@@ -12,7 +12,7 @@ import type { WorkItem } from "./workItems/workItems";
 // Besides the three issues of the host (updated 2026-10-18): a newer task, an older plan, and a session newer than all.
 const row = (id: string, kind: string, title: string, created: string, shortId: string | null): WorkItem => ({ id, kind, title, summary: null, category: "problem",
   status: kind === "task" ? "pending" : "approved", statusText: null, created, file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false,
-  runsWith: null, shortId, updated: null, projectId: "project", stage: "todo" });
+  runsWith: null, tags: null, shortId, updated: null, projectId: "project", stage: "todo" });
 const sources: ReferenceSources = {
   workItems: projectId => projectId === "project" ? [row("2026-11-08-fix-the-parser-p53b", "task", "Fix the parser", "2026-11-08", "p53b"),
     row("2026-10-01-release", "plan", "Release [plan]", "2026-10-01", null)] : [],

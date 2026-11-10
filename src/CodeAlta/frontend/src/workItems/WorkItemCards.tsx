@@ -5,8 +5,9 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { MarkdownContent } from "../MarkdownContent";
+import { NewTagQuestion, TagChips, TagProposalDialog, type ShownTagProposal } from "./WorkItemTagViews";
 import { useShellLanguage } from "../shellLanguage";
-import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workItemTone, workKindIcon,
+import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workItems, workItemTone, workKindIcon,
   type WorkItem, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
@@ -58,7 +59,8 @@ export function WorkItemText({ hub, item }: { hub: Pick<WorkItemsHub, "read">; i
 }
 
 /** The tags that say what an item is: why a task exists, and where it comes from. */
-export function WorkItemTags({ item, projectName, shortId }: { item: WorkItem; projectName?: string | null; /** Shows the short id after the date. */ shortId?: boolean }) {
+export function WorkItemTags({ item, projectName, shortId, tags }: { item: WorkItem; projectName?: string | null; /** Shows the short id after the date. */ shortId?: boolean;
+  /** Shows the tags of the task, after the date. */ tags?: boolean }) {
   const { t } = useShellLanguage();
   return <span className="work-tags">
     {item.kind === "task" && <Tag minimal round intent={taskCategoryTone(item.category)} icon={<AppIcon name={taskCategoryIcon(item.category)} size={12} />}>{t(taskCategoryLabel(item.category))}</Tag>}
@@ -66,6 +68,7 @@ export function WorkItemTags({ item, projectName, shortId }: { item: WorkItem; p
     {/* The short id is in the line of the date, so that their texts share a baseline. */}
     {(item.created || shortId && item.shortId) && <span className="work-date">{item.created}
       {shortId && item.shortId && <code className="work-tag-id" data-tone={workItemTone(item)}>{item.shortId}</code>}</span>}
+    {tags && <TagChips tags={item.tags} max={5} />}
   </span>;
 }
 
@@ -99,6 +102,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const [collapsed, setCollapsed] = useState(remembered.collapsed);
   useEffect(() => { remembered.collapsed = collapsed; }, [remembered, collapsed]);
   const [detail, setDetail] = useState(false);
+  const [reviewing, setReviewing] = useState<ShownTagProposal | null>(null);
+  const workState = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const [cards, setCards] = useState<HTMLElement | null>(null);
   // The side of Notes the user chose for the cards, for the whole window; null leaves it to the room around Notes.
   const dock = useSyncExternalStore(dockPreference.subscribe, dockPreference.get, dockPreference.get);
@@ -126,6 +131,12 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const plan = item.kind === "plan";
   // The session works on it: there is nothing to start or to decide, only to see.
   const running = item.stage === "running";
+  // A new tag the session proposed with this task: the card asks about it beside the decisions, and its review is the one of Work items.
+  const project = item.kind === "task" ? workState.projects.find(candidate => candidate.projectId === item.projectId) : undefined;
+  const suggestion = project?.tagProposals?.find(proposal => proposal.newTag && proposal.sessionId === item.proposedBy && proposal.tasks.some(match => match.id === item.id)) ?? null;
+  const suggestionTasks = project && suggestion ? workItems([project], new Set()).filter(task => task.kind === "task" && suggestion.tasks.some(match => match.id === task.id)) : [];
+  const review = () => { if (project && suggestion) setReviewing({ projectId: project.projectId, projectName: null, proposal: suggestion, tasks: suggestionTasks }); };
+  const decline = () => { if (suggestion) void hub.tag(item.projectId, "dismiss", suggestion.name); };
   const acknowledge = () => void hub.act(item, "acknowledge");
   const later = () => void hub.act(item, plan ? "acknowledge" : "later");
   const dismiss = () => void hub.act(item, "dismiss");
@@ -198,8 +209,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     ? <Button intent="primary" size="small" disabled={working} icon={<AppIcon name="check" size={14} />} title={t("Put the card away. The task stays in Work items.")}
       onClick={acknowledge}>{t("OK")}</Button>
     : <>
-    <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="later" size={14} />} title={t(plan ? "Keep the plan for later. It stays in Work items." : "Keep the task for later. It stays in Work items.")}
-      onClick={later}>{t("Later")}</Button>
+    <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="later" size={14} />} title={t(plan ? "Keep the plan for later. It stays in Work items." : "Keep the task in the Backlog of Work items.")}
+      onClick={later}>{t(plan ? "Later" : "Backlog")}</Button>
     {!plan && <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="close" size={14} />} title={t("This task is not worth doing.")} onClick={dismiss}>{t("Dismiss")}</Button>}
   </>;
 
@@ -216,13 +227,15 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
             <Button variant="minimal" size="small" icon={<AppIcon name="minus" size={14} />} aria-label={t("Put away")} title={t("Put the proposals away")} onClick={() => setCollapsed(true)} />
           </header>
           <h3 id={titleId}>{item.title}</h3>
-          <WorkItemTags item={item} shortId />
+          <WorkItemTags item={item} shortId tags />
           {item.summary && <p className="work-card-summary">{item.summary}</p>}
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
+          {suggestion && <NewTagQuestion proposal={suggestion} count={suggestionTasks.length} onReview={review} onDecline={decline} />}
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
             : <WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start => onStart(item, start)} />}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>
         </section>}
+    {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
     {detail && <AppWindow storageKey="codealta.desktop.work-item-window.v1" title={item.title} titleId={`${titleId}-window`} className="work-item-window"
       preferredSize={viewport => ({ width: Math.min(860, viewport.width - 80), height: Math.min(720, viewport.height - 80) })}
       onClose={() => setDetail(false)} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); setDetail(false); }}
@@ -230,7 +243,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
       <div className="work-window">
         <div className="work-window-meta">
           <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : running ? "Task in progress" : "Proposed task")}</span>
-          <WorkItemTags item={item} shortId />
+          <WorkItemTags item={item} shortId tags />
           <code title={item.file}>{item.file}</code>
         </div>
         <div className="work-window-text">{item.summary && <p className="work-window-summary">{item.summary}</p>}<WorkItemText hub={hub} item={item} /></div>

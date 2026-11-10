@@ -1,5 +1,6 @@
 // What the page shows of the work items of the projects: the follow-up tasks agents propose and the plans.
-import type { WorkItemRow, WorkItemsProject, WorkItemsSettings } from "#neoastra";
+import type { WorkItemRow, WorkItemsProject, WorkItemsSettings, WorkItemTagRow } from "#neoastra";
+import { seriesColorCount, seriesVariable } from "../charts/palette";
 import type { IconName } from "../AppIcon";
 import type { MessageKey } from "../localization";
 
@@ -92,7 +93,7 @@ export function workStatusLabel(item: Pick<WorkItem, "kind" | "status" | "stage"
   // A review says who it waits for.
   if (item.kind === "review") return item.stage === "todo" ? "Waiting for you" : item.stage === "running" ? "Waiting for the agent" : "Done";
   if (item.stage === "running") return "In progress";
-  if (item.kind === "task") return item.status === "later" ? "Later" : item.status === "done" ? "Done" : item.status === "dismissed" ? "Dismissed" : "To do";
+  if (item.kind === "task") return item.status === "later" ? "Backlog" : item.status === "done" ? "Done" : item.status === "dismissed" ? "Dismissed" : "Inbox";
   return item.status === "approved" ? "Ready" : item.status === "blocked" ? "Blocked" : item.status === "done" ? "Done" : "Draft";
 }
 
@@ -144,15 +145,52 @@ export const startIcon = (start: WorkStart): IconName => start === "worktree" ? 
 export type WorkFilter = WorkStage;
 export const workFilters: readonly WorkFilter[] = ["todo", "running", "later", "closed"];
 export function workFilterLabel(filter: WorkFilter): MessageKey {
-  return filter === "todo" ? "To do" : filter === "running" ? "In progress" : filter === "later" ? "Later" : "Closed";
+  return filter === "todo" ? "Inbox" : filter === "running" ? "In progress" : filter === "later" ? "Backlog" : "Closed";
 }
 
-/** The items the list shows: of one project or of all, of one kind or of both, at one stage, matching what is typed. */
-export function filterWorkItems(items: readonly WorkItem[], filter: Readonly<{ projectId: string | null; kind: WorkKind | "all"; stage: WorkFilter; query: string }>): readonly WorkItem[] {
-  const words = filter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+/**
+ * The items the list shows: of one project or of all, of one kind or of both, at one stage, that have one of the
+ * chosen tags, matching what is typed. A typed word that starts with `#` is a tag the item must have.
+ */
+export function filterWorkItems(items: readonly WorkItem[], filter: Readonly<{ projectId: string | null; kind: WorkKind | "all"; stage: WorkFilter; query: string;
+  tags?: ReadonlySet<string> }>): readonly WorkItem[] {
+  const all = filter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const typedTags = all.filter(word => word.startsWith("#") && word.length > 1).map(word => word.slice(1));
+  const words = all.filter(word => !word.startsWith("#"));
+  const chosen = filter.tags ?? noTags;
   return items.filter(item => (filter.projectId === null || item.projectId === filter.projectId)
     && (filter.kind === "all" || item.kind === filter.kind) && item.stage === filter.stage
+    && (chosen.size === 0 || (item.tags ?? []).some(tag => chosen.has(tag)))
+    && typedTags.every(typed => (item.tags ?? []).includes(typed))
     && words.every(word => `${item.title} ${item.summary ?? ""} ${item.id}`.toLowerCase().includes(word)));
+}
+
+const noTags: ReadonlySet<string> = new Set();
+
+/** The tags of the projects shown: one project's, or those of all the projects by name, with their open tasks added. */
+export function shownTags(projects: readonly WorkItemsProject[], projectId: string | null): readonly WorkItemTagRow[] {
+  const byName = new Map<string, WorkItemTagRow>();
+  for (const project of projects) {
+    if (projectId !== null && project.projectId !== projectId) continue;
+    for (const tag of project.tags ?? []) {
+      const known = byName.get(tag.name);
+      byName.set(tag.name, known ? { ...known, description: known.description ?? tag.description, openTasks: known.openTasks + tag.openTasks, listed: known.listed || tag.listed } : tag);
+    }
+  }
+  return [...byName.values()];
+}
+
+/** The color of a tag, which comes from its name: one of the colors of the charts, which read on both themes. */
+export function tagColor(name: string): string {
+  let hash = 0;
+  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return `var(${seriesVariable(hash % seriesColorCount)})`;
+}
+
+/** A tag name as a person may type it: trimmed, in lower case, without a leading `#`; null when it is not one. */
+export function tagNameOf(text: string): string | null {
+  const name = text.trim().replace(/^#/, "").toLowerCase();
+  return name.length <= 32 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(name) ? name : null;
 }
 
 /** The order of the list: the newest items first, or the oldest. */

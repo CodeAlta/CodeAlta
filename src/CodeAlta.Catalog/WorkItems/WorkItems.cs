@@ -50,6 +50,9 @@ public sealed record WorkTask(string Id, string Title, string? Summary, string K
 {
     /// <summary>Gets the short id of the task: the characters that end its id; null for a task written before ids had them.</summary>
     public string? ShortId => WorkItemFiles.ShortIdOf(Id);
+
+    /// <summary>Gets the tags of the task, as its file names them (<see cref="WorkItemFiles.IsTagName"/>), each once.</summary>
+    public IReadOnlyList<string> Tags { get; init; } = [];
 }
 
 /// <summary>What a new task is made of.</summary>
@@ -57,7 +60,39 @@ public sealed record WorkTask(string Id, string Title, string? Summary, string K
 /// <param name="Kind">Why the task exists; <c>improvement</c> when null.</param>
 /// <param name="Summary">One or two sentences for a notification.</param>
 /// <param name="Body">The Markdown that says why, what and where.</param>
-public sealed record WorkTaskDraft(string Title, string? Kind, string? Summary, string Body);
+public sealed record WorkTaskDraft(string Title, string? Kind, string? Summary, string Body)
+{
+    /// <summary>Gets the tags of the new task; each is a tag name (<see cref="WorkItemFiles.IsTagName"/>).</summary>
+    public IReadOnlyList<string> Tags { get; init; } = [];
+}
+
+/// <summary>A tag of the tasks of a project.</summary>
+/// <param name="Name">The name: lower case letters, digits and hyphens (<see cref="WorkItemFiles.IsTagName"/>).</param>
+/// <param name="Description">What the tag is for, in a line, which agents match tasks against; null when it has none.</param>
+/// <param name="OpenTasks">How many tasks that are not closed have the tag.</param>
+/// <param name="Listed">Whether the tags file of the project lists the tag; a tag only found on tasks is not.</param>
+public sealed record WorkTag(string Name, string? Description, int OpenTasks, bool Listed);
+
+/// <summary>The tags of the tasks of a project, and the names the user declined when an agent proposed them.</summary>
+/// <param name="Tags">The tags: those of the tags file in its order, then those only found on tasks, by name.</param>
+/// <param name="Declined">The names the user turned down, which agents do not propose again.</param>
+public sealed record WorkTags(IReadOnlyList<WorkTag> Tags, IReadOnlyList<string> Declined);
+
+/// <summary>How a change of the tags of a project ended.</summary>
+public enum WorkTagChange
+{
+    /// <summary>The change was made, or there was nothing to change.</summary>
+    Done,
+
+    /// <summary>The project has no tag of that name.</summary>
+    NotFound,
+
+    /// <summary>The project already has a tag of the new name.</summary>
+    Exists,
+
+    /// <summary>A file could not be read or written; what was written before stays.</summary>
+    Failed,
+}
 
 /// <summary>
 /// A plan: a Markdown file under <c>.alta/plans/</c> of a project. A plan written before plans had a front

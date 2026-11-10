@@ -31,6 +31,92 @@ public sealed class WorkItemTests
     }
 
     [TestMethod]
+    public void Task_Tags_AreReadFromAFlowOrABlockList_AndWhatIsNotATagIsLeftOut()
+    {
+        var flow = WorkItemFiles.ParseTask("2026-11-10-a-task-p53b.md", "---\ntitle: A task\ntags: [mobile, Flaky-Tests, not a tag, mobile]\n---\n\nBody.\n");
+        var block = WorkItemFiles.ParseTask("2026-11-10-a-task-p53b.md", "---\ntitle: A task\ntags:\n  - mobile\n  - \"#ci\"\nstatus: later\n---\n\nBody.\n");
+        var none = WorkItemFiles.ParseTask("2026-11-10-a-task-p53b.md", "---\ntitle: A task\n---\n\nBody.\n");
+
+        CollectionAssert.AreEqual(new[] { "mobile", "flaky-tests" }, flow.Tags.ToArray(), "Case is folded and a tag is kept once.");
+        CollectionAssert.AreEqual(new[] { "mobile", "ci" }, block.Tags.ToArray());
+        Assert.AreEqual(WorkTaskStatus.Later, block.Status, "The line after a block list is read.");
+        Assert.AreEqual(0, none.Tags.Count);
+    }
+
+    [TestMethod]
+    public void Task_WithTags_ChangesTheTagsLineAlone()
+    {
+        const string Text = "---\r\ntitle: A task\r\nkind: gap\r\nstatus: pending\r\nsummary: \"Why.\"\r\n---\r\n\r\nBody.\r\n";
+
+        var tagged = WorkItemFiles.WithTags(Text, ["mobile", "ci"]);
+        var retagged = WorkItemFiles.WithTags(tagged, ["ci"]);
+        var fromBlock = WorkItemFiles.WithTags("---\ntitle: A task\ntags:\n  - mobile\n  - ci\nstatus: later\n---\n\nBody.\n", ["phone"]);
+
+        Assert.AreEqual("---\r\ntitle: A task\r\nkind: gap\r\nstatus: pending\r\nsummary: \"Why.\"\r\ntags: [mobile, ci]\r\n---\r\n\r\nBody.\r\n", tagged, "The line is added at the end of the front matter, in the file's line endings.");
+        Assert.AreEqual(Text.Replace("---\r\n\r\n", "tags: [ci]\r\n---\r\n\r\n", StringComparison.Ordinal), retagged);
+        Assert.AreEqual(Text, WorkItemFiles.WithTags(retagged, []), "No tags removes the line.");
+        Assert.AreEqual("---\ntitle: A task\ntags: [phone]\nstatus: later\n---\n\nBody.\n", fromBlock, "A block list is replaced whole.");
+        Assert.AreEqual("---\ntags: [ci]\n---\n\n# A task\n", WorkItemFiles.WithTags("# A task\n", ["ci"]), "A file without a front matter gets one.");
+        Assert.ThrowsExactly<ArgumentException>(() => WorkItemFiles.WithTags(Text, ["Not a tag"]));
+    }
+
+    [TestMethod]
+    public void Task_SerializedWithTags_IsReadBackWithThem()
+    {
+        var text = WorkItemFiles.SerializeTask("A task", "gap", WorkTaskStatus.Pending, "2026-11-10", "Why.", "## Why\nBecause.", ["mobile", "flaky-tests"]);
+
+        var task = WorkItemFiles.ParseTask("2026-11-10-a-task-p53b.md", text);
+
+        StringAssert.Contains(text, "\ntags: [mobile, flaky-tests]\n");
+        CollectionAssert.AreEqual(new[] { "mobile", "flaky-tests" }, task.Tags.ToArray());
+        Assert.IsFalse(WorkItemFiles.SerializeTask("A task", "gap", WorkTaskStatus.Pending, "2026-11-10", null, "Body.").Contains("tags:", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void TagNames_AreLowerCaseWordsJoinedBySingleHyphens()
+    {
+        foreach (var name in new[] { "mobile", "flaky-tests", "ci2", "a-b-c" })
+        {
+            Assert.IsTrue(WorkItemFiles.IsTagName(name), name);
+        }
+
+        foreach (var name in new[] { "", "Mobile", "-ci", "ci-", "flaky--tests", "flaky tests", "café", new string('a', WorkItemFiles.MaximumTagName + 1) })
+        {
+            Assert.IsFalse(WorkItemFiles.IsTagName(name), name);
+        }
+
+        Assert.AreEqual("flaky-tests", WorkItemFiles.TagNameOf("  #Flaky-Tests "));
+    }
+
+    [TestMethod]
+    public void TagsFile_WrittenOrByHand_IsReadWithItsDescriptionsAndDeclinedNames()
+    {
+        const string ByHand = """
+            # Our tags
+            tags:
+              mobile: The phone app and the Mobile server.
+              Flaky-Tests: "A test that fails at random"
+              ci:
+              not a tag: Left out.
+            declined: [ci-noise, ci-noise]
+            """;
+
+        Assert.IsTrue(WorkItemFiles.TryParseTagsFile(ByHand, out var tags, out var declined));
+        CollectionAssert.AreEqual(new[] { "mobile", "flaky-tests", "ci" }, tags.Select(static tag => tag.Key).ToArray());
+        CollectionAssert.AreEqual(new[] { "The phone app and the Mobile server.", "A test that fails at random", null }, tags.Select(static tag => tag.Value).ToArray());
+        CollectionAssert.AreEqual(new[] { "ci-noise" }, declined.ToArray());
+
+        var written = WorkItemFiles.SerializeTagsFile(tags, declined);
+        Assert.IsTrue(WorkItemFiles.TryParseTagsFile(written, out var again, out var declinedAgain), written);
+        CollectionAssert.AreEqual(tags.ToArray(), again.ToArray());
+        CollectionAssert.AreEqual(declined.ToArray(), declinedAgain.ToArray());
+
+        Assert.IsTrue(WorkItemFiles.TryParseTagsFile(WorkItemFiles.SerializeTagsFile([], []), out var empty, out _));
+        Assert.AreEqual(0, empty.Count);
+        Assert.IsFalse(WorkItemFiles.TryParseTagsFile("tags: [unclosed\n  - : :", out _, out _), "A file that is not a tags file is not read as no tags.");
+    }
+
+    [TestMethod]
     public void Plan_WithAFrontMatter_IsReadFromIt()
     {
         const string Text = "---\ntitle: \"Filter the task list by kind\"\nstatus: approved\ncreated: 2026-10-07\nsummary: Adds a --kind option.\n---\n\n# Another heading\n\nBody.\n";

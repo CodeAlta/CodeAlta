@@ -68,6 +68,124 @@ public sealed class WorkItemHostTests
     }
 
     [TestMethod]
+    public async Task Tags_AreTheUsers_AndAgentsApplyThemToTasks()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (items, project) = (fixture.Items, fixture.Project);
+        Assert.AreEqual("0", Text(await fixture.One("alta.tag.summary", ["tag", "list"]), "count"));
+        var (refused, _, why) = await fixture.Run(["task", "create", "--title", "Untagged", "--tag", "mobile", "--content", "Body."]);
+        Assert.AreEqual(AltaExitCodes.Usage, refused, "A task cannot have a tag the project does not have.");
+        StringAssert.Contains(why, "Only the user creates tags");
+
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "mobile", "The phone app."));
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "CI", null));
+        var tagged = await fixture.One("alta.task.created", ["task", "create", "--title", "Tagged", "--tag", "mobile", "--tag", "ci", "--content", "Body."]);
+        var shortId = Text(tagged, "shortId")!;
+        Assert.AreEqual("[\"mobile\",\"ci\"]", Text(tagged, "tags"));
+        var plain = Text(await fixture.One("alta.task.created", ["task", "create", "--title", "Plain", "--content", "Body."]), "id")!;
+        (refused, _, why) = await fixture.Run(["task", "create", "--title", "Unknown", "--tag", "desktop", "--content", "Body."]);
+        Assert.AreEqual(AltaExitCodes.Usage, refused);
+        StringAssert.Contains(why, "Its tags are: ci, mobile");
+
+        var (_, listed, _) = await fixture.Run(["tag", "list"]);
+        CollectionAssert.AreEqual(new[] { "mobile:The phone app.:1", "ci::1" },
+            Of(listed, "alta.tag").Select(static tag => $"{Text(tag, "name")}:{Text(tag, "description")}:{Text(tag, "openTasks")}").ToArray());
+        var (_, filtered, _) = await fixture.Run(["task", "list", "--tag", "#Mobile"]);
+        Assert.AreEqual(shortId, Text(Of(filtered, "alta.task").Single(), "shortId"));
+
+        Assert.AreEqual("[\"ci\",\"mobile\"]", Text(await fixture.One("alta.task.tagged", ["task", "tag", plain[^4..], "--add", "ci", "--add", "mobile", "--remove", "none"]), "tags"));
+        Assert.AreEqual("[\"ci\"]", Text(await fixture.One("alta.task.tagged", ["task", "tag", plain[^4..], "--remove", "mobile"]), "tags"));
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["task", "tag", plain[^4..], "--add", "desktop"])).Code);
+
+        // Renaming and deleting change the tags file and every task that has the tag.
+        Assert.AreEqual(WorkTagChange.Exists, items.RenameTag(project, "mobile", "ci"));
+        Assert.AreEqual(WorkTagChange.NotFound, items.RenameTag(project, "desktop", "web"));
+        Assert.AreEqual(WorkTagChange.Done, items.RenameTag(project, "mobile", "phone"));
+        Assert.AreEqual(WorkTagChange.Done, items.DeleteTag(project, "ci"));
+        CollectionAssert.AreEqual(new[] { "phone" }, items.FindTasks(project, shortId).Single().Tags.ToArray());
+        Assert.AreEqual(0, items.FindTasks(project, plain[^4..]).Single().Tags.Count);
+        var file = File.ReadAllText(Path.Combine(project.ProjectPath, ".alta", "tags.yaml"));
+        StringAssert.Contains(file, "  phone: \"The phone app.\"\n");
+        Assert.IsFalse(file.Contains("ci:", StringComparison.Ordinal), file);
+
+        // A tag written on a task by hand is a tag of the project, not listed in its file until the user describes it.
+        Assert.IsTrue(items.SetTaskTags(project, plain, ["handmade"]));
+        Assert.IsFalse(items.ListTags(project).Tags.Single(tag => tag.Name == "handmade").Listed);
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "handmade", "Written by hand."));
+        Assert.IsTrue(items.ListTags(project).Tags.Single(tag => tag.Name == "handmade").Listed);
+
+        Assert.AreEqual(WorkTagChange.Done, items.SetTagDeclined(project, "ci-noise", declined: true));
+        Assert.AreEqual("[\"ci-noise\"]", Text(await fixture.One("alta.tag.summary", ["tag", "list"]), "declined"));
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "ci-noise", null));
+        Assert.AreEqual(0, items.ListTags(project).Declined.Count, "A declined name the user creates is no longer declined.");
+
+        // A tags file that cannot be read is not written over.
+        File.WriteAllText(Path.Combine(project.ProjectPath, ".alta", "tags.yaml"), "tags: [unclosed\n  - : :");
+        Assert.AreEqual(WorkTagChange.Failed, items.SetTag(project, "new", null));
+        Assert.AreEqual("tags: [unclosed\n  - : :", File.ReadAllText(Path.Combine(project.ProjectPath, ".alta", "tags.yaml")));
+    }
+
+    [TestMethod]
+    public async Task TagProposals_WaitForTheUser_WhoAppliesOrDismissesThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (items, project) = (fixture.Items, fixture.Project);
+        var ids = new List<string>();
+        foreach (var title in new[] { "One", "Two", "Three", "Four" })
+        {
+            ids.Add(Text(await fixture.One("alta.task.created", ["task", "create", "--title", title, "--content", "Body."]), "id")!);
+        }
+
+        var shortIds = ids.Select(static id => id[^4..]).ToArray();
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "mobile", "The phone app."));
+        Assert.IsTrue(items.SetTaskTags(project, ids[3], ["mobile"]));
+
+        // A session found the tasks a tag fits: the ones that have it already are left out, and nothing is tagged yet.
+        var found = await fixture.One("alta.tag.matches", ["tag", "matches", "mobile", "--stdin"], $"{shortIds[0]} the phone app\n- {shortIds[1]}: its server\n{shortIds[3]} already");
+        Assert.AreEqual($"[\"{ids[0]}\",\"{ids[1]}\"]", Text(found, "tasks"));
+        Assert.AreEqual(0, items.GetTask(project, ids[0])!.Tags.Count);
+        Assert.AreEqual(AltaExitCodes.NotFound, (await fixture.Run(["tag", "matches", "desktop", "--task", shortIds[0]])).Code, "only an existing tag");
+        Assert.AreEqual(AltaExitCodes.NotFound, (await fixture.Run(["tag", "matches", "mobile", "--task", "zzzz"])).Code, "only open tasks");
+
+        // The page lists the proposal and applies it to the tasks the user kept.
+        var listed = (await fixture.Rpc.ListAsync(new(Epoch, [project.Id]), default)).Projects.Single().TagProposals!.Single();
+        Assert.AreEqual(("mobile", false, "the phone app"), (listed.Name, listed.NewTag, listed.Tasks[0].Reason));
+        Assert.AreEqual("ok", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "apply", "mobile", null, [ids[1]]), default)).Status);
+        CollectionAssert.AreEqual(new[] { "mobile" }, items.GetTask(project, ids[1])!.Tags.ToArray());
+        Assert.AreEqual(0, items.GetTask(project, ids[0])!.Tags.Count, "a task the user unticked is not tagged");
+        Assert.AreEqual(0, items.ListTagProposals(project.Id).Count);
+
+        // A new tag needs three open tasks, and is not a tag before the user creates it.
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["tag", "propose", "--name", "parser", "--description", "The parser.", "--task", shortIds[0], "--task", shortIds[1]])).Code);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["tag", "propose", "--name", "mobile", "--description", "Again.", "--task", shortIds[0]])).Code, "an existing tag is given, not proposed");
+        var proposed = await fixture.One("alta.tag.proposed", ["tag", "propose", "--name", "parser", "--description", "The parser of the files.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]]);
+        Assert.AreEqual("parser", Text(proposed, "name"));
+        Assert.IsTrue(items.ListTags(project).Tags.All(static tag => tag.Name != "parser"));
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, (await fixture.Run(["tag", "propose", "--name", "lexer", "--description", "The lexer.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]])).Code,
+            "one new tag of a session waits at a time");
+
+        // Applied: the tag is created with the description the user left, and given to the tasks kept.
+        Assert.AreEqual("ok", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "apply", "parser", "Parsing files.", [ids[0], ids[2]]), default)).Status);
+        Assert.AreEqual("Parsing files.", items.ListTags(project).Tags.Single(static tag => tag.Name == "parser").Description);
+        CollectionAssert.AreEqual(new[] { "parser" }, items.GetTask(project, ids[2])!.Tags.ToArray());
+
+        // Dismissed: a new tag is declined, and no agent proposes it again.
+        await fixture.One("alta.tag.proposed", ["tag", "propose", "--name", "lexer", "--description", "The lexer.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]]);
+        Assert.AreEqual("ok", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "dismiss", "lexer"), default)).Status);
+        CollectionAssert.Contains(items.ListTags(project).Declined.ToArray(), "lexer");
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, (await fixture.Run(["tag", "propose", "--name", "lexer", "--description", "The lexer.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]])).Code);
+
+        // Finding the tasks of a tag starts a session with what the tag is for.
+        var find = await fixture.Rpc.TagAsync(new(Epoch, project.Id, "find", "mobile"), default);
+        Assert.AreEqual(("ok", "finder-session"), (find.Status, find.SessionId));
+        Assert.AreEqual(("mobile", "The phone app."), fixture.Runner.Finds.Single());
+        Assert.AreEqual("not_found", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "find", "desktop"), default)).Status);
+        StringAssert.Contains(WorkItemPrompts.ForTagMatches("mobile", "The phone app."), "alta tag matches mobile --stdin");
+        // Without a description the session goes by the name, and finds nothing when the name is not clear.
+        StringAssert.Contains(WorkItemPrompts.ForTagMatches("v2", null), "go by its name. When the name does not say clearly what the tag covers, say so and run nothing.");
+    }
+
+    [TestMethod]
     public async Task TaskCommands_ListStartCompleteAndSetAside()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -333,6 +451,14 @@ public sealed class WorkItemHostTests
         internal List<SessionStartSettings?> Settings { get; } = [];
 
         internal (string Message, string Reason)? Problem { get; set; }
+
+        internal List<(string Name, string? Description)> Finds { get; } = [];
+
+        public Task<WorkItemStartResult> FindTagTasksAsync(ProjectDescriptor project, string name, string? description)
+        {
+            Finds.Add((name, description));
+            return Task.FromResult(new WorkItemStartResult("finder-session", null));
+        }
 
         public Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked,
             SessionStartSettings? settings)

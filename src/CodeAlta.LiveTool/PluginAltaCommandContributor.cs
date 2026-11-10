@@ -42,6 +42,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "job",
         "task",
         "plan",
+        "tag",
         "review",
         "diff",
         "editor",

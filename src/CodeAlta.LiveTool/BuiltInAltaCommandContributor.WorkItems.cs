@@ -22,6 +22,10 @@ internal sealed partial class BuiltInAltaCommandContributor
         Mutating("task reopen"),
         Mutating("task dismiss"),
         Mutating("task remove"),
+        Mutating("task tag"),
+        Read("tag list"),
+        Mutating("tag matches"),
+        Mutating("tag propose"),
         Read("plan list"),
         Read("plan show"),
         Mutating("plan status"),
@@ -40,12 +44,14 @@ internal sealed partial class BuiltInAltaCommandContributor
         group.Add(CreateTaskChangeCommand(context, "reopen", "Put a task back among the ones that wait for a decision."));
         group.Add(CreateTaskChangeCommand(context, "dismiss", "Dismiss a task that is not worth doing."));
         group.Add(CreateTaskChangeCommand(context, "remove", "Delete the file of a task."));
+        group.Add(CreateTaskTagCommand(context));
         AddHelpText(
             group,
             "A task is one specific piece of work, separate from what the session was asked: a real gap, a problem or an improvement found on the way. The user sees a proposed task at once, as a card in the session that proposed it, and decides: start it in a new worktree, in this session or in a new session, keep it for later, or dismiss it.",
             "Propose a task only for something concrete that you verified and that is outside the current request. What belongs to the current request is done, not proposed. Look at `alta task list` first: do not propose what is already there. A session has at most a few open proposals.",
             "A task is not a plan: a plan (`alta plan`) describes how a larger piece of work will be done, for review before it starts.",
             "The commands use the project of the calling session; `--project` names another one. A completed or dismissed task is deleted, or kept when the user chose so in the settings.",
+            "A task can have tags, which the user chose to organize the tasks of the project (`alta tag list`). Give a new task the tags whose description fits it, or whose name clearly does when the tag has none, with `--tag`; never invent one.",
             "A task has a short id: the four characters that end its id, such as `p53b` in `2026-11-08-fix-the-parser-p53b`. The commands take it as well as the id, and the user finds the task by it in the list of tasks and in the conversation. When you mention a task to the user, write its short id in code: `p53b`.",
             "Examples: `alta task list`; `alta task create --title \"Make the locator test pass on Windows\" --kind problem --summary \"...\" --stdin`; `alta task complete <task-id>`.");
         return group;
@@ -55,12 +61,14 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         string? project = null;
         string? status = null;
+        string? tag = null;
         var all = false;
-        var command = Leaf("list", "List the tasks of a project: id, short id, title, kind, status, and the session that does it.");
+        var command = Leaf("list", "List the tasks of a project: id, short id, title, kind, status, tags, and the session that does it.");
         command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => project = value);
         command.Add("all", "The tasks of every project.", value => all = value is not null);
         command.Add("status=", "`open` (default: pending, later and in progress), `pending`, `later`, `in-progress`, `done`, `dismissed` or `all`.", value => status = value);
-        command.Add(async (_, _) => await HandleWorkItemListAsync(context, WorkItemKinds.Task, project, all, status).ConfigureAwait(false));
+        command.Add("tag=", "Only the tasks that have this tag.", value => tag = value);
+        command.Add(async (_, _) => await HandleWorkItemListAsync(context, WorkItemKinds.Task, project, all, status, tag).ConfigureAwait(false));
         return command;
     }
 
@@ -84,6 +92,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("summary=", "One or two sentences for the card: what and why, without the details.", value => options.Summary = value);
         command.Add("content=", "The description. Prefer --stdin for several lines.", value => options.Content = value);
         command.Add("stdin", "Read the description from stdin.", value => options.UseStdin = value is not null);
+        command.Add("tag=", "A tag of the project (`alta tag list`) whose description fits the task. Repeat it for several.", value => { if (value is not null) options.Tags.Add(value); });
         command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session.", value => options.Project = value);
         command.Add(async (_, _) => await HandleTaskCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
@@ -114,7 +123,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         list.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => project = value);
         list.Add("all", "The plans of every project.", value => all = value is not null);
         list.Add("status=", "`open` (default: every plan that is not done), `draft`, `approved`, `in-progress`, `blocked`, `done` or `all`.", value => status = value);
-        list.Add(async (_, _) => await HandleWorkItemListAsync(context, WorkItemKinds.Plan, project, all, status).ConfigureAwait(false));
+        list.Add(async (_, _) => await HandleWorkItemListAsync(context, WorkItemKinds.Plan, project, all, status, tag: null).ConfigureAwait(false));
         group.Add(list);
 
         string? shownId = null;
@@ -198,7 +207,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return (project, AltaExitCodes.Success);
     }
 
-    private static async ValueTask<int> HandleWorkItemListAsync(AltaCommandContext context, string kind, string? projectRef, bool all, string? status)
+    private static async ValueTask<int> HandleWorkItemListAsync(AltaCommandContext context, string kind, string? projectRef, bool all, string? status, string? tag)
     {
         var command = $"alta {kind} list";
         if (!TryGetWorkItems(context, out var items))
@@ -213,6 +222,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!known.Contains(filter))
         {
             return UsageError(context, "usage.invalidStatus", $"--status is one of: {string.Join(", ", known)}.", command);
+        }
+
+        var tagFilter = WorkItemFiles.TagNameOf(tag);
+        if (NormalizeOptionalText(tag) is not null && tagFilter is null)
+        {
+            return UsageError(context, "usage.invalidTag", $"'{tag}' is not a tag name. List the tags with `alta tag list`.", command);
         }
 
         IReadOnlyList<ProjectDescriptor> projects;
@@ -255,7 +270,8 @@ internal sealed partial class BuiltInAltaCommandContributor
                 {
                     var link = items.GetLink(project.Id, kind, task.Id);
                     var shown = TaskStatusName(task, link);
-                    if (filter == "all" || filter == shown || filter == "open" && shown is "pending" or "later" or "in-progress")
+                    if ((filter == "all" || filter == shown || filter == "open" && shown is "pending" or "later" or "in-progress")
+                        && (tagFilter is null || task.Tags.Contains(tagFilter)))
                     {
                         AltaJsonlWriter.WriteRecord(context.Stdout, TaskRecord(context, project, task, link, markdown: null));
                         count++;
@@ -370,11 +386,16 @@ internal sealed partial class BuiltInAltaCommandContributor
             return exitCode;
         }
 
+        if (UnknownTags(items, project, options.Tags) is { } unknown)
+        {
+            return UsageError(context, "usage.unknownTag", unknown, Command);
+        }
+
         WorkTaskCreation creation;
         try
         {
             var proposer = NormalizeOptionalText(context.Caller.SourceSessionId);
-            creation = items.CreateTask(project, new WorkTaskDraft(title, options.Kind, options.Summary, body), proposer,
+            creation = items.CreateTask(project, new WorkTaskDraft(title, options.Kind, options.Summary, body) { Tags = options.Tags }, proposer,
                 await CallerSelectionAsync(context, proposer).ConfigureAwait(false));
         }
         catch (ArgumentException exception)
@@ -634,16 +655,16 @@ internal sealed partial class BuiltInAltaCommandContributor
         => task.Status == WorkTaskStatus.Pending && link?.Runner is not null ? "in-progress" : WorkItemFiles.NameOf(task.Status);
 
     private static WorkItemRecord TaskRecord(AltaCommandContext context, ProjectDescriptor project, WorkTask task, WorkItemLink? link, string? markdown)
-        => new("alta.task", 1, context.CorrelationId, task.Id, task.ShortId, project.Id, project.Slug, task.Title, task.Kind, TaskStatusName(task, link), null, task.Summary, task.Created,
+        => new("alta.task", 1, context.CorrelationId, task.Id, task.ShortId, project.Id, project.Slug, task.Title, task.Kind, TaskStatusName(task, link), null, task.Tags.Count > 0 ? [.. task.Tags] : null, task.Summary, task.Created,
             WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, markdown, null, null);
 
     private static WorkItemRecord PlanRecord(AltaCommandContext context, ProjectDescriptor project, WorkPlan plan, WorkItemLink? link, string? markdown, bool truncated)
-        => new("alta.plan", 1, context.CorrelationId, plan.Id, null, project.Id, project.Slug, plan.Title, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Summary, plan.Created,
+        => new("alta.plan", 1, context.CorrelationId, plan.Id, null, project.Id, project.Slug, plan.Title, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, null, plan.Summary, plan.Created,
             WorkItemFiles.PlansFolder + "/" + plan.Id + ".md", link?.ProposedBy, link?.Runner, markdown, truncated ? true : null, null);
 
 #pragma warning disable IDE1006, SA1300 // The names are those of the JSONL record.
     private sealed record WorkItemRecord(string type, int version, string correlationId, string id, string? shortId, string projectId, string project, string title, string? kind,
-        string status, string? statusText, string? summary, string? created, string file, string? proposedBy, string? sessionId, string? markdown, bool? truncated, string? nextStep);
+        string status, string? statusText, string[]? tags, string? summary, string? created, string file, string? proposedBy, string? sessionId, string? markdown, bool? truncated, string? nextStep);
 #pragma warning restore IDE1006, SA1300
 
     private sealed class TaskCreateOptions
@@ -659,5 +680,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         public bool UseStdin { get; set; }
 
         public string? Project { get; set; }
+
+        public List<string> Tags { get; } = [];
     }
 }

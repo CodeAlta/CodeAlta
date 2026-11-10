@@ -10,7 +10,9 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { createdDay, filterWorkItems, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
+import { NewTagQuestion, TagChips, TagFilter, TagManagerDialog, TagProposalBanners, TagProposalDialog, TaskTagField, type ShownTagProposal } from "./WorkItemTagViews";
+import type { WorkItemTagRow } from "#neoastra";
+import { createdDay, filterWorkItems, shownTags, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
   workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { PlanReview } from "./PlanReview";
@@ -60,6 +62,10 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const [kind, setKind] = useState<WorkKind | "all">("all");
   const [stage, setStage] = useState<WorkFilter>("todo");
   const [query, setQuery] = useState("");
+  // The tags a task of the list must have one of; none chosen shows every task.
+  const [tagFilter, setTagFilter] = useState<ReadonlySet<string>>(() => new Set());
+  const [managingTags, setManagingTags] = useState(false);
+  const [reviewing, setReviewing] = useState<ShownTagProposal | null>(null);
   // How the list is read: newest or oldest first, by day or by project; kept for the next time.
   const [view, setView] = useState(readWorkView);
   const changeView = (change: Partial<WorkView>) => setView(current => { const next = { ...current, ...change }; writeWorkView(next); return next; });
@@ -81,15 +87,23 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   // A project that has nothing is not one to choose: the list would be empty.
   const scoped = scope !== null && all.some(item => item.projectId === scope) ? scope : null;
   const counts = stageCounts(all, scoped, kind);
-  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query }), view.order), [all, scoped, kind, stage, query, view.order]);
+  const tags = useMemo(() => shownTags(state.projects, scoped), [state.projects, scoped]);
+  // The tag proposals of the projects shown, each with the open tasks it still names.
+  const proposals = useMemo(() => state.projects.filter(project => scoped === null || project.projectId === scoped).flatMap(project => (project.tagProposals ?? []).map(proposal => ({
+    projectId: project.projectId, projectName: scoped === null ? projectById.get(project.projectId)?.name ?? null : null, proposal,
+    tasks: proposal.tasks.map(match => all.find(item => item.projectId === project.projectId && item.kind === "task" && item.id === match.id)).filter((item): item is WorkItem => !!item) })))
+    .filter(shown => shown.tasks.length > 0), [state.projects, scoped, projectById, all]);
+  // A tag chosen for another project does not empty the list of this one.
+  const chosenTags = useMemo(() => new Set([...tagFilter].filter(name => tags.some(tag => tag.name === name))), [tagFilter, tags]);
+  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query, tags: chosenTags }), view.order), [all, scoped, kind, stage, query, chosenTags, view.order]);
   const current = shown.find(item => workItemKey(item) === selected) ?? shown[0] ?? null;
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
   useEffect(() => {
     if (!focus || !state.loaded) return;
     setScope(focus.projectId);
     const item = focus.key ? all.find(candidate => workItemKey(candidate) === focus.key) : null;
-    if (item) { setStage(item.stage); setKind("all"); setQuery(""); setSelected(focus.key!); }
-    else if (focus.kind) { setKind(focus.kind); setStage("todo"); setQuery(""); }
+    if (item) { setStage(item.stage); setKind("all"); setQuery(""); setTagFilter(new Set()); setSelected(focus.key!); }
+    else if (focus.kind) { setKind(focus.kind); setStage("todo"); setQuery(""); setTagFilter(new Set()); }
     onFocused?.();
   }, [focus, state.loaded]);
 
@@ -142,6 +156,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </HTMLSelect>
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search work items")}
             aria-label={t("Search work items")} onChange={event => setQuery(event.target.value)} />
+          <TagFilter tags={tags} chosen={chosenTags} onChange={setTagFilter} onManage={() => setManagingTags(true)} />
           <span className="work-view" role="group" aria-label={t("Order")}>
             <Button size="small" variant="minimal" className="work-order" icon={<AppIcon name={view.order === "newest" ? "arrowDown" : "arrowUp"} size={14} />}
               title={t(view.order === "newest" ? "Oldest first" : "Newest first")} aria-pressed={view.order === "oldest"}
@@ -151,12 +166,13 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
               options={[{ value: "date", label: t("Group by date") }, { value: "project", label: t("Group by project") }]} />}
           </span>
         </div>
+        <TagProposalBanners proposals={proposals} onReview={setReviewing} onDismiss={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)} />
         <Tabs id="work-stages" className="work-stages" selectedTabId={stage} onChange={next => setStage(next as WorkFilter)}>
           {workFilters.map(filter => <Tab key={filter} id={filter} disabled={false} title={<>{t(workFilterLabel(filter))}<span className="work-count" data-zero={counts[filter] === 0 || undefined}>{counts[filter]}</span></>} />)}
         </Tabs>
         <div className="work-body">
           <div className="work-list" role="listbox" aria-label={t(workFilterLabel(stage))}>
-            {shown.length === 0 && <p className="work-empty">{t(query.trim() ? "No work item matches." : stage === "todo" ? "Nothing waits for a decision." : stage === "running" ? "Nothing is in progress."
+            {shown.length === 0 && <p className="work-empty">{t(query.trim() || chosenTags.size ? "No work item matches." : stage === "todo" ? "Nothing waits for a decision." : stage === "running" ? "Nothing is in progress."
               : stage === "later" ? "Nothing is set aside for later." : "Nothing here. The settings say whether closed tasks and completed plans are kept.")}</p>}
             {groups.map(group => <section key={group.key} className="work-group" data-group={group.key}>
               {<h3><AppIcon name={byProject ? "folder" : "calendar"} size={13} />{group.label}<span className="work-count">{group.items.length}</span></h3>}
@@ -171,7 +187,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                     <AppIcon name={item.kind === "task" ? taskCategoryIcon(item.category) : workKindIcon(item.kind)} size={16} /></span>
                     {item.shortId && <code className="work-row-id" data-tone={tone}>{item.shortId}</code>}</span>
                   <span className="work-row-text"><strong>{item.title}</strong>
-                    <small>{item.summary ?? item.statusText ?? item.file}</small></span>
+                    <span className="work-row-sub"><TagChips tags={item.tags} /><small>{item.summary ?? item.statusText ?? item.file}</small></span></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
                     {scoped === null && !byProject && <span className="work-row-project" title={projectById.get(item.projectId)?.name}>{projectById.get(item.projectId)?.name}</span>}
@@ -191,7 +207,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 reviewSessions={reviewSessions(sessions, current.projectId, current.review.checkout, current.runner)} fallback={<p className="work-empty">{t("The file cannot be read.")}</p>}
                 reload={reload} onForget={() => overview.refresh()} />
               : current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
-                providers={providers} sessionSettings={sessionSettings}
+                providers={providers} sessionSettings={sessionSettings} tags={shownTags(state.projects, current.projectId)}
+                tagQuestion={proposals.find(shown => shown.proposal.newTag && shown.projectId === current.projectId && shown.tasks.some(task => task.id === current.id)) ?? null}
+                onReviewTag={setReviewing} onDeclineTag={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
                 preferredStart={state.settings.start} onStart={(way, request) => start(current, way, request)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
@@ -201,6 +219,10 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </aside>
         </div>
       </>}
+    {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
+    {managingTags && <TagManagerDialog hub={hub} projectId={scoped} onClose={() => setManagingTags(false)}
+      projects={withItems.map(project => { const known = state.projects.find(candidate => candidate.projectId === project.id);
+        return { id: project.id, name: project.name, tags: known?.tags ?? [], declined: known?.declinedTags ?? [] }; })} />}
     <Alert isOpen={!!removing} intent="danger" icon={null} cancelButtonText={t("Cancel")} confirmButtonText={t("Remove")} canEscapeKeyCancel canOutsideClickCancel
       onCancel={() => setRemoving(null)} onConfirm={() => { const item = removing; setRemoving(null); if (item) act(item, "remove"); }}>
       <p>{removing && t(removing.kind === "plan" ? "Remove the plan \"{title}\"? Its file is deleted." : "Remove the task \"{title}\"? Its file is deleted.", { title: removing.title })}</p>
@@ -355,8 +377,12 @@ function ShortIdCopy({ shortId }: { shortId: string }) {
 }
 
 function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
-  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession }: {
+  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession, tags, tagQuestion, onReviewTag, onDeclineTag }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
+  /** The tags of the project of the item. */
+  tags: readonly WorkItemTagRow[];
+  /** A new tag an agent proposes with this task, which the detail asks about, or null. */
+  tagQuestion: ShownTagProposal | null; onReviewTag: (shown: ShownTagProposal) => void; onDeclineTag: (shown: ShownTagProposal) => void;
   /** The host's epoch: a plan that is not done takes comments; null shows it without. */
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
@@ -380,6 +406,9 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
         {item.shortId && <ShortIdCopy shortId={item.shortId} />}</div>
       <h3>{item.title}</h3>
       <WorkItemTags item={item} projectName={projectName} />
+      {task && <TaskTagField hub={hub} item={item} tags={tags} disabled={busy} />}
+      {task && tagQuestion && <NewTagQuestion proposal={tagQuestion.proposal} count={tagQuestion.tasks.length} onReview={() => onReviewTag(tagQuestion)}
+        onDecline={() => onDeclineTag(tagQuestion)} />}
       {item.statusText && <p className="work-detail-status">{item.statusText}</p>}
       {runner && <button type="button" className="work-runner work-runner-link" title={t("Open the session that does it")} onClick={onOpenSession}>
         {runnerWorking ? <ActivitySpinner size={12} /> : <AppIcon name="chat" size={12} />}<span>{runner.title}</span><AppIcon name="chevronRight" size={12} /></button>}
@@ -391,10 +420,10 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
       </div>}
       {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, startRequest(settings, choices.shown))} />}
       <div className="work-detail-buttons">
-        {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Later")}</Button>}
-        {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to To do")}</Button>}
+        {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Backlog")}</Button>}
+        {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to Inbox")}</Button>}
         {item.stage === "running" && item.runner && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} title={t("No session does it any more.")}
-          onClick={() => onAct("release")}>{t("Back to To do")}</Button>}
+          onClick={() => onAct("release")}>{t("Back to Inbox")}</Button>}
         {task && item.stage !== "closed" && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />} onClick={() => onAct("complete")}>{t("Mark done")}</Button>}
         {!task && item.status === "draft" && <Button size="small" disabled={busy} icon={<AppIcon name="checked" size={14} />} onClick={() => onAct("status", "approved")}>{t("Mark ready")}</Button>}
         {!task && item.stage !== "closed" && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />} onClick={() => onAct("status", "done")}>{t("Mark done")}</Button>}

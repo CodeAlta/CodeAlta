@@ -22,6 +22,13 @@ internal interface IWorkItemRunner
     /// <param name="settings">The permission mode, the review and the sandbox the user chose for the session; null for the defaults.</param>
     /// <returns>The session, or why the work did not start. Failures are results, not exceptions.</returns>
     Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked, SessionStartSettings? settings);
+
+    /// <summary>Creates a session of the project that finds the open tasks a tag fits, and gives them to the user with <c>alta tag matches</c>.</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="name">The name of the tag.</param>
+    /// <param name="description">What the tag is for; null when the user did not say.</param>
+    /// <returns>The session, or why it did not start. Failures are results, not exceptions.</returns>
+    Task<WorkItemStartResult> FindTagTasksAsync(ProjectDescriptor project, string name, string? description);
 }
 
 /// <summary>
@@ -55,5 +62,15 @@ internal sealed class WorkItemRunner : IWorkItemRunner
         return new(started.SessionId, started.Problem, started.Reason);
 
         SessionStartModel Model(SessionStartModel model) => settings?.Apply(model) ?? model;
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkItemStartResult> FindTagTasksAsync(ProjectDescriptor project, string name, string? description)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        // The session reads and changes nothing: it works in the folder of the project, with what a new session runs with.
+        var started = await _starter.StartAsync(project, WorkItemPrompts.SessionTitle($"Tasks for the tag {name}"), _ => WorkItemPrompts.ForTagMatches(name, description),
+            worktree: false, likeSessionId: null, "workitem", model: null).ConfigureAwait(false);
+        return new(started.SessionId, started.Problem, started.Reason);
     }
 }

@@ -88,7 +88,7 @@
 .work-hero { display: grid; justify-items: center; gap: 10px; margin-top: 48px; padding: 36px 24px; border: 1px dashed var(--line-strong); border-radius: 16px; text-align: center; }
 .work-hero h3 { font-size: 17px; font-weight: 650; color: var(--text); }
 .work-hero p { max-width: 62ch; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.work-toolbar { display: grid; grid-template-columns: auto auto minmax(140px, 260px) auto; justify-content: start; align-items: center; gap: 10px; margin-top: 18px; }
+.work-toolbar { display: grid; grid-template-columns: auto auto minmax(140px, 260px) auto auto; justify-content: start; align-items: center; gap: 10px; margin-top: 18px; }
 /* The order of the list and what groups it, after the search. */
 .work-view { display: inline-flex; align-items: center; gap: 4px; }
 .work-view .bp6-html-select.work-grouping select { min-width: 0; max-width: none; }
@@ -194,3 +194,67 @@
 /* A plan under review, and a review whose worktree is gone. */
 .work-row-review { display: inline-flex; color: var(--accent); }
 .work-review-missing { margin-top: 8px; }
+
+/* The tags of tasks: a chip in the color of its name. */
+.work-tag { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px;
+  color: var(--tag-color); background: color-mix(in srgb, var(--tag-color) 14%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-tag::before { content: "#"; opacity: .6; }
+.work-tag-remove { display: inline-grid; place-items: center; padding: 0; border: 0; color: inherit; background: none; opacity: .65; cursor: pointer; }
+.work-tag-remove:hover, .work-tag-remove:focus-visible { opacity: 1; }
+.work-tag-chips { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+/* The tags of a row lead the line under its title, which keeps its width. */
+.work-row-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.work-row-sub .work-tag-chips { flex: none; max-width: 70%; }
+.work-row-sub small { min-width: 0; }
+.work-tag-more { font-size: 11px; color: var(--muted); }
+.work-task-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.work-tag-add { min-height: 20px; font-size: 12px; color: var(--muted); }
+.work-tag-picker { display: grid; gap: 4px; width: 300px; padding: 6px; }
+.work-tag-picker .bp6-menu { max-height: 260px; overflow-y: auto; padding: 0; }
+.work-tag-option { display: grid; justify-items: start; gap: 2px; min-width: 0; }
+.work-tag-option small { font-size: 11.5px; color: var(--muted); white-space: normal; }
+/* The tick of a tag stays beside its chip, not in the middle of its description. */
+.work-tag-picker .bp6-menu-item .bp6-menu-item-selected-icon, .work-tag-menu .bp6-menu-item .bp6-menu-item-selected-icon { align-self: flex-start; margin-top: 1px; }
+.work-tag-menu { max-width: 340px; max-height: 320px; overflow-y: auto; }
+.work-tag-filter { max-width: 200px; }
+.work-tag-filter .bp6-button-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-tag-failed { font-size: 12px; color: var(--red); }
+.work-tag-dialog { width: min(440px, calc(100vw - 40px)); }
+.work-tag-manager { width: min(620px, calc(100vw - 40px)); }
+.work-tag-manager .bp6-dialog-body { display: grid; gap: 10px; max-height: min(70vh, 640px); overflow-y: auto; }
+.work-tag-manager-intro { margin: 0; font-size: 12.5px; color: var(--muted); }
+/* One grid for the list: the descriptions start at the same place whatever the length of the names. */
+.work-tag-list { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto auto; column-gap: 10px; row-gap: 2px; margin: 0; padding: 0; list-style: none; }
+.work-tag-list > li { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 34px; padding: 4px 6px; border-radius: 8px; }
+.work-tag-list > li:hover { background: var(--panel-2); }
+.work-tag-list > li > .work-tag { justify-self: start; }
+.work-tag-description { min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-tag-description em { color: var(--muted); }
+.work-tag-count { min-width: 22px; font-size: 12px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.work-tag-actions { display: inline-flex; gap: 2px; }
+.work-tag-edit { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr) auto auto; align-items: center; gap: 6px; }
+.work-tag-declined { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.work-tag-declined h4 { flex-basis: 100%; margin: 0; font-size: 12px; }
+.work-tag-declined p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
+.work-tag-declined-name { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px; border: 1px solid var(--line); border-radius: 999px; }
+
+/* The tag proposals that wait, above the list, and the review of one. */
+.work-tag-hint { margin: -4px 0 0 26px; font-size: 12px; color: var(--muted); }
+.work-tag-proposals { display: grid; gap: 6px; margin-top: 12px; }
+.work-tag-proposal.bp6-callout { display: flex; align-items: center; gap: 8px; }
+.work-tag-proposal-text { display: grid; flex: 1; min-width: 0; font-size: 13px; }
+.work-tag-proposal-text small { color: var(--muted); }
+.work-tag-review-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; }
+.work-tag-review-tasks { display: grid; gap: 4px; max-height: 50vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.work-tag-review-tasks .bp6-checkbox { display: flex; gap: 2px; margin: 0; padding: 6px 8px 6px 34px; border-radius: 8px; }
+.work-tag-review-tasks .bp6-checkbox:hover { background: var(--panel-2); }
+.work-tag-review-task { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: baseline; min-width: 0; }
+.work-tag-review-task strong { font-size: 13px; font-weight: 600; }
+.work-tag-review-task small { grid-column: 2; font-size: 12px; color: var(--muted); }
+.work-tag-review .work-tag-id { margin: 0; }
+.work-tag-question { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 2px; margin: 0; padding: 2px 4px 2px 8px; border-radius: 8px;
+  font-size: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.work-tag-question-head { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.work-tag-question-head .work-tag { flex: 0 1 auto; min-width: 0; }
+.work-tag-question-head small { flex: 0 0 auto; color: var(--muted); }
+.work-tag-question-text { grid-column: 1 / -1; min-width: 0; margin: 0 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }

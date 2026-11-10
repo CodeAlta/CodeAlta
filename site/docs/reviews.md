@@ -111,7 +111,7 @@ In CodeAlta TUI, agents do not commit either: they leave the changes uncommitted
 
 **Work items** lists the reviews beside the tasks and plans: choose **Reviews** there, run **Reviews** from the command palette, or click the eye of a review bar.
 
-- **To do** holds what waits for you: a review an agent asked for, comments the agent answered, drafts you have not submitted, and reviews whose file or worktree is gone, waiting for you to delete them.
+- **Inbox** holds what waits for you: a review an agent asked for, comments the agent answered, drafts you have not submitted, and reviews whose file or worktree is gone, waiting for you to delete them.
 - **In progress** holds what waits for the agent: comments it has not answered yet.
 - A plan under review shows an eye in the list.
 - Select a review to see its request, comments and last verdict. **Open review** opens it, **Delete review** ends it, and **Reload** reads the plans and reviews again.

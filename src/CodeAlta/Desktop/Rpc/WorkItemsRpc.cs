@@ -82,10 +82,15 @@ internal sealed class WorkItemsService
             var tasks = _items.ListTasks(project);
             var plans = _items.ListPlans(project);
             if (tasks.Count == 0 && plans.Count == 0) continue;
+            var tags = _items.ListTags(project, tasks);
             rows.Add(new(project.Id,
                 [.. tasks.Take(MaximumRows).Select(task => Row(task, links.GetValueOrDefault((project.Id, WorkItemKinds.Task, task.Id))))],
                 [.. plans.Take(MaximumRows).Select(plan => Row(plan, links.GetValueOrDefault((project.Id, WorkItemKinds.Plan, plan.Id))))],
-                tasks.Count > MaximumRows || plans.Count > MaximumRows));
+                tasks.Count > MaximumRows || plans.Count > MaximumRows,
+                [.. tags.Tags.Select(static tag => new WorkItemTagRow(tag.Name, tag.Description, tag.OpenTasks, tag.Listed))],
+                tags.Declined,
+                [.. _items.ListTagProposals(project.Id).Select(static proposal => new WorkItemTagProposalRow(proposal.Name, proposal.Description, proposal.NewTag, proposal.SessionId,
+                    [.. proposal.Tasks.Select(static match => new WorkItemTagMatchRow(match.TaskId, match.Reason))]))]));
         }
 
         return new("ok", rows, Settings(_items.Settings));
@@ -106,7 +111,8 @@ internal sealed class WorkItemsService
 
     /// <summary>Does one thing to an item.</summary>
     /// <remarks>
-    /// <c>later</c>, <c>reopen</c>, <c>complete</c> and <c>dismiss</c> are for tasks; <c>status</c> (with
+    /// <c>later</c>, <c>reopen</c>, <c>complete</c>, <c>dismiss</c> and <c>tags</c> (the tags, separated by commas, in
+    /// <see cref="WorkItemActionRequest.Value"/>) are for tasks; <c>status</c> (with
     /// <see cref="WorkItemActionRequest.Value"/>) is for plans; <c>remove</c> deletes the file of either;
     /// <c>acknowledge</c> puts a card away; <c>release</c> forgets the session that carries the item out.
     /// <c>start_worktree</c> and <c>start_session</c> create a session and send it the item;
@@ -135,6 +141,13 @@ internal sealed class WorkItemsService
             case "reopen" when task: return Done(_items.SetTaskStatus(project, request.Id, WorkTaskStatus.Pending));
             case "complete" when task: return Done(_items.CompleteTask(project, request.Id));
             case "dismiss" when task: return Done(_items.DismissTask(project, request.Id));
+            case "tags" when task:
+            {
+                // The tags of the task, separated by commas; none removes them.
+                var tags = (request.Value ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                if (tags.Length > WorkItemFiles.MaximumTaskTags || tags.Any(static tag => !WorkItemFiles.IsTagName(tag))) return new("invalid_request");
+                return Done(_items.SetTaskTags(project, request.Id, tags));
+            }
             case "remove": return Done(task ? _items.RemoveTask(project, request.Id) : _items.RemovePlan(project, request.Id));
             case "status" when !task:
                 return WorkItemFiles.PlanStatusOf(request.Value) is { } status ? Done(_items.SetPlanStatus(project, request.Id, status)) : new("invalid_request");
@@ -168,6 +181,53 @@ internal sealed class WorkItemsService
         }
 
         static WorkItemActionResponse Done(bool changed) => new(changed ? "ok" : "write_failed");
+    }
+
+    /// <summary>Changes the tags of a project, in its tags file and, for a rename or a deletion, in its tasks.</summary>
+    /// <remarks>
+    /// <c>set</c> adds a tag or changes its description (<see cref="WorkItemTagRequest.Value"/>); <c>rename</c> gives it
+    /// the name in <see cref="WorkItemTagRequest.Value"/>; <c>delete</c> removes it; <c>decline</c> records that the user
+    /// turned down a name an agent proposed, and <c>forget</c> forgets it. <c>find</c> starts a session that finds the open
+    /// tasks the tag fits, which it proposes; <c>apply</c> applies a proposal to <see cref="WorkItemTagRequest.Tasks"/> (with the
+    /// description of a new tag in <see cref="WorkItemTagRequest.Value"/>); <c>dismiss</c> dismisses it, and declines a new tag.
+    /// </remarks>
+    [NeoRpcMethod("tag")]
+    public async Task<WorkItemActionResponse> TagAsync(WorkItemTagRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (!Identifier(request.ProjectId) || !WorkItemFiles.IsTagName(request.Name) || request.Value is { Length: > WorkItemFiles.MaximumTagDescription }
+            || request.Action is "rename" && !WorkItemFiles.IsTagName(request.Value)
+            || request.Tasks is { } named && (named.Count > MaximumRows || named.Any(static id => !WorkItemFiles.IsValidId(id)))) return new("invalid_request");
+        if (await ProjectAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
+        if (request.Action == "find")
+        {
+            var tag = _items!.ListTags(project).Tags.FirstOrDefault(tag => tag.Name == request.Name);
+            if (tag is null) return new("not_found");
+            var started = await _runner!.FindTagTasksAsync(project, tag.Name, tag.Description).ConfigureAwait(false);
+            return started.Problem is null ? new("ok") { SessionId = started.SessionId }
+                : new("refused") { SessionId = started.SessionId, Message = started.Problem, Reason = started.Reason };
+        }
+
+        WorkTagChange? change = request.Action switch
+        {
+            "apply" => _items!.ApplyTagProposal(project, request.Name, request.Tasks ?? [], request.Value),
+            "dismiss" => _items!.DismissTagProposal(project, request.Name),
+            "set" => _items!.SetTag(project, request.Name, request.Value),
+            "rename" => _items!.RenameTag(project, request.Name, request.Value!),
+            "delete" => _items!.DeleteTag(project, request.Name),
+            "decline" => _items!.SetTagDeclined(project, request.Name, declined: true),
+            "forget" => _items!.SetTagDeclined(project, request.Name, declined: false),
+            _ => null,
+        };
+        return change switch
+        {
+            WorkTagChange.Done => new("ok"),
+            WorkTagChange.NotFound => new("not_found"),
+            WorkTagChange.Exists => new("exists"),
+            WorkTagChange.Failed => new("write_failed"),
+            _ => new("invalid_request"),
+        };
     }
 
     /// <summary>Saves the user's choices for tasks and plans.</summary>
@@ -244,7 +304,7 @@ internal sealed class WorkItemsService
 
     private static WorkItemRow Row(WorkTask task, WorkItemLink? link)
         => new(task.Id, WorkItemKinds.Task, task.Title, task.Summary, task.Kind, WorkItemFiles.NameOf(task.Status), null, task.Created,
-            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link), task.ShortId, Updated(task.Path));
+            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link), task.ShortId, Updated(task.Path), task.Tags);
 
     private static WorkItemRow Row(WorkPlan plan, WorkItemLink? link)
         => new(plan.Id, WorkItemKinds.Plan, plan.Title, plan.Summary, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Created,
@@ -273,7 +333,33 @@ internal sealed record WorkItemsRequest(string? ExpectedEpoch, IReadOnlyList<str
 internal sealed record WorkItemsListResponse(string Status, IReadOnlyList<WorkItemsProject> Projects, WorkItemsSettings? Settings);
 
 /// <param name="Truncated">The project has more tasks or plans than the answer holds.</param>
-internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItemRow> Tasks, IReadOnlyList<WorkItemRow> Plans, bool Truncated);
+/// <param name="Tags">The tags of the tasks of the project: those of its tags file, then those only found on its tasks.</param>
+/// <param name="DeclinedTags">The names the user declined when an agent proposed them.</param>
+/// <param name="TagProposals">The tag proposals of the project that wait for the user.</param>
+internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItemRow> Tasks, IReadOnlyList<WorkItemRow> Plans, bool Truncated,
+    IReadOnlyList<WorkItemTagRow>? Tags = null, IReadOnlyList<string>? DeclinedTags = null, IReadOnlyList<WorkItemTagProposalRow>? TagProposals = null);
+
+/// <param name="Name">The name of the tag.</param>
+/// <param name="Description">What a new tag is for; null for an existing one.</param>
+/// <param name="NewTag">Whether the tag does not exist yet.</param>
+/// <param name="SessionId">The session that proposed it, whose card shows a new tag; null when it is not known.</param>
+/// <param name="Tasks">The tasks the tag would be given to.</param>
+internal sealed record WorkItemTagProposalRow(string Name, string? Description, bool NewTag, string? SessionId, IReadOnlyList<WorkItemTagMatchRow> Tasks);
+
+/// <param name="Id">The id of the task.</param>
+/// <param name="Reason">Why the tag fits it; null when the agent did not say.</param>
+internal sealed record WorkItemTagMatchRow(string Id, string? Reason);
+
+/// <param name="Description">What the tag is for, in a line; null when it has none.</param>
+/// <param name="OpenTasks">How many tasks that are not closed have the tag.</param>
+/// <param name="Listed">Whether the tags file of the project lists the tag.</param>
+internal sealed record WorkItemTagRow(string Name, string? Description, int OpenTasks, bool Listed);
+
+/// <param name="Action"><c>set</c>, <c>rename</c>, <c>delete</c>, <c>decline</c>, <c>forget</c>, <c>find</c>, <c>apply</c> or <c>dismiss</c>: see <see cref="WorkItemsService.TagAsync"/>.</param>
+/// <param name="Name">The name of the tag.</param>
+/// <param name="Value">The description for <c>set</c> and for <c>apply</c> of a new tag (null or empty for none), the new name for <c>rename</c>.</param>
+/// <param name="Tasks">The tasks a proposal is applied to, by id, for <c>apply</c>.</param>
+internal sealed record WorkItemTagRequest(string? ExpectedEpoch, string ProjectId, string Action, string Name, string? Value = null, IReadOnlyList<string>? Tasks = null);
 
 /// <param name="Kind"><c>task</c> or <c>plan</c>.</param>
 /// <param name="Category">Why a task exists: <c>gap</c>, <c>problem</c> or <c>improvement</c>; null for a plan.</param>
@@ -286,8 +372,10 @@ internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItem
 /// <param name="RunsWith">What the session that proposed the item ran with, which a session started for it takes; null when it is not known.</param>
 /// <param name="ShortId">The short id of a task, which agents name it by; null for a plan and for a task written before ids had one.</param>
 /// <param name="Updated">When the file of the item was last written; null when it is not known.</param>
+/// <param name="Tags">The tags of a task; null for a plan.</param>
 internal sealed record WorkItemRow(string Id, string Kind, string Title, string? Summary, string? Category, string Status, string? StatusText, string? Created,
-    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null, string? ShortId = null, DateTimeOffset? Updated = null);
+    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null, string? ShortId = null, DateTimeOffset? Updated = null,
+    IReadOnlyList<string>? Tags = null);
 
 /// <param name="ProviderId">The key of the model provider.</param>
 /// <param name="ModelId">The model; null leaves it to the provider.</param>
@@ -305,7 +393,7 @@ internal sealed record WorkItemRequest(string? ExpectedEpoch, string ProjectId, 
 internal sealed record WorkItemReadResponse(string Status, string? Markdown, bool Truncated);
 
 /// <param name="Action">What to do: see <see cref="WorkItemsService.ActAsync"/>.</param>
-/// <param name="Value">The status of a plan, for <c>status</c>.</param>
+/// <param name="Value">The status of a plan, for <c>status</c>; the tags of a task separated by commas, for <c>tags</c>.</param>
 /// <param name="SessionId">The session that shows the item: the one that carries it out for <c>start_here</c>, the one a new session takes its model from otherwise.</param>
 /// <param name="WorkingDirectory">The folder that session works in, for <c>start_here</c>.</param>
 /// <param name="ProviderId">The provider the user chose for a new session; null to take what the item or the showing session says, then the default.</param>

@@ -29,7 +29,7 @@ public sealed record WorkTaskCreation(WorkTask? Task, WorkTaskRefusal? Refusal);
 /// The files are read at each call: agents and people write them directly. <see cref="Changed"/> tells of the
 /// changes made through this service; a file written directly is seen at the next read.
 /// </remarks>
-public sealed class WorkItemService
+public sealed partial class WorkItemService
 {
     /// <summary>The most tasks or plans of a project that are listed.</summary>
     public const int MaximumItems = 300;
@@ -39,6 +39,7 @@ public sealed class WorkItemService
 
     private readonly CodeAltaConfigStore _config;
     private readonly WorkItemLinkStore _links;
+    private readonly WorkTagProposalStore _tagProposals;
     private readonly TimeProvider _time;
 
     /// <summary>Creates the service.</summary>
@@ -52,6 +53,7 @@ public sealed class WorkItemService
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
         _links = new WorkItemLinkStore(stateRoot);
+        _tagProposals = new WorkTagProposalStore(stateRoot);
         _time = time ?? TimeProvider.System;
     }
 
@@ -157,7 +159,7 @@ public sealed class WorkItemService
     /// <param name="proposedBy">The session that proposes it, which then shows it; null when a person or a tool outside a session does.</param>
     /// <returns>The task, or why it was refused.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="ArgumentException">The title or the body is blank or too long, the summary is too long, or the kind is not one.</exception>
+    /// <exception cref="ArgumentException">The title or the body is blank or too long, the summary is too long, the kind is not one, or a tag is not a tag name.</exception>
     /// <exception cref="IOException">The file could not be written.</exception>
     public WorkTaskCreation CreateTask(ProjectDescriptor project, WorkTaskDraft draft, string? proposedBy)
         => CreateTask(project, draft, proposedBy, runsWith: null);
@@ -171,7 +173,7 @@ public sealed class WorkItemService
     /// <param name="runsWith">The provider, the model and the effort of that session, which a session started for the task takes; null when they are not known.</param>
     /// <returns>The task, or why it was refused.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> or <paramref name="draft"/> is null.</exception>
-    /// <exception cref="ArgumentException">The title or the body is blank or too long, the summary is too long, or the kind is not one.</exception>
+    /// <exception cref="ArgumentException">The title or the body is blank or too long, the summary is too long, the kind is not one, or a tag is not a tag name.</exception>
     /// <exception cref="IOException">The file could not be written.</exception>
     public WorkTaskCreation CreateTask(ProjectDescriptor project, WorkTaskDraft draft, string? proposedBy, WorkItemSelection? runsWith)
     {
@@ -200,6 +202,10 @@ public sealed class WorkItemService
         {
             throw new ArgumentException($"The kind of a task is one of: {string.Join(", ", WorkItemFiles.TaskKinds)}.", nameof(draft));
         }
+
+        var tags = (draft.Tags ?? []).Select(tag => WorkItemFiles.TagNameOf(tag) ?? throw new ArgumentException(
+            $"'{tag}' is not a tag name: lower case letters, digits and single hyphens, at most {WorkItemFiles.MaximumTagName} characters.", nameof(draft)))
+            .Distinct(StringComparer.Ordinal).ToList();
 
         if (proposedBy is not null && !Settings.Propose)
         {
@@ -233,7 +239,7 @@ public sealed class WorkItemService
         Directory.CreateDirectory(directory);
         var stem = WorkItemFiles.NewId(today, title);
         var created = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var text = WorkItemFiles.SerializeTask(title, kind, WorkTaskStatus.Pending, created, summary, body);
+        var text = WorkItemFiles.SerializeTask(title, kind, WorkTaskStatus.Pending, created, summary, body, tags);
         for (var attempt = 1; ; attempt++)
         {
             // The id ends with a few random characters: two sessions that work in two checkouts of the project (a
