@@ -97,6 +97,8 @@ public sealed class BrowserAgentOverlayTests
         var page = (CdpPage)session.Pages[0].Page;
         using var timeout = new CancellationTokenSource(BrowserToolTesting.Deadline);
         var main = page.MainFrame;
+        // A system without animations (Windows Server) asks pages for reduced motion: the motion is asked for here.
+        await session.OkAsync("emulate", """{"prefersReducedMotion":"no-preference"}""");
         await page.MouseMoveAsync(BrowserPoint.OfPage(main, 10, 10), timeout.Token);
 
         // The cursor travels to a far point before the pointer gets there: at least the shortest flight, at most the limit.
