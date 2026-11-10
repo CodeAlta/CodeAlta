@@ -141,6 +141,9 @@ test("mounted production Notes and proposal overlays cooperate without replacing
       for (let step = 1; step <= 8; step++)
         await command("Input.dispatchMouseEvent", { type: "mouseMoved", button: "left", buttons: 1,
           x: from.x + (to.x - from.x) * step / 8, y: from.y + (to.y - from.y) * step / 8 });
+      // Chromium delivers the moves of a frame together: a release sent before the next frame can come before the last
+      // move on a busy machine, and the tab stops one step short.
+      await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
       await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 });
       return layout();
     };

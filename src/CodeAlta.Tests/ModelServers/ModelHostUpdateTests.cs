@@ -124,9 +124,15 @@ public sealed class ModelHostUpdateTests
         Assert.IsEmpty(second.GetStatus().History, "it is not its time yet");
         Assert.AreEqual(planned.Id, second.GetStatus().Planned?.Id);
 
+        // The loop reads the clock, then makes its timer, which this clock dates from the moment it is made: a move of the
+        // clock in between leaves it waiting from the later time. The clock goes on a minute at a time until the update ran.
         time.Advance(TimeSpan.FromMinutes(31));
-        var ended = await machine.WaitForAsync(second, () => second.GetStatus().Tasks.FirstOrDefault(static task => task.Kind == "update" && task.EndedAt is not null),
-            "the planned update ran");
+        var ended = await machine.WaitForAsync(second, () =>
+        {
+            var task = second.GetStatus().Tasks.FirstOrDefault(static task => task.Kind == "update" && task.EndedAt is not null);
+            if (task is null) time.Advance(TimeSpan.FromMinutes(1));
+            return task;
+        }, "the planned update ran");
         Assert.AreEqual("done", ended.State, ended.Message);
         Assert.AreEqual("Planned switch to b12100", ended.Title);
         Assert.AreEqual("test", ended.RequestedBy);
