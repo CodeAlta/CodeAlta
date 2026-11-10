@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { globalConfig, type GlobalConfigModelTiersResponse, type ModelFallbackSetting, type ModelTierChoiceItem, type ModelTierList } from "#neoastra";
+import { keepIfSame } from "./keepIfSame";
 
 // The tiers of models of the settings: complex, standard and quick, each an ordered list of targets (a model of a
 // configured provider with its reasoning efforts in order). A session asks for a tier and runs on its first ready model;
@@ -314,7 +315,14 @@ export function createTierStore(read: Read, rereads: PendingRereads = pendingRer
   const planned = new Set<string>();
   const listeners = new Set<() => void>();
   const tell = () => { for (const listener of [...listeners]) listener(); };
-  const put = (key: string, state: TierState) => { readings = new Map(readings).set(key, state); tell(); };
+  // A reading that says what the window already has changes nothing: the composers read their scope each time a session is
+  // shown, and none of them has to render again for it.
+  const put = (key: string, state: TierState) => {
+    const known = readings.get(key);
+    if (known && keepIfSame(known, state) === known) return;
+    readings = new Map(readings).set(key, state);
+    tell();
+  };
   async function refresh(epoch: string, scope: TierScope | null = null) {
     const key = scopeKey(epoch, scope);
     scopes.set(key, { epoch, scope });
