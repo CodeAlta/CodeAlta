@@ -21,7 +21,7 @@ public sealed class NodeTelemetryTests
     private const string Organization = "org-1";
     private const string Owner = "person-1";
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(200);
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -44,7 +44,7 @@ public sealed class NodeTelemetryTests
             ServiceEnvironment = static () => null,
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--no-listen", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        var stop = await started.Task.WithinAsync(Patience, TestContext.CancellationToken);
         try
         {
             var metrics = await receiver.WaitAsync(static request => request.Signal == "metrics" && request.Contains("codealta.node.sessions.working"));
@@ -58,7 +58,7 @@ public sealed class NodeTelemetryTests
         finally
         {
             stop();
-            Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, TestContext.CancellationToken));
+            Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, TestContext.CancellationToken));
         }
     }
 
@@ -239,7 +239,7 @@ public sealed class NodeTelemetryTests
             ServiceEnvironment = static () => null,
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--no-listen", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var joined = await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
@@ -277,7 +277,7 @@ public sealed class NodeTelemetryTests
         finally
         {
             stop();
-            Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token));
+            Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, token));
         }
     }
 

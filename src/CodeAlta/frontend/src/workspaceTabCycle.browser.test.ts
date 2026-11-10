@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host: Ctrl+Tab and Ctrl+Shift+Tab go through every tab of the dock as
 // the strip shows them, the tools and the sessions alike, around the strip, wherever the keyboard is; they open no tab.
 // A code editor that has the keyboard goes through its own files with them.
-test("Ctrl+Tab and Ctrl+Shift+Tab go through the tabs of the window in the order of the strip", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("Ctrl+Tab and Ctrl+Shift+Tab go through the tabs of the window in the order of the strip", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, tabs, shown, press, session, title, exceptions }) => {
     // A real key press, with Ctrl (2), Alt (1) and Shift (8) as asked.
     const key = async (name: "Tab" | "PageDown" | "PageUp" | "ArrowLeft" | "ArrowRight", modifiers: { shift?: boolean; alt?: boolean } = {}) => {

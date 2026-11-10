@@ -153,7 +153,7 @@ public sealed class WorkspaceBranchSessionTests
             Images = [new("notes.txt", "text/plain", Convert.ToBase64String("hello"u8.ToArray()))],
         }).Receipt;
         Assert.IsNotNull(receipt);
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestTime.Seconds(10))).Outcome);
         await fixture.SendAsync(sessionId, "two");
         var rpc = new WorkspaceService(fixture.Host, Epoch);
         var turns = (await rpc.SessionTurnsAsync(new(Epoch, sessionId), CancellationToken.None)).Turns;
@@ -239,7 +239,7 @@ public sealed class WorkspaceBranchSessionTests
         var running = fixture.Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "two")).Receipt!;
         try
         {
-            await fixture.Provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await fixture.Provider.Started.Task.WithinAsync(TestTime.Seconds(10));
 
             var turns = await rpc.SessionTurnsAsync(new(Epoch, sessionId), CancellationToken.None);
             Assert.AreEqual(2, turns.Total);
@@ -256,7 +256,7 @@ public sealed class WorkspaceBranchSessionTests
         finally
         {
             fixture.Provider.Hold.TrySetResult();
-            await running.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+            await running.Completion.WithinAsync(TestTime.Seconds(10));
         }
 
         await rpc.CloseSessionsAsync();
@@ -301,7 +301,7 @@ public sealed class WorkspaceBranchSessionTests
         {
             var receipt = Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt) { Provenance = provenance }).Receipt;
             Assert.IsNotNull(receipt, "The send was not admitted.");
-            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestTime.Seconds(10))).Outcome);
         }
 
         public string[] UserTexts(string sessionId)

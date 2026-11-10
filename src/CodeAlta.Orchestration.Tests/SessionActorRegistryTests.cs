@@ -57,7 +57,7 @@ public sealed class SessionActorRegistryTests
             firstStarted.SetResult();
             await releaseFirst.Task.ConfigureAwait(false);
         }).AsTask();
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await firstStarted.Task.WithinAsync(TestTime.Seconds(5));
 
         var second = registry.GetOrCreate("session-2").ExecuteAsync(_ =>
         {
@@ -65,7 +65,7 @@ public sealed class SessionActorRegistryTests
             return ValueTask.CompletedTask;
         }).AsTask();
 
-        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondStarted.Task.WithinAsync(TestTime.Seconds(5));
         Assert.IsFalse(first.IsCompleted);
 
         releaseFirst.SetResult();
@@ -96,7 +96,7 @@ public sealed class SessionActorRegistryTests
             return ValueTask.CompletedTask;
         });
 
-        await callbackQueued.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await callbackQueued.Task.WithinAsync(TestTime.Seconds(5));
 
         CollectionAssert.AreEqual(new[] { 1, 2, 3 }, observed);
     }

@@ -31,8 +31,8 @@ public sealed class FleetHandshakeTests
         };
 
         var accept = FleetHandshake.AcceptAsync(serverTransport, serverOptions, keys, CancellationToken.None);
-        var welcome = await FleetHandshake.ConnectAsync(clientTransport, clientOptions, keys, CancellationToken.None).WaitAsync(Json.Hang);
-        var accepted = await accept.WaitAsync(Json.Hang);
+        var welcome = await FleetHandshake.ConnectAsync(clientTransport, clientOptions, keys, CancellationToken.None).WithinAsync(Json.Hang);
+        var accepted = await accept.WithinAsync(Json.Hang);
 
         Assert.AreEqual(3, welcome.Protocol);
         CollectionAssert.AreEqual(new[] { "relay", "replica" }, welcome.Features.ToArray());
@@ -58,8 +58,8 @@ public sealed class FleetHandshakeTests
         var accept = FleetHandshake.AcceptAsync(serverTransport, new FleetHandshakeServerOptions { Protocol = new FleetProtocolRange(3, 4) }, keys, CancellationToken.None);
         var connect = FleetHandshake.ConnectAsync(clientTransport, new FleetHandshakeClientOptions { Protocol = new FleetProtocolRange(1, 2), Client = Desktop }, keys, CancellationToken.None);
 
-        var clientError = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => connect.WaitAsync(Json.Hang));
-        var serverError = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WaitAsync(Json.Hang));
+        var clientError = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => connect.WithinAsync(Json.Hang));
+        var serverError = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WithinAsync(Json.Hang));
 
         Assert.AreEqual(FleetErrorCodes.UpdateRequired, clientError.Error.Code);
         Assert.AreEqual(FleetErrorHints.Update, clientError.Error.Hint);
@@ -67,7 +67,7 @@ public sealed class FleetHandshakeTests
         Assert.IsNull(keys.VerifiedContext, "No proof is checked for a client that cannot speak the protocol.");
 
         // The refusing side closed: nothing follows the error.
-        Assert.AreEqual(FleetFrameType.Closed, await clientTransport.ReceiveAsync(new ArrayBufferWriter<byte>(), 1024, CancellationToken.None).AsTask().WaitAsync(Json.Hang));
+        Assert.AreEqual(FleetFrameType.Closed, await clientTransport.ReceiveAsync(new ArrayBufferWriter<byte>(), 1024, CancellationToken.None).AsTask().WithinAsync(Json.Hang));
     }
 
     [TestMethod]
@@ -79,10 +79,10 @@ public sealed class FleetHandshakeTests
         var connect = FleetHandshake.ConnectAsync(clientTransport, new FleetHandshakeClientOptions { Protocol = new FleetProtocolRange(1, 1), Client = Desktop },
             new TestDeviceKeys("device-1"), CancellationToken.None);
 
-        var error = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => connect.WaitAsync(Json.Hang));
+        var error = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => connect.WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.PendingApproval, error.Error.Code);
         Assert.AreEqual(FleetErrorHints.WaitForApproval, error.Error.Hint);
-        await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WaitAsync(Json.Hang));
+        await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WithinAsync(Json.Hang));
     }
 
     [TestMethod]
@@ -93,9 +93,9 @@ public sealed class FleetHandshakeTests
         var connect = FleetHandshake.ConnectAsync(clientTransport, new FleetHandshakeClientOptions { Protocol = new FleetProtocolRange(1, 1), Client = Desktop },
             new TestDeviceKeys("device-1", "another-key"), CancellationToken.None);
 
-        var error = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => connect.WaitAsync(Json.Hang));
+        var error = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => connect.WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.Unauthenticated, error.Error.Code);
-        await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WaitAsync(Json.Hang));
+        await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WithinAsync(Json.Hang));
     }
 
     [TestMethod]
@@ -105,7 +105,7 @@ public sealed class FleetHandshakeTests
         var accept = FleetHandshake.AcceptAsync(serverTransport, new FleetHandshakeServerOptions { Protocol = new FleetProtocolRange(1, 1) }, new TestDeviceKeys("device-1"), CancellationToken.None);
         await clientTransport.SendAsync(new FleetRequest("1", "node.info").Text().Utf8(), FleetFrameType.Text, CancellationToken.None);
 
-        var error = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WaitAsync(Json.Hang));
+        var error = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => accept.WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.ProtocolError, error.Error.Code);
     }
 
@@ -114,6 +114,6 @@ public sealed class FleetHandshakeTests
     {
         var (_, serverTransport) = FleetInMemoryTransport.CreatePair();
         var options = new FleetHandshakeServerOptions { Protocol = new FleetProtocolRange(1, 1), Timeout = TimeSpan.FromMilliseconds(100) };
-        await Assert.ThrowsExactlyAsync<TimeoutException>(() => FleetHandshake.AcceptAsync(serverTransport, options, new TestDeviceKeys("d"), CancellationToken.None).WaitAsync(Json.Hang));
+        await Assert.ThrowsExactlyAsync<TimeoutException>(() => FleetHandshake.AcceptAsync(serverTransport, options, new TestDeviceKeys("d"), CancellationToken.None).WithinAsync(Json.Hang));
     }
 }

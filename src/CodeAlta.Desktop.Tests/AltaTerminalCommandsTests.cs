@@ -11,7 +11,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class AltaTerminalCommandsTests
 {
     private const string Esc = "\u001b";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     // The alta commands over the terminals of an application whose programs are fakes, and a real project catalog.
     private sealed class Fixture : IAsyncDisposable
@@ -60,7 +60,7 @@ public sealed class AltaTerminalCommandsTests
         // Runs a command as the session, in the folder of its project.
         public async Task<(int Code, List<JsonElement> Records, string Text)> Run(string[] arguments, string? stdin = null, int? maximumBytes = null, bool session = true)
         {
-            var result = await Alta.InvokeAsync(arguments, stdin, session ? Session : AltaCallerIdentity.Cli, Project.ProjectPath, maxOutputBytes: maximumBytes).AsTask().WaitAsync(Patience);
+            var result = await Alta.InvokeAsync(arguments, stdin, session ? Session : AltaCallerIdentity.Cli, Project.ProjectPath, maxOutputBytes: maximumBytes).AsTask().WithinAsync(Patience);
             var records = new List<JsonElement>();
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
@@ -279,7 +279,7 @@ public sealed class AltaTerminalCommandsTests
         // A terminal a session created stays once its program has ended: what it wrote is still read, nothing is typed.
         program.Show("bye\r\n");
         program.End(3);
-        await fixture.Terminals.Find(id)!.Ended.WaitAsync(Patience);
+        await fixture.Terminals.Find(id)!.Ended.WithinAsync(Patience);
         var ended = await fixture.One("alta.terminal.text", "terminal", "read", id);
         Assert.AreEqual(("exited", "3", "bye\n\n[process exited with code 3]"), (Text(ended, "state"), Text(ended, "exitCode"), Text(ended, "text")));
         (code, _, text) = await fixture.Run(["terminal", "send", id, "--enter"]);
@@ -317,7 +317,7 @@ public sealed class AltaTerminalCommandsTests
 
         // Another session of the same host, and a caller that is no session, type in it.
         var other = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-2", SourceProjectId = fixture.Project.Id };
-        var typed = await fixture.Alta.InvokeAsync(["terminal", "send", id, "--text", "a"], null, other, fixture.Project.ProjectPath).AsTask().WaitAsync(Patience);
+        var typed = await fixture.Alta.InvokeAsync(["terminal", "send", id, "--text", "a"], null, other, fixture.Project.ProjectPath).AsTask().WithinAsync(Patience);
         Assert.AreEqual(AltaExitCodes.Success, typed.ExitCode, typed.Stdout + typed.Stderr);
         Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["terminal", "send", id, "--text", "b"], session: false)).Code);
         await Until(() => program.Typed == "ab", "What the two callers typed");
@@ -347,7 +347,7 @@ public sealed class AltaTerminalCommandsTests
         Assert.AreEqual(string.Empty, fixture.Programs.Single().Typed);
         Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["terminal", "read", id])).Code);
         var other = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-2", SourceProjectId = fixture.Project.Id };
-        var typed = await fixture.Alta.InvokeAsync(["terminal", "send", id, "--text", "a"], null, other, fixture.Project.ProjectPath).AsTask().WaitAsync(Patience);
+        var typed = await fixture.Alta.InvokeAsync(["terminal", "send", id, "--text", "a"], null, other, fixture.Project.ProjectPath).AsTask().WithinAsync(Patience);
         Assert.AreEqual(AltaExitCodes.Success, typed.ExitCode, typed.Stdout + typed.Stderr);
     }
 

@@ -111,7 +111,7 @@ public sealed class CdpConnectionTests
         var session = connection.Session("s2");
         var failure = await Assert.ThrowsExactlyAsync<CdpException>(() => session.Page.EnableAsync(cancellationToken: CancellationToken.None));
         StringAssert.Contains(failure.Message, "target was closed");
-        await session.Completed.WaitAsync(TimeSpan.FromSeconds(5));
+        await session.Completed.WithinAsync(TestTime.Seconds(5));
     }
 
     [TestMethod]
@@ -122,9 +122,9 @@ public sealed class CdpConnectionTests
         var pending = connection.Browser.Page.EnableAsync(cancellationToken: CancellationToken.None);
         // The endpoint closes on this command, with the other one still waiting.
         _ = connection.SendAsync(null, "Test.close", new PageEnableParams(), CdpJsonContext.Default.PageEnableParams, CancellationToken.None);
-        var failure = await Assert.ThrowsExactlyAsync<CdpException>(() => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+        var failure = await Assert.ThrowsExactlyAsync<CdpException>(() => pending.WithinAsync(TestTime.Seconds(10)));
         StringAssert.Contains(failure.Message, "closed");
-        await connection.Closed.WaitAsync(TimeSpan.FromSeconds(5));
+        await connection.Closed.WithinAsync(TestTime.Seconds(5));
         Assert.IsTrue(connection.IsClosed);
     }
 }

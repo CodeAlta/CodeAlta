@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
 import "monaco-editor/features/diffEditor/register.js";
-import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontOptions } from "./monacoEnvironment";
 import { ensureMonacoLanguage } from "./monacoLanguages";
 import type { EditorLanguage } from "./fileLanguage";
 
@@ -96,7 +96,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
   useLayoutEffect(() => {
     const node = host.current!, embedded = !!latest.current.onContentHeight;
     const instance = monaco.editor.createDiffEditor(node, { automaticLayout: true, readOnly: true, originalEditable: false,
-      fontFamily: pageFontFamily("code"), fontSize: 13, lineHeight: 20, minimap: { enabled: false }, scrollBeyondLastLine: false,
+      ...pageFontOptions("code"), minimap: { enabled: false }, scrollBeyondLastLine: false,
       stickyScroll: { enabled: false }, renderOverviewRuler: !embedded, renderIndicators: true, renderMarginRevertIcon: false, renderGutterMenu: false,
       useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 780, diffAlgorithm: "advanced", lineNumbersMinChars: 4,
       glyphMargin: false, folding: false, links: false, padding: { top: 6, bottom: 6 }, renderLineHighlight: "none",

@@ -97,7 +97,7 @@ internal static class BrowserToolTesting
     /// its BiDi session in about 1 s alone, in 5 to 18 s under a load of a busy pwsh per core, and in more than 60 s in a full
     /// validation, where a deadline of 60 s failed the call. The deadline is only there to end a test that hangs.
     /// </summary>
-    public static readonly TimeSpan Deadline = TimeSpan.FromMinutes(3);
+    public static readonly TimeSpan Deadline = TestTime.Minutes(3);
 
     public static async Task<BrowserToolResult> CallAsync(this BrowserSession session, string tool, string arguments = "{}")
     {

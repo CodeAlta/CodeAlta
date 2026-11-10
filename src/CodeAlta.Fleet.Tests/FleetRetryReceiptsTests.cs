@@ -7,7 +7,7 @@ namespace CodeAlta.Fleet.Tests;
 [TestClass]
 public sealed class FleetRetryReceiptsTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task ACallStillRunning_KeepsItsReceiptPastCapacity_AndARetryWaitsForIt()
@@ -23,8 +23,8 @@ public sealed class FleetRetryReceiptsTests
         var retry = receipts.RunOnceAsync("a", "{}", TestJson.Default.Item, () => { Interlocked.Increment(ref runs); return Task.FromResult(new Item("again")); });
         gate.SetResult(new Item("first"));
 
-        Assert.AreEqual("first", (await first.WaitAsync(Patience)).Value);
-        Assert.AreEqual("first", (await retry.WaitAsync(Patience)).Value, "A retry of a call that still runs shares it.");
+        Assert.AreEqual("first", (await first.WithinAsync(Patience)).Value);
+        Assert.AreEqual("first", (await retry.WithinAsync(Patience)).Value, "A retry of a call that still runs shares it.");
         Assert.AreEqual(1, runs, "The call ran once.");
     }
 

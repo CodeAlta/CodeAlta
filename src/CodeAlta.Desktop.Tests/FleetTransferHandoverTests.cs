@@ -20,7 +20,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class FleetTransferHandoverTests
 {
     private const string Id = "01a1a662-bcde-7c1b-8b0f-30c06af2790e";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Patience = TestTime.Seconds(20);
 
     public TestContext TestContext { get; set; } = null!;
 

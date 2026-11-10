@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./browserHarness";
+import { testLimit } from "../testTime";
 
-test("overview freshness follows stored data, not navigation, pending or failed refreshes", { skip: !edge, timeout: 120_000 }, async () => {
+test("overview freshness follows stored data, not navigation, pending or failed refreshes", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const first = "2026-10-08T11:22:33Z", next = "2026-10-09T12:34:56Z";
     const time = `document.querySelector('.stats-data-updated time')?.getAttribute('datetime')`;
@@ -34,7 +35,7 @@ test("overview freshness follows stored data, not navigation, pending or failed 
   });
 });
 
-test("initial and unavailable data have no invented update time", { skip: !edge, timeout: 120_000 }, async () => {
+test("initial and unavailable data have no invented update time", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`statsFixture.render({ scenario: "ready", latencyMs: 400 }); statsFixture.control.setDataUpdatedAt(undefined)`);
     await page.until(`document.querySelector('.stats-tile-skeleton')`, "initial query");

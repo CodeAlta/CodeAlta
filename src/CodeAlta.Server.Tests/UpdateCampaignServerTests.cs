@@ -459,7 +459,7 @@ public sealed class UpdateCampaignServerTests
             }
         }
 
-        public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WaitAsync(Waits.Hang);
+        public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WithinAsync(Waits.Hang);
     }
 
     /// <summary>

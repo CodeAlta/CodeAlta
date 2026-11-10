@@ -16,7 +16,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class WorkItemHostTests
 {
     private const string Epoch = "8f2f3b3c-0f6e-4d0b-9c1e-2f1d5f6f7a10";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task ASandboxedSession_ReachesTheTasksAndPlansOfItsOwnProjectAlone()
@@ -427,14 +427,14 @@ public sealed class WorkItemHostTests
         await using var fixture = await Fixture.CreateAsync();
         using var stop = new CancellationTokenSource();
         var events = fixture.Rpc.WatchAsync(new(Epoch), stop.Token).GetAsyncEnumerator(stop.Token);
-        Assert.IsTrue(await events.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await events.MoveNextAsync().AsTask().WithinAsync(Patience));
         Assert.AreEqual(0, events.Current.Revision);
 
         var saved = await fixture.Rpc.SaveSettingsAsync(new(Epoch, new WorkItemsSettings(false, false, "keep", "delete", "delete", "here")), default);
 
         Assert.AreEqual(("ok", new WorkItemsSettings(false, false, "keep", "delete", "delete", "here")), (saved.Status, saved.Settings));
         Assert.AreEqual(new WorkItemSettings(false, false, WorkItemClosing.Keep, WorkItemClosing.Delete, WorkItemClosing.Delete, WorkItemStart.Here), fixture.Items.Settings);
-        Assert.IsTrue(await events.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await events.MoveNextAsync().AsTask().WithinAsync(Patience));
         Assert.AreEqual(1, events.Current.Revision);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveSettingsAsync(new(Epoch, new WorkItemsSettings(true, true, "archive", "delete", "keep", "here")), default)).Status);
 
@@ -514,7 +514,7 @@ public sealed class WorkItemHostTests
 
         public async Task<(int Code, List<JsonElement> Records, string Text)> Run(string[] arguments, string? stdin = null, AltaCallerIdentity? caller = null)
         {
-            var result = await Alta.InvokeAsync(arguments, stdin, caller ?? Session, Project.ProjectPath).AsTask().WaitAsync(Patience);
+            var result = await Alta.InvokeAsync(arguments, stdin, caller ?? Session, Project.ProjectPath).AsTask().WithinAsync(Patience);
             var records = new List<JsonElement>();
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {

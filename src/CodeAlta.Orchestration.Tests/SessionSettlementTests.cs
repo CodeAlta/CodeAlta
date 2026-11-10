@@ -42,7 +42,7 @@ public sealed class SessionSettlementTests
 
         await host.RuntimeService.SendAsync(parent, options, new AgentSendOptions { Input = AgentInput.Text("start") });
         var settled = host.RuntimeService.WhenSettledAsync(parent.SessionId);
-        await childStarted.Task.WaitAsync(Hang);
+        await childStarted.Task.WithinAsync(Hang);
         await WaitUntilAsync(() => provider.RequestsOf(parent.SessionId).Length == 2 && settled.IsCompleted is false);
         CollectionAssert.AreEquivalent(new[] { parent.SessionId, childId }, host.RuntimeService.GetSessionTree(parent.SessionId).ToArray());
 
@@ -51,10 +51,10 @@ public sealed class SessionSettlementTests
         Assert.IsFalse(settled.IsCompleted, "The run is not over while a child it started runs.");
 
         childGate.SetResult();
-        await settled.WaitAsync(Hang);
+        await settled.WithinAsync(Hang);
 
         Assert.IsNotNull(childSend);
-        await childSend.WaitAsync(Hang);
+        await childSend.WithinAsync(Hang);
         var parentRequests = provider.RequestsOf(parent.SessionId);
         Assert.AreEqual(3, parentRequests.Length, "The answer of the child started a third run of the parent before the tree settled.");
         StringAssert.Contains(TextOf(parentRequests[^1]), "Child result.");
@@ -73,8 +73,8 @@ public sealed class SessionSettlementTests
 
         await host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("hello") });
 
-        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(Guid.NewGuid().ToString()).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(Guid.NewGuid().ToString()).WithinAsync(Hang);
     }
 
     [TestMethod]
@@ -93,13 +93,13 @@ public sealed class SessionSettlementTests
         provider.Script(child.SessionId, ScriptedTurnProvider.WaitThenReply(never.Task, "never", childStarted));
         var parentSend = host.RuntimeService.SendAsync(parent, options, new AgentSendOptions { Input = AgentInput.Text("work") });
         var childSend = host.RuntimeService.SendAsync(child, options, new AgentSendOptions { Input = AgentInput.Text("child work") });
-        await Task.WhenAll(parentStarted.Task, childStarted.Task).WaitAsync(Hang);
+        await Task.WhenAll(parentStarted.Task, childStarted.Task).WithinAsync(Hang);
 
-        var tree = await host.RuntimeService.AbortTreeAsync(parent.SessionId, "timeout").WaitAsync(Hang);
+        var tree = await host.RuntimeService.AbortTreeAsync(parent.SessionId, "timeout").WithinAsync(Hang);
 
         CollectionAssert.AreEquivalent(new[] { parent.SessionId, child.SessionId }, tree.ToArray());
-        await Task.WhenAll(parentSend, childSend).ContinueWith(static _ => { }).WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WaitAsync(Hang);
+        await Task.WhenAll(parentSend, childSend).ContinueWith(static _ => { }).WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
         Assert.AreEqual(1, provider.RequestsOf(parent.SessionId).Length, "The failure of the aborted child starts no run of its parent.");
         Assert.AreEqual("timeout", host.RuntimeService.GetAbortReason(parent.SessionId));
         foreach (var session in new[] { parent, child })

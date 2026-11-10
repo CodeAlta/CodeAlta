@@ -155,7 +155,7 @@ public sealed class AgentSessionProviderToolHostTests
         results["call-1"].SetResult(new AgentToolResult(true, [new AgentToolResultItem.Text("one")]));
         await events.WaitForAsync("call-3", AgentActivityPhase.Started);
         results["call-3"].SetResult(new AgentToolResult(true, [new AgentToolResultItem.Text("three")]));
-        await run.WaitAsync(TimeSpan.FromSeconds(20));
+        await run.WithinAsync(TestTime.Seconds(20));
 
         // The model is called again once every call of the message has its result, each recorded with its call.
         Assert.AreEqual(2, provider.Turns);
@@ -206,9 +206,9 @@ public sealed class AgentSessionProviderToolHostTests
         await events.WaitForAsync("call-1", AgentActivityPhase.Started);
         await events.WaitForAsync("call-2", AgentActivityPhase.Started);
 
-        await session.AbortAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        await session.AbortAsync().WithinAsync(TestTime.Seconds(20));
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(20)));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => run.WithinAsync(TestTime.Seconds(20)));
         Assert.AreEqual(2, Volatile.Read(ref cancelled), "No call is left running when the run ends.");
     }
 
@@ -397,7 +397,7 @@ public sealed class AgentSessionProviderToolHostTests
 
         public async Task WaitForAsync(string callId, AgentActivityPhase phase)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
             while (!Has(callId, phase))
             {
                 await Task.Delay(10, timeout.Token);

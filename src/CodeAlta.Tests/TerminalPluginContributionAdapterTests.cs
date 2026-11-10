@@ -209,7 +209,7 @@ public sealed class TerminalPluginContributionAdapterTests
             Track(gate.Task);
             return gate;
         }
-        public Task<T> WaitAsync<T>(Task<T> task) => Track(task.WaitAsync(TimeSpan.FromSeconds(5)));
+        public Task<T> WaitAsync<T>(Task<T> task) => Track(task.WithinAsync(TestTime.Seconds(5)));
         public async Task<List<Exception>> FinishAsync()
         {
             foreach (var gate in _gates) gate.TrySetResult(null);
@@ -220,7 +220,7 @@ public sealed class TerminalPluginContributionAdapterTests
         }
         private static async Task<Exception?> ObserveAsync(Task original)
         {
-            try { await original.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await original.WithinAsync(TestTime.Seconds(5)); }
             catch (TimeoutException error) { return error; }
             catch (Exception) { _ = original.Exception; }
             return null;

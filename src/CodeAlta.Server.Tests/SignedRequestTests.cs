@@ -43,7 +43,7 @@ public sealed class SignedRequestTests
                 request.Headers.Add(FleetSignedRequest.SignatureHeader, "AAAA");
             }
 
-            using var answer = await server.Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).WaitAsync(TimeSpan.FromSeconds(10));
+            using var answer = await server.Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(HttpStatusCode.Unauthorized, answer.StatusCode, path);
         }
     }

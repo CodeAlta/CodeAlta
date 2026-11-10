@@ -45,7 +45,7 @@ public sealed class OwnedWorkspaceTimelineTests
             var cancel = caller.CancelAsync(); waits.Add(cancel); await cancel;
             await Assert.ThrowsAsync<OperationCanceledException>(() => canceled);
             // The canceled wait does not cancel its admitted read: all eight actual reads still start.
-            await eightStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await eightStarted.Task.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(8, ActualCount());
             // A ninth read waits its bounded time for a slot, then is refused as busy without starting.
             await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadHistorySourceAsync(revision, 0, 100, 0, default));
@@ -56,7 +56,7 @@ public sealed class OwnedWorkspaceTimelineTests
             Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadTimelinePageAsync("selected", null, default));
             Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadHistorySourceAsync(revision, 0, 100, 0, default));
             release.TrySetResult();
-            await close.WaitAsync(TimeSpan.FromSeconds(5));
+            await close.WithinAsync(TestTime.Seconds(5));
         }
         finally
         {
@@ -67,7 +67,7 @@ public sealed class OwnedWorkspaceTimelineTests
             // A read that starts after this snapshot is still joined by the owner drain observed below.
             Task[] started;
             lock (actualGate) started = actual.ToArray();
-            var actualObservers = started.Append(close).Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
+            var actualObservers = started.Append(close).Select(task => task.WithinAsync(TestTime.Seconds(5))).ToArray();
             var waitObservers = waits.Select(ObserveWait).ToArray();
             await Task.WhenAll(actualObservers.Concat(waitObservers));
             caller.Dispose();
@@ -86,7 +86,7 @@ public sealed class OwnedWorkspaceTimelineTests
         async Task<AgentHistorySourceChunk> Source() { await release.Task; return new("literal", null); }
         static async Task ObserveWait(Task task)
         {
-            try { await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await task.WithinAsync(TestTime.Seconds(5)); }
             catch (OperationCanceledException) when (task.IsCanceled) { }
         }
     }
@@ -116,12 +116,12 @@ public sealed class OwnedWorkspaceTimelineTests
 
         using var caller = new CancellationTokenSource();
         var reads = Enumerable.Range(0, 8).Select(_ => owner.ReadUsageUpdatesAsync("selected", caller.Token)).ToArray();
-        Assert.AreEqual(caller.Token, await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.AreEqual(caller.Token, await started.Task.WithinAsync(TestTime.Seconds(5)));
         await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadUsageUpdatesAsync("selected", default));
         await caller.CancelAsync();
         foreach (var read in reads) await Assert.ThrowsAsync<OperationCanceledException>(() => read);
         // The reads ended as their caller asked: the drain joins them and reports no failure.
-        await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await owner.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(5));
         Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadUsageUpdatesAsync("selected", default));
 
         var unconfigured = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
@@ -156,11 +156,11 @@ public sealed class OwnedWorkspaceTimelineTests
 
         using var caller = new CancellationTokenSource();
         var reads = Enumerable.Range(0, 8).Select(_ => owner.ReadSystemPromptAsync("selected", 40, caller.Token)).ToArray();
-        Assert.AreEqual(caller.Token, await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.AreEqual(caller.Token, await started.Task.WithinAsync(TestTime.Seconds(5)));
         await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadSystemPromptAsync("selected", 40, default));
         await caller.CancelAsync();
         foreach (var read in reads) await Assert.ThrowsAsync<OperationCanceledException>(() => read);
-        await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await owner.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(5));
         Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadSystemPromptAsync("selected", 40, default));
 
         var unconfigured = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,

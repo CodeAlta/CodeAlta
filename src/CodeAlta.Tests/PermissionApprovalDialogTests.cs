@@ -44,8 +44,8 @@ public sealed class PermissionApprovalDialogTests
                 terminal.Key(TerminalKey.Enter);
             }
 
-            dialog.Resolution.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-            Assert.AreEqual(decision, registration.Completion.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult().Kind);
+            dialog.Resolution.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
+            Assert.AreEqual(decision, registration.Completion.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult().Kind);
             Assert.AreEqual(0, terminal.DialogCount);
             Assert.AreEqual(0, service.ListAsync().AsTask().GetAwaiter().GetResult().Count);
             Assert.IsFalse(service.ResolveAsync(registration.Snapshot.Handle, AgentPermissionDecisionKind.AllowOnce).AsTask().GetAwaiter().GetResult());
@@ -69,7 +69,7 @@ public sealed class PermissionApprovalDialogTests
             var second = service.RegisterAsync("session", request, false, CancellationToken.None).GetAwaiter().GetResult();
             terminal.App.Focus(terminal.App.Root.EnumerateVisualsDepthFirst().OfType<Button>().Single(button => button.Tone == ControlTone.Primary));
             terminal.Key(TerminalKey.Enter);
-            oldDialog.Resolution.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            oldDialog.Resolution.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
             Assert.AreEqual(0, terminal.DialogCount);
             Assert.AreEqual(AgentPermissionDecisionKind.Cancel, first.Completion.GetAwaiter().GetResult().Kind);
             Assert.IsTrue(second.IsPending);

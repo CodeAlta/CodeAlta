@@ -14,7 +14,7 @@ namespace CodeAlta.Server.Tests;
 [TestClass]
 public sealed class PolicyNodeTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Patience = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task TheOwnerStopsTheFleet_TheNodeObeysOffline_AndAForgedVersionChangesNothing()

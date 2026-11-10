@@ -85,7 +85,7 @@ public sealed partial class NodeClientCommandTests
             Started = (_, stop) => started.TrySetResult(stop),
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var (code, output, error) = await RunProjectsAsync(root, ["projects", "add", root.ProjectRoot, "--data-root", root.DataRoot]);
@@ -111,7 +111,7 @@ public sealed partial class NodeClientCommandTests
             var link = await WaitForAsync(() => LinkPattern().Match(pairOutput.Text) is { Success: true } match ? match.Value : null, pairing, pairError, token);
             (code, _, error) = await RunAsync(["connect", link, "--data-root", viewerRoot, "--name", "viewer"]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            Assert.AreEqual(NodeExitCodes.Success, await pairing.WaitAsync(Patience, token), pairError.Text);
+            Assert.AreEqual(NodeExitCodes.Success, await pairing.WithinAsync(Patience, token), pairError.Text);
             (code, output, error) = await RunAsync(["remote", "test-node", "create", "--project", project.Id, "Hello", "--data-root", viewerRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
 
@@ -130,7 +130,7 @@ public sealed partial class NodeClientCommandTests
             stop();
         }
 
-        Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token), runError.Text);
+        Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, token), runError.Text);
     }
 
     // A client with the clone root of the node of the test root, as the node of the profile would run.
@@ -142,7 +142,7 @@ public sealed partial class NodeClientCommandTests
         {
             InitializeLogging = false, ClientStop = TestContext.CancellationToken, ServiceEnvironment = static () => null, ConfigureHost = root.Isolate,
         };
-        var code = await client.RunAsync(args).WaitAsync(Patience, TestContext.CancellationToken);
+        var code = await client.RunAsync(args).WithinAsync(Patience, TestContext.CancellationToken);
         return (code, output.Text, error.Text);
     }
 

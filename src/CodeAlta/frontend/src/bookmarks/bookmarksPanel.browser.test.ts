@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The tab of the bookmarks in headless Edge, under the production content security policy and React StrictMode.
 
@@ -8,7 +9,7 @@ const options = { entry: "../bookmarks/bookmarksPanel.mount.tsx", fixture: "book
 const projects = `[...document.querySelectorAll('.bookmarks-project')].map(project => [project.querySelector('h2 > span').textContent, project.querySelector('h2 .bookmarks-count').textContent, [...project.querySelectorAll('.bookmarks-session')].map(session => session.dataset.sessionId)])`;
 const titles = `[...document.querySelectorAll('.bookmark-row .bookmark-text > strong')].map(title => title.textContent)`;
 
-test("the bookmarks are listed by project and session, go to what they mark, and are searched and filtered", { skip: !edge, timeout: 120_000 }, async () => {
+test("the bookmarks are listed by project and session, go to what they mark, and are searched and filtered", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.bookmarks-project').length === 3`, "the projects that have bookmarks");
     // The project with the newest bookmark first; the chats are a group of their own.
@@ -59,7 +60,7 @@ test("the bookmarks are listed by project and session, go to what they mark, and
   }, options);
 });
 
-test("a bookmark is named and removed from the tab, and the tab says when the host refuses", { skip: !edge, timeout: 120_000 }, async () => {
+test("a bookmark is named and removed from the tab, and the tab says when the host refuses", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.bookmark-row').length === 4`, "the bookmarks");
 
@@ -122,7 +123,7 @@ test("a bookmark is named and removed from the tab, and the tab says when the ho
   }, options);
 });
 
-test("the tab of the bookmarks is drawn in both themes and in a narrow window", { skip: !edge, timeout: 120_000 }, async () => {
+test("the tab of the bookmarks is drawn in both themes and in a narrow window", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.bookmark-row').length === 4`, "the bookmarks");
     const overflow = `(() => { const list = document.querySelector('.bookmarks-list'), header = document.querySelector('.bookmarks-header'); return list.scrollWidth > list.clientWidth || header.scrollWidth > header.clientWidth; })()`;

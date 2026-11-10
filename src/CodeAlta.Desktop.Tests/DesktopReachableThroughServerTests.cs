@@ -18,7 +18,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopReachableThroughServerTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
     private static readonly RemoteSessionHostOptions Quick = new() { MinimumBackoff = TimeSpan.FromMilliseconds(50), MaximumBackoff = TimeSpan.FromMilliseconds(200), ListInterval = TimeSpan.FromMilliseconds(100) };
 
     public TestContext TestContext { get; set; } = null!;
@@ -85,7 +85,7 @@ public sealed class DesktopReachableThroughServerTests
 
                 // Turned off: the channel under way closes at once, and the next relay is declined.
                 await node.SetReachableThroughServersAsync(false, token);
-                await client.Completion.WaitAsync(Patience, token);
+                await client.Completion.WithinAsync(Patience, token);
             }
 
             Assert.IsFalse(await TryReachAsync(viewer, desk.DeviceId, laptop, token), "turned off, a new relay is declined");

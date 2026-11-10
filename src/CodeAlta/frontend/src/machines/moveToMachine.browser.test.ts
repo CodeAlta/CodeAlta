@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../machines/moveToMachine.mount.tsx", fixture: "moveToMachineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css"], width: 900,
   height: 700, reducedMotion: true } as const;
 const checked = `[...document.querySelectorAll('.move-machine-targets input')].filter(input => input.checked).map(input => input.value)`;
 
-test("the machine the person chooses stays chosen, and the machines are read once", { skip: !edge, timeout: 60_000 }, async () => {
+test("the machine the person chooses stays chosen, and the machines are read once", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.move-machine-project')?.textContent.includes('/home/me/mac-id/markdig')`, "the preview of the first machine online");
     assert.deepEqual(await page.evaluate(checked), ["mac-id"]);

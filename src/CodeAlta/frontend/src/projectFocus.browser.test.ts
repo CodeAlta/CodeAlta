@@ -8,9 +8,10 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
-test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: 60_000 }, async () => {
+test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-project-focus-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -56,14 +57,14 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined); return value.result?.value;
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({focus:document.activeElement?.outerHTML.slice(0,300),promptText:document.querySelector('#catalog-prompt .view-lines')?.textContent,project:document.querySelector('.welcome-subtitle')?.textContent,errors:window.projectFocusErrors});else setTimeout(tick,20)};tick()})`);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({focus:document.activeElement?.outerHTML.slice(0,300),promptText:document.querySelector('#catalog-prompt .view-lines')?.textContent,project:document.querySelector('.welcome-subtitle')?.textContent,errors:window.projectFocusErrors});else setTimeout(tick,20)};tick()})`);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true)))))");
     const key = async (key: string, code: string, virtual: number, ctrl = false) => {
       for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: virtual, modifiers: ctrl ? 2 : 0 });

@@ -23,7 +23,7 @@ public sealed class AcpSandboxTests
             Needs = AcpAgentQuirks.For(settings).SandboxNeeds(settings, executable, "copilot") with { LocalPorts = [50123] },
         };
 
-        var client = await AcpProcessConnectionFactory.Instance.StartAsync(request, static _ => { }, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        var client = await AcpProcessConnectionFactory.Instance.StartAsync(request, static _ => { }, CancellationToken.None).WithinAsync(TestTime.Seconds(30));
 
         Assert.IsNotNull(client.InitializeResponse, "the protocol runs over the streams of the process the host started");
         var launch = host.Launch!;
@@ -66,9 +66,9 @@ public sealed class AcpSandboxTests
         var host = new FakeHost(new AcpFakeAgent()) { OutputIgnoresCancellation = true };
         var settings = new AcpAgentSettings("my-agent", [], new Dictionary<string, string>(), null, null);
         var request = new AcpConnectionRequest("my-agent", [], settings.Environment, Path.GetTempPath(), TimeSpan.FromSeconds(30)) { Host = host };
-        var client = await AcpProcessConnectionFactory.Instance.StartAsync(request, static _ => { }, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        var client = await AcpProcessConnectionFactory.Instance.StartAsync(request, static _ => { }, CancellationToken.None).WithinAsync(TestTime.Seconds(30));
 
-        await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await client.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(10));
 
         Assert.IsTrue(host.Ended);
     }

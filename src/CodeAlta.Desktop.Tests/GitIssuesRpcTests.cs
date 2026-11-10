@@ -450,9 +450,9 @@ public sealed class GitIssuesRpcTests
         };
 
         var search = fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null), cancellation.Token);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
         cancellation.Cancel();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => search.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => search.WithinAsync(TestTime.Seconds(10)));
 
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();

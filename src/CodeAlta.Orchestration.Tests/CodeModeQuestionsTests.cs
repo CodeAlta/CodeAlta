@@ -25,7 +25,7 @@ public sealed class CodeModeQuestionsTests
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
         var session = opened.Session!;
         provider.Script(session.SessionId, ScriptedTurnProvider.Reply("Ready."));
-        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(session, new HeadlessPrompt("start")).WaitAsync(Hang)).Status);
+        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(session, new HeadlessPrompt("start")).WithinAsync(Hang)).Status);
         return (root, provider, host, driver, session);
     }
 
@@ -76,13 +76,13 @@ public sealed class CodeModeQuestionsTests
         Assert.AreEqual(stopped, run.TimeNotWaitingForUser);
 
         var disposition = await host.Commands.Asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, [new AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [0] }]), CancellationToken.None);
-        var answered = await first.WaitAsync(Hang);
+        var answered = await first.WithinAsync(Hang);
         var next = await HeadAsync(host, session.SessionId, "Which tag?");
         await host.Commands.Asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), next.Handle, [new AltaAskAnswer { QuestionIndex = 0, FreeformText = "" }]), CancellationToken.None);
-        var defaulted = await second.WaitAsync(Hang);
+        var defaulted = await second.WithinAsync(Hang);
         release.SetResult();
-        await run.Completion.WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await run.Completion.WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
 
         Assert.AreEqual("admitted", disposition.Status);
         Assert.IsFalse(run.WaitingForUser);
@@ -116,10 +116,10 @@ public sealed class CodeModeQuestionsTests
             await host.Commands.Asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, [new AltaAskAnswer { QuestionIndex = 0, FreeformText = question }]), CancellationToken.None);
         }
 
-        var answers = await Task.WhenAll(asked).WaitAsync(Hang);
+        var answers = await Task.WhenAll(asked).WithinAsync(Hang);
         CollectionAssert.AreEqual(questions, answers.Select(static answer => answer.Answer).ToArray());
         release.SetResult();
-        await run.Completion.WaitAsync(Hang);
+        await run.Completion.WithinAsync(Hang);
     }
 
     [TestMethod]
@@ -139,11 +139,11 @@ public sealed class CodeModeQuestionsTests
         await HeadAsync(host, session.SessionId, "Still there?");
         await stop.CancelAsync();
 
-        Assert.AreEqual(CodeModeQuestionOutcome.Cancelled, (await dismissed.WaitAsync(Hang)).Outcome);
-        await Assert.ThrowsAsync<OperationCanceledException>(() => withdrawn.WaitAsync(Hang));
+        Assert.AreEqual(CodeModeQuestionOutcome.Cancelled, (await dismissed.WithinAsync(Hang)).Outcome);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => withdrawn.WithinAsync(Hang));
         Assert.IsNull(host.Commands.Asks.List(session.SessionId).Head, "the question of a stopped run leaves the panel");
         release.SetResult();
-        await run.Completion.WaitAsync(Hang);
+        await run.Completion.WithinAsync(Hang);
     }
 
     [TestMethod]
@@ -161,13 +161,13 @@ public sealed class CodeModeQuestionsTests
             var release = new TaskCompletionSource();
             var run = StartRun(host, session.SessionId, release);
 
-            var answer = await host.CodeModeQuestions.AskAsync(new(session.SessionId, run.Id, "Go?"), CancellationToken.None).WaitAsync(Hang);
+            var answer = await host.CodeModeQuestions.AskAsync(new(session.SessionId, run.Id, "Go?"), CancellationToken.None).WithinAsync(Hang);
 
             Assert.AreEqual(CodeModeQuestionOutcome.Unavailable, answer.Outcome);
             StringAssert.StartsWith(answer.Message, expected);
             Assert.IsNull(host.Commands.Asks.List(session.SessionId).Head);
             release.SetResult();
-            await run.Completion.WaitAsync(Hang);
+            await run.Completion.WithinAsync(Hang);
         }
     }
 
@@ -190,15 +190,15 @@ public sealed class CodeModeQuestionsTests
         await Task.Delay(100);
         Assert.IsFalse(approval.IsCompleted, "the approval waits for the question before it");
         await host.Commands.Asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, [new AltaAskAnswer { QuestionIndex = 0, FreeformText = "ok" }]), CancellationToken.None);
-        await question.WaitAsync(Hang);
-        using (var turn = await approval.WaitAsync(Hang))
+        await question.WithinAsync(Hang);
+        using (var turn = await approval.WithinAsync(Hang))
         {
             Assert.IsNotNull(turn);
         }
 
         release.SetResult();
-        await run.Completion.WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await run.Completion.WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         var descriptor = await host.RuntimeService.TryGetResumableSessionAsync(session.SessionId, CancellationToken.None);
         var history = await host.RuntimeService.TryReadStoredHistoryAsync(descriptor!, CancellationToken.None);
         Assert.AreEqual("approval", history!.OfType<AgentWorkflowEvent>().Last(static record => record.Kind == AgentWorkflowEventKind.WaitStarted).Status);

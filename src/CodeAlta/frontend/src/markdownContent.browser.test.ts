@@ -9,10 +9,11 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 import { isSanitizerParseReport } from "./sanitizerParseReport";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
-test("production MarkdownContent retains useful HTML without resource or app authority under production CSP", { skip: !edge, timeout: 60_000 }, async () => {
+test("production MarkdownContent retains useful HTML without resource or app authority under production CSP", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-markdown-boundary-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -26,7 +27,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(directory, "profile"), browser);
     // Loopback is solely the Node-to-CDP control channel, never a page asset or application bridge.
-    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json() as { type: string; url: string; webSocketDebuggerUrl: string }[];
+    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(5000)) })).json() as { type: string; url: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(pages.find(p => p.type === "page" && p.url === "about:blank")!.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
     let sequence = 0;
@@ -34,7 +35,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     const pending = new Map<number, (reply: { result?: Reply; error?: unknown }) => void>();
     const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout`)); }, 8000);
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(8000), `the answer to ${method}`))); }, testLimit(8000));
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });

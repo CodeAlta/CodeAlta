@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The workflow block of a run in the timeline and the tab of a run, drawn with React Flow, in headless Edge under React
 // StrictMode, in both themes, in a 1600×1000 and a 900×650 window: the research sample left to right, a fan-out of 50
@@ -40,7 +41,7 @@ async function drawn(page: Page, steps: number) {
 
 for (const light of [false, true]) {
   const theme = light ? "light" : "dark";
-  test(`the block of the research run: its head, its steps left to right, its sessions, its actions (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {
+  test(`the block of the research run: its head, its steps left to right, its sessions, its actions (${theme})`, { skip: !edge, timeout: testLimit(240_000) }, async () => {
     await withCanvas(async page => {
       await page.evaluate(`runFixture.theme(${light}); runFixture.renderBlock(1180, "research")`);
       await drawn(page, 3);
@@ -117,7 +118,7 @@ for (const light of [false, true]) {
     }, { ...options, colorScheme: light ? "light" : "dark" });
   });
 
-  test(`a fan-out of 50 sessions is one group with a status bar, which opens on its list (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {
+  test(`a fan-out of 50 sessions is one group with a status bar, which opens on its list (${theme})`, { skip: !edge, timeout: testLimit(240_000) }, async () => {
     await withCanvas(async page => {
       await page.evaluate(`runFixture.theme(${light}); runFixture.renderBlock(860, "fanOut")`);
       await drawn(page, 3);
@@ -152,7 +153,7 @@ for (const light of [false, true]) {
     }, { ...options, width: 900, height: 650, colorScheme: light ? "light" : "dark" });
   });
 
-  test(`the block is in the timeline outside the folded tool calls; the call goes to it (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {
+  test(`the block is in the timeline outside the folded tool calls; the call goes to it (${theme})`, { skip: !edge, timeout: testLimit(240_000) }, async () => {
     await withCanvas(async page => {
       await page.evaluate(`runFixture.theme(${light}); runFixture.renderTimeline(false)`);
       await drawn(page, 3);
@@ -174,7 +175,7 @@ for (const light of [false, true]) {
   });
 }
 
-test("a background task goes to its place in the timeline: the block of its run, the tile of its call, the folded activity", { skip: !edge, timeout: 240_000 }, async () => {
+test("a background task goes to its place in the timeline: the block of its run, the tile of its call, the folded activity", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`runFixture.renderTimeline(false)`);
     await drawn(page, 3);
@@ -193,7 +194,7 @@ test("a background task goes to its place in the timeline: the block of its run,
   }, options);
 });
 
-test("among 30 runs, a graph is drawn only near the view, in a place of its size", { skip: !edge, timeout: 240_000 }, async () => {
+test("among 30 runs, a graph is drawn only near the view, in a place of its size", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`runFixture.renderMany(30)`);
     await page.until(`document.querySelectorAll('.workflow-block .react-flow').length > 0`, "the graphs in view drawn");
@@ -209,7 +210,7 @@ test("among 30 runs, a graph is drawn only near the view, in a place of its size
 
 // The editor of the composer types through an element that is no field (an EditContext): a graph on the screen, in a block
 // or in a tab, must leave its keys alone.
-test("a graph shown leaves Space and the other keys to an editor that is no field", { skip: !edge, timeout: 240_000 }, async () => {
+test("a graph shown leaves Space and the other keys to an editor that is no field", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     const typed = `(() => { const editor = document.createElement('div'); editor.tabIndex = 0; document.body.append(editor); editor.focus();
       const cancelled = [' ', 'Backspace', 'Shift', 'Meta', 'Control'].filter(key => !editor.dispatchEvent(new KeyboardEvent('keydown',
@@ -226,7 +227,7 @@ test("a graph shown leaves Space and the other keys to an editor that is no fiel
 
 for (const light of [false, true]) {
   const theme = light ? "light" : "dark";
-  test(`the tab of a run: its graph pans and zooms with a minimap, its sessions, its timeline, Copy as Mermaid (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {
+  test(`the tab of a run: its graph pans and zooms with a minimap, its sessions, its timeline, Copy as Mermaid (${theme})`, { skip: !edge, timeout: testLimit(240_000) }, async () => {
     await withCanvas(async page => {
       await page.evaluate(`runFixture.theme(${light}); runFixture.renderTab()`);
       await page.until(`document.querySelectorAll('.workflow-run-graph .workflow-step').length === 3 && document.querySelectorAll('.workflow-run-graph .workflow-edge-line').length === 2`, "the graph of the tab");

@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../workItems/workItemTags.mount.tsx", fixture: "tagsFixture", rpcFixture: "../demo-api.ts", width: 900, height: 700,
   styles: ["../workItems/workItems.css"] } as const;
 const chips = `[...document.querySelectorAll('.work-task-tags > .work-tag')].map(tag => tag.firstChild.textContent)`;
 const calls = `tagsFixture.calls.slice()`;
 
-test("a task's tags are added from the project's, removed, or created, and the tag manager edits, deletes and forgets", { skip: !edge, timeout: 90_000 }, async () => {
+test("a task's tags are added from the project's, removed, or created, and the tag manager edits, deletes and forgets", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.work-task-tags > .work-tag').length === 1`, "the tag of the task");
     assert.deepEqual(await page.evaluate(chips), ["mobile"]);
@@ -93,7 +94,7 @@ test("a task's tags are added from the project's, removed, or created, and the t
   }, options);
 });
 
-test("the tag picker stays open and in place for several tags, saves them in turn, and a click outside only closes it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the tag picker stays open and in place for several tags, saves them in turn, and a click outside only closes it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.work-task-tags > .work-tag').length === 1`, "the tag of the task");
     await page.clickText(".work-tag-add", "Add tag");

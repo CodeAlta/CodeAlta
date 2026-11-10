@@ -184,7 +184,7 @@ public sealed class CliHostCommandsTests
         process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         try
         {
             await process.WaitForExitAsync(timeout.Token);

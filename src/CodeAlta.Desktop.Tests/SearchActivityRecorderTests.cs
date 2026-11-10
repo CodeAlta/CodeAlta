@@ -22,7 +22,7 @@ public sealed class SearchActivityRecorderTests
             await recorder.RecordAsync(typing with { Query = "retr" }, Answer(4));
             await recorder.RecordAsync(typing with { Query = "retry" }, Answer(2));
             await recorder.RecordAsync(new SearchRequest("port", new SearchScope()) { Origin = "agent", OriginSessionId = "s1" }, Answer(1));
-            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            using (var timeout = new CancellationTokenSource(TestTime.Seconds(10)))
             {
                 while ((await store.GetActivityAsync(DateTimeOffset.Now.AddDays(-1), timeout.Token)).Searches < 2) await Task.Delay(20, timeout.Token);
             }

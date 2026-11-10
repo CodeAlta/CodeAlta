@@ -71,7 +71,7 @@ public sealed class AgentSessionIdleCompactionTests
 
         internal Task<T> Keep<T>(Task<T> task) { lock (_gate) _work.Add(task); return task; }
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
-        internal Task<T> Wait<T>(Task<T> task) => Keep(task.WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task<T> Wait<T>(Task<T> task) => Keep(task.WithinAsync(TestTime.Seconds(5)));
         internal Task<AgentRunId> Send(string text) => Keep(Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text(text) }, Token));
         internal Task<AgentCompactionOutcome?> Compact() => Keep(((IAgentIdleCompactionProvider)Session).TryCompactWhenIdleAsync(Token));
 
@@ -85,14 +85,14 @@ public sealed class AgentSessionIdleCompactionTests
         {
             var f = new Fixture();
             f._lifetime = f.RunOwnedAsync(body);
-            try { await f._lifetime.WaitAsync(TimeSpan.FromSeconds(30)); }
+            try { await f._lifetime.WithinAsync(TestTime.Seconds(30)); }
             catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
             finally
             {
                 // A timeout is permanent failure, never permission to dispose a live session/source.
                 // Late fixture stages also see these released gates. The original lifetime owns disposal.
                 f.Executor.ReleaseAll();
-                try { await f._lifetime.WaitAsync(TimeSpan.FromSeconds(5)); }
+                try { await f._lifetime.WithinAsync(TestTime.Seconds(5)); }
                 catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
             }
             Exception[] failures;

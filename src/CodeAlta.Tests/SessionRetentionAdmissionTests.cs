@@ -20,7 +20,7 @@ public sealed class SessionRetentionAdmissionTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => observer);
         Assert.IsFalse(original.IsCompleted);
         Assert.IsTrue(protection.Publish("desktop", ["open-session"], true));
-        await original.WaitAsync(TimeSpan.FromSeconds(5));
+        await original.WithinAsync(TestTime.Seconds(5));
         Assert.IsNull(protection.TryReserveRetirement("open-session"));
         protection.MarkUnknown("desktop");
         Assert.IsNull(protection.TryReserveRetirement("other"), "First readiness does not override later readiness loss.");
@@ -37,7 +37,7 @@ public sealed class SessionRetentionAdmissionTests
         Assert.IsNull(protection.TryReserveRetirement("closed", out refusal));
         Assert.AreEqual("all_sessions_protected", refusal);
         Assert.IsFalse(await protection.WaitForAllSessionsReleasedAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
-        var released = protection.WaitForAllSessionsReleasedAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        var released = protection.WaitForAllSessionsReleasedAsync(TestTime.Seconds(30), CancellationToken.None);
         all.Dispose();
         Assert.IsTrue(await released);
         using (var retirement = protection.TryReserveRetirement("closed", out refusal)) Assert.IsNotNull(retirement, refusal);

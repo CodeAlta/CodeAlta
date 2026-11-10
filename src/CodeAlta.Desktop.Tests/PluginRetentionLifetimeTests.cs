@@ -123,14 +123,14 @@ public sealed class PluginRetentionLifetimeTests
         admission.Retiring = false;
         using var rpc = new CancellationTokenSource();
         var action = ui.ActionAsync(request.RequestId, "test", null, null, rpc.Token).AsTask();
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         rpc.Cancel();
         ui.Respond(Answer(request, cancelled: true));
         await dialog;
         Assert.IsFalse(action.IsCompleted);
         Assert.AreEqual(1, admission.Claims);
         finish.SetResult();
-        await action.WaitAsync(TimeSpan.FromSeconds(10));
+        await action.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(0, admission.Claims);
     }
 
@@ -163,13 +163,13 @@ public sealed class PluginRetentionLifetimeTests
             admission.Retiring = false;
             using var rpc = new CancellationTokenSource();
             Assert.AreEqual("started", (await service.InvokeCommandAsync(request, rpc.Token)).Status);
-            await plugin.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await plugin.Entered.Task.WithinAsync(TestTime.Seconds(10));
             rpc.Cancel();
             var close = service.CloseAsync();
             Assert.IsFalse(close.IsCompleted);
             Assert.AreEqual(1, admission.Claims);
             plugin.Finish.SetResult();
-            await close.WaitAsync(TimeSpan.FromSeconds(10));
+            await close.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(0, admission.Claims);
         }
         finally
@@ -237,9 +237,9 @@ public sealed class PluginRetentionLifetimeTests
             service = new PluginUiService(new ProjectCatalog(new CatalogOptions { GlobalRoot = root }), runtime, ui, "epoch");
             var command = (await service.ContributionsAsync(new("epoch", null), default)).Commands.Single();
             Assert.AreEqual("started", (await service.InvokeCommandAsync(new("epoch", command.Id, null, null, false, null), default)).Status);
-            await plugin.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await plugin.Entered.Task.WithinAsync(TestTime.Seconds(10));
             plugin.Finish.SetResult();
-            await service.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            await service.CloseAsync().WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(kind == "ordinary" ? 0 : 1, admission.Claims);
         }
         finally

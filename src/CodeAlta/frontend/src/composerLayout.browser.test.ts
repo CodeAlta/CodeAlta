@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host, in a short window. The composer grows upwards over the timeline
 // and never scrolls as a whole: its editor gives room back, so the toolbar of the prompt stays in the window, also
 // when the splitter is dragged to the bottom. The entries of the timeline are centered like the prompt, and the button
 // that jumps to the latest entry does not push the timeline under the divider (#174).
-test("the prompt keeps its toolbar in a short window, and the timeline is centered above it", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the prompt keeps its toolbar in a short window, and the timeline is centered above it", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ command, evaluate, until, session, exceptions }) => {
     const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent)`;
     const part = (selector: string) => `${workspace}?.querySelector(${JSON.stringify(selector)})`;
@@ -92,7 +93,7 @@ test("the prompt keeps its toolbar in a short window, and the timeline is center
 // What shows in the prompt for a while and goes (the content a plugin puts above the prompt, such as the annotations of
 // the browser): the prompt grows with it, and gives the room back once it is gone, instead of keeping the height it
 // had as its least one: in the session shown when the window starts, and in one opened later from the Explorer.
-test("the prompt gives back the room of what showed in it for a while", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the prompt gives back the room of what showed in it for a while", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ evaluate, until, press, session, exceptions }) => {
     const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent)`;
     const part = (selector: string) => `${workspace}?.querySelector(${JSON.stringify(selector)})`;

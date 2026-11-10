@@ -16,6 +16,10 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopOwnedSessionTests
 {
+    // Starting a host, running a turn or closing a session: a wait that does not end in this time is stuck, not slow
+    // (TestTime makes it longer on CI).
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
+
     [TestMethod]
     public void ImageOnlySend_ForwardsEmptyTextAndExactLocalMetadata()
     {
@@ -243,7 +247,7 @@ public sealed class DesktopOwnedSessionTests
             if (result.Outcome != OwnedSessionCommandOutcome.Completed) return result;
             var marker = Guid.NewGuid().ToString("N");
             f.Provider.EmitIdle!(marker);
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(Patience);
             await f.Keep(Committed());
             return result;
 
@@ -522,7 +526,7 @@ public sealed class DesktopOwnedSessionTests
         await f.Wait(send.Completion);
         var marker = Guid.NewGuid().ToString("N");
         f.Provider.EmitIdle!(marker);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(Patience);
         await f.Keep(Committed());
         async Task Committed()
         {
@@ -607,7 +611,7 @@ public sealed class DesktopOwnedSessionTests
     public async Task Shutdown_RetainsLeaseUntilAllOwnedWorkIsConfirmed()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var wait = gate.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var wait = gate.Task.WithinAsync(Patience);
         try
         {
             Assert.IsFalse(DesktopApplication.CanReleaseOwnedLease(Task.CompletedTask, gate.Task, true));
@@ -762,7 +766,7 @@ public sealed class DesktopOwnedSessionTests
     {
         var changes = Channel.CreateUnbounded<bool>();
         void Changed(object? sender, EventArgs args) => changes.Writer.TryWrite(true);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(Patience);
         // Subscribe before reading: a firing between the snapshot and the wait must not be missed.
         // Changed is invalidation, not completion; always requery the real reminder owner.
         reminders.Reminders.Changed += Changed;
@@ -794,7 +798,7 @@ public sealed class DesktopOwnedSessionTests
         try
         {
             clock.Advance(TimeSpan.FromSeconds(60));
-            await deliveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await deliveryStarted.Task.WithinAsync(Patience);
             // Delivery is pending behind a manual gate. A Task.Yield polling loop posts immediately;
             // awaiting the reminder's actual change signal does not, regardless of thread-pool throughput.
             var context = new PostingContext();
@@ -812,13 +816,13 @@ public sealed class DesktopOwnedSessionTests
         finally
         {
             releaseDelivery.TrySetResult("queued");
-            if (waiting is not null) await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+            if (waiting is not null) await waiting.WithinAsync(Patience);
         }
 
         Assert.IsNotNull(waiting);
         Assert.AreEqual(1, waiting.Result.CompletedCount);
         Assert.AreEqual(0, waiting.Result.Reminders.Single().LastExitCode);
-        var alreadyFired = await ReminderCount(reminders, "session", 1).WaitAsync(TimeSpan.FromSeconds(5));
+        var alreadyFired = await ReminderCount(reminders, "session", 1).WithinAsync(Patience);
         Assert.AreEqual(1, alreadyFired.Reminders.Single().FiredCount);
     }
 
@@ -878,8 +882,11 @@ public sealed class DesktopOwnedSessionTests
             try { await task.ConfigureAwait(false); }
             catch (Exception ex) { lock (_gate) _failures.Add(ex); }
         }
-        internal Task Wait(Task task) => Keep(task.WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Wait<T>(Task<T> task) => Keep(task.WaitAsync(TimeSpan.FromSeconds(5)));
+        // A wait that runs out says where and for what: the failure of a fixture lists the messages of the tasks it kept.
+        internal Task Wait(Task task, [CallerArgumentExpression(nameof(task))] string what = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+            => Keep(task.WithinAsync(Patience, what, file, line));
+        internal Task<T> Wait<T>(Task<T> task, [CallerArgumentExpression(nameof(task))] string what = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+            => Keep(task.WithinAsync(Patience, what, file, line));
         internal OwnedSessionCommandReceipt Retain(OwnedSessionCommandAdmission admission)
         {
             if (admission.Receipt is not null) Keep(admission.Receipt.Completion);
@@ -945,7 +952,7 @@ public sealed class DesktopOwnedSessionTests
 
         private async Task<bool> DrainAsync(IEnumerable<Task> tasks)
         {
-            var waits = tasks.Distinct().Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
+            var waits = tasks.Distinct().Select(task => task.WithinAsync(Patience)).ToArray();
             lock (_gate) _cleanup.AddRange(waits);
             var confirmed = true;
             foreach (var wait in waits)

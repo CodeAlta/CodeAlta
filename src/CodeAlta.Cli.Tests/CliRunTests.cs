@@ -254,10 +254,10 @@ public sealed class CliRunTests
             ClientInfo = new Implementation { Name = "test", Version = "1.0.0" },
             ClientCapabilities = new ClientCapabilities(),
             ProtocolVersion = ProtocolVersion.From(1),
-        }, messages.Enqueue).WaitAsync(TimeSpan.FromSeconds(30));
-        await agent.WaitAsync(TimeSpan.FromSeconds(30));
+        }, messages.Enqueue).WithinAsync(TestTime.Seconds(30));
+        await agent.WithinAsync(TestTime.Seconds(30));
         var expected = run.Lines.Length;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(30);
         while (messages.Count < expected && DateTime.UtcNow < deadline) await Task.Delay(20);
 
         var methods = messages.Select(static message => message.Method).ToArray();
@@ -370,7 +370,9 @@ public sealed class CliRunTests
             request.Conversation[^1].Parts.OfType<AgentMessagePart.Text>().Any(static part => part.Value.Contains("timed out", StringComparison.Ordinal))
                 ? "The tests did not end in time." : "No result of the job.")));
 
-        var run = await root.RunAsync(provider, ["run", Plain, "--no-mcp", "--format", "jsonl", "--timeout", "12", "run the tests"]);
+        // The job ends a quarter of the time left before the deadline: long enough, on a busy machine too, to end its shell
+        // and bring its result back before the run ends.
+        var run = await root.RunAsync(provider, ["run", Plain, "--no-mcp", "--format", "jsonl", "--timeout", "30", "run the tests"]);
 
         var result = Result(run);
         Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, $"{result.GetRawText()}\n{run.Stderr}");
@@ -409,7 +411,7 @@ public sealed class CliRunTests
         using var signal = new CancellationTokenSource();
 
         var running = root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "wait"], cancellationToken: signal.Token);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await started.Task.WithinAsync(TestTime.Seconds(30));
         signal.Cancel();
         var run = await running;
 
@@ -432,12 +434,12 @@ public sealed class CliRunTests
         try
         {
             var running = root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "wait"], cancellationToken: signal.Token);
-            await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await started.Task.WithinAsync(TestTime.Seconds(30));
             var watch = System.Diagnostics.Stopwatch.StartNew();
             signal.Cancel();
-            var run = await running.WaitAsync(TimeSpan.FromSeconds(30));
+            var run = await running.WithinAsync(TestTime.Seconds(30));
 
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(15), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(15), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
             Assert.AreEqual(CliExitCodes.Aborted, run.ExitCode, run.Stderr);
             var result = Result(run);
             Assert.AreEqual("aborted", result.GetProperty("status").GetString());
@@ -459,9 +461,9 @@ public sealed class CliRunTests
         try
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var run = await root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "--timeout", "1", "wait"]).WaitAsync(TimeSpan.FromSeconds(30));
+            var run = await root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "--timeout", "1", "wait"]).WithinAsync(TestTime.Seconds(30));
 
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(16), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(16), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
             Assert.AreEqual(CliExitCodes.Timeout, run.ExitCode, run.Stderr);
             Assert.AreEqual("timeout", Result(run).GetProperty("abortReason").GetString());
         }

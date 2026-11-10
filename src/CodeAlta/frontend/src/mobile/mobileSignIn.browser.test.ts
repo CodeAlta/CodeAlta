@@ -3,8 +3,9 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { session } from "./fixtureServer";
 import { openPhone } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
-test("the phone page signs in from a link whose token is in the query, and takes it out of the address", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the phone page signs in from a link whose token is in the query, and takes it out of the address", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const phone = await openPhone(server => { server.state.sessions = [session("s1", "Fix the parser", "p1", 2)]; }, "");
   const { server, command, waitFor, evaluate } = phone;
   try {

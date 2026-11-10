@@ -310,7 +310,7 @@ public sealed class SessionPermissionServiceTests
             {
                 var denied = service.HandleOwnedCommandAsync(execution, invalid, CancellationToken.None);
                 deliveries.Add(denied);
-                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WithinAsync(TestTime.Seconds(5))).Kind);
             }
 
             // A command or a reason longer than the review shows is not denied unseen: it waits, shown cut, and says so.
@@ -332,7 +332,7 @@ public sealed class SessionPermissionServiceTests
                 Assert.AreEqual(shownReason, shown.Reason);
                 Assert.IsFalse(waiting.IsCompleted);
                 Assert.IsTrue(await service.ResolveAsync(shown.Handle, AgentPermissionDecisionKind.Deny));
-                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await waiting.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await waiting.WithinAsync(TestTime.Seconds(5))).Kind);
             }
 
             request = request with
@@ -354,7 +354,7 @@ public sealed class SessionPermissionServiceTests
             Assert.IsNull(changeSnapshot.Command);
             Assert.IsNull(changeSnapshot.WorkingDirectory);
             Assert.IsTrue(await service.ResolveAsync(changeSnapshot.Handle, AgentPermissionDecisionKind.Deny));
-            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await changePending.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await changePending.WithinAsync(TestTime.Seconds(5))).Kind);
 
             var pending = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
             deliveries.Add(pending);
@@ -369,7 +369,7 @@ public sealed class SessionPermissionServiceTests
             Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowForSession));
             Assert.IsTrue(await service.IsPendingAsync(handle));
             Assert.IsTrue(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce));
-            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await pending.WithinAsync(TestTime.Seconds(5))).Kind);
             await service.CloseOwnedExecutionAsync(execution);
             Assert.IsFalse(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
         }
@@ -406,14 +406,14 @@ public sealed class SessionPermissionServiceTests
             Assert.IsTrue(await service.BindOwnedExecutionAsync(extra, Guid.NewGuid(), attachment, new ModelProviderId("test")));
             var denied = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
             deliveries.Add(denied);
-            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WithinAsync(TestTime.Seconds(5))).Kind);
             await service.CloseOwnedExecutionAsync(first!);
             var reclaimed = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
             deliveries.Add(reclaimed);
             Assert.AreEqual(SessionPermissionService.OwnedPendingLimit - SessionPermissionService.OwnedPendingPerExecutionLimit + 1,
                 (await service.ListAsync()).Count);
             await service.CloseOwnedExecutionAsync(extra);
-            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await reclaimed.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await reclaimed.WithinAsync(TestTime.Seconds(5))).Kind);
             // Individually closed records do not exhaust the live execution cap or need tombstones.
             for (var i = 0; i < SessionPermissionService.OwnedExecutionLimit * 2; i++)
             {
@@ -455,7 +455,7 @@ public sealed class SessionPermissionServiceTests
                 var request = Request() with { RunId = null, WorkingDirectory = "Q:\\fixture", Command = "inert \U0001f600" };
                 var wrongOwner = other.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
                 deliveries.Add(wrongOwner);
-                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await wrongOwner.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await wrongOwner.WithinAsync(TestTime.Seconds(5))).Kind);
                 var pending = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
                 deliveries.Add(pending);
                 var handle = (await service.ListAsync()).Single().Handle;
@@ -468,11 +468,11 @@ public sealed class SessionPermissionServiceTests
                 if (i % 3 == 0) Assert.IsFalse(accepted);
                 await service.CloseOwnedExecutionAsync(execution);
                 Assert.AreEqual(accepted ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Cancel,
-                    (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                    (await pending.WithinAsync(TestTime.Seconds(5))).Kind);
                 Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce));
                 var late = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
                 deliveries.Add(late);
-                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await late.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await late.WithinAsync(TestTime.Seconds(5))).Kind);
             }
         }
         finally
@@ -506,13 +506,13 @@ public sealed class SessionPermissionServiceTests
                 deliveries.Add(service.HandleOwnedCommandAsync(first, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None));
             var overflow = service.HandleOwnedCommandAsync(first, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None);
             deliveries.Add(overflow);
-            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await overflow.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await overflow.WithinAsync(TestTime.Seconds(5))).Kind);
             var handles = (await service.ListAsync()).Select(snapshot => snapshot.Handle).ToArray();
             cancellation.Cancel();
             foreach (var handle in handles)
                 Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce));
             await service.CloseOwnedAdmissionAsync();
-            await Task.WhenAll(deliveries).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(deliveries).WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(0, (await service.ListAsync()).Count);
             Assert.IsNull(await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None));
             // Closing owned admission must not dispose or change trusted TUI registration.
@@ -595,14 +595,14 @@ public sealed class SessionPermissionServiceTests
                 Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, (AgentPermissionDecisionKind)999, default));
                 Assert.IsTrue(await service.ResolveOwnedCommandAsync(handle, decision, default));
                 Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, decision, default));
-                Assert.AreEqual(decision, (await delivery.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                Assert.AreEqual(decision, (await delivery.WithinAsync(TestTime.Seconds(5))).Kind);
             }
             var closing = service.HandleOwnedCommandAsync(execution, Request() with { WorkingDirectory = "Q:\\fixture" }, default);
             deliveries.Add(closing);
             var stale = (await service.ListOwnedCommandsAsync("session", default)).Entries.Single().Handle;
             await service.InvalidateOwnedOperationAsync(execution.OperationId);
             Assert.IsFalse(await service.ResolveOwnedCommandAsync(stale, AgentPermissionDecisionKind.AllowOnce, default));
-            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await closing.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await closing.WithinAsync(TestTime.Seconds(5))).Kind);
             Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
         }
         finally { await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, []); }
@@ -634,7 +634,7 @@ public sealed class SessionPermissionServiceTests
             Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.AllowOnce, default));
             Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
             await service.CloseOwnedExecutionAsync(execution);
-            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await delivery.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await delivery.WithinAsync(TestTime.Seconds(5))).Kind);
             Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.Cancel, default));
         }
         finally { await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, [cancellation]); }
@@ -649,9 +649,9 @@ public sealed class SessionPermissionServiceTests
         Task? retirement = null;
         try
         {
-            await completion.WaitAsync(TimeSpan.FromSeconds(5));
+            await completion.WithinAsync(TestTime.Seconds(5));
             retirement = forwarding.RetireAsync(attachment);
-            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            await retirement.WithinAsync(TestTime.Seconds(5));
             foreach (var source in sources) source.Dispose();
         }
         catch (Exception error)

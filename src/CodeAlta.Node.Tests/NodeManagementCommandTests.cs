@@ -173,7 +173,7 @@ public sealed class NodeManagementCommandTests
         await WaitForAsync(() => output.ToString().Contains("third", StringComparison.Ordinal));
         await stop.CancelAsync();
 
-        Assert.AreEqual(NodeExitCodes.Success, await following.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken));
+        Assert.AreEqual(NodeExitCodes.Success, await following.WithinAsync(TestTime.Seconds(10), TestContext.CancellationToken));
         Assert.AreEqual("first\nsecond\nthird\n", output.ToString().ReplaceLineEndings("\n"));
     }
 
@@ -191,7 +191,7 @@ public sealed class NodeManagementCommandTests
 
     private async Task WaitForAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(15);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("The command never printed what was expected.");
@@ -210,7 +210,7 @@ public sealed class NodeManagementCommandTests
             ServiceEnvironment = () => machine.Environment,
             ServiceExecutable = () => Shim,
         };
-        var code = await app.RunAsync(args).WaitAsync(TimeSpan.FromSeconds(60), TestContext.CancellationToken);
+        var code = await app.RunAsync(args).WithinAsync(TestTime.Seconds(60), TestContext.CancellationToken);
         return (code, output.ToString().ReplaceLineEndings("\n"), error.ToString());
     }
 }

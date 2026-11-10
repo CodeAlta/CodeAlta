@@ -201,7 +201,7 @@ public sealed class AgentSessionOwnedUserInputTests
             f._lifetime = f.Core(body, launch.Task); f._observer = Settle(f._lifetime); launch.SetResult();
             try
             {
-                await f._lifetime.WaitAsync(TimeSpan.FromSeconds(30)); await f._observer;
+                await f._lifetime.WithinAsync(TestTime.Seconds(30)); await f._observer;
                 f.AssertClientUnreleased();
                 var client = f._client!; var handler = f._handler!;
                 client.Dispose();

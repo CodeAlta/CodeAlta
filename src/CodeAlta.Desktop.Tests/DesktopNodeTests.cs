@@ -74,7 +74,7 @@ public sealed class DesktopNodeTests
             using var laptop = DeviceIdentity.LoadOrCreate(viewerRoot);
             var machine = await FleetNodeClient.PairAsync(offer, laptop, "laptop", new PairedMachineStore(viewerRoot), token);
             Assert.AreEqual("desk", machine.Name);
-            var outcome = await waiting.WaitAsync(TimeSpan.FromSeconds(10), token);
+            var outcome = await waiting.WithinAsync(TestTime.Seconds(10), token);
             Assert.AreEqual(("redeemed", "laptop"), (outcome.Status, outcome.DeviceName));
 
             var device = node.Devices().Single();
@@ -162,7 +162,7 @@ public sealed class DesktopNodeTests
             var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             node.Changed += () => { if (node.TailnetName is not null) changed.TrySetResult(); };
             await node.SetVisibleAsync(true, token);
-            await changed.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+            await changed.Task.WithinAsync(TestTime.Seconds(10), token);
 
             var port = node.Port;
             Assert.AreEqual("desk.tail1234.ts.net", node.TailnetName);
@@ -203,7 +203,7 @@ public sealed class DesktopNodeTests
             var paired = await laptop.Fleet.PairAsync(link.Link, offer, token);
 
             Assert.IsTrue(paired.BothWays);
-            var outcome = await waiting.WaitAsync(TimeSpan.FromSeconds(10), token);
+            var outcome = await waiting.WithinAsync(TestTime.Seconds(10), token);
             Assert.AreEqual(("redeemed", "laptop", true), (outcome.Status, outcome.DeviceName, outcome.BothWays));
             // Each trusts the key of the other, with what a pairing gives, and lists the other with its machines.
             var deskOnLaptop = laptop.Node.Devices().Single();
@@ -315,7 +315,7 @@ public sealed class DesktopNodeTests
 
     private static async Task WaitAsync(Func<bool> condition, CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(20);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("The condition was not met in time.");

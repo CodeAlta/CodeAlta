@@ -348,14 +348,14 @@ public sealed class ConfiguredXaiAuthenticationTests
         var task = fake.InvokeAsync(operation, cancellation.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(task.IsCompleted);
             CollectionAssert.AreEqual(new[] { "factory", "root", "operation" }, fake.Events);
             if (cancel)
             {
                 cancellation.Cancel();
                 var failure = await Assert.ThrowsAsync<OperationCanceledException>(
-                    () => task.WaitAsync(TimeSpan.FromSeconds(5)));
+                    () => task.WithinAsync(TestTime.Seconds(5)));
                 Assert.AreEqual(cancellation.Token, failure.CancellationToken);
                 Assert.AreEqual(cancellation.Token, fake.ObservedToken);
                 CollectionAssert.AreEqual(new[] { "factory", "root", "operation" }, fake.Events);
@@ -363,7 +363,7 @@ public sealed class ConfiguredXaiAuthenticationTests
             else
             {
                 release.TrySetResult();
-                Assert.AreSame(operation == "delete" ? null : fake.Result, await task.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.AreSame(operation == "delete" ? null : fake.Result, await task.WithinAsync(TestTime.Seconds(5)));
                 CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "operation-completed" }, fake.Events);
             }
         }
@@ -372,7 +372,7 @@ public sealed class ConfiguredXaiAuthenticationTests
             release.TrySetResult();
             try
             {
-                await task.WaitAsync(TimeSpan.FromSeconds(5));
+                await task.WithinAsync(TestTime.Seconds(5));
             }
             catch (OperationCanceledException) when (cancel && cancellation.IsCancellationRequested)
             {
@@ -469,20 +469,20 @@ public sealed class ConfiguredXaiAuthenticationTests
         var task = fake.InvokeAsync(operation);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(task.IsCompleted);
             CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "callback" }, fake.Events);
             if (cancel)
             {
                 callbackCancellation.Cancel();
-                var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => task.WaitAsync(TimeSpan.FromSeconds(5)));
+                var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => task.WithinAsync(TestTime.Seconds(5)));
                 Assert.AreEqual(callbackCancellation.Token, failure.CancellationToken);
                 CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "callback" }, fake.Events);
             }
             else
             {
                 release.TrySetResult();
-                Assert.AreSame(fake.Result, await task.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.AreSame(fake.Result, await task.WithinAsync(TestTime.Seconds(5)));
                 CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "callback", "callback-completed", "after-callback" }, fake.Events);
             }
         }
@@ -491,7 +491,7 @@ public sealed class ConfiguredXaiAuthenticationTests
             release.TrySetResult();
             try
             {
-                await task.WaitAsync(TimeSpan.FromSeconds(5));
+                await task.WithinAsync(TestTime.Seconds(5));
             }
             catch (OperationCanceledException) when (cancel && callbackCancellation.IsCancellationRequested)
             {

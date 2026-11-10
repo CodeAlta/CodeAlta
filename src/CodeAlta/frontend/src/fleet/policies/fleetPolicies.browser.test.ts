@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
+import { testLimit } from "../../testTime";
 
 const options = { entry: "../fleet/policies/fleetPolicies.mount.tsx", fixture: "fleetPoliciesFixture", rpcFixture: "../demo-api.ts",
   styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/access/fleetAccess.css", "../fleet/console/fleetConsole.css", "../fleet/policies/fleetPolicies.css"], width: 1300, height: 1100,
@@ -12,7 +13,7 @@ const type = (selector: string, value: string) => `(() => { const input = docume
 const calls = `[...window.fleetPoliciesFixture.calls].map(call => JSON.parse(call))`;
 const overflow = `[...document.querySelectorAll('.fleet-policy-field, .fleet-secrets-head, .fleet-policy-version')].filter(element => element.scrollWidth > element.clientWidth + 1).length`;
 
-test("an owner stops chosen machines in one confirmed action, the title bar says so, and lifting lets the work go on", { skip: !edge, timeout: 90_000 }, async () => {
+test("an owner stops chosen machines in one confirmed action, the title bar says so, and lifting lets the work go on", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-policy-switch') && document.querySelectorAll('.fleet-policy-version').length === 2`, "the policy");
     await page.shot("fleet-policies");
@@ -54,7 +55,7 @@ test("an owner stops chosen machines in one confirmed action, the title bar says
   }, options);
 });
 
-test("a signer changes a rule and signs what this computer reads; a person who does not sign reads only", { skip: !edge, timeout: 90_000 }, async () => {
+test("a signer changes a rule and signs what this computer reads; a person who does not sign reads only", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-policy-rules fieldset')`, "the rules");
     assert.equal(await page.evaluate(`[...document.querySelectorAll('.fleet-policy-actions .bp6-button')].find(button => button.textContent === 'Review and sign…').disabled`), true,

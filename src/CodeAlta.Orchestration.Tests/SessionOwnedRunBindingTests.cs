@@ -160,7 +160,7 @@ public sealed class SessionOwnedRunBindingTests
         Assert.IsFalse(question.IsCompleted);
 
         Assert.IsTrue(await f.Wait(f.Permissions.CancelOwnedUserInputAsync(form.Handle, CancellationToken.None).AsTask()));
-        await Assert.ThrowsAsync<OperationCanceledException>(() => question.WaitAsync(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => question.WithinAsync(TestTime.Seconds(5)));
     });
 
     [TestMethod]
@@ -263,8 +263,8 @@ public sealed class SessionOwnedRunBindingTests
         }
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
         internal Task<T> Keep<T>(Task<T> task) { Keep((Task)task); return task; }
-        internal Task Wait(Task task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Wait<T>(Task<T> task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Wait(Task task) => Keep(Keep(task).WithinAsync(TestTime.Seconds(5)));
+        internal Task<T> Wait<T>(Task<T> task) => Keep(Keep(task).WithinAsync(TestTime.Seconds(5)));
         internal CancellationTokenSource NewSource()
         {
             var source = new CancellationTokenSource();
@@ -295,7 +295,7 @@ public sealed class SessionOwnedRunBindingTests
         {
             var f = new Fixture();
             f._lifetime = f.RunOwned(body);
-            try { await f._lifetime.WaitAsync(TimeSpan.FromSeconds(30)); }
+            try { await f._lifetime.WithinAsync(TestTime.Seconds(30)); }
             catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
             Exception[] failures;
             lock (f._gate) failures = [.. f._failures];

@@ -23,7 +23,7 @@ public sealed class PluginTaskRetentionTests
                 SessionRetentionAdmission = admission,
                 BuiltIns = [new BuiltInPluginDefinition { Id = "held", DisplayName = "Held", PluginType = typeof(TaskPlugin), Factory = () => plugin }],
             });
-            await plugin.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await plugin.Entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreSame(admission, runtime.SessionRetentionAdmission);
             Assert.IsTrue(runtime.IsStarted);
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => runtime.StartAsync(new PluginRuntimeManagerOptions
@@ -75,7 +75,7 @@ public sealed class PluginTaskRetentionTests
             entered.SetResult();
             await finish.Task;
         });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         handle.RequestCancellation();
         lifetime.Cancel();
         using var waiter = new CancellationTokenSource();
@@ -85,7 +85,7 @@ public sealed class PluginTaskRetentionTests
         Assert.IsTrue(tasks.HasRunningTasks);
         Assert.AreEqual(1, admission.Claims, "Cancellation and presentation reads cannot release original work.");
         finish.SetResult();
-        await handle.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await handle.Completion.WithinAsync(TestTime.Seconds(10));
         await tasks.WhenIdleAsync();
         Assert.AreEqual(0, admission.Claims);
     }
@@ -102,17 +102,17 @@ public sealed class PluginTaskRetentionTests
         var task = tasks.Run("held cancellation", async token =>
         {
             // Deliberately leave the registration to the CTS owner: cleanup must join this callback too.
-            token.Register(() => { callbackEntered.SetResult(); callbackRelease.Wait(TimeSpan.FromSeconds(10)); });
+            token.Register(() => { callbackEntered.SetResult(); callbackRelease.Wait(TestTime.Seconds(10)); });
             entered.SetResult();
             await finish.Task;
         });
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             task.RequestCancellation();
-            await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await callbackEntered.Task.WithinAsync(TestTime.Seconds(10));
             finish.SetResult();
-            await task.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+            await task.Completion.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(1, admission.Claims);
             Assert.IsTrue(tasks.HasRunningTasks);
         }
@@ -218,7 +218,7 @@ public sealed class PluginTaskRetentionTests
                 SessionRetentionAdmission = admission,
                 BuiltIns = [new BuiltInPluginDefinition { Id = "held", DisplayName = "Held", PluginType = typeof(HeldActivationPlugin), Factory = () => plugin }],
             }).AsTask();
-            await plugin.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await plugin.Entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(1, admission.Claims);
             Assert.AreSame(admission, runtime.SessionRetentionAdmission);
             Assert.IsFalse(runtime.IsStarted);

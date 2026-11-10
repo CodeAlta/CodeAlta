@@ -319,10 +319,10 @@ public sealed class AgentSessionTitleTests
             Answer("<session_title>Again from the model</session_title>\nDone again."));
 
         var send = fixture.Session.SendAsync(new() { Input = AgentInput.Text("Fix the login error.") });
-        await answering.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await fixture.Session.RenameAsync("My own title").WaitAsync(TimeSpan.FromSeconds(5));
+        await answering.Task.WithinAsync(TestTime.Seconds(5));
+        await fixture.Session.RenameAsync("My own title").WithinAsync(TestTime.Seconds(5));
         release.TrySetResult();
-        await send.WaitAsync(TimeSpan.FromSeconds(5));
+        await send.WithinAsync(TestTime.Seconds(5));
         await fixture.Session.SendAsync(new() { Input = AgentInput.Text("Go on.") });
 
         var summary = await fixture.SummaryAsync();

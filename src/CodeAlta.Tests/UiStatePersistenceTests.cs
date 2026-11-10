@@ -350,7 +350,7 @@ public sealed class UiStatePersistenceTests
         var state = await coordinator.LoadViewStateAsync(CancellationToken.None);
         state.OpenSessionIds.Add("first");
         var first = coordinator.PersistViewStateAsync(state);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         state.OpenSessionIds.Add("second");
         var second = coordinator.PersistViewStateAsync(state);
         // Neither queued request may enumerate this now-mutated collection asynchronously.

@@ -265,7 +265,7 @@ public sealed class WorkspaceMoveSessionTests
             Assert.AreEqual("ok", moved.Status, string.Join(" | ", moved.Warnings));
 
             // Nobody waits for the reconnection: it comes after the answer, from an attachment in the new folder.
-            await remote.Reconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await remote.Reconnected.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual((otherPath, true), remote.Requests[^1], "The session is attached again where it was moved, and its remote control turned on there.");
             Assert.AreEqual(otherPath, (await host.RuntimeService.ResolveOwnedSessionAsync(session.SessionId, CancellationToken.None))?.WorkingDirectory);
             await rpc.CloseSessionsAsync();
@@ -374,7 +374,7 @@ public sealed class WorkspaceMoveSessionTests
             var request = new WorkspaceMoveSessionRequest(Epoch, "exact", source.Id, source.ProjectPath, "target", Path.Combine(root, "target"));
             using var cancel = new CancellationTokenSource();
             var pending = rpc.MoveSessionAsync(request, cancel.Token);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual("busy", (await rpc.MoveSessionAsync(request, CancellationToken.None)).Status);
             cancel.Cancel();
             await Assert.ThrowsExactlyAsync<TaskCanceledException>(async () => await pending);

@@ -51,7 +51,7 @@ public sealed class BackgroundScriptPermissionTests
             await Task.Delay(100);
             Assert.AreEqual(0, (await owner.ListOwnedCommandsAsync("session", CancellationToken.None)).Entries.Count, "it waits for its turn");
             turn.SetResult();
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(10);
             SessionOwnedPermissionPage page;
             while ((page = await owner.ListOwnedCommandsAsync("session", CancellationToken.None)).Entries.Count == 0)
             {
@@ -60,12 +60,12 @@ public sealed class BackgroundScriptPermissionTests
             }
 
             Assert.IsTrue(await owner.ResolveOwnedCommandAsync(page.Entries[0].Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None));
-            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await asked.WaitAsync(TimeSpan.FromSeconds(10))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await asked.WithinAsync(TestTime.Seconds(10))).Kind);
             Assert.AreEqual(1, waits);
 
             // A request the session grants waits for nobody.
             policy = SessionPermissionPolicy.Approve;
-            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await handler(Command(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await handler(Command(), CancellationToken.None).WithinAsync(TestTime.Seconds(10))).Kind);
             Assert.AreEqual(1, waits);
             await owner.CloseOwnedExecutionAsync(execution);
         }
@@ -114,7 +114,7 @@ public sealed class BackgroundScriptPermissionTests
             var handler = owner.CreateOwnedCommandHandler(execution);
 
             var asked = handler(Command(), CancellationToken.None);
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(10);
             SessionOwnedPermissionPage page;
             while ((page = await owner.ListOwnedCommandsAsync("session", CancellationToken.None)).Entries.Count == 0)
             {
@@ -125,12 +125,12 @@ public sealed class BackgroundScriptPermissionTests
 
             CollectionAssert.Contains((await owner.ListWaitingSessionsAsync()).ToArray(), "session", "the session waits for the user");
             Assert.IsTrue(await owner.ResolveOwnedCommandAsync(page.Entries[0].Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None));
-            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await asked.WaitAsync(TimeSpan.FromSeconds(10))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await asked.WithinAsync(TestTime.Seconds(10))).Kind);
             Assert.AreEqual(1, waits, "the request took its turn among the questions of its run");
 
             // A session that approves everything approves it without asking, as during the send.
             policy = SessionPermissionPolicy.Approve;
-            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await handler(Command(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10))).Kind);
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await handler(Command(), CancellationToken.None).WithinAsync(TestTime.Seconds(10))).Kind);
             Assert.AreEqual(1, waits);
         }
         finally

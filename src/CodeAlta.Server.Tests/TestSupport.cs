@@ -353,7 +353,7 @@ internal sealed class ServerFixture : IAsyncDisposable
 /// <summary>Bounds for waits that only tell a hang.</summary>
 internal static class Waits
 {
-    public static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan Hang = TestTime.Seconds(30);
 }
 
 /// <summary>Bytes of a text, for tests.</summary>

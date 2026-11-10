@@ -21,7 +21,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class FleetServerRpcTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
     private static readonly ModelProviderId Provider = new("fleet-fixture");
 
     public TestContext TestContext { get; set; } = null!;

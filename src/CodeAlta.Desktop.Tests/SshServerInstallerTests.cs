@@ -143,6 +143,138 @@ public sealed class SshServerInstallerTests
         Assert.AreEqual("server_proxy_unreachable", failure.Code, "what stands in front of the server does not answer");
     }
 
+    // The machine on its tailnet, as tailscale status --json says it there.
+    private const string OnTailnet = """{"BackendState":"Running","Self":{"DNSName":"box.tail1234.ts.net."}}""";
+
+    private const string ServeCommand = "tailscale 'serve' '--bg' '--https=8443' 'http://127.0.0.1:2693'";
+
+    // A machine with Tailscale where the server is installed and runs; then what Tailscale answers there.
+    private static SshNodeInstallerTests.ScriptedSsh WithTailscale(string sudo, params SshResult[] tailscale)
+    {
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, Ubuntu + "tailscale=yes\n" + (sudo.Length > 0 ? $"sudo={sudo}\n" : ""), ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        foreach (var answer in tailscale) ssh.Answers.Enqueue(answer);
+        return ssh;
+    }
+
+    private static SshServerSetupRequest BehindTailnet(bool serve = false, string? password = null, string name = "box.tail1234.ts.net") => new()
+    {
+        Target = new SshTarget("me", "box", null), Port = 2693, Address = new Uri($"https://{name}:8443"), TailscaleServe = serve, SudoPassword = password,
+    };
+
+    private async Task<SshSetupException> NoAnswerAsync(ISshRunner ssh, SshServerSetupRequest request)
+        => await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.2.0").RunAsync(request, (_, _, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
+            (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+
+    [TestMethod]
+    public async Task BehindANameOfItsTailnet_ThatTailscaleServeDoesNotPublish_TheCommandIsNamed_AndNothingIsChangedThere()
+    {
+        var ssh = WithTailscale("password", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""));
+        var failure = await NoAnswerAsync(ssh, BehindTailnet());
+
+        Assert.AreEqual(("reach", "tailscale_serve_missing_sudo"), (failure.Step, failure.Code), "sudo asks a password there: the page asks it with the offer to publish");
+        Assert.AreEqual("sudo tailscale serve --bg --https=8443 http://127.0.0.1:2693", failure.Message, "the HTTPS port of the address, in front of the port of the server");
+        Assert.HasCount(6, ssh.Scripts);
+        StringAssert.Contains(ssh.Scripts[3], "$T tailscale 'status' '--json' </dev/null\n");
+        StringAssert.Contains(ssh.Scripts[4], "$T tailscale 'serve' 'status' '--json' </dev/null\n");
+        StringAssert.Contains(ssh.Scripts[5], "$T tailscale 'debug' 'prefs' </dev/null\n");
+        Assert.IsFalse(ssh.Scripts.Any(static script => script.Contains("--bg", StringComparison.Ordinal)), "the person did not ask CodeAlta to publish it");
+
+        // No password to ask where the person is the operator of Tailscale, or where sudo asks none.
+        var operated = WithTailscale("password", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""), new SshResult(0, """{"ControlURL":"https://controlplane.tailscale.com","OperatorUser":"me"}""", ""));
+        Assert.AreEqual("tailscale_serve_missing", (await NoAnswerAsync(operated, BehindTailnet())).Code);
+        var another = WithTailscale("password", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""), new SshResult(0, """{"OperatorUser":"alex"}""", ""));
+        Assert.AreEqual("tailscale_serve_missing_sudo", (await NoAnswerAsync(another, BehindTailnet())).Code);
+        var free = WithTailscale("nopassword", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""));
+        Assert.AreEqual("tailscale_serve_missing", (await NoAnswerAsync(free, BehindTailnet())).Code);
+        Assert.HasCount(5, free.Scripts);
+
+        // What already publishes the server there is not the problem: the address is what does not answer from here.
+        var served = WithTailscale("password", new SshResult(0, OnTailnet, ""),
+            new SshResult(0, """{"TCP":{"8443":{"HTTPS":true}},"Web":{"box.tail1234.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2693"}}}}}""", ""));
+        failure = await NoAnswerAsync(served, BehindTailnet(serve: true));
+        Assert.AreEqual(("server_proxy_unreachable", "https://box.tail1234.ts.net:8443 · No route to host · Tailscale Serve publishes it on the machine: check that this computer is on the same tailnet"),
+            (failure.Code, failure.Message));
+
+        // Another program's port is left to it, and a name that is not this machine's is said.
+        var taken = WithTailscale("password", new SshResult(0, OnTailnet, ""),
+            new SshResult(0, """{"TCP":{"8443":{"HTTPS":true}},"Web":{"box.tail1234.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}""", ""));
+        failure = await NoAnswerAsync(taken, BehindTailnet(serve: true));
+        Assert.AreEqual("server_proxy_unreachable", failure.Code);
+        StringAssert.EndsWith(failure.Message, "· Tailscale Serve publishes something else on port 8443 of the machine");
+        var other = WithTailscale("password", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""));
+        failure = await NoAnswerAsync(other, BehindTailnet(serve: true, name: "nas.tail1234.ts.net"));
+        Assert.AreEqual("server_proxy_unreachable", failure.Code);
+        StringAssert.EndsWith(failure.Message, "· on its tailnet, this machine is box.tail1234.ts.net");
+        Assert.IsFalse(taken.Scripts.Concat(other.Scripts).Any(static script => script.Contains("--bg", StringComparison.Ordinal)));
+
+        // A domain of the person is theirs to put in front of the server: Tailscale is not asked.
+        var domain = WithTailscale("password");
+        failure = await NoAnswerAsync(domain, BehindTailnet(serve: true, name: "fleet.example.com"));
+        Assert.AreEqual("server_proxy_unreachable", failure.Code);
+        Assert.HasCount(3, domain.Scripts);
+    }
+
+    [TestMethod]
+    public async Task BehindANameOfItsTailnet_WhenThePersonAsks_TailscaleServePublishesTheServer_WithSudoWhereItIsKeptForRoot()
+    {
+        var ssh = WithTailscale("password", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""), new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""),
+            new SshResult(0, "Available within your tailnet:\n\nhttps://box.tail1234.ts.net:8443/\n", ""), new SshResult(0, "WXYZ-1234\n", ""));
+        var reaches = 0;
+        var steps = new List<SshSetupProgress>();
+        Uri? claimed = null;
+
+        var link = await new SshServerInstaller(ssh, "4.2.0").RunAsync(BehindTailnet(serve: true, password: "it's s3cret"),
+            (_, _, _) => Task.FromResult<ReachProblem?>(++reaches == 1 ? new("No route to host") : null),
+            (address, _, _, _, _) => { claimed = address; return Task.FromResult("link-1"); }, steps.Add, TestContext.CancellationToken);
+
+        Assert.AreEqual(("link-1", new Uri("https://box.tail1234.ts.net:8443"), 2), (link, claimed, reaches), "the address is checked again once it is published, then the server is claimed");
+        // As the person would type it; refused for want of root, it runs once more with sudo, the password on its standard input only.
+        StringAssert.Contains(ssh.Scripts[7], $"OUT=$($T {ServeCommand} 2>&1 </dev/null) && CODE=0 || CODE=$?\n");
+        StringAssert.Contains(ssh.Scripts[7], $"case \"$OUT\" in *\"Access denied\"*)\n  OUT=$(printf '%s\\n' 'it'\\''s s3cret' | sudo -S -p '' $T {ServeCommand} 2>&1) && CODE=0 || CODE=$? ;;\nesac\n");
+        Assert.IsTrue(steps.Any(static step => step is { Step: "reach", State: "running", Detail: "https://box.tail1234.ts.net:8443 · Tailscale Serve" }), "the step says what it does there");
+        CollectionAssert.AreEqual(new[] { "connect", "check", "install", "service", "reach", "claim" }, steps.Where(static step => step.State == "done").Select(static step => step.Step).ToArray());
+
+        // Where sudo asks nothing, it is used without a password.
+        var free = WithTailscale("nopassword", new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""), new SshResult(0, OnTailnet, ""), new SshResult(0, "{}", ""),
+            new SshResult(1, "sending serve config: Access denied: serve config denied\n", ""));
+        var failure = await NoAnswerAsync(free, BehindTailnet(serve: true));
+        StringAssert.Contains(free.Scripts[7], $"OUT=$(sudo -n $T {ServeCommand} 2>&1 </dev/null)");
+        Assert.AreEqual("tailscale_serve_failed", failure.Code);
+        Assert.AreEqual("tailscale serve failed: sending serve config: Access denied: serve config denied\nsudo tailscale serve --bg --https=8443 http://127.0.0.1:2693", failure.Message,
+            "what Tailscale said, and the command the person can run");
+    }
+
+    [TestMethod]
+    public async Task PublishingWithTailscaleServe_AsksTheSudoPasswordWhenItIsNeeded_AndSaysWhenTheTailnetDoesNotAllowIt()
+    {
+        const string Denied = "sending serve config: Access denied: serve config denied\n\nUse 'sudo tailscale serve --bg --https=8443 http://127.0.0.1:2693'.\n";
+        SshResult[] Then(SshResult serve) => [new(0, OnTailnet, ""), new(0, "{}", ""), new(0, OnTailnet, ""), new(0, "{}", ""), serve];
+
+        // Without the password, the change runs as the person only: Tailscale refuses it, and the page asks the password.
+        var asked = WithTailscale("password", Then(new SshResult(1, Denied, "")));
+        var failure = await NoAnswerAsync(asked, BehindTailnet(serve: true));
+        Assert.AreEqual(("reach", "tailscale_sudo_password_needed", "sudo asks the password of me there."), (failure.Step, failure.Code, failure.Message));
+        Assert.IsFalse(asked.Scripts[7].Contains("sudo", StringComparison.Ordinal), asked.Scripts[7]);
+
+        var wrong = WithTailscale("password", Then(new SshResult(1, "Sorry, try again.\nsudo: 1 incorrect password attempt\n", "")));
+        Assert.AreEqual("sudo_refused", (await NoAnswerAsync(wrong, BehindTailnet(serve: true, password: "wrong"))).Code);
+
+        // Without sudo there, the command is the person's to run as an administrator.
+        var none = WithTailscale("", Then(new SshResult(1, Denied, "")));
+        failure = await NoAnswerAsync(none, BehindTailnet(serve: true));
+        Assert.AreEqual("tailscale_serve_failed", failure.Code);
+        StringAssert.EndsWith(failure.Message, "\nsudo tailscale serve --bg --https=8443 http://127.0.0.1:2693");
+
+        // Serve is not turned on for the tailnet: the command waits for its admin, is stopped there, and its page is given.
+        var disabled = WithTailscale("password", Then(new SshResult(124, "\nServe is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=abc\n\n", "")));
+        failure = await NoAnswerAsync(disabled, BehindTailnet(serve: true, password: "pw"));
+        Assert.AreEqual(("tailscale_serve_disabled", "https://login.tailscale.com/f/serve?node=abc"), (failure.Code, failure.Message));
+        StringAssert.StartsWith(disabled.Scripts[7], "T=\"\"\nif command -v timeout >/dev/null 2>&1; then T=\"timeout 15\"; fi\n");
+    }
+
     [TestMethod]
     public async Task BehindAnAddressOfItsOwn_ThePasskeyPageIsAtTheHttpsAddressTheProxyOnItsLoopbackServes()
     {

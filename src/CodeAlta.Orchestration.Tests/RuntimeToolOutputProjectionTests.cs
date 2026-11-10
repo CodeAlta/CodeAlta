@@ -7,7 +7,7 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class RuntimeToolOutputProjectionTests
 {
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Wait = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task ARunningCall_GivesWhatItWroteThenWhatItWrites_AndEndsWithIt()
@@ -18,21 +18,21 @@ public sealed class RuntimeToolOutputProjectionTests
         output.Commit(Delta("call", "two\n"));
         await using var updates = output.ObserveAsync("session", "call").GetAsyncEnumerator();
 
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(new RuntimeToolOutputUpdate("one\ntwo\n", 0, 8, true, false), updates.Current);
         Assert.AreEqual(1, output.SubscriberCount);
 
         // What is written while nobody reads is one update.
         output.Commit(Delta("call", "three\n"));
         output.Commit(Delta("call", "four\n"));
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(new RuntimeToolOutputUpdate("three\nfour\n", 8, 19, false, false), updates.Current);
 
         output.Commit(Delta("call", "five\n"));
         output.Commit(Activity("call", AgentActivityPhase.Completed));
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(new RuntimeToolOutputUpdate("five\n", 19, 24, false, true), updates.Current);
-        Assert.IsFalse(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsFalse(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(0, output.CallCount);
         Assert.AreEqual(0, output.SubscriberCount);
     }
@@ -98,13 +98,13 @@ public sealed class RuntimeToolOutputProjectionTests
         output.Commit(Activity("call"));
         output.Commit(Delta("call", "start"));
         await using var updates = output.ObserveAsync("session", "call").GetAsyncEnumerator();
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual("start", updates.Current.Text);
 
         var chunk = new string('a', 64 * 1024);
         var written = 5L;
         for (var index = 0; index < 20; index++, written += chunk.Length) output.Commit(Delta("call", chunk));
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         var update = updates.Current;
         Assert.IsTrue(update.IsReset, "The text after `start` is no longer there: what is kept restarts the output.");
         Assert.AreEqual(written, update.TotalCharacters);
@@ -128,9 +128,9 @@ public sealed class RuntimeToolOutputProjectionTests
         output.Commit(Activity("left running"));
         output.Commit(Activity("elsewhere", session: "other"));
         await using var updates = output.ObserveAsync("session", "left running").GetAsyncEnumerator();
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         output.Commit(new SessionLifecycleRuntimeEvent("session", DateTimeOffset.UnixEpoch, new SessionLifecycleEvent { SessionId = "session", Kind = SessionLifecycleEventKind.RunAborted }));
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.IsTrue(updates.Current.IsComplete);
         Assert.AreEqual(1, output.CallCount, "The calls of another session go on.");
 
@@ -151,7 +151,7 @@ public sealed class RuntimeToolOutputProjectionTests
         output.Commit(Activity("watched"));
         output.Commit(Delta("watched", "a"));
         await using var updates = output.ObserveAsync("session", "watched").GetAsyncEnumerator();
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         for (var index = 0; index < RuntimeToolOutputProjection.MaxCalls + 3; index++)
         {
             output.Commit(Activity($"call {index}", session: $"session {index}"));
@@ -161,7 +161,7 @@ public sealed class RuntimeToolOutputProjectionTests
         Assert.AreEqual(RuntimeToolOutputProjection.MaxCalls, output.CallCount);
         var next = updates.MoveNextAsync().AsTask();
         output.Commit(Delta("watched", "b"));
-        Assert.IsTrue(await next.WaitAsync(Wait));
+        Assert.IsTrue(await next.WithinAsync(Wait));
         Assert.AreEqual("b", updates.Current.Text, "The observed call still runs although it was written to least recently.");
         Assert.IsFalse(updates.Current.IsComplete);
     }
@@ -175,7 +175,7 @@ public sealed class RuntimeToolOutputProjectionTests
         for (var index = 0; index < RuntimeToolOutputProjection.MaxSubscribers; index++)
         {
             var observer = output.ObserveAsync("session", "call").GetAsyncEnumerator();
-            Assert.IsTrue(await observer.MoveNextAsync().AsTask().WaitAsync(Wait));
+            Assert.IsTrue(await observer.MoveNextAsync().AsTask().WithinAsync(Wait));
             observers.Add(observer);
         }
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () => await FirstAsync(output.ObserveAsync("session", "call")));
@@ -184,15 +184,15 @@ public sealed class RuntimeToolOutputProjectionTests
 
         using var cancellation = new CancellationTokenSource();
         var canceled = output.ObserveAsync("session", "call", cancellation.Token).GetAsyncEnumerator();
-        Assert.IsTrue(await canceled.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await canceled.MoveNextAsync().AsTask().WithinAsync(Wait));
         var pending = canceled.MoveNextAsync().AsTask();
         cancellation.Cancel();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => pending.WaitAsync(Wait));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => pending.WithinAsync(Wait));
         await canceled.DisposeAsync();
         Assert.AreEqual(RuntimeToolOutputProjection.MaxSubscribers - 1, output.SubscriberCount);
 
         output.Complete();
-        Assert.IsTrue(await observers[1].MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await observers[1].MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.IsTrue(observers[1].Current.IsComplete);
         output.Commit(Activity("after"));
         Assert.AreEqual(0, output.CallCount, "A closed runtime retains nothing.");
@@ -215,14 +215,14 @@ public sealed class RuntimeToolOutputProjectionTests
     private static async Task<RuntimeToolOutputUpdate> FirstAsync(IAsyncEnumerable<RuntimeToolOutputUpdate> updates)
     {
         await using var enumerator = updates.GetAsyncEnumerator();
-        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WithinAsync(Wait));
         return enumerator.Current;
     }
 
     private static async Task<List<RuntimeToolOutputUpdate>> ReadAllAsync(IAsyncEnumerable<RuntimeToolOutputUpdate> updates)
     {
         var result = new List<RuntimeToolOutputUpdate>();
-        await foreach (var update in updates.WaitAsync(Wait)) result.Add(update);
+        await foreach (var update in updates.WaitAsync(Wait)) result.Add(update); // not a Task
         return result;
     }
 
@@ -241,6 +241,6 @@ internal static class AsyncEnumerableWaits
     internal static async IAsyncEnumerable<T> WaitAsync<T>(this IAsyncEnumerable<T> source, TimeSpan timeout)
     {
         await using var enumerator = source.GetAsyncEnumerator();
-        while (await enumerator.MoveNextAsync().AsTask().WaitAsync(timeout)) yield return enumerator.Current;
+        while (await enumerator.MoveNextAsync().AsTask().WithinAsync(timeout)) yield return enumerator.Current;
     }
 }

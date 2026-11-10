@@ -3,6 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "esbuild";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The prompt of the preview bundles the code editor of the large prompt window: its worker is built into the page.
 const editorWorker: Plugin = { name: "editor-worker", setup(bundle) {
@@ -21,7 +22,7 @@ const options = { entry: "../claudeCodeImport/claudeCodePreview.mount.tsx", fixt
   styles: ["../claudeCodeImport/claudeCodeSessions.css", "../conversationHeld/conversationHeld.css"], width: 1600, height: 1000, plugins: [editorWorker] } as const;
 const timelineText = `document.querySelector('.claude-code-preview .timeline-scroll').textContent`;
 
-test("the preview of a Claude Code conversation says what it is, shows the latest turn then older ones on demand, and its prompt continues it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the preview of a Claude Code conversation says what it is, shows the latest turn then older ones on demand, and its prompt continues it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
       const A = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11", B = "1f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e12", C = "2f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e13";
       // The banner, in the place of the text of the prompt: where it was started, not in CodeAlta yet, the process that
@@ -168,7 +169,7 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
   }, options);
 });
 
-test("the preview reads a conversation again as it grows, recovers from a failed read, keeps a message no session took, and waits while another is imported", { skip: !edge, timeout: 90_000 }, async () => {
+test("the preview reads a conversation again as it grows, recovers from a failed read, keeps a message no session took, and waits while another is imported", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const A = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11", D = "3f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e14", E = "4f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e15";
     const scope = (id: string) => JSON.stringify(`claude-code-preview:${JSON.stringify(["p1", id])}`);

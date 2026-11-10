@@ -483,7 +483,7 @@ public sealed class ProviderInspectionWorkflowTests
         finally
         {
             releaseProbe.TrySetResult(runtime.CreateProbeResult());
-            await operation.WaitAsync(TimeSpan.FromSeconds(5));
+            await operation.WithinAsync(TestTime.Seconds(5));
         }
         CollectionAssert.AreEqual(new[] { "probe", "format", "dispose" }, events);
         Assert.AreEqual(1, runtime.DisposeCount);
@@ -508,7 +508,7 @@ public sealed class ProviderInspectionWorkflowTests
         finally
         {
             releaseDisposal.TrySetResult();
-            await operation.WaitAsync(TimeSpan.FromSeconds(5));
+            await operation.WithinAsync(TestTime.Seconds(5));
         }
         Assert.AreEqual(1, runtime.DisposeCount);
     }

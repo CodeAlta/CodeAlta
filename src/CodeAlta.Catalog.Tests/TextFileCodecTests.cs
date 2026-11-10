@@ -68,12 +68,12 @@ public sealed class TextFileCodecTests
         // Another writer of this process holds the first file: a save of the second one does not wait for it.
         var held = await locks.AcquireAsync(first.Path, CancellationToken.None);
         var blocked = store.SaveAsync(Request(first.Path, firstSnapshot, "first edited"));
-        Assert.IsFalse((await store.SaveAsync(Request(second.Path, secondSnapshot, "second edited")).WaitAsync(TimeSpan.FromSeconds(30))).IsConflict);
+        Assert.IsFalse((await store.SaveAsync(Request(second.Path, secondSnapshot, "second edited")).WithinAsync(TestTime.Seconds(30))).IsConflict);
         Assert.IsFalse(blocked.IsCompleted);
         Assert.AreEqual("first", await File.ReadAllTextAsync(first.Path));
 
         held.Dispose();
-        Assert.IsFalse((await blocked.WaitAsync(TimeSpan.FromSeconds(30))).IsConflict);
+        Assert.IsFalse((await blocked.WithinAsync(TestTime.Seconds(30))).IsConflict);
         Assert.AreEqual("first edited", await File.ReadAllTextAsync(first.Path));
     }
 

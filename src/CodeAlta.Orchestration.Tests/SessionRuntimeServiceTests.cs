@@ -46,7 +46,7 @@ public sealed class SessionRuntimeServiceTests
 
         var history = await runtime.GetOrResumeHistoryAsync(session, CreateOptions(providerId, project));
         Assert.IsNotNull(history);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(5));
         var events = await CollectUntilRuntimeEventAsync(runtime, session.SessionId,
             static item => item is SessionHostEvent { Kind: AgentSessionUpdateKind.Warning }, timeout.Token);
         var warning = events.OfType<SessionHostEvent>().Single(item => item.Kind == AgentSessionUpdateKind.Warning);
@@ -341,7 +341,7 @@ public sealed class SessionRuntimeServiceTests
         await using var hub = new AgentHub(registry, temp.Path);
         await using var runtime = CreateRuntime(temp.Path, hub);
         var session = CreateSession("session-1", providerId, temp.Path);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TestTime.Seconds(5));
         var eventsTask = CollectUntilAgentCompactionCompletedAsync(runtime, session.SessionId, cts.Token);
 
         await runtime.CompactAsync(session, CreateOptions(providerId, temp.Path), cts.Token).ConfigureAwait(false);
@@ -382,7 +382,7 @@ public sealed class SessionRuntimeServiceTests
         await using var hub = new AgentHub(registry, temp.Path);
         await using var runtime = CreateRuntime(temp.Path, hub);
         var session = CreateSession("session-1", providerId, temp.Path);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TestTime.Seconds(5));
         var eventsTask = CollectUntilAgentCompactionStartedAsync(runtime, session.SessionId, cts.Token);
 
         var compactTask = runtime.CompactAsync(session, CreateOptions(providerId, temp.Path), cts.Token);
@@ -413,7 +413,7 @@ public sealed class SessionRuntimeServiceTests
         await using var hub = new AgentHub(registry, temp.Path);
         await using var runtime = CreateRuntime(temp.Path, hub);
         var session = CreateSession("session-1", providerId, temp.Path);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TestTime.Seconds(5));
         var eventsTask = CollectUntilHostCompactionCompletedAsync(runtime, session.SessionId, cts.Token);
 
         await runtime.CompactAsync(session, CreateOptions(providerId, temp.Path), cts.Token).ConfigureAwait(false);
@@ -444,7 +444,7 @@ public sealed class SessionRuntimeServiceTests
         await using var hub = new AgentHub(registry, temp.Path);
         await using var runtime = CreateRuntime(temp.Path, hub);
         var session = CreateSession("session-1", providerId, temp.Path);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TestTime.Seconds(5));
 
         Assert.AreSame(outcome, await runtime.CompactAsync(session, CreateOptions(providerId, temp.Path), AgentCompactionOptions.Default, cts.Token));
         // This session implements no compaction with options: it does not compact without the instructions it was given.
@@ -500,7 +500,7 @@ public sealed class SessionRuntimeServiceTests
             new AgentSendOptions { Input = new AgentInput([new AgentInputItem.Text("hello")]) });
         try
         {
-            await recorder.SendStarted.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            await recorder.SendStarted.Task.WithinAsync(TestTime.Seconds(2)).ConfigureAwait(false);
 
             var history = await runtime.GetOrResumeHistoryAsync(
                     session,
@@ -518,7 +518,7 @@ public sealed class SessionRuntimeServiceTests
             recorder.ReleaseSend.TrySetResult();
         }
 
-        await sendTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        await sendTask.WithinAsync(TestTime.Seconds(2)).ConfigureAwait(false);
     }
 
     [TestMethod]
@@ -569,7 +569,7 @@ public sealed class SessionRuntimeServiceTests
         var options = CreateOptions(providerId, temp.Path, model: "model-a");
         var first = await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false);
         await runtime.SendAsync(session, options, new AgentSendOptions { Input = new AgentInput([new AgentInputItem.Text("hello")]) })
-            .WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            .WithinAsync(TestTime.Seconds(2)).ConfigureAwait(false);
 
         Register();
 

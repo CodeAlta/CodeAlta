@@ -110,14 +110,14 @@ public sealed class ServerServiceTests
             StopRequestInterval = TimeSpan.FromMilliseconds(50),
         };
         var running = server.RunAsync(["run", "--data-root", root, "--urls", "http://127.0.0.1:0"]);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
+        await started.Task.WithinAsync(TestTime.Seconds(30), token);
 
         output.GetStringBuilder().Clear();
         Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["uninstall", "--data-root", root]), error.ToString());
         Assert.IsFalse(machine.IsRegistered(task));
         StringAssert.Contains(output.ToString(), "Stopping the server of this data root (process ");
         StringAssert.Contains(output.ToString(), "The server stopped.");
-        Assert.AreEqual(ServerExitCodes.Success, await running.WaitAsync(TimeSpan.FromSeconds(30), token), "it stopped as on Ctrl+C");
+        Assert.AreEqual(ServerExitCodes.Success, await running.WithinAsync(TestTime.Seconds(30), token), "it stopped as on Ctrl+C");
         Assert.IsFalse(CoordinatorServer.IsRunning(new ServerPaths(root)));
         Assert.IsFalse(File.Exists(new ServerPaths(root).StopRequestPath), "the request is consumed");
     }
@@ -136,7 +136,7 @@ public sealed class ServerServiceTests
             ConfigureServer = static options => new CoordinatorServerOptions { DataRoot = options.DataRoot, Urls = options.Urls, ConfigureLogging = static _ => { } },
         };
         var running = server.RunAsync(["run", "--data-root", root, "--urls", "http://127.0.0.1:0"]);
-        var stop = await started.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
+        var stop = await started.Task.WithinAsync(TestTime.Seconds(30), token);
 
         // A server the service does not stop keeps the data root: the service's server starts once it exits.
         Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["install", "--data-root", root]), error.ToString());
@@ -147,7 +147,7 @@ public sealed class ServerServiceTests
         {
             if (!command.StartsWith("launchctl bootout", StringComparison.Ordinal)) return;
             stop();
-            running.Wait(TimeSpan.FromSeconds(30), token);
+            running.Wait(TestTime.Seconds(30), token);
         };
         output.GetStringBuilder().Clear();
         Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["install", "--data-root", root, "--port", "2691"]), error.ToString());
@@ -171,12 +171,12 @@ public sealed class ServerServiceTests
             StopRequestInterval = TimeSpan.FromMilliseconds(20),
         };
         var running = server.RunAsync(["run", "--data-root", paths.DataRoot, "--urls", "http://127.0.0.1:0"]);
-        var stop = await started.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
+        var stop = await started.Task.WithinAsync(TestTime.Seconds(30), token);
         await Task.Delay(300, token);
         Assert.IsFalse(running.IsCompleted, "the request was for the server before this one");
         Assert.IsFalse(File.Exists(paths.StopRequestPath));
         stop();
-        await running.WaitAsync(TimeSpan.FromSeconds(30), token);
+        await running.WithinAsync(TestTime.Seconds(30), token);
     }
 
     [TestMethod]

@@ -27,13 +27,13 @@ public sealed class ModelProviderInitializationServiceTests
         var waiter = service.GetModelsAsync(descriptor.ProviderId, cancellation.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             cancellation.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => waiter);
             Assert.IsNull(protection.TryReserveRetirement("old-session"), "Canceled waiter is not the original refresh.");
             var original = service.RefreshProviderAsync(descriptor.ProviderId);
             release.TrySetResult();
-            await original.WaitAsync(TimeSpan.FromSeconds(5));
+            await original.WithinAsync(TestTime.Seconds(5));
             using var retirement = protection.TryReserveRetirement("old-session");
             Assert.IsNotNull(retirement);
         }
@@ -65,12 +65,12 @@ public sealed class ModelProviderInitializationServiceTests
         var refresh = host.ModelProviderInitializationService.RefreshProviderAsync(descriptor.ProviderId);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             var shutdown = host.DisposeAsync().AsTask();
             Assert.IsFalse(shutdown.IsCompleted);
             Assert.IsFalse(disposed.Task.IsCompleted);
             release.TrySetResult();
-            await Task.WhenAll(refresh, shutdown).WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.WhenAll(refresh, shutdown).WithinAsync(TestTime.Seconds(10));
             Assert.IsTrue(disposed.Task.IsCompleted);
         }
         finally { release.TrySetResult(); }
@@ -95,7 +95,7 @@ public sealed class ModelProviderInitializationServiceTests
         var observer = service.RefreshProviderAsync(descriptor.ProviderId, cancellation.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             cancellation.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => observer);
             if (retained)
@@ -114,7 +114,7 @@ public sealed class ModelProviderInitializationServiceTests
             if (!retained)
             {
                 release.TrySetResult();
-                await service.DrainAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                await service.DrainAsync().WithinAsync(TestTime.Seconds(5));
                 if (remove) Assert.IsTrue(registry.Unregister(descriptor.ProviderId));
                 else registry.RegisterOrReplace(descriptor, () => new TestRuntime(descriptor));
                 Assert.IsTrue(disposed.Task.IsCompleted);
@@ -145,7 +145,7 @@ public sealed class ModelProviderInitializationServiceTests
         var waiter = service.GetModelsAsync(descriptor.ProviderId, cancellation.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             cancellation.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => waiter);
             var drain = service.DrainAsync();
@@ -153,7 +153,7 @@ public sealed class ModelProviderInitializationServiceTests
             Assert.AreSame(drain, service.DrainAsync());
             await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => service.RefreshProviderAsync(descriptor.ProviderId));
             release.TrySetResult();
-            await drain.WaitAsync(TimeSpan.FromSeconds(5));
+            await drain.WithinAsync(TestTime.Seconds(5));
         }
         finally { release.TrySetResult(); }
     }
@@ -174,7 +174,7 @@ public sealed class ModelProviderInitializationServiceTests
         registry.RegisterOrReplace(blocker, () =>
         {
             lockHeld.TrySetResult();
-            Assert.IsTrue(releaseLock.Wait(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(releaseLock.Wait(TestTime.Seconds(10)));
             reentrantDrain = service!.DrainAsync();
             return new TestRuntime(blocker);
         });
@@ -182,20 +182,20 @@ public sealed class ModelProviderInitializationServiceTests
         service = new ModelProviderInitializationService(registry, null, new CallbackAdmission(() =>
         {
             registryWorker = Task.Run(async () => await registry.GetOrCreateRuntimeAsync(blocker.ProviderId));
-            lockHeld.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            lockHeld.Task.WithinAsync(TestTime.Seconds(5)).GetAwaiter().GetResult();
             admitted.TrySetResult();
             return protection.TryProtectAll();
         }));
         var refresh = Task.Run(() => service.RefreshProviderAsync(target.ProviderId));
         try
         {
-            await admitted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await admitted.Task.WithinAsync(TestTime.Seconds(5));
             // Drain must acquire _gate without needing the registry lock, and see the published original.
             var drainCall = Task.Run(() => new[] { service.DrainAsync() });
-            var drain = (await drainCall.WaitAsync(TimeSpan.FromSeconds(5)))[0];
+            var drain = (await drainCall.WithinAsync(TestTime.Seconds(5)))[0];
             Assert.IsFalse(drain.IsCompleted);
             releaseLock.Set();
-            await Task.WhenAll(refresh, drain, registryWorker!).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(refresh, drain, registryWorker!).WithinAsync(TestTime.Seconds(5));
             Assert.AreSame(drain, reentrantDrain);
         }
         finally { releaseLock.Set(); await refresh; if (registryWorker is not null) await registryWorker; }
@@ -241,14 +241,14 @@ public sealed class ModelProviderInitializationServiceTests
         var refresh = service.RefreshProviderAsync(descriptor.ProviderId);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             var failure = await Assert.ThrowsExactlyAsync<AgentDependencyRetentionException>(() => registry.DisposeAsync().AsTask());
             Assert.AreSame(registry, failure.Dependencies);
             Assert.IsFalse(disposed.Task.IsCompleted);
             Assert.IsFalse(otherDisposed.Task.IsCompleted);
             Assert.ThrowsExactly<ObjectDisposedException>(() => registry.ProtectPreparation(other.ProviderId));
             release.TrySetResult();
-            await refresh.WaitAsync(TimeSpan.FromSeconds(5));
+            await refresh.WithinAsync(TestTime.Seconds(5));
             await service.DrainAsync();
             await registry.DisposeAsync();
             Assert.IsTrue(disposed.Task.IsCompleted);
@@ -283,7 +283,7 @@ public sealed class ModelProviderInitializationServiceTests
             Assert.IsNotNull(drain);
             Assert.IsFalse(drain.IsCompleted, "Provider callbacks run only after the original task is published.");
             release.TrySetResult();
-            await Task.WhenAll(refresh, drain).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(refresh, drain).WithinAsync(TestTime.Seconds(5));
         }
         finally { release.TrySetResult(); }
     }
@@ -343,7 +343,7 @@ public sealed class ModelProviderInitializationServiceTests
         registry.RegisterOrReplace(descriptor, () => new HeldProbeRuntime(descriptor, entered, release));
         var service = new ModelProviderInitializationService(registry, null, protection);
         var original = service.GetModelsAsync(descriptor.ProviderId);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WithinAsync(TestTime.Seconds(5));
         release.SetException(new AggregateException(new InvalidOperationException("outer",
             new AgentDependencyRetentionException("fixture", "probe", [new IOException("held")], new object()))));
         await Assert.ThrowsExactlyAsync<AgentDependencyRetentionException>(() => original);
@@ -408,11 +408,11 @@ public sealed class ModelProviderInitializationServiceTests
         var service = new ModelProviderInitializationService(registry);
 
         var before = service.RefreshProviderAsync(descriptor.ProviderId);
-        await runtime.FirstProbeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await runtime.FirstProbeStarted.Task.WithinAsync(TestTime.Seconds(5));
         runtime.SignedIn = true;
         var after = service.RefreshProviderAfterChangeAsync(descriptor.ProviderId);
         runtime.ReleaseFirstProbe.TrySetResult();
-        await Task.WhenAll(before, after).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(before, after).WithinAsync(TestTime.Seconds(5));
 
         var state = service.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId);
         Assert.AreEqual(ModelProviderAvailability.Ready, state.Availability, state.StatusMessage);
@@ -429,7 +429,7 @@ public sealed class ModelProviderInitializationServiceTests
         registry.RegisterOrReplace(descriptor, () => runtime);
         var service = new ModelProviderInitializationService(registry);
 
-        await service.RefreshProviderAfterChangeAsync(descriptor.ProviderId).WaitAsync(TimeSpan.FromSeconds(5));
+        await service.RefreshProviderAfterChangeAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
 
         Assert.AreEqual(1, runtime.ProbeCount);
         Assert.AreEqual(ModelProviderAvailability.Ready, service.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId).Availability);
@@ -504,13 +504,13 @@ public sealed class ModelProviderInitializationServiceTests
             new ModelProviderInitializationOptions { DefaultProbeTimeout = TimeSpan.FromMilliseconds(50) });
 
         var initializeTask = service.InitializeAllAsync(CancellationToken.None);
-        await readyRuntime.ProbeCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await readyRuntime.ProbeCompleted.Task.WithinAsync(TestTime.Seconds(5));
 
         var readyState = service.CurrentStates.Single(state => state.ProviderId == readyDescriptor.ProviderId);
         Assert.AreEqual(ModelProviderAvailability.Ready, readyState.Availability);
         CollectionAssert.AreEqual(new[] { "ready-model" }, readyState.Models.Select(static model => model.Id).ToArray());
 
-        await initializeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await initializeTask.WithinAsync(TestTime.Seconds(5));
         var hangingState = service.CurrentStates.Single(state => state.ProviderId == hangingDescriptor.ProviderId);
         Assert.AreEqual(ModelProviderAvailability.Failed, hangingState.Availability);
         Assert.AreEqual("Timeout", hangingState.ErrorCategory);
@@ -530,7 +530,7 @@ public sealed class ModelProviderInitializationServiceTests
             registry,
             new ModelProviderInitializationOptions { DefaultProbeTimeout = TimeSpan.FromMilliseconds(50) });
 
-        await service.InitializeAllAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await service.InitializeAllAsync(CancellationToken.None).WithinAsync(TestTime.Seconds(10));
 
         var slow = service.CurrentStates.Single(state => state.ProviderId == slowDescriptor.ProviderId);
         Assert.AreEqual(ModelProviderAvailability.Ready, slow.Availability, slow.StatusMessage);
@@ -556,12 +556,12 @@ public sealed class ModelProviderInitializationServiceTests
             new ModelProviderInitializationOptions { PreparationPlaceTime = TimeSpan.FromMilliseconds(50) });
 
         var initialization = service.InitializeAllAsync(maxConcurrency: 1, CancellationToken.None);
-        await ready.ProbeCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await ready.ProbeCompleted.Task.WithinAsync(TestTime.Seconds(5));
 
         Assert.IsFalse(initialization.IsCompleted);
         Assert.AreEqual(ModelProviderAvailability.Probing, service.CurrentStates.Single(state => state.ProviderId == slowDescriptor.ProviderId).Availability);
         slow.Release.TrySetResult();
-        await initialization.WaitAsync(TimeSpan.FromSeconds(5));
+        await initialization.WithinAsync(TestTime.Seconds(5));
         Assert.AreEqual(ModelProviderAvailability.Ready, service.CurrentStates.Single(state => state.ProviderId == slowDescriptor.ProviderId).Availability);
     }
 
@@ -597,12 +597,12 @@ public sealed class ModelProviderInitializationServiceTests
 
         var service = new ModelProviderInitializationService(registry);
         var initializing = service.InitializeAllAsync(maxConcurrency: 2, CancellationToken.None);
-        await Task.WhenAll(entered.Take(2).Select(static value => value.Task)).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(entered.Take(2).Select(static value => value.Task)).WithinAsync(TestTime.Seconds(5));
         await Task.Delay(100);
         Assert.IsFalse(entered[2].Task.IsCompleted, "The third provider waits for one of the first two.");
 
         release.SetResult();
-        await initializing.WaitAsync(TimeSpan.FromSeconds(5));
+        await initializing.WithinAsync(TestTime.Seconds(5));
         Assert.IsTrue(entered[2].Task.IsCompleted);
         Assert.IsTrue(service.CurrentStates.All(static state => state.Availability == ModelProviderAvailability.Ready));
         await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.InitializeAllAsync(maxConcurrency: 0, CancellationToken.None));

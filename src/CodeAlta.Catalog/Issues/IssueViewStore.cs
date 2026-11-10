@@ -464,10 +464,10 @@ public sealed class IssueViewStore
     private static ViewFile ReadFile(IssueViewSource source, string[] table, string projectRoot)
     {
         var path = Locate(source, projectRoot);
-        if (!File.Exists(path)) return new([], null);
         try
         {
-            var file = ParseFile(SharedTextFile.ReadAllText(path), source, table);
+            if (SharedTextFile.TryReadAllText(path) is not { } text) return new([], null);
+            var file = ParseFile(text, source, table);
             return file.Problem is null ? file : file with { Problem = $"'{path}' {file.Problem}" };
         }
         catch (InvalidDataException exception)
@@ -612,7 +612,7 @@ public sealed class IssueViewStore
         var path = Locate(source, projectRoot);
         var folder = System.IO.Path.GetDirectoryName(path)!;
         using var writing = ConfigFileLock.Acquire(path);
-        var content = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
+        var content = SharedTextFile.TryReadAllText(path) ?? string.Empty;
         var updated = edit(content);
         if (string.Equals(updated, content, StringComparison.Ordinal)) return;
         try
@@ -631,7 +631,7 @@ public sealed class IssueViewStore
             if (!File.Exists(ignore)) File.WriteAllText(ignore, "*\n");
         }
 
-        File.WriteAllText(path, updated);
+        SharedTextFile.WriteAllText(path, updated);
     }
 
     private static void CheckView(string service, string name)

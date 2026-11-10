@@ -17,7 +17,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class ReviewHostTests
 {
     private const string Epoch = "6f1c8f0e-2a4b-4c55-9d1e-7a2b3c4d5e6f";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task ThePage_CommentsAPlan_AndAnAgentReplyIsSeenThroughTheWatch()
@@ -30,7 +30,7 @@ public sealed class ReviewHostTests
 
         var added = await fixture.Rpc.AddAsync(new(Epoch, fixture.Project.Id, null, "file", Fixture.Plan, "new", 3, 4, "Split these steps.", null), default);
         Assert.AreEqual(("ok", "c1", "draft", "- one\n- two"), (added.Status, added.Thread!.Id, added.Thread.State, added.Thread.Anchor));
-        Assert.IsTrue(await events.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await events.MoveNextAsync().AsTask().WithinAsync(Patience));
 
         // The Reviews page lists it, in the default space that holds every project.
         var overview = await fixture.Rpc.OverviewAsync(new(Epoch, "default", false), default);
@@ -52,9 +52,9 @@ public sealed class ReviewHostTests
         StringAssert.Contains(text, "Split these steps.");
 
         var replied = await fixture.Alta.InvokeAsync(["review", "reply", "--stdin"], "[{\"id\":\"c1\",\"reply\":\"Split.\"}]",
-            new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id }).AsTask().WaitAsync(Patience);
+            new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id }).AsTask().WithinAsync(Patience);
         Assert.AreEqual(AltaExitCodes.Success, replied.ExitCode, replied.Stderr + replied.Stdout);
-        Assert.IsTrue(await events.MoveNextAsync().AsTask().WaitAsync(Patience), "The page is told of the agent's reply.");
+        Assert.IsTrue(await events.MoveNextAsync().AsTask().WithinAsync(Patience), "The page is told of the agent's reply.");
         var after = (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, null, null, null, false), default)).Threads.Single();
         Assert.AreEqual(("addressed", "agent", "Split."), (after.State, after.Replies.Single().Author, after.Replies.Single().Body));
 
@@ -94,7 +94,7 @@ public sealed class ReviewHostTests
         await fixture.Rpc.AddAsync(new(Epoch, fixture.Project.Id, null, "file", Fixture.Plan, "new", 3, 4, "Split these steps.", null), default);
         AltaCommandResult? replied = null;
         fixture.DuringSend = async () => replied = await fixture.Alta.InvokeAsync(["review", "reply", "--stdin"], "[{\"id\":\"c1\",\"reply\":\"Split.\"}]",
-            new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id }).AsTask().WaitAsync(Patience);
+            new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id }).AsTask().WithinAsync(Patience);
 
         var submitted = await fixture.Rpc.SubmitAsync(new(Epoch, fixture.Project.Id, null, "file", Fixture.Plan, "changes_requested", null, "session-1", false), default);
 
@@ -157,7 +157,7 @@ public sealed class ReviewHostTests
             receipt.Complete(new(OwnedSessionCommandOutcome.Completed, new AgentRunId("run-answer")));
             send.Close();
             fixture.Owner.CloseAdmission();
-            await fixture.Owner.DrainAsync().WaitAsync(Patience);
+            await fixture.Owner.DrainAsync().WithinAsync(Patience);
         }
     }
 

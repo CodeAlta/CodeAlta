@@ -96,7 +96,7 @@ public sealed class SpacesRpcTests
         Assert.AreEqual("invalid", (await fixture.Service.ShownAsync(new(Epoch, "Not An Id"), default)).Status);
         Assert.AreEqual("work", fixture.View.ShownSpaceId);
 
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var stop = new CancellationTokenSource(TestTime.Seconds(30));
         await using var events = fixture.Service.WatchAsync(new(Epoch), stop.Token).GetAsyncEnumerator(stop.Token);
         var next = events.MoveNextAsync();
         // The page listens from its first read on: the request is made once it does.
@@ -406,7 +406,7 @@ public sealed class SpacesRpcTests
         Assert.AreEqual(2, told.Count, "A refused publication changes nothing.");
 
         // The page of the secondary window watches, then goes away: its tabs are no longer open.
-        using (var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+        using (var stop = new CancellationTokenSource(TestTime.Seconds(30)))
         {
             await using var events = fixture.Service.WatchAsync(new(Epoch), "window-2", stop.Token, secondary).GetAsyncEnumerator(stop.Token);
             var next = events.MoveNextAsync();

@@ -126,7 +126,8 @@ internal sealed partial class FleetServerService
                     Target = target, Port = request.Port ?? 2586, Address = address, DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath),
                     PackageFolder = Blank(request.PackageFolder), TrustedHostKey = TrustedHostKey(request.TrustedHostKey), OwnCertificate = request.OwnCertificate,
                     // Given to sudo -S on the machine for this setup only: never kept, never logged.
-                    AlwaysOn = request.AlwaysOn, SudoPassword = request.AlwaysOn && !string.IsNullOrEmpty(request.SudoPassword) ? request.SudoPassword : null,
+                    AlwaysOn = request.AlwaysOn, TailscaleServe = request.TailscaleServe,
+                    SudoPassword = (request.AlwaysOn || request.TailscaleServe) && !string.IsNullOrEmpty(request.SudoPassword) ? request.SudoPassword : null,
                 }, Reachable ?? AnswersAsync, async (linkAddress, setupAddress, code, pin, token) =>
                 {
                     try
@@ -233,6 +234,7 @@ internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string Owne
 /// <param name="TrustedHostKey">The fingerprint of the host key the person trusted, as it was shown to them; null for the keys ssh knows.</param>
 /// <param name="OwnCertificate">On the local network (no <paramref name="Address"/>), whether the server is reached over HTTPS with a certificate of its own, which every device pins; otherwise plain HTTP.</param>
 /// <param name="AlwaysOn">Over SSH, whether the server starts with its machine, with nobody logged in (sudo there).</param>
-/// <param name="SudoPassword">The password sudo asks there for <paramref name="AlwaysOn"/>, given once and never kept; null for none.</param>
+/// <param name="SudoPassword">The password sudo asks there for <paramref name="AlwaysOn"/> or <paramref name="TailscaleServe"/>, given once and never kept; null for none.</param>
+/// <param name="TailscaleServe">Over SSH, whether Tailscale Serve publishes the server there when <paramref name="Address"/> is the name of the machine on its tailnet and nothing serves it yet.</param>
 internal sealed record FleetServerSetupRequest(string ExpectedEpoch, string? Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
-    string? ToolPath, string? PackageFolder, string? TrustedHostKey, bool OwnCertificate = false, bool AlwaysOn = false, string? SudoPassword = null);
+    string? ToolPath, string? PackageFolder, string? TrustedHostKey, bool OwnCertificate = false, bool AlwaysOn = false, string? SudoPassword = null, bool TailscaleServe = false);

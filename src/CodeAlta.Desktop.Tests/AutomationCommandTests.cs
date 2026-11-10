@@ -511,26 +511,26 @@ public sealed class AutomationCommandTests
             return new CodeAlta.Agent.AgentProcessEnvironment([new("GIT_AUTHOR_EMAIL", "alex@contoso.example")]);
         });
         var folder = Path.GetTempPath();
-        var patience = TimeSpan.FromSeconds(60);
+        var patience = TestTime.Seconds(60);
 
-        var said = await commands.Start("echo hello-from-the-command", folder, "alpha").Completion.WaitAsync(patience);
+        var said = await commands.Start("echo hello-from-the-command", folder, "alpha").Completion.WithinAsync(patience);
         Assert.AreEqual(0, said.ExitCode, said.Output);
         StringAssert.Contains(said.Output, "hello-from-the-command");
 
         // The command runs with the identity of the space of its project.
         var identity = await commands.Start(OperatingSystem.IsWindows() ? "Write-Output \"[$env:GIT_AUTHOR_EMAIL]\"" : "echo \"[$GIT_AUTHOR_EMAIL]\"", folder, "alpha")
-            .Completion.WaitAsync(patience);
+            .Completion.WithinAsync(patience);
         StringAssert.Contains(identity.Output, "[alex@contoso.example]");
         Assert.AreEqual("alpha", asked);
 
-        var failed = await commands.Start("exit 3", folder, null).Completion.WaitAsync(patience);
+        var failed = await commands.Start("exit 3", folder, null).Completion.WithinAsync(patience);
         Assert.AreEqual(3, failed.ExitCode, failed.Output);
 
         var waiting = commands.Start("sleep 120", folder, null);
         await Task.Delay(500);
         Assert.IsFalse(waiting.Completion.IsCompleted);
         waiting.Kill();
-        Assert.AreNotEqual(0, (await waiting.Completion.WaitAsync(patience)).ExitCode);
+        Assert.AreNotEqual(0, (await waiting.Completion.WithinAsync(patience)).ExitCode);
         waiting.Kill();
     }
 

@@ -3,12 +3,13 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { fixtureChoices, session } from "./fixtureServer";
 import { openPhone } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
 const providers = [{ id: "codex", name: "Codex" }, { id: "claude", name: "Claude Code" }];
 
-test("the options of a session move it to another provider of its space while it is idle, as the desktop does", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the options of a session move it to another provider of its space while it is idle, as the desktop does", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const phone = await openPhone(server => {
     server.state.sessions = [session("s1", "Fix the parser", "p1", 1), session("s2", "Write the docs", "p1", 5, { live: "running" })];
     for (const id of ["s1", "s2"]) {
@@ -70,7 +71,7 @@ test("the options of a session move it to another provider of its space while it
   }
 
   async function waitUntil(condition: () => boolean, what: string) {
-    const deadline = Date.now() + 8000;
+    const deadline = Date.now() + testLimit(8000);
     while (!condition()) {
       if (Date.now() > deadline) assert.fail(`${what}: not seen`);
       await new Promise(resolve => setTimeout(resolve, 50));

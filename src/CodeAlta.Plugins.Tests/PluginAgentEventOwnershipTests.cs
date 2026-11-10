@@ -43,16 +43,16 @@ public sealed class PluginAgentEventOwnershipTests
         {
             Assert.IsInstanceOfType<TimeoutException>(retained.Primary);
             Assert.IsInstanceOfType<TimeoutException>(retained.Cleanup);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await entered.Task.WithinAsync(TestTime.Seconds(30));
             acquire.TrySetResult();
-            await acquired.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await acquired.Task.WithinAsync(TestTime.Seconds(30));
             Assert.IsFalse(retained.Fixture.CleanupOutcome.IsCompleted);
             Assert.AreEqual(0, retained.Fixture.Plugins[0].Disposals);
         }
         catch (Exception ex) { primary = ex; }
         finally { acquire.TrySetResult(); finish.TrySetResult(); }
         Exception? cleanup;
-        try { cleanup = await retained.Fixture.CleanupOutcome.WaitAsync(TimeSpan.FromSeconds(30)); }
+        try { cleanup = await retained.Fixture.CleanupOutcome.WithinAsync(TestTime.Seconds(30)); }
         catch (Exception ex) { cleanup = ex; }
         if (primary is not null || cleanup is not null)
             throw new Fixture.RetainedFixtureFailure(retained.Fixture, primary, cleanup);
@@ -121,7 +121,7 @@ public sealed class PluginAgentEventOwnershipTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(20);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("The condition was not met in time.");
@@ -641,7 +641,7 @@ public sealed class PluginAgentEventOwnershipTests
         }
         internal static async Task<Exception?> ObserveOutcome(Task work) { try { await work.ConfigureAwait(false); return null; } catch (Exception ex) { return ex; } }
         internal static Task Run(Func<Fixture, Task> body)
-            => Run(body, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            => Run(body, TestTime.Seconds(30), TestTime.Seconds(30));
 
         internal static async Task Run(Func<Fixture, Task> body, TimeSpan bodyWait, TimeSpan cleanupWait)
         {
@@ -650,13 +650,13 @@ public sealed class PluginAgentEventOwnershipTests
             var original = f.Keep(() => body(f));
             Task<Exception?> bodyOutcome;
             lock (f._gate) bodyOutcome = f._outcomes[f._originals.IndexOf(original)];
-            try { primary = await bodyOutcome.WaitAsync(bodyWait); } catch (Exception ex) { primary = ex; }
+            try { primary = await bodyOutcome.WithinAsync(bodyWait); } catch (Exception ex) { primary = ex; }
             f.BeginDrain();
             // Retain one cleanup original and its observer before launch. Wait deadlines never cancel it.
             f._cleanup = new CleanupOperation(() => f.CleanupAsync(original, bodyOutcome, primary));
             f._cleanup.Launch();
             Exception? cleanup;
-            try { cleanup = await f._cleanup.Outcome.WaitAsync(cleanupWait); }
+            try { cleanup = await f._cleanup.Outcome.WithinAsync(cleanupWait); }
             catch (Exception ex) { cleanup = ex; }
             if (primary is not null || cleanup is not null)
                 throw new RetainedFixtureFailure(f, primary, cleanup);

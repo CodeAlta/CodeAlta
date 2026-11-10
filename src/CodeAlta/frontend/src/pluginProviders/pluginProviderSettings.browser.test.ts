@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../pluginProviders/pluginProviderSettings.mount.tsx", fixture: "pluginSettingsFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000 } as const;
 
-test("the panel of a plugin provider shows once after the form changes around it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the panel of a plugin provider shows once after the form changes around it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const panels = `document.querySelectorAll('.plugin-provider-panel').length`;
     await page.until(`document.querySelector('.provider-state-problem') && document.querySelector('.plugin-provider-command code')`, "the signed-out provider and its command");

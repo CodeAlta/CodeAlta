@@ -655,7 +655,7 @@ internal sealed class ReminderTaskScope
     {
         try
         {
-            var bounded = Track(task.WaitAsync(TimeSpan.FromSeconds(5)));
+            var bounded = Track(task.WithinAsync(TestTime.Seconds(5)));
             await bounded.ConfigureAwait(false);
             return null;
         }

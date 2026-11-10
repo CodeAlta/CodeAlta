@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./browserHarness";
+import { testLimit } from "../testTime";
 
 // The canvas of one session and its sub-agents, and the button of the card of a turn that opens it, in headless Edge under the
 // production content security policy and React StrictMode. Each test ends by checking that the page raised no error.
@@ -21,7 +22,7 @@ const parentOf = `(() => { const all = statsFixture.control.data.sessions; const
   const tree = [parent.id]; for (let grown = true; grown;) { grown = false; for (const one of all) if (one.parent && tree.includes(one.parent) && !tree.includes(one.id)) { tree.push(one.id); grown = true; } }
   return { id: parent.id, title: parent.title, tree }; })()`;
 
-test("the canvas of a session asks every page for that session and its sub-agents, and neither a chip nor Reset lifts it", { skip: !edge, timeout: 300_000 }, async () => {
+test("the canvas of a session asks every page for that session and its sub-agents, and neither a chip nor Reset lifts it", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     // The fixture first, to learn a session with sub-agents; then the canvas of that session, in a window that shows a named space.
     await render(page, { scenario: "ready" });
@@ -116,7 +117,7 @@ test("the canvas of a session asks every page for that session and its sub-agent
   });
 });
 
-test("a session the statistics have not read is named by its id and shows nothing of the others", { skip: !edge, timeout: 300_000 }, async () => {
+test("a session the statistics have not read is named by its id and shows nothing of the others", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready", sessionId: "01a00000-0000-7000-8000-000000000000", instanceId: "canvas-unread" });
     await page.until(`document.querySelector('.statistics-canvas') && !document.querySelector('.stats-block[data-state="loading"]') && !document.querySelector('.stats-tile-skeleton')`, "the canvas of a session that is not read");
@@ -134,7 +135,7 @@ test("a session the statistics have not read is named by its id and shows nothin
   });
 });
 
-test("the button at the foot of the card of a turn runs for the session of the card and closes the details", { skip: !edge, timeout: 180_000 }, async () => {
+test("the button at the foot of the card of a turn runs for the session of the card and closes the details", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   await withCanvas(async page => {
     const opened = `document.querySelector('dialog.timeline-details-dialog[open]')`;
     const button = `[...document.querySelectorAll('dialog.timeline-details-dialog button')].find(one => one.textContent.trim() === 'Session statistics')`;

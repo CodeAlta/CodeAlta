@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.PrivateNetworks;
 
 namespace CodeAlta.Desktop.Fleet.MachineSetup;
 
@@ -46,8 +48,18 @@ internal sealed record SshServerSetupRequest
     /// </summary>
     public bool AlwaysOn { get; init; }
 
-    /// <summary>Gets the password <c>sudo</c> asks there for <see cref="AlwaysOn"/>; given to <c>sudo -S</c> only, never kept. Null for none.</summary>
+    /// <summary>
+    /// Gets the password <c>sudo</c> asks there for <see cref="AlwaysOn"/> or <see cref="TailscaleServe"/>; given to
+    /// <c>sudo -S</c> only, never kept. Null for none.
+    /// </summary>
     public string? SudoPassword { get; init; }
+
+    /// <summary>
+    /// Gets whether the person asked that Tailscale Serve publish the server there, when <see cref="Address"/> is the name
+    /// of the computer on its tailnet and nothing serves it yet. Without it, the setup only says what is missing, with the
+    /// command.
+    /// </summary>
+    public bool TailscaleServe { get; init; }
 }
 
 /// <summary>The steps of a server set up over SSH.</summary>
@@ -147,7 +159,10 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             + (onNetwork ? ", every network of the machine" : ", its loopback") + (encrypted ? ", HTTPS with its own certificate" : "") + (restart is null ? "" : $" · {restart}")));
 
         progress(new(SshServerSteps.Reach, "running", address.ToString().TrimEnd('/')));
-        if (await reachable(address, pin, cancellationToken).ConfigureAwait(false) is { } blocked)
+        var blocked = await reachable(address, pin, cancellationToken).ConfigureAwait(false);
+        if (blocked is { BlockedHere: false } && !onNetwork && facts.Tailscale && IsTailnetName(address))
+            blocked = await ServeOnTailnetAsync(request, facts, address, blocked, reachable, progress, cancellationToken).ConfigureAwait(false);
+        if (blocked is not null)
             throw new SshSetupException(SshServerSteps.Reach, blocked.BlockedHere ? "local_network_blocked"
                 : onNetwork ? facts.Firewall == "ufw" ? "server_blocked_ufw" : "server_blocked" : "server_proxy_unreachable",
                 $"{address.ToString().TrimEnd('/')} · {blocked.Reason}");
@@ -169,6 +184,64 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             return linkId;
         }
     }
+
+    // A name of a tailnet, which Tailscale Serve publishes over HTTPS with a certificate of that name.
+    private static bool IsTailnetName(Uri address) => address.Scheme == Uri.UriSchemeHttps && address.Host.EndsWith(".ts.net", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What the person runs there so that Tailscale Serve publishes the server at an HTTPS port of the tailnet.</summary>
+    internal static string TailscaleServeCommand(SshMachineFacts facts, int httpsPort, int port)
+        => string.Create(CultureInfo.InvariantCulture, $"{(facts.Os == "Linux" && facts.Sudo != "root" ? "sudo " : "")}tailscale serve --bg --https={httpsPort} http://127.0.0.1:{port}");
+
+    // Behind a name of its tailnet, what stands in front of the server is Tailscale Serve on its machine: Tailscale there
+    // says what it serves at that name, which tells why the address does not answer, and publishes the server when the
+    // person asked. Null once the address answers; otherwise what the failure says.
+    private async Task<ReachProblem?> ServeOnTailnetAsync(SshServerSetupRequest request, SshMachineFacts facts, Uri address, ReachProblem blocked,
+        Func<Uri, string?, CancellationToken, Task<ReachProblem?>> reachable, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
+    {
+        var cli = new SshTailscaleCli(ssh, request.Target, request.TrustedHostKey, facts, request.SudoPassword);
+        var serve = new TailscaleServe(cli);
+        var status = await serve.CheckAsync(request.Port, address.Port, cancellationToken).ConfigureAwait(false);
+        if (status.State == "serve-disabled") throw ServeDisabled(status);
+        // Another computer of the tailnet, or an older name of this one: nothing published here answers at that name.
+        if (status.Url is { } url && new Uri(url).Host is var name && !string.Equals(name, address.Host, StringComparison.OrdinalIgnoreCase))
+            return new ReachProblem($"{blocked.Reason} · on its tailnet, this machine is {name}");
+        switch (status.State)
+        {
+            case "not-serving":
+                break;
+            case "serving":
+                return Published(blocked);
+            case "port-taken":
+                return new ReachProblem($"{blocked.Reason} · Tailscale Serve publishes something else on port {address.Port.ToString(CultureInfo.InvariantCulture)} of the machine");
+            case "not-running":
+                return new ReachProblem($"{blocked.Reason} · Tailscale does not run on the machine, or is not signed in");
+            default:
+                return new ReachProblem($"{blocked.Reason} · {status.Detail}");
+        }
+
+        var command = TailscaleServeCommand(facts, address.Port, request.Port);
+        // The offer to publish comes with the password of sudo where the change needs it, so that one try publishes.
+        if (!request.TailscaleServe)
+            throw new SshSetupException(SshServerSteps.Reach, await cli.ChangesAskSudoPasswordAsync(cancellationToken).ConfigureAwait(false) ? "tailscale_serve_missing_sudo" : "tailscale_serve_missing", command);
+        progress(new(SshServerSteps.Reach, "running", $"{address.ToString().TrimEnd('/')} · Tailscale Serve"));
+        status = await serve.PublishAsync(request.Port, address.Port, cancellationToken).ConfigureAwait(false);
+        if (status.State == "serve-disabled") throw ServeDisabled(status);
+        if (status.State != "serving")
+        {
+            throw cli.NeedsPassword ? new SshSetupException(SshServerSteps.Reach, "tailscale_sudo_password_needed", $"sudo asks the password of {facts.User} there.")
+                : cli.SudoRefused ? new SshSetupException(SshServerSteps.Reach, "sudo_refused", Lines(status.Detail))
+                : new SshSetupException(SshServerSteps.Reach, "tailscale_serve_failed", $"{Lines(status.Detail)}\n{command}");
+        }
+
+        return await reachable(address, null, cancellationToken).ConfigureAwait(false) is { } still ? Published(still) : null;
+
+        // Tailscale Serve forwards to the server, and the address still does not answer: what is left is the way from this computer.
+        static ReachProblem Published(ReachProblem problem) => new($"{problem.Reason} · Tailscale Serve publishes it on the machine: check that this computer is on the same tailnet");
+    }
+
+    // Serve or HTTPS certificates are not turned on for the tailnet: the page where its admin turns them on.
+    private static SshSetupException ServeDisabled(PrivateNetworkStatus status)
+        => new(SshServerSteps.Reach, "tailscale_serve_disabled", status.FixUrl ?? TailscaleServe.DnsUrl);
 
     private static string InstallScript(SshMachineFacts facts, string toolPath, string version, string? source)
     {

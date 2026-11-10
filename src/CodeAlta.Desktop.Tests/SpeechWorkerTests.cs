@@ -107,7 +107,7 @@ public sealed class SpeechWorkerTests
         Assert.AreEqual(2, Frames().Count(static frame => frame.Kind == SpeechFrameKind.Final));
 
         SpeechWorkerProtocol.Write(process.Input, SpeechFrameKind.Exit, 0, []);
-        await reading.WaitAsync(TimeSpan.FromSeconds(10));
+        await reading.WithinAsync(TestTime.Seconds(10));
         await Until(() => process.Ended, "the worker to end");
         Assert.IsTrue(engine.Recognizer!.Disposed, "the model is released when the worker ends");
     }
@@ -168,7 +168,7 @@ public sealed class SpeechWorkerTests
         {
             Assert.AreEqual("load_failed", await client.ProbeAsync(LoadOf("broken"), default));
             var refused = client.Start(LoadOf("broken"));
-            Assert.AreEqual(new SpeechTranscriptSnapshot("failed", "", "", "load_failed"), await refused.Over.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.AreEqual(new SpeechTranscriptSnapshot("failed", "", "", "load_failed"), await refused.Over.WithinAsync(TestTime.Seconds(10)));
 
             // Another model starts another worker; the engine closing its process ends the dictation with an error.
             Assert.IsNull(await client.ProbeAsync(LoadOf("good"), default));
@@ -177,7 +177,7 @@ public sealed class SpeechWorkerTests
             Assert.IsTrue(client.Append(dictation.Id, 0, Audio(8, loud: true)));
             await Until(() => dictation.Current.PartialText.Length > 0, "the text so far");
             started[^1].Kill();
-            Assert.AreEqual("engine_failed", (await dictation.Over.WaitAsync(TimeSpan.FromSeconds(10))).Error);
+            Assert.AreEqual("engine_failed", (await dictation.Over.WithinAsync(TestTime.Seconds(10))).Error);
             await Until(() => client.ModelDirectory is null, "the dead worker to be forgotten");
             Assert.AreEqual("failed", (await client.StopAsync(dictation.Id, cancel: false, default))!.State);
 

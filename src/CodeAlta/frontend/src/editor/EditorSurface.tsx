@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
 import { equationKey, equationKeybinding, useEquationEditing } from "../equationEditing";
-import { followPageFont, followShellTheme, monaco, pageFontFamily } from "../monaco/monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontOptions } from "../monaco/monacoEnvironment";
 import { attachPromptMath } from "../promptMath";
 import { useShellLanguage } from "../shellLanguage";
 import { ensureMonacoLanguage } from "../monaco/monacoLanguages";
@@ -90,7 +90,7 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
   useLayoutEffect(() => {
     const node = host.current!;
     const instance = monaco.editor.create(node, { model: null, automaticLayout: true, ariaLabel: label, readOnly, glyphMargin: comments,
-      fontFamily: pageFontFamily("code"), fontSize: 13, lineHeight: 20, minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 },
+      ...pageFontOptions("code"), minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 },
       lineNumbers: "on", lineNumbersMinChars: 4, scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: true,
       folding: true, showFoldingControls: "mouseover", matchBrackets: "always", occurrencesHighlight: "singleFile", selectionHighlight: true,

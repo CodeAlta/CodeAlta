@@ -268,7 +268,7 @@ public sealed class DirectoryVisibilityTests
 
     private static async Task WaitForAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(20);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("Timed out.");

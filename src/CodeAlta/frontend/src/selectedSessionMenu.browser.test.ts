@@ -7,10 +7,11 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 // Mount main.tsx itself, not a test-provided PluginButtonsContext around an extracted row: a hook in App cannot
 // read the provider App returns. Both a project and Chats must use the row's identity without opening that session.
-test("the selected-scope Explorer menu reads plugins below App's provider and acts for its row without selecting it", { skip: !browserExecutable, timeout: 90_000 }, async () => {
+test("the selected-scope Explorer menu reads plugins below App's provider and acts for its row without selecting it", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-selected-session-menu-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -55,7 +56,7 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -63,7 +64,7 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
     const until = async (condition: string, what: string) => {
-      const found = await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
+      const found = await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
       assert.equal(found, true, `${what}; ${exceptions.join("\n")}; menu: ${await evaluate("document.querySelector('.session-tab-popup')?.textContent")}`);
     };
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");

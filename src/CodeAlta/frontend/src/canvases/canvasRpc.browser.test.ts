@@ -7,10 +7,11 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
-test("a canvas script calls its plugin under StrictMode: one session, a call, an error, a stream, a reload, a hidden tab", { skip: !edge, timeout: 180_000 }, async () => {
+test("a canvas script calls its plugin under StrictMode: one session, a call, an error, a stream, a reload, a hidden tab", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-canvas-rpc-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -21,13 +22,13 @@ test("a canvas script calls its plugin under StrictMode: one session, a call, an
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root" style="height:400px"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(`${method} timed out`)), 30_000);
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))), testLimit(30_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -41,9 +42,9 @@ test("a canvas script calls its plugin under StrictMode: one session, a call, an
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
-    const settle = (milliseconds = 300) => new Promise(resolve => setTimeout(resolve, milliseconds));
+    const settle = (milliseconds = 300) => new Promise(resolve => setTimeout(resolve, milliseconds)); // not a limit: a pause
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("window.rpcFixture"), true);
 
@@ -69,7 +70,7 @@ test("a canvas script calls its plugin under StrictMode: one session, a call, an
     await new Promise(resolve => setTimeout(resolve, 300));
     assert.equal(await evaluate("rpcFixture.state.acks.length"), before);
     await evaluate("rpcFixture.render({ visible: true })");
-    assert.equal(await wait("document.querySelector('.rpc-board .stream')?.textContent.startsWith('latest 50')", 15_000), true);
+    assert.equal(await wait("document.querySelector('.rpc-board .stream')?.textContent.startsWith('latest 50')", testLimit(15_000)), true);
 
     // The window loses its host for a while: a call asks again after a wait that grows, not twice a second for as long as it lasts.
     await evaluate("rpcFixture.state.rpcOpenStatus = 'not_watching'; rpcFixture.state.rpcOpens = 0; rpcFixture.push({ kind: 'rpcClosed', connection: rpcFixture.state.connection, reason: 'watch_ended' }); rpcFixture.render({ visible: false })");
@@ -81,11 +82,11 @@ test("a canvas script calls its plugin under StrictMode: one session, a call, an
     assert.ok(asked >= 2 && asked <= 4, `${asked} tries in under three seconds`);
     // The host is back: the next try connects, and the call is answered.
     await evaluate("rpcFixture.state.rpcOpenStatus = 'ok'");
-    assert.equal(await wait("document.querySelector('.rpc-board .call')?.textContent === 'echo 1'", 15_000), true);
+    assert.equal(await wait("document.querySelector('.rpc-board .call')?.textContent === 'echo 1'", testLimit(15_000)), true);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 5000))]); }
+    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, testLimit(5000)))]); }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

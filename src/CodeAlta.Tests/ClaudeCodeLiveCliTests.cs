@@ -20,7 +20,7 @@ namespace CodeAlta.Tests;
 public sealed class ClaudeCodeLiveCliTests
 {
     private const string Model = "haiku";
-    private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan Timeout = TestTime.Minutes(3);
 
     [TestMethod]
     public async Task Probe_ListsTheModelsOfTheInstalledCli()
@@ -28,7 +28,7 @@ public sealed class ClaudeCodeLiveCliTests
         var command = RequireCli();
         await using var runtime = new ClaudeCodeModelProviderRuntime(CreateOptions(command));
 
-        var probe = await runtime.ProbeAsync().WaitAsync(Timeout);
+        var probe = await runtime.ProbeAsync().WithinAsync(Timeout);
 
         Console.WriteLine($"{probe.Availability}: {probe.StatusMessage}");
         Console.WriteLine(string.Join(", ", probe.Models.Select(static model => $"{model.Id} ({model.DisplayName})")));
@@ -197,8 +197,8 @@ public sealed class ClaudeCodeLiveCliTests
         // whose first part is a long `sleep` (checked with CLI 2.1.300, 2.1.309 and 2.1.316): this one starts with an echo.
         var stopped = live.Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Run exactly this shell command with the Bash tool, in one call: echo waiting && sleep 60") });
         await live.WaitForAsync(static e => e is AgentActivityEvent { Name: "Bash", Phase: AgentActivityPhase.Started });
-        await live.Session.AbortAsync().WaitAsync(Timeout);
-        await Assert.ThrowsAsync<OperationCanceledException>(() => stopped.WaitAsync(Timeout));
+        await live.Session.AbortAsync().WithinAsync(Timeout);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => stopped.WithinAsync(Timeout));
 
         // Another runtime, as after a restart of CodeAlta, resumes the transcript of the CLI.
         var sessionId = live.Session.SessionId;
@@ -361,7 +361,7 @@ public sealed class ClaudeCodeLiveCliTests
                 execution,
                 new AgentSendOptions { Input = AgentInput.Text("What is the code word of this CodeAlta session? Answer with the word only.") },
                 CancellationToken.None);
-            await settled.Task.WaitAsync(Timeout);
+            await settled.Task.WithinAsync(Timeout);
             await streaming.CancelAsync();
             await stream.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
@@ -521,7 +521,7 @@ public sealed class ClaudeCodeLiveCliTests
             Assert.IsNotNull(pid);
             var entryPath = Path.Combine(root, "sessions", $"{pid}.json");
             JsonElement? entry = null;
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(20);
             while (DateTime.UtcNow < deadline)
             {
                 if (File.Exists(entryPath))
@@ -703,7 +703,7 @@ public sealed class ClaudeCodeLiveCliTests
 
             var live = new LiveSession(command, tools, permissionMode, guard);
             live._runtime = new ClaudeCodeModelProviderRuntime(CreateOptions(command));
-            var probe = await live._runtime.ProbeAsync().WaitAsync(Timeout);
+            var probe = await live._runtime.ProbeAsync().WithinAsync(Timeout);
             if (probe.Availability is not ModelProviderAvailability.Ready)
             {
                 await live._runtime.DisposeAsync();
@@ -739,7 +739,7 @@ public sealed class ClaudeCodeLiveCliTests
             var before = Events.Length;
             try
             {
-                await Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text(prompt) }).WaitAsync(Timeout);
+                await Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text(prompt) }).WithinAsync(Timeout);
             }
             finally
             {
@@ -765,7 +765,7 @@ public sealed class ClaudeCodeLiveCliTests
                 {
                     await Task.Delay(50);
                 }
-            }).WaitAsync(Timeout);
+            }).WithinAsync(Timeout);
 
         public void Dispose()
         {
