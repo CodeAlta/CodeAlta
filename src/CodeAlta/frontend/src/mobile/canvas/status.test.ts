@@ -88,7 +88,7 @@ test("each Tailscale state that keeps a phone out says what fixes it, and Try ag
   const problem = (state: string, fixUrl: string | null = null) =>
     mobileView(serving({ connectUrl: null, address: null, qr: null }, { state, fixUrl, detail: "line of the plugin" })).problems[0];
   const notInstalled = problem("not-installed", "https://tailscale.com/download");
-  assert.deepEqual([notInstalled.intent, notInstalled.fix, notInstalled.retry], ["danger", { label: "Download Tailscale", url: "https://tailscale.com/download" }, false]);
+  assert.deepEqual([notInstalled.intent, notInstalled.fix, notInstalled.retry], ["danger", { label: "Download Tailscale", url: "https://tailscale.com/download" }, true]);
   const serve = problem("serve-disabled", "https://login.tailscale.com/admin/settings/features");
   assert.deepEqual([serve.title, serve.fix?.label, serve.retry], ["Tailscale Serve is not enabled for this tailnet.", "Enable it in the admin console", true]);
   assert.deepEqual([problem("not-running").retry, problem("not-running").fix], [true, null]);

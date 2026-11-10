@@ -164,7 +164,7 @@ import { createCoalescedRead } from "./coalescedRead";
 import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDrag, type SessionRowDrag } from "./explorer/sessionDrag";
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
-import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
+import { confirmDeletedSession, createSessionDeletion, deleteSelectionCurrent, hostSessionPresence, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
@@ -463,6 +463,7 @@ import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionContextSize, sessionFastMode, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { SandboxSettings } from "./sandbox/SandboxSettings";
 import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
+import { keepIfSame } from "./keepIfSame";
 import { createExternalOpener, ExternalOpenerContext, failure } from "./externalEditors/externalEditors";
 import { MarkdownLinkFilesContext, type MarkdownLinkFiles } from "./MarkdownLinkMenu";
 import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
@@ -3282,7 +3283,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const controller = new AbortController();
     void sandboxSettings.draft({ expectedEpoch: status.hostEpoch, providerKey: draftSandboxProvider, modelId: draftSandboxModel, projectId,
       spaceId: spacesState.available ? spaceId : null, own: null }, { signal: controller.signal, timeoutMilliseconds: 8000 })
-      .then(reply => { if (!controller.signal.aborted) setDraftSandboxScopes(reply.status === "ok" ? reply : null); }).catch(() => { /* No row then. */ });
+      .then(reply => { if (!controller.signal.aborted) setDraftSandboxScopes(scopes => keepIfSame(scopes, reply.status === "ok" ? reply : null)); }).catch(() => { /* No row then. */ });
     return () => controller.abort();
   }, [status?.hostEpoch, owned, draftSandboxProvider, draftSandboxModel, projectId, spacesState.available, spaceId, creatingVisible, settingsSection, settingsOpen]);
   const currentHostEpoch = useRef(status?.hostEpoch);
@@ -3575,7 +3576,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!pluginEpoch) { setPluginContributed(noPluginContributions); return; }
     const abort = new AbortController();
     void pluginUi.contributions({ expectedEpoch: pluginEpoch, projectId: pluginProjectId, sessionId: null }, { signal: abort.signal, timeoutMilliseconds: 8000 })
-      .then(reply => { if (!abort.signal.aborted) setPluginContributed(pluginContributions(reply, pluginProjectId) ?? noPluginContributions); },
+      .then(reply => { if (!abort.signal.aborted) setPluginContributed(contributed => keepIfSame(contributed, pluginContributions(reply, pluginProjectId) ?? noPluginContributions)); },
         () => { if (!abort.signal.aborted) setPluginContributed(noPluginContributions); });
     return () => abort.abort();
   }, [pluginEpoch, pluginProjectId, pluginRevision]);
@@ -5754,7 +5755,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (result.kind === "deleted") {
         const fresh = await refreshProjects(creationRefresh.current.signal);
         if (!creationAlive.current) return;
-        const recovered = fresh && deletedSessionRecovery(fresh, result);
+        const recovered = fresh && await confirmDeletedSession(fresh, result, hostSessionPresence(workspace.sessionChildren, status?.hostEpoch));
+        if (!creationAlive.current) return;
         if (recovered && capability.canMutate()) {
           if (deleteSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
             setSessionId(recovered.sessionId);
@@ -5785,7 +5787,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const captured = uncertainDelete.current;
     const fresh = await refreshProjects(creationRefresh.current.signal);
     if (!creationAlive.current || !captured) return;
-    const recovered = fresh && deletedSessionRecovery(fresh, captured);
+    const recovered = fresh && await confirmDeletedSession(fresh, captured, hostSessionPresence(workspace.sessionChildren, status?.hostEpoch));
+    if (!creationAlive.current || uncertainDelete.current !== captured) return;
     if (recovered) {
       uncertainDelete.current = null;
       setDeleteLocked(false);

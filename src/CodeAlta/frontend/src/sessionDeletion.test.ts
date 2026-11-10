@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage } from "./sessionDeletion";
+import { confirmDeletedSession, createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, hostSessionPresence, sessionDeletionMessage } from "./sessionDeletion";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
@@ -30,6 +30,35 @@ test("a delete freezes scope, session identity and listed title; recovered selec
   assert.equal(deletedSessionRecovery({ ...snapshot, projects: [{ ...snapshot.projects[0], path: global.projectPath }] }, result), undefined);
   assert.equal(deletedSessionRecovery({ ...snapshot, projects: [{ ...snapshot.projects[0], archived: true }] }, result), undefined);
   assert.deepEqual(deletedSessionRecovery({ ...snapshot, sessions: [] }, result), { projectId: "p1", sessionId: null });
+});
+
+test("a truncated catalog confirms a deletion by asking the host whether that session is gone", async () => {
+  const result = { target: project, id: "s1" };
+  const truncated = { ...snapshot, sessionsTruncated: true };
+  const asked: string[] = [];
+  const presence = (answer: "absent" | "present" | "unknown") => async (id: string) => { asked.push(id); return answer; };
+  assert.deepEqual(await confirmDeletedSession(truncated, result, presence("absent")), { projectId: "p1", sessionId: "s2" });
+  assert.deepEqual(asked, ["s1"]);
+  assert.equal(await confirmDeletedSession(truncated, result, presence("present")), undefined);
+  assert.equal(await confirmDeletedSession(truncated, result, presence("unknown")), undefined);
+  asked.length = 0;
+  // A complete catalog decides alone, and one that still lists the session or lost its project needs no question.
+  assert.deepEqual(await confirmDeletedSession(snapshot, result, presence("present")), { projectId: "p1", sessionId: "s2" });
+  assert.equal(await confirmDeletedSession({ ...truncated, sessions: [...snapshot.sessions, { ...snapshot.sessions[0], id: "s1" }] }, result, presence("absent")), undefined);
+  assert.equal(await confirmDeletedSession({ ...truncated, projects: [{ ...snapshot.projects[0], archived: true }] }, result, presence("absent")), undefined);
+  assert.deepEqual(asked, []);
+});
+
+test("the host says a session is absent only when it reads every session and finds none with that id", async () => {
+  const replyFor = (status: string, overrides = {}) => async () => ({ status, hostEpoch: epoch, sessionId: "s1", root: null, rootAtWork: false,
+    children: [], descendantIds: [], directCount: 0, totalCount: 0, truncated: false, ...overrides });
+  assert.equal(await hostSessionPresence(replyFor("session_missing"), epoch)("s1"), "absent");
+  assert.equal(await hostSessionPresence(replyFor("ok", { root: snapshot.sessions[0] }), epoch)("s1"), "present");
+  assert.equal(await hostSessionPresence(replyFor("read_failed"), epoch)("s1"), "unknown");
+  assert.equal(await hostSessionPresence(replyFor("session_missing", { hostEpoch: other }), epoch)("s1"), "unknown");
+  assert.equal(await hostSessionPresence(replyFor("session_missing", { sessionId: "s2" }), epoch)("s1"), "unknown");
+  assert.equal(await hostSessionPresence(async () => { throw new Error("lost"); }, epoch)("s1"), "unknown");
+  assert.equal(await hostSessionPresence(replyFor("session_missing"), undefined)("s1"), "unknown");
 });
 
 test("an unusable title, a stale host and malformed responses never delete or retry automatically", async () => {

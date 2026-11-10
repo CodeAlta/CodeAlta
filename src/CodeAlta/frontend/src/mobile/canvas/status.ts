@@ -160,7 +160,7 @@ type ProviderText = Readonly<{
 const providers: Readonly<Record<string, ProviderText>> = {
   tailscale: {
     problems: {
-      "not-installed": { title: "Tailscale is not installed on this computer.", danger: true, fix: "Download Tailscale" },
+      "not-installed": { title: "Tailscale is not installed on this computer.", danger: true, fix: "Download Tailscale", retry: true },
       "not-running": { title: "Tailscale is not running on this computer.", fix: "Open Tailscale", retry: true },
       "serve-disabled": { title: "Tailscale Serve is not enabled for this tailnet.", danger: true, fix: "Enable it in the admin console", retry: true },
       "port-taken": { title: "The port of Tailscale Serve is used by another service.", retry: true },

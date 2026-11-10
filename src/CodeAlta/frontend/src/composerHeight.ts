@@ -39,7 +39,13 @@ export function composerSizeKey(epoch: string | null, projectId: string | null, 
   return JSON.stringify([epoch, projectId, sessionId]);
 }
 
-export function rememberComposerHeight(sizes: ReadonlyMap<string, number>, key: string, height: number | undefined): Map<string, number> {
+/**
+ * The sizes with the height of a composer remembered, or forgotten when `height` is undefined. A composer tells its height
+ * each time it is shown: when the size is the one already kept, the same map comes back, so that the window is not
+ * rendered again for it. A size told again is then no more recent for the bound of 64: the oldest written goes first.
+ */
+export function rememberComposerHeight(sizes: ReadonlyMap<string, number>, key: string, height: number | undefined): ReadonlyMap<string, number> {
+  if (sizes.get(key) === height) return sizes;
   const next = new Map(sizes);
   next.delete(key);
   if (height !== undefined) next.set(key, height);

@@ -210,3 +210,21 @@ test("a change of the providers reads again every scope of the host the window k
   await store.refreshAll("e1");
   assert.deepEqual(asked.sort(), ["e1|", "e1|work"], "Only the scopes of that host are read again.");
 });
+
+test("a reading that says what the window already has tells nobody, and keeps the state a composer holds", async () => {
+  const store = createTierStore(async () => reply());
+  await store.refresh("e1");
+  const first = store.of("e1");
+  const readings = store.get();
+  let told = 0;
+  const stop = store.subscribe(() => told++);
+  // Each composer reads its scope again when its session is shown.
+  await store.refresh("e1");
+  await store.refresh("e1");
+  assert.equal(told, 0);
+  assert.equal(store.of("e1"), first);
+  assert.equal(store.get(), readings, "the window renders again for a change only");
+  store.set("e1", { ...first!, fallback: { ...first!.fallback, enabled: false } });
+  assert.equal(told, 1);
+  stop();
+});
