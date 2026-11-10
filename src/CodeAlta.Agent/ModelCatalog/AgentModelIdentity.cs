@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using CodeAlta.Agent.Runtime;
 
@@ -129,6 +130,14 @@ internal static class AgentModelIdentity
 
     private static string? StripDateSuffix(string value)
     {
+        // Anthropic snapshots use a compact date, while other providers use an ISO date.
+        const int CompactDateSuffixLength = 9;
+        if (value.Length > CompactDateSuffixLength && value[^CompactDateSuffixLength] == '-' &&
+            DateOnly.TryParseExact(value.AsSpan(value.Length - 8), "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        {
+            return value[..^CompactDateSuffixLength];
+        }
+
         const int DateSuffixLength = 11;
         if (value.Length <= DateSuffixLength || value[^DateSuffixLength] != '-')
         {

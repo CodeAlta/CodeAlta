@@ -32,7 +32,7 @@ public sealed record ClaudeCodeCliAsset(string RuntimeIdentifier, string FileNam
 public static class ClaudeCodePinnedCli
 {
     /// <summary>The version of Claude Code CodeAlta runs.</summary>
-    public const string Version = "2.1.318";
+    public const string Version = "2.1.322";
 
     /// <summary>The name of the file that marks a complete installation in its folder.</summary>
     public const string MarkerFileName = "claude-code.json";
@@ -41,14 +41,14 @@ public static class ClaudeCodePinnedCli
 
     private static readonly FrozenDictionary<string, ClaudeCodeCliAsset> AssetsByRuntime = new ClaudeCodeCliAsset[]
     {
-        new("win-x64", "claude-win32-x64.zip", 157_140_300, "09291c31ac37b9a905e0f0e76d4867b741589bb6b3ae9daa06943042ec72c619"),
-        new("win-arm64", "claude-win32-arm64.zip", 150_529_105, "0ff65eff74358633abedb9d42608365ef18535001b38eadc05d4bd0fa5cf049c"),
-        new("osx-x64", "claude-darwin-x64.tar.gz", 150_453_543, "ea3e05371b9e8760e5d366529db9c6a96d968f5d1a41ba42ad61687c9a3f8173"),
-        new("osx-arm64", "claude-darwin-arm64.tar.gz", 142_991_302, "cd7fa988d60e7aef7ed453847650255138440b229d081496b8ed0ab75836603b"),
-        new("linux-x64", "claude-linux-x64.tar.gz", 155_477_886, "e6d426ca0c123f61fad58a361da0329f2a93cd206bc87040ed8d9576dd9eb583"),
-        new("linux-arm64", "claude-linux-arm64.tar.gz", 155_175_248, "0f4fb66a2af3bf02d114099727e4a7745f117b1e63d2f77c8aff165590197421"),
-        new("linux-musl-x64", "claude-linux-x64-musl.tar.gz", 147_776_202, "6f6d85b6faf3f5ed2655e9aefd52289ca30647ed4503647c2bfd342e1a5431f9"),
-        new("linux-musl-arm64", "claude-linux-arm64-musl.tar.gz", 147_025_238, "198e232519752b4f64a39252507cd693b16eb2107a36ecc4a2b78971d1ad36ef"),
+        new("win-x64", "claude-win32-x64.zip", 159_094_037, "f0453dac97a91f2a71b70c7cfc93cc392098056963628df84f9396a1b7a90471"),
+        new("win-arm64", "claude-win32-arm64.zip", 152_457_870, "fcb9fb6f071635e3e108b8a0cfae8f634ee7be933d2c0d94d4d54da1432feab4"),
+        new("osx-x64", "claude-darwin-x64.tar.gz", 152_408_601, "7a7291c5ae01c8f8e91dc2636da43f905bd3cb52b1170229850f83f3fef194e1"),
+        new("osx-arm64", "claude-darwin-arm64.tar.gz", 144_920_972, "0ff389f1a313f50778c2472c2f85882ca82c10156398c68cfc3c332004694646"),
+        new("linux-x64", "claude-linux-x64.tar.gz", 157_379_500, "3d2bc5ae54d4d4cd63510e9fcca5b6d48d2b18806708df8c8f691aa486c5dca8"),
+        new("linux-arm64", "claude-linux-arm64.tar.gz", 157_080_712, "65c1ad35e804ef463f34585d0c080afd4bf2e9018c7bad1f29efb8df4e9c3750"),
+        new("linux-musl-x64", "claude-linux-x64-musl.tar.gz", 149_672_172, "28a7eca835d0da7a2c70d8bb4aea62e90cc7446b30a4f21505390fe9957fd58c"),
+        new("linux-musl-arm64", "claude-linux-arm64-musl.tar.gz", 148_919_181, "6a76c3d064b1f9af9995402a6e50498a7491eba15f48c98e0119a13b88bc2c19"),
     }.ToFrozenDictionary(static asset => asset.RuntimeIdentifier, StringComparer.Ordinal);
 
     /// <summary>Gets the archives of the pinned version, one per platform.</summary>
