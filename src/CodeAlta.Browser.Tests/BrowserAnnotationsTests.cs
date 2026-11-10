@@ -595,7 +595,7 @@ public sealed class BrowserAnnotationsTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
         var large = Path.Combine(folder.Path, "photo.png");
-        await File.WriteAllBytesAsync(large, Png(1100, 1100, noise: true), timeout.Token);
+        await File.WriteAllBytesAsync(large, Png(2400, 2400, noise: true), timeout.Token);
 
         // A large image takes a while to be made smaller: the note is saved, and cancelled, while it is read.
         var center = await CenterAsync(session, "#c1");

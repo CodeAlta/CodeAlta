@@ -354,7 +354,8 @@ public sealed class BrowserDrawingTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "draw(true)", timeout.Token));
         var large = Path.Combine(folder.Path, "photo.png");
-        await File.WriteAllBytesAsync(large, BrowserAnnotationsTests.Png(1100, 1100, noise: true), timeout.Token);
+        // The largest image kept at its size: its read outlasts the keys that save and cancel the note, on a fast machine too.
+        await File.WriteAllBytesAsync(large, BrowserAnnotationsTests.Png(2400, 2400, noise: true), timeout.Token);
 
         // The note of the drawing opens under it; a large image is dropped on it, and the note is saved and cancelled
         // while the image is read.

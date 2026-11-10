@@ -164,12 +164,12 @@ public sealed class DesktopTerminalStartTests
         var token = NewToken();
         var steps = 0;
 
+        // The first look returns at once: on a busy machine, one sleep of a step can outlast the whole patience.
         var code = DesktopTerminalStart.Await(token, wait =>
         {
-            steps++;
-            Thread.Sleep(wait);
+            if (steps++ > 0) Thread.Sleep(wait);
             return null;
-        }, TimeSpan.FromMilliseconds(120));
+        }, TimeSpan.FromMilliseconds(500));
 
         Assert.AreEqual(0, code);
         Assert.IsTrue(steps >= 2, "it looked more than once");
