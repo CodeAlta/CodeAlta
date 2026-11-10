@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasFreeSeat, loadParts, parseSessionLimit, queuedLabel } from "./seats";
+import { hasFreeSeat, loadParts, parseSessionLimit, queuedLabel, queuedSince } from "./seats";
 import { translate } from "../localization";
 
 test("the limit of a machine is a number from 1 to 256, or empty for none", () => {
@@ -27,4 +27,17 @@ test("a queued session names its machine and how many wait before it, in every l
   assert.equal(translate("en", next.key, next.vars), "Queued on dgx-spark (next)");
   assert.equal(translate("en", third.key, third.vars), "Queued on dgx-spark (2 before it)");
   for (const language of ["es", "fr", "de", "ja", "zh-CN"] as const) assert.match(translate(language, third.key, third.vars), /dgx-spark.*2|2.*dgx-spark/u, language);
+});
+
+test("a run that waits on the page of its machine says what it is and since when, in every language", () => {
+  const at = "2026-11-10T07:21:00Z";
+  const time = new Date(at).toLocaleString("en", { timeStyle: "short" });
+  const say = (item: Parameters<typeof queuedSince>[0]) => { const since = queuedSince(item, "en"); return translate("en", since.key, since.vars); };
+  assert.equal(say({ title: "SharpYaml", kind: "send", queuedAt: at }), `Prompt, queued at ${time}`);
+  assert.equal(say({ title: "Nightly report", kind: "automation", queuedAt: at }), `Automation run, queued at ${time}`);
+  assert.equal(say({ title: null, kind: "automation", queuedAt: at }), `Queued at ${time}`, "the title of a run without one already says what it is");
+  for (const language of ["es", "fr", "de", "ja", "zh-CN"] as const) {
+    const since = queuedSince({ title: "SharpYaml", kind: "send", queuedAt: at }, language);
+    assert.notEqual(translate(language, since.key, since.vars), translate("en", since.key, since.vars), language);
+  }
 });

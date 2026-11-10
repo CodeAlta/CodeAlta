@@ -7363,6 +7363,8 @@ function SessionWorkspace({ sideQuestions, canAdmit, remoteControlRequest = null
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
         <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><McpAppsContext.Provider value={mcpAppsHost}><AutomationOriginContext.Provider value={automationOrigin}><History {...timelineFind.history} observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
+          emptyText={session.machineId && session.remoteQueuedPosition != null
+            ? t("The first prompt of this session waits for its turn on {machine}: the conversation shows here once it starts.", { machine: session.machineName ?? session.machineId }) : null}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} olderRequest={timeline.olderRequestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}

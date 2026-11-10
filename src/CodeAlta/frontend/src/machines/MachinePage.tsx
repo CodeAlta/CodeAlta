@@ -13,7 +13,7 @@ import { MachineProviders } from "./MachineProviders";
 import { MachineModelServers } from "../modelServers/MachineModelServers";
 import { MachineSignIns } from "./MachineSignIns";
 import { formatSize } from "../search/SearchSettings";
-import { loadParts, maxSessionLimit, parseSessionLimit } from "./seats";
+import { loadParts, maxSessionLimit, parseSessionLimit, queuedSince } from "./seats";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary, type DevicePermission } from "./machineManagement";
 
@@ -481,7 +481,7 @@ function LabelsSection({ epoch, machine, api }: { epoch: string; machine: Machin
  * or Enter is pressed; and the runs that wait for their turn, which a computer that manages the machine starts now or takes out.
  */
 function LimitsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const [typed, setTyped] = useState<string | null>(null);
   const [saved, setSaved] = useState<number | null | undefined>(undefined);
   const [seats, setSeats] = useState<MachineSeatsView | null>(null);
@@ -539,14 +539,15 @@ function LimitsSection({ epoch, machine, api }: { epoch: string; machine: Machin
       {load && <span className="muted-text machine-limits-load">{load.map(part => t(part.key, part.vars)).join(", ")}</span>}
     </label>}
     {seats && seats.queue.length > 0 && <div className="machine-seats" role="list" aria-label={t("Queue")}>
-      {seats.queue.map(item => <div key={item.id} className="machine-seat" role="listitem">
+      {seats.queue.map(item => { const since = queuedSince(item, locale); return <div key={item.id} className="machine-seat" role="listitem">
         <span className="machine-seat-position">{item.position}</span>
-        <span className="machine-seat-title">{item.title ?? t(item.kind === "automation" ? "An automation" : "A prompt")}</span>
+        <span className="machine-seat-title">{item.title ?? t(item.kind === "automation" ? "An automation" : "A prompt")}
+          <span className="muted-text machine-seat-since">{t(since.key, since.vars)}</span></span>
         <Button size="small" variant="minimal" text={t("Start now")} disabled={busy}
           onClick={() => void run(() => api.startSeat({ expectedEpoch: epoch, machineId: machine.id, id: item.id }))} />
         <Button size="small" variant="minimal" text={t("Take out of the queue")} disabled={busy}
           onClick={() => void run(() => api.cancelSeat({ expectedEpoch: epoch, machineId: machine.id, id: item.id }))} />
-      </div>)}
+      </div>; })}
     </div>}
   </section>;
 }

@@ -208,7 +208,7 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-pool { grid-column: 1 / -1; }
 .automation-pool-suggested { display: flex; flex-wrap: wrap; gap: 2px 4px; margin-top: 4px; }
 .automation-pool-members, .automation-pool-refused { margin: 6px 0 0; font-size: 12px; color: var(--muted, inherit); }
-.automation-pool-refused { color: var(--bp-intent-warning-text, #c87619); }
+.automation-pool-refused, .automation-pool-members[data-problem] { color: var(--bp-intent-warning-text, #c87619); }
 .automation-more-options { align-self: flex-start; margin-bottom: 6px; }
 .automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
 .automation-editor-switches .bp6-control { margin: 0; }

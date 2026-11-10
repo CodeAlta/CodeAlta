@@ -99,6 +99,9 @@ button { color: inherit; }
 input:not([type="checkbox"]):not([type="radio"]), textarea { color: var(--text); background: var(--panel-2); border: 1px solid var(--line-strong); border-radius: 7px; }
 input:disabled, textarea:disabled { color: var(--muted); background: var(--panel-3); opacity: 1; cursor: not-allowed; }
 button:not(.bp6-button):focus-visible, input:focus, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The input of a tag input (Blueprint's ghost input) is a part of its box, which draws the border and the ring of the focus. */
+input.bp6-input-ghost:not([type="checkbox"]):not([type="radio"]), input.bp6-input-ghost:disabled { border: 0; border-radius: 0; background: transparent; }
+input.bp6-input-ghost:focus { outline: none; }
 /* normalize.css and Blueprint name the generic monospace font: code is in the code font. */
 code, kbd, samp, pre, .bp6-monospace-text, .bp6-code, .bp6-running-text code, .bp6-code-block, .bp6-running-text pre { font-family: var(--code-font); }
 
@@ -3150,6 +3153,9 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 /* The line of a Claude Code conversation held elsewhere has the edges of the prompt card below it. */
 .session-workspace > .conversation-elsewhere-notice { margin-inline: calc(4px + var(--session-inset)); }
 .ide-shell .session-workspace > .conversation-elsewhere-notice { margin-inline: calc(12px + var(--session-inset)); }
+/* So has the notice of a session that waits for its turn on its machine. */
+.session-workspace > .queued-session-notice { margin-inline: calc(4px + var(--session-inset)); }
+.ide-shell .session-workspace > .queued-session-notice { margin-inline: calc(12px + var(--session-inset)); }
 .session-workspace > .composer-region { position: relative; padding-inline: var(--session-inset); }
 .ide-shell .session-workspace > .composer-region { padding-inline: calc(8px + var(--session-inset)); }
 /* The grips of the prompt: a slim line at each of its edges, shown when the pointer or the keyboard is on it. */

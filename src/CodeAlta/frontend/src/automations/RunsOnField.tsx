@@ -66,7 +66,7 @@ export function RunsOnField({ hub, form, reachable, disabled, edit }: {
         {suggested.map(tag => <Button key={tag} size="small" variant="minimal" icon={<AppIcon name="plus" size={12} />} text={tag} disabled={disabled}
           onClick={() => setTags([...(tags ?? []), tag])} />)}
       </div>}
-      {(tags ?? []).length > 0 && pool && <p className="automation-pool-members" role="status">
+      {(tags ?? []).length > 0 && pool && <p className="automation-pool-members" role="status" data-problem={pool.members.length === 0 ? "" : undefined}>
         {pool.members.length > 0
           ? t("Runs on now: {machines}", { machines: pool.members.map(member => member.online ? member.name : t("{machine} (offline)", { machine: member.name })).join(", ") })
           : pool.problem ?? t("No machine of yours has these tags.")}

@@ -32,6 +32,16 @@ export function hasFreeSeat(load: MachineLoad): boolean {
   return (load.working ?? 0) < load.sessionLimit && (load.queued ?? 0) === 0;
 }
 
+/**
+ * What a run that waits says beside its title on the page of its machine: what it is, unless its title stands for it, and the
+ * time it joined the queue, in the locale given.
+ */
+export function queuedSince(item: { readonly title: string | null; readonly kind: string; readonly queuedAt: string }, locale: string): { key: MessageKey; vars: Record<string, string | number> } {
+  const time = new Date(item.queuedAt).toLocaleString(locale, { timeStyle: "short" });
+  if (!item.title) return { key: "Queued at {time}", vars: { time } };
+  return { key: item.kind === "automation" ? "Automation run, queued at {time}" : "Prompt, queued at {time}", vars: { time } };
+}
+
 /** What a session whose run waits for a seat says: its machine and how many wait before it. */
 export function queuedLabel(machine: string, position: number): { key: MessageKey; vars: Record<string, string | number> } {
   return position <= 1

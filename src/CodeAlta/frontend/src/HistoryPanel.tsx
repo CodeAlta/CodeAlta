@@ -70,7 +70,7 @@ const minimumFoldSearch = 2;
  * activity line. It is rendered again only when one of these changes, not on every page the panel reads,
  * each group only when one of its rows did, and each row only when its own item changed.
  */
-const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty,
+const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty, emptyText,
   revision, sources, readImages, readTool, readPrompt, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch, running, shown, find }: {
   sessionId: string; rows: readonly ReconciledRow[]; entries: HistoryTimeline["entries"];
   outgoing: readonly OutgoingMessage[]; onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
@@ -79,6 +79,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   echoes: boolean;
   /** The history was read and holds nothing to show. It only changes while there are no rows. */
   empty: boolean;
+  /** What an empty history says instead of the default, such as a first prompt that waits for its turn. */
+  emptyText?: string | null;
   revision: HistoryTimeline["revision"] | null; sources: HistorySources;
   readImages?: TimelineImageReader; canInspect: () => boolean; onOpenSource: (target: HistorySourceTarget) => void;
   /** Reads the whole record of a tool call, and follows what a running one writes. */
@@ -185,7 +187,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   const shownTool = openTool?.sessionId === sessionId ? openedItem.current : null;
   const toolImages = shownTool?.toolCall?.images?.length && shownTool.toolCall.outputOffset ? readImages?.(shownTool.toolCall.outputOffset) : undefined;
   return <SystemPromptReaderContext.Provider value={readPrompt ?? null}>
-    {items.length === 0 && empty && <div className="empty-history">{t("No visible events in this history.")}</div>}
+    {items.length === 0 && empty && <div className="empty-history">{emptyText ?? t("No visible events in this history.")}</div>}
     <div className={`messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`} style={emphasisStyle}>
       {blocks.map(block => block.kind === "row"
         ? <TimelineGroupView key={`${sessionId}:${block.key}`} {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
@@ -218,12 +220,14 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onUnsentPrompt, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
   newestRequest, olderRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
-  reveal = null, onReveal, running, find = null, onOlderState, loadAllRequest }: {
+  reveal = null, onReveal, running, find = null, onOlderState, loadAllRequest, emptyText }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
   /** Reports the last prompt of the loaded window when its run never sent it (the conversation changed while it waited). */
   onUnsentPrompt?: (prompt: UnsentPrompt | null) => void;
+  /** What an empty history says instead of the default. */
+  emptyText?: string | null;
   observing?: boolean;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
   onNewerOmitted?: (value: boolean) => void;
@@ -538,7 +542,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     </span>}</div>}
     <TimelineRows sessionId={sessionId} rows={reconciled} entries={entries} outgoing={outgoing} onAcknowledgeOutgoing={onAcknowledgeOutgoing}
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
-      echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}
+      echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} emptyText={emptyText} revision={timeline?.revision ?? null} sources={sources}
       readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs} canInspect={inspectable} onOpenSource={openSource}
       promptKeys={promptKeys} onBranch={onBranch} running={running} shown={reveal?.offset ?? null} find={find} />
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}

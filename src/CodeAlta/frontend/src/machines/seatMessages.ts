@@ -17,6 +17,9 @@ export const seatMessages = {
   "Take out of the queue": ["Quitar de la cola", "Retirer de la file", "Aus der Warteschlange nehmen", "キューから外す", "移出队列"],
   "An automation": ["Una automatización", "Une automatisation", "Eine Automatisierung", "自動化", "一个自动化"],
   "A prompt": ["Un prompt", "Un prompt", "Ein Prompt", "プロンプト", "一个提示"],
+  "Prompt, queued at {time}": ["Prompt, en cola a las {time}", "Prompt, en attente depuis {time}", "Prompt, wartet seit {time}", "プロンプト、{time} から待機", "提示，{time} 起排队"],
+  "Automation run, queued at {time}": ["Ejecución de automatización, en cola a las {time}", "Exécution d’automatisation, en attente depuis {time}", "Automatisierungslauf, wartet seit {time}", "自動化の実行、{time} から待機", "自动化运行，{time} 起排队"],
+  "Queued at {time}": ["En cola a las {time}", "En attente depuis {time}", "Wartet seit {time}", "{time} から待機", "{time} 起排队"],
   // A session whose run waits for a seat of its machine.
   "Queued on {machine} (next)": ["En cola en {machine} (la siguiente)", "En attente sur {machine} (la suivante)", "Wartet auf {machine} (als Nächstes)", "{machine} で待機中（次）", "在 {machine} 上排队（下一个）"],
   "Queued on {machine} ({count} before it)": ["En cola en {machine} ({count} antes)", "En attente sur {machine} ({count} avant)", "Wartet auf {machine} ({count} davor)", "{machine} で待機中（前に {count} 件）", "在 {machine} 上排队（前面还有 {count} 个）"],
@@ -32,6 +35,12 @@ export const seatMessages = {
     "Die Sitzung wurde auf {machine} gestartet: Ihr Prompt wartet dort, bis er an der Reihe ist.",
     "セッションは {machine} で開始しました。プロンプトはそこで順番を待っています。",
     "会话已在 {machine} 上启动：其提示在那里排队等候。"],
+  "The first prompt of this session waits for its turn on {machine}: the conversation shows here once it starts.": [
+    "El primer prompt de esta sesión espera su turno en {machine}: la conversación aparece aquí cuando empieza.",
+    "Le premier prompt de cette session attend son tour sur {machine} : la conversation s’affiche ici dès qu’elle démarre.",
+    "Der erste Prompt dieser Sitzung wartet auf {machine}, bis er an der Reihe ist: Das Gespräch erscheint hier, sobald es beginnt.",
+    "このセッションの最初のプロンプトは {machine} で順番を待っています。開始すると会話がここに表示されます。",
+    "此会话的第一个提示正在 {machine} 上排队：开始后对话将显示在这里。"],
   // A run of an automation that waits for a seat.
   "Waits for its turn": ["Espera su turno", "Attend son tour", "Wartet, bis es an der Reihe ist", "順番待ち", "等候轮到"],
 } as const;

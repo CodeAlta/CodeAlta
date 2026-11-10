@@ -183,6 +183,8 @@
 .queued-session-notice { display: flex; align-items: center; gap: 8px; margin: 4px 12px; padding: 6px 10px; border-radius: 6px;
   background: color-mix(in srgb, var(--bp-intent-warning-rest) 10%, transparent); }
 .queued-session-notice .queued-session-text { flex: 1 1 auto; min-width: 0; }
+/* Its buttons, and those of a run that waits on the page of the machine, keep their words on one line: the text gives way. */
+.queued-session-notice > .bp6-button, .machine-seat > .bp6-button { flex-shrink: 0; white-space: nowrap; }
 .queued-session-problem { color: var(--bp-intent-danger-text); }
 /* The limits of a machine on its page: the field of the sessions at work at once, its load, then the runs that wait. */
 .machine-limits-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -191,4 +193,5 @@
 .machine-seat { display: flex; align-items: center; gap: 8px; }
 .machine-seat-position { min-width: 1.5em; text-align: right; color: var(--muted); }
 .machine-seat-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-seat-since { margin-left: 10px; font-size: 12px; }
 .fleet-machine-load { display: block; font-size: 11px; }
