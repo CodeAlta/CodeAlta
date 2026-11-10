@@ -34,15 +34,20 @@ While a machine is offline, its sessions stay listed with what was last known of
 4. Choose the provider and the model among the ones ready on that machine.
 5. Write your prompt and send it. The session starts on the machine and opens in its tab.
 
-**Run on** shows the load of each machine, such as `3 of 3 at work, 2 queued`. A machine that already runs as many sessions as its owner [lets it](machines.md#limit-the-sessions-at-work) takes the session and queues its prompt: its row in the Explorer says **Queued on Workstation (1 before it)**, and its tab says so above the prompt, with **Start now** and **Take out of the queue**. The prompt is sent once its turn comes.
+**Run on** shows the load of each machine, such as `3 of 3 at work, 2 queued`. A machine that already runs as many sessions as its owner [lets it](machines.md#limit-the-sessions-at-work) takes the session and queues its prompt: its row in the Explorer says **Queued on Workstation (1 before it)**, and its tab says so above the prompt, with **Start now** and **Take out of the queue**. The prompt is sent once its turn comes, and its conversation shows then.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-queued-session.webp" alt="Above the prompt of a session of Workstation: Queued on Workstation (next), Workstation runs as many sessions as its owner lets it, with Start now and Take out of the queue" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session whose first prompt waits for its turn on its machine.</figcaption>
+</figure>
 
 In a project in a git repository, the session works in a worktree of its own on the machine, on a new `alta/` branch that starts from the commit its checkout is on: two sessions of the machine never change the same files, and the checkout of the project there stays as it is. A session started by an agent of another computer, or by a run of an automation, gets one too. A project that is not a git repository is worked in where it is.
 
 The machine removes a worktree once its session is archived, deleted or idle for 7 days, unless something in it is not committed. Its branch stays when it holds commits that no other branch has: no work is lost. Give that session a prompt again and it works in a new worktree, from that branch. The **Projects** section of the page of the machine says how many worktrees its sessions work in and what they take on its disk.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-fleet-run-on.webp" alt="The prompt of a new session with the Run on menu open: This machine, Build box and Workstation" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Run on chooses the machine the session starts on.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-run-on.webp" alt="The prompt of a new session with the Run on menu open: This machine, and Workstation with 1 of 1 at work, 1 queued" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Run on chooses the machine the session starts on, and shows its load.</figcaption>
 </figure>
 
 The **+** of the row of a machine in the Explorer opens the same prompt, already set to run on that machine.

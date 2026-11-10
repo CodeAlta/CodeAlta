@@ -192,7 +192,12 @@ A machine that serves a few sessions well can say so: beyond its limit, the work
 - A session and its sub-sessions count once, and a session that waits for you (a question, a command to allow) holds no seat.
 - What waits is a prompt sent from another computer, a session an agent of another machine starts, a prompt queued for such a session, and a run of an automation. They start first in, first out. A prompt that waits still waits after the machine restarts; a run of an automation that waits is interrupted by the restart.
 - The work started on the machine itself is counted, and never waits.
-- **Limits** lists what waits: **Start now** starts one at once, past the limit, and **Take out of the queue** drops it.
+- **Limits** lists what waits, in order, each with what it is and when it joined the queue: **Start now** starts one at once, past the limit, and **Take out of the queue** drops it.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-machine-limits.webp" alt="The Machine tags and Limits sections of the page of Workstation: the tags gpu and always-on; one session at work at once, 1 of 1 at work, 1 queued, and the prompt of SharpYaml that waits, with Start now and Take out of the queue" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A limit of one session: the second waits for its turn.</figcaption>
+</figure>
 
 **Run on**, the **Fleet** canvas and `alta fleet machine list` show the load of a machine, such as `3 of 3 at work, 2 queued`.
 
@@ -217,7 +222,7 @@ A paired computer may see the sessions of the machine, drive them and start new 
 In **Settings** > **Fleet** > **Machines**, click the name of a machine to open its page. A computer that manages the machine changes everything there, without a terminal on the machine:
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-fleet-machine-page.webp" alt="The page of the machine Workstation in Settings > Fleet > Machines, managed from this computer: its devices with a switch per permission, the agents of other machines, its people and its labels" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-machine-page.webp" alt="The page of the machine Workstation in Settings > Fleet > Machines, managed from this computer: its devices with a switch per permission, its permissions, the agents of other machines, its people and the start of its machine tags" loading="lazy">
   <figcaption class="small text-secondary mt-2">The page of a machine you manage.</figcaption>
 </figure>
 
@@ -228,6 +233,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](sessions.md#let-agents-start-sessions-on-it)) |
 | **People** | The people of your organization who may use it, each on their own sessions, and who asked to ([People and Access](people-and-access.md#people-on-your-own-machines)) |
 | **Machine tags** | Its [tags](#tag-your-machines), which it publishes to its servers: add them, or remove one with its cross |
+| **Limits** | How many sessions work there at once, and the runs that wait for their turn, with **Start now** and **Take out of the queue** ([Limit the sessions at work](#limit-the-sessions-at-work)) |
 | **Projects** | Clone a repository there, add a folder, remove a project; how many [worktrees](sessions.md#start-a-session-on-it) its sessions work in, and what they take on its disk |
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
 | **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in with an account, ACP agents, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
