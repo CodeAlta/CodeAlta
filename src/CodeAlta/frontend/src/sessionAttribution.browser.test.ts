@@ -28,6 +28,21 @@ const selectAll = async (page: Page) => {
   await page.command("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers, commands: ["selectAll"] });
   await page.command("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers });
 };
+// What the field and the focus are when a wait fails: where the keys of a busy machine went.
+const state = (page: Page) => page.evaluate(`JSON.stringify({ value: ${trailer}.value, disabled: ${trailer}.disabled,
+  focused: document.activeElement === ${trailer} ? "the trailer" : document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName,
+  dialog: !!document.querySelector(".attribution-confirmation") })`);
+const until = async (page: Page, expression: string, what: string) => {
+  try { await page.until(expression, what); } catch (error) { throw new Error(`${(error as Error).message}\n${await state(page)}`); }
+};
+// Enter saves what the field holds: the text typed is in the focused field before Enter is pressed.
+const enter = async (page: Page, text: string) => {
+  await page.click("#settings-commit-co-author-trailer");
+  await selectAll(page);
+  await page.type(text);
+  await until(page, `${trailer}.value === ${JSON.stringify(text)} && document.activeElement === ${trailer}`, "the text typed in the field");
+  await page.key("Enter", 13);
+};
 
 test("the texts of attribution show the ones of CodeAlta until the user writes another, and each choice is saved alone", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
@@ -38,22 +53,17 @@ test("the texts of attribution show the ones of CodeAlta until the user writes a
     await page.until(`document.querySelector('.attribution-markdown .view-lines').textContent.replace(/\\s+/g, ' ').includes('When you write')`, "the default instruction");
 
     // Removing CodeAlta asks first, with Keep it as the safe choice and no premature save.
-    await page.click("#settings-commit-co-author-trailer");
-    await selectAll(page);
-    await page.type("Assisted-by: Contoso <agents@contoso.example>");
-    await page.key("Enter", 13);
-    await page.until(`!!document.querySelector('.attribution-confirmation')`, "the confirmation before saving");
+    await enter(page, "Assisted-by: Contoso <agents@contoso.example>");
+    await until(page, `!!document.querySelector('.attribution-confirmation')`, "the confirmation before saving");
     assert.equal(await page.evaluate(`attributionFixture.saved.length`), 0);
     await page.clickText(".attribution-confirmation button", "Keep it");
-    await page.until(`${trailer}.value === 'Co-authored-by: CodeAlta <noreply@codealta.io>'`, "the original trailer kept");
+    await until(page, `${trailer}.value === 'Co-authored-by: CodeAlta <noreply@codealta.io>' && !document.querySelector('.attribution-confirmation')`, "the original trailer kept");
 
     // A trailer the user confirms, saved on Enter: nothing else is sent.
-    await page.click("#settings-commit-co-author-trailer");
-    await selectAll(page);
-    await page.type("Assisted-by: Contoso <agents@contoso.example>");
-    await page.key("Enter", 13);
+    await enter(page, "Assisted-by: Contoso <agents@contoso.example>");
+    await until(page, `!!document.querySelector('.attribution-confirmation')`, "the confirmation before saving it anyway");
     await page.clickText(".attribution-confirmation button", "Save it anyway");
-    await page.until(`attributionFixture.saved.length === 1 && attributionFixture.held.coAuthorTrailer.startsWith('Assisted-by')`, "the trailer saved");
+    await until(page, `attributionFixture.saved.length === 1 && attributionFixture.held.coAuthorTrailer.startsWith('Assisted-by')`, "the trailer saved");
     assert.equal(await page.evaluate(saved), JSON.stringify([{ coAuthorTrailer: "Assisted-by: Contoso <agents@contoso.example>" }]));
     await page.until(`${trailer}.value === 'Assisted-by: Contoso <agents@contoso.example>' && !${trailer}.disabled`, "the trailer of the user shown");
 
