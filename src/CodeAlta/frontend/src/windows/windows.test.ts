@@ -136,3 +136,41 @@ test("what the host asks of the window reaches the shell, and the tabs are repor
   assert.equal(hub.ownerOf("editor:p1"), "main");
   stop();
 });
+
+test("the tabs the windows hold do not change what the page shows of them", async () => {
+  let windows = [window("main", { tabs: ["session:s1"] }), window("w2", { tabs: ["session:s2"] })];
+  const fake = fakeApi(() => windows);
+  const hub = createWindowsHub(fake.api, current(windows[0]));
+  const stop = hub.connect();
+  await settle(); await settle();
+  const before = hub.getSnapshot();
+  let notified = 0;
+  const unsubscribe = hub.subscribe(() => notified++);
+
+  // Switching the session in front reports the tabs, and the host lists the windows again with them: nothing to draw.
+  hub.report(["session:s1", "session:s3"], "session:s3", null);
+  windows = [window("main", { tabs: ["session:s1", "session:s3"], activeTab: "session:s3" }), windows[1]];
+  fake.send({ kind: "changed", tab: null, payload: null, requestId: null, target: null, x: null, y: null, refused: false });
+  await settle(); await settle();
+  assert.equal(hub.getSnapshot(), before, "a render of the window reads the same snapshot");
+  assert.equal(notified, 0);
+  assert.equal(hub.ownerOf("session:s3"), "main", "the owners are read from what the host listed");
+
+  // A tab another window takes is known at once, without the page drawing anything, and so is a change of focus.
+  windows = [window("main", { tabs: ["session:s1"], focused: false }), window("w2", { tabs: ["session:s2", "session:s3"], focused: true, state: "minimized" })];
+  fake.send({ kind: "changed", tab: null, payload: null, requestId: null, target: null, x: null, y: null, refused: false });
+  await settle(); await settle();
+  assert.equal(hub.heldElsewhere("session:s3"), true, "the owners are those the host listed last");
+  assert.equal(hub.getSnapshot(), before);
+  assert.equal(notified, 0);
+
+  // What the page does show of a window changes the snapshot.
+  windows = [windows[0], { ...windows[1], name: "Review" }];
+  fake.send({ kind: "changed", tab: null, payload: null, requestId: null, target: null, x: null, y: null, refused: false });
+  await settle(); await settle();
+  assert.notEqual(hub.getSnapshot(), before);
+  assert.equal(hub.getSnapshot().windows[1].name, "Review");
+  assert.equal(notified, 1);
+  unsubscribe();
+  stop();
+});
