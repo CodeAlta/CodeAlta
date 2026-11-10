@@ -74,42 +74,45 @@ export function TaskTagField({ hub, item, tags, disabled }: { hub: WorkItemsHub;
   };
   // The picker stays open for the next tag, until the task has all it can have.
   const add = (name: string) => {
-    setTyped("");
     if (own.includes(name)) return;
     if (own.length + 1 >= maximumTaskTags) setOpen(false);
     save([...own, name]);
   };
+  const remove = (name: string) => save(own.filter(other => other !== name));
   const words = typed.trim().toLowerCase().replace(/^#/, "");
-  const offered = tags.filter(tag => !own.includes(tag.name) && (!words || tag.name.includes(words) || (tag.description ?? "").toLowerCase().includes(words)));
+  // The tags of the task stay in the picker, ticked, so that the rows do not move under the pointer as tags are added.
+  const offered = tags.filter(tag => !words || tag.name.includes(words) || (tag.description ?? "").toLowerCase().includes(words));
   const name = tagNameOf(typed);
   const fresh = name !== null && !tags.some(tag => tag.name === name);
   const full = own.length >= maximumTaskTags;
-  return <div className="work-task-tags" role="group" aria-label={t("Tags")}>
+  // The picker hangs from the whole field, not from Add tag, which each new chip pushes along; without an arrow, which
+  // would point at the middle of the field. The backdrop takes the click that closes the picker, which would otherwise
+  // reach what is under it, such as the buttons of the task.
+  return <PopoverNext isOpen={open && !full} onInteraction={setOpen} placement="bottom-start" arrow={false} autoFocus={false} hasBackdrop content={<div className="work-tag-picker">
+    <InputGroup size="small" autoFocus value={typed} placeholder={t("Find or create a tag")} aria-label={t("Find or create a tag")}
+      onChange={event => setTyped(event.target.value)}
+      onKeyDown={event => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        // The first tag that matches and the task does not have; a new one only when none matches.
+        const first = offered.find(tag => !own.includes(tag.name));
+        if (first) { setTyped(""); add(first.name); }
+        else if (fresh) { setOpen(false); setCreating(name); }
+      }} />
+    <Menu aria-label={t("Tags of the project")}>
+      {offered.map(tag => <MenuItem key={tag.name} roleStructure="listoption" selected={own.includes(tag.name)} shouldDismissPopover={false}
+        text={<span className="work-tag-option"><TagChip name={tag.name} />{tag.description && <small>{tag.description}</small>}</span>}
+        onClick={() => own.includes(tag.name) ? remove(tag.name) : add(tag.name)} />)}
+      {fresh && <MenuItem icon={<AppIcon name="plus" size={14} />} text={t("New tag \"{name}\"…", { name: name! })} onClick={() => { setOpen(false); setCreating(name); }} />}
+      {!offered.length && !fresh && <MenuItem disabled text={t(tags.length ? "No tag matches. A name is lower case letters, digits and hyphens." : "Type the name of a new tag.")} />}
+    </Menu>
+  </div>} renderTarget={({ ref }) => <div ref={ref} className="work-task-tags" role="group" aria-label={t("Tags")}>
     {own.map(tag => <TagChip key={tag} name={tag} title={tags.find(known => known.name === tag)?.description}
-      onRemove={disabled ? undefined : () => save(own.filter(other => other !== tag))} />)}
-    {/* The backdrop takes the click that closes the picker, which would otherwise reach what is under it, such as the buttons of the task. */}
-    {!full && <PopoverNext isOpen={open} onInteraction={setOpen} placement="bottom-start" autoFocus={false} hasBackdrop content={<div className="work-tag-picker">
-      <InputGroup size="small" autoFocus value={typed} placeholder={t("Find or create a tag")} aria-label={t("Find or create a tag")}
-        onChange={event => setTyped(event.target.value)}
-        onKeyDown={event => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          // The first tag that matches; a new one only when none does.
-          if (offered[0]) add(offered[0].name);
-          else if (fresh) { setOpen(false); setCreating(name); }
-        }} />
-      <Menu aria-label={t("Tags of the project")}>
-        {offered.map(tag => <MenuItem key={tag.name} text={<span className="work-tag-option"><TagChip name={tag.name} />{tag.description && <small>{tag.description}</small>}</span>}
-          shouldDismissPopover={false} onClick={() => add(tag.name)} />)}
-        {fresh && <MenuItem icon={<AppIcon name="plus" size={14} />} text={t("New tag \"{name}\"…", { name: name! })} onClick={() => { setOpen(false); setCreating(name); }} />}
-        {!offered.length && !fresh && <MenuItem disabled text={t(tags.length ? "No tag matches. A name is lower case letters, digits and hyphens." : "Type the name of a new tag.")} />}
-      </Menu>
-    </div>}>
-      <Button size="small" variant="minimal" className="work-tag-add" disabled={disabled} icon={<AppIcon name="plus" size={12} />}>{t("Add tag")}</Button>
-    </PopoverNext>}
+      onRemove={disabled ? undefined : () => remove(tag)} />)}
+    {!full && <Button size="small" variant="minimal" className="work-tag-add" disabled={disabled} icon={<AppIcon name="plus" size={12} />} onClick={() => setOpen(true)}>{t("Add tag")}</Button>}
     {failed && <span className="work-tag-failed" role="alert">{t("The change was not made.")}</span>}
-    {creating !== null && <NewTagDialog hub={hub} projectId={item.projectId} name={creating} onClose={() => setCreating(null)} onCreated={created => add(created)} />}
-  </div>;
+    {creating !== null && <NewTagDialog hub={hub} projectId={item.projectId} name={creating} onClose={() => setCreating(null)} onCreated={created => { setTyped(""); add(created); }} />}
+  </div>} />;
 }
 
 /** The dialog of a new tag of a project: its name and what it is for, which agents match tasks against. */

@@ -93,11 +93,17 @@ test("a task's tags are added from the project's, removed, or created, and the t
   }, options);
 });
 
-test("the tag picker stays open for several tags, saves them in turn, and a click outside only closes it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the tag picker stays open and in place for several tags, saves them in turn, and a click outside only closes it", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.work-task-tags > .work-tag').length === 1`, "the tag of the task");
     await page.clickText(".work-tag-add", "Add tag");
     await page.until(`!!document.querySelector('.work-tag-picker input')`, "the picker");
+    const place = `(() => { const box = document.querySelector('.work-tag-picker').getBoundingClientRect(); return Math.round(box.x) + ',' + Math.round(box.y); })()`;
+    const ticked = `[...document.querySelectorAll('.work-tag-picker .bp6-menu-item .work-tag-option > .work-tag')].map(tag => tag.textContent + (tag.closest('li').getAttribute('aria-selected') === 'true' ? '+' : '')).join()`;
+    // Where the picker is once it has opened, past its transition.
+    const opened = await page.evaluate<string>(`new Promise(done => setTimeout(() => done(${place}), 600))`);
+    assert.equal(opened.split(",")[0], String(await page.evaluate(`Math.round(document.querySelector('.work-task-tags').getBoundingClientRect().x)`)), "the picker is under the start of the field");
+    assert.equal(await page.evaluate(ticked), "mobile+,flaky-tests,handmade", "the tags of the task are in the list, ticked");
 
     // Two tags clicked before the first save is back: both show at once, and the second save keeps the first tag.
     await page.evaluate(`tagsFixture.held = true`);
@@ -110,6 +116,19 @@ test("the tag picker stays open for several tags, saves them in turn, and a clic
     await page.until(`tagsFixture.calls.length === 2`, "the second save");
     assert.deepEqual(await page.evaluate(calls), ["task:mobile,flaky-tests", "task:mobile,flaky-tests,handmade"]);
     assert.ok(await page.evaluate(`!!document.querySelector('.work-tag-picker')`), "the picker is still open");
+    // Neither the picker nor its rows moved: it hangs from the field, and the tags added stay in it, ticked.
+    assert.equal(await page.evaluate(place), opened, "the picker did not move");
+    assert.equal(await page.evaluate(ticked), "mobile+,flaky-tests+,handmade+");
+
+    // A ticked tag clicked is removed, and the search stays for the next one.
+    await page.click(".work-tag-picker input");
+    await page.type("hand");
+    await page.until(`${ticked} === 'handmade+'`, "the search");
+    await page.clickText(".work-tag-picker .bp6-menu-item .work-tag-option > .work-tag", "handmade");
+    await page.until(`tagsFixture.calls.length === 3`, "the tag removed");
+    assert.equal(await page.evaluate(`tagsFixture.calls[2]`), "task:mobile,flaky-tests");
+    await page.until(`${ticked} === 'handmade'`, "the tag unticked");
+    assert.equal(await page.evaluate(`document.querySelector('.work-tag-picker input').value`), "hand");
 
     // A click outside closes the picker without reaching what is under it.
     const point = await page.evaluate<{ x: number; y: number }>(`(() => { const box = document.querySelector('#behind').getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`);
@@ -117,7 +136,7 @@ test("the tag picker stays open for several tags, saves them in turn, and a clic
     await page.command("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
     await page.until(`!document.querySelector('.work-tag-picker')`, "the picker closed");
     assert.equal(await page.evaluate(`tagsFixture.behind`), 0, "the click did not reach the button behind the picker");
-    assert.deepEqual(await page.evaluate(chips), ["mobile", "flaky-tests", "handmade"]);
+    assert.deepEqual(await page.evaluate(chips), ["mobile", "flaky-tests"]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

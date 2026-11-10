@@ -67,7 +67,7 @@ function Page() {
     <TagProposalBanners proposals={proposals} onReview={setReviewing} onDismiss={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)} />
     {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
     <TaskTagField hub={hub} item={item} tags={state.projectTags} disabled={false} />
-    <button type="button" id="behind" style={{ display: "block", marginTop: 8 }} onClick={() => { state.behind++; }}>Behind the picker</button>
+    <button type="button" id="behind" style={{ display: "block", marginTop: 8, marginLeft: 360 }} onClick={() => { state.behind++; }}>Behind the picker</button>
     <button type="button" id="manage" onClick={() => setManaging(true)}>Manage</button>
     {managing && <TagManagerDialog hub={hub} projectId="p1" onClose={() => setManaging(false)}
       projects={[{ id: "p1", name: "Alpha", tags: state.projectTags, declined: state.declined }]} />}
