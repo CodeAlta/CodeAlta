@@ -6,7 +6,7 @@ namespace CodeAlta.Tests;
 public sealed class CodexSubscriptionConcurrencyLimiterTests
 {
     // Tells a hang from a slow machine: the waits below end as soon as the limiter does its part.
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task AccountWaiters_AreAdmittedInTheOrderTheyCame_OneByRelease()
@@ -27,14 +27,14 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         for (var index = 0; index < waiters.Count; index++)
         {
             await lease.DisposeAsync();
-            lease = await waiters[index].WaitAsync(Hang);
+            lease = await waiters[index].WithinAsync(Hang);
             // The release admitted the oldest waiter and no other.
             Assert.IsTrue(waiters.Skip(index + 1).All(static waiter => !waiter.IsCompleted));
             Assert.AreEqual(waiters.Count - index - 1, limiter.GetAccountWaiterCount(accountId));
         }
 
         await lease.DisposeAsync();
-        await (await AcquireAsync(limiter, "after", accountId, limit: 1).WaitAsync(Hang)).DisposeAsync();
+        await (await AcquireAsync(limiter, "after", accountId, limit: 1).WithinAsync(Hang)).DisposeAsync();
     }
 
     [TestMethod]
@@ -48,11 +48,11 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         var next = AcquireAsync(limiter, "next", accountId, limit: 1);
 
         await cancellation.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelled.WaitAsync(Hang));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelled.WithinAsync(Hang));
         Assert.AreEqual(1, limiter.GetAccountWaiterCount(accountId));
 
         await holder.DisposeAsync();
-        var lease = await next.WaitAsync(Hang);
+        var lease = await next.WithinAsync(Hang);
         await lease.DisposeAsync();
 
         // The slot the cancelled waiter never took is still there, and only it.
@@ -61,7 +61,7 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         var second = AcquireAsync(limiter, "second", accountId, limit: 1);
         Assert.IsFalse(second.IsCompleted);
         await (await first).DisposeAsync();
-        await (await second.WaitAsync(Hang)).DisposeAsync();
+        await (await second.WithinAsync(Hang)).DisposeAsync();
         Assert.AreEqual(0, limiter.SessionGateCount);
     }
 
@@ -89,12 +89,12 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
                 start.SignalAndWait();
                 await first.DisposeAsync();
             });
-            await Task.WhenAll(cancel, release).WaitAsync(Hang);
+            await Task.WhenAll(cancel, release).WithinAsync(Hang);
 
             try
             {
                 // Admitted before it was cancelled: the waiter owns the slot and gives it back.
-                await (await waiter.WaitAsync(Hang)).DisposeAsync();
+                await (await waiter.WithinAsync(Hang)).DisposeAsync();
             }
             catch (OperationCanceledException)
             {
@@ -112,7 +112,7 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         Assert.IsTrue(b.IsCompletedSuccessfully);
         Assert.IsFalse(c.IsCompleted);
         await (await a).DisposeAsync();
-        await (await c.WaitAsync(Hang)).DisposeAsync();
+        await (await c.WithinAsync(Hang)).DisposeAsync();
         await (await b).DisposeAsync();
         Assert.AreEqual(0, limiter.SessionGateCount);
     }
@@ -136,11 +136,11 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         Assert.AreEqual(1, limiter.SessionGateCount);
 
         await cancellation.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelled.WaitAsync(Hang));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelled.WithinAsync(Hang));
         Assert.AreEqual(1, limiter.SessionGateCount);
 
         await holder.DisposeAsync();
-        var second = await queued.WaitAsync(Hang);
+        var second = await queued.WithinAsync(Hang);
         Assert.AreEqual(1, limiter.SessionGateCount);
         await second.DisposeAsync();
         Assert.AreEqual(0, limiter.SessionGateCount);
@@ -151,7 +151,7 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         await Task.Delay(25);
         Assert.IsFalse(blocked.IsCompleted);
         await again.DisposeAsync();
-        await (await blocked.WaitAsync(Hang)).DisposeAsync();
+        await (await blocked.WithinAsync(Hang)).DisposeAsync();
         Assert.AreEqual(0, limiter.SessionGateCount);
     }
 
@@ -166,11 +166,11 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         Assert.AreEqual(2, limiter.SessionGateCount);
 
         await cancellation.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelled.WaitAsync(Hang));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelled.WithinAsync(Hang));
         Assert.AreEqual(1, limiter.SessionGateCount);
 
         // The session of the cancelled request is free again.
-        await (await AcquireAsync(limiter, "cancelled", "other-" + accountId, limit: 1).WaitAsync(Hang)).DisposeAsync();
+        await (await AcquireAsync(limiter, "cancelled", "other-" + accountId, limit: 1).WithinAsync(Hang)).DisposeAsync();
         await holder.DisposeAsync();
         Assert.AreEqual(0, limiter.SessionGateCount);
     }
@@ -192,7 +192,7 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         Assert.IsFalse(lowLimit.IsCompleted);
 
         await (await highLimit).DisposeAsync();
-        await (await lowLimit.WaitAsync(Hang)).DisposeAsync();
+        await (await lowLimit.WithinAsync(Hang)).DisposeAsync();
     }
 
     [TestMethod]
@@ -209,7 +209,7 @@ public sealed class CodexSubscriptionConcurrencyLimiterTests
         Assert.IsTrue(second.IsCompletedSuccessfully);
         Assert.IsFalse(third.IsCompleted);
         await (await second).DisposeAsync();
-        await (await third.WaitAsync(Hang)).DisposeAsync();
+        await (await third.WithinAsync(Hang)).DisposeAsync();
     }
 
     private static string NewAccountId() => "acct_" + Guid.NewGuid().ToString("N");

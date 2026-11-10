@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../secrets/secretsSettings.mount.tsx", fixture: "secretsFixture", rpcFixture: "../demo-api.ts", styles: ["../secrets/secrets.css"],
   width: 1300, height: 900, reducedMotion: true } as const;
@@ -12,7 +13,7 @@ const rows = `[...document.querySelectorAll('.secret-row')].map(row => {
     title: code.title, overflow: row.scrollWidth > row.clientWidth + 1, tagCut: cut(row.querySelector('.bp6-tag .bp6-text-overflow-ellipsis') ?? row.querySelector('.bp6-tag')) };
 })`;
 
-test("the names of secrets and variables keep their room in a large window, and a narrow one cuts them with the whole name on hover", { skip: !edge, timeout: 90_000 },
+test("the names of secrets and variables keep their room in a large window, and a narrow one cuts them with the whole name on hover", { skip: !edge, timeout: testLimit(90_000) },
   async () => {
     await withCanvas(async page => {
       await page.until(`document.querySelectorAll('.secret-row').length === 5`, "the secrets and the variables");

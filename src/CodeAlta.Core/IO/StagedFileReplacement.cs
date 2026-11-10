@@ -16,7 +16,7 @@ namespace CodeAlta.Core.IO;
 /// <para>
 /// On Windows even that rename can leave no file for a moment, rarely (about one replacement in ten thousand, for tens of
 /// milliseconds): the previous file is gone, the staged one not yet in its place. A reader for which a missing file
-/// means something (a credential read as a sign-out) opens it with <see cref="OpenReplacedFileAsync"/>, which waits for
+/// means something (a credential read as a sign-out) opens it with <see cref="OpenReplacedFileAsync(string, CancellationToken)"/>, which waits for
 /// the new one while a staged file shows a write in progress. Such a writer names its staged file with
 /// <see cref="StagedPathOf"/>.
 /// </para>
@@ -38,7 +38,7 @@ public static class StagedFileReplacement
 
     /// <summary>
     /// Gets a new name for the file a write stages beside <paramref name="path"/>: <c>&lt;file name&gt;.&lt;guid&gt;.tmp</c> in
-    /// its folder, which <see cref="OpenReplacedFileAsync"/> takes for a write in progress, and which no other write uses.
+    /// its folder, which <see cref="OpenReplacedFileAsync(string, CancellationToken)"/> takes for a write in progress, and which no other write uses.
     /// </summary>
     /// <param name="path">The file the write replaces.</param>
     /// <returns>The path of the staged file.</returns>
@@ -65,19 +65,35 @@ public static class StagedFileReplacement
     /// replacement in progress (or once it is back), and for an access denied or a sharing violation, which a replacement
     /// causes for a moment, as the writer tries its move again. A file missing without a write in progress is none at once.
     /// </remarks>
-    public static async ValueTask<FileStream?> OpenReplacedFileAsync(string path, CancellationToken cancellationToken)
+    public static ValueTask<FileStream?> OpenReplacedFileAsync(string path, CancellationToken cancellationToken)
+        => OpenReplacedFileAsync(path, FileShare.Read | FileShare.Delete, cancellationToken);
+
+    /// <summary>
+    /// Opens for reading a file that a write replaces, as <see cref="OpenReplacedFileAsync(string, CancellationToken)"/> does,
+    /// sharing it with others as <paramref name="share"/> says: <see cref="FileShare.ReadWrite"/> with
+    /// <see cref="FileShare.Delete"/> for a reader that must never refuse a writer.
+    /// </summary>
+    /// <param name="path">The file to read.</param>
+    /// <param name="share">What the others may do with the file while it is open; <see cref="FileShare.Delete"/> lets a replacement through.</param>
+    /// <param name="cancellationToken">Cancels the wait for a file being replaced.</param>
+    /// <returns>The file, opened to be read while a writer replaces it (the reader keeps what it opened), or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    /// <exception cref="IOException">The file cannot be opened.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled while the file was being replaced.</exception>
+    public static async ValueTask<FileStream?> OpenReplacedFileAsync(string path, FileShare share, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var started = Stopwatch.GetTimestamp();
         for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
         {
-            if (TryOpenReplacedFile(path, started, useAsync: true, out var stream)) return stream;
+            if (TryOpenReplacedFile(path, share, started, useAsync: true, out var stream)) return stream;
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// Opens for reading a file that a write replaces, as <see cref="OpenReplacedFileAsync"/> does, blocking the thread
+    /// Opens for reading a file that a write replaces, as <see cref="OpenReplacedFileAsync(string, CancellationToken)"/> does, blocking the thread
     /// while it waits for a file being replaced.
     /// </summary>
     /// <param name="path">The file to read.</param>
@@ -86,24 +102,36 @@ public static class StagedFileReplacement
     /// <exception cref="IOException">The file cannot be opened.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     /// <remarks>For a reader that holds a lock owned by its thread, which it cannot await under.</remarks>
-    public static FileStream? OpenReplacedFile(string path)
+    public static FileStream? OpenReplacedFile(string path) => OpenReplacedFile(path, FileShare.Read | FileShare.Delete);
+
+    /// <summary>
+    /// Opens for reading a file that a write replaces, as <see cref="OpenReplacedFileAsync(string, FileShare, CancellationToken)"/>
+    /// does, blocking the thread while it waits for a file being replaced.
+    /// </summary>
+    /// <param name="path">The file to read.</param>
+    /// <param name="share">What the others may do with the file while it is open; <see cref="FileShare.Delete"/> lets a replacement through.</param>
+    /// <returns>The file, opened to be read while a writer replaces it (the reader keeps what it opened), or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    /// <exception cref="IOException">The file cannot be opened.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public static FileStream? OpenReplacedFile(string path, FileShare share)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var started = Stopwatch.GetTimestamp();
         for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
         {
-            if (TryOpenReplacedFile(path, started, useAsync: false, out var stream)) return stream;
+            if (TryOpenReplacedFile(path, share, started, useAsync: false, out var stream)) return stream;
             Thread.Sleep(delay);
         }
     }
 
     // True once the open is decided: the file, or null for none. False to try again, in the moment of a replacement.
-    private static bool TryOpenReplacedFile(string path, long started, bool useAsync, out FileStream? stream)
+    private static bool TryOpenReplacedFile(string path, FileShare share, long started, bool useAsync, out FileStream? stream)
     {
         stream = null;
         try
         {
-            stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync);
+            stream = new FileStream(path, FileMode.Open, FileAccess.Read, share, 4096, useAsync);
             return true;
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)

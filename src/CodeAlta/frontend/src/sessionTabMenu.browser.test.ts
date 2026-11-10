@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host: the menu of a tab, opened with the other button of the pointer,
 // and the menu of a pane close the tabs of that pane in one go, and keep the transient tab.
-test("the menu of a tab and the menu of its pane close the other tabs, the ones after it or all of them", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the menu of a tab and the menu of its pane close the other tabs, the ones after it or all of them", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, shown, press, session, scope, title, exceptions }) => {
     const entries = `[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.textContent.trim() + (item.getAttribute('aria-disabled') === 'true' ? ' (off)' : ''))`;
     const entry = (text: string) => `[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].find(item => item.textContent.trim() === ${JSON.stringify(text)})`;

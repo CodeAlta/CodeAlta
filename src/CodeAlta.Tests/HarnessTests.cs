@@ -136,7 +136,7 @@ public sealed class HarnessTests
         var definition = bridge.Resolve(new AgentMessagePart.ToolCall("call-1", "alta", arguments), tool, "x", static () => Task.CompletedTask)!;
         var sessionRun = definition.Handler(new AgentToolInvocation(Provider, "s1", "call-1", "alta", arguments), CancellationToken.None);
 
-        var answer = await early.WaitAsync(TimeSpan.FromSeconds(10));
+        var answer = await early.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual("call-1", ((AgentToolResultItem.Text)answer.Items[0]).Value, "it ran as the call of the session");
         Assert.AreSame(answer, await sessionRun);
     }

@@ -21,7 +21,7 @@ public sealed partial class NodeClientCommandTests
             Started = (_, stop) => started.TrySetResult(stop),
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var pairOutput = new CapturingWriter();
@@ -30,7 +30,7 @@ public sealed partial class NodeClientCommandTests
             var link = await WaitForAsync(() => LinkPattern().Match(pairOutput.Text) is { Success: true } match ? match.Value : null, pairing, pairError, token);
             var (code, output, error) = await RunAsync(["connect", link, "--data-root", viewerRoot, "--name", "viewer"]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            Assert.AreEqual(NodeExitCodes.Success, await pairing.WaitAsync(Patience, token), pairError.Text);
+            Assert.AreEqual(NodeExitCodes.Success, await pairing.WithinAsync(Patience, token), pairError.Text);
 
             // The viewer keeps a channel open: the node shows it connected, and closes it when it is revoked.
             var viewerCatalog = new CatalogOptions { GlobalRoot = viewerRoot, StateRoot = viewerRoot };
@@ -67,7 +67,7 @@ public sealed partial class NodeClientCommandTests
             Assert.AreEqual(NodeExitCodes.Success, code, error);
             StringAssert.Contains(output, "may view, start, manage, models.");
             StringAssert.Contains(output, "1 open channel(s) closed");
-            await viewer.Completion.WaitAsync(Patience, token);
+            await viewer.Completion.WithinAsync(Patience, token);
             (code, output, error) = await RunAsync(["remote", "test-node", "info", "--data-root", viewerRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
             StringAssert.Contains(output, "this device may view, start, manage, models.");
@@ -78,7 +78,7 @@ public sealed partial class NodeClientCommandTests
             Assert.AreEqual(NodeExitCodes.Success, code, error);
             StringAssert.Contains(output, $"Revoked viewer ({viewerIdentity.DeviceId})");
             StringAssert.Contains(output, "1 open channel(s) closed");
-            var closed = await second.Completion.WaitAsync(Patience, token);
+            var closed = await second.Completion.WithinAsync(Patience, token);
             Assert.IsFalse(closed.ClosedLocally, "The node closed the channel of the revoked device.");
             (code, _, _) = await RunAsync(["remote", "test-node", "info", "--data-root", viewerRoot]);
             Assert.AreEqual(NodeExitCodes.Failure, code, "A revoked device is refused.");
@@ -100,7 +100,7 @@ public sealed partial class NodeClientCommandTests
             stop();
         }
 
-        Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token), runError.Text);
+        Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, token), runError.Text);
 
         // Without a running node, the commands read and change the profile; the next node reads it.
         var (offlineCode, offline, offlineError) = await RunAsync(["devices", "--data-root", root.DataRoot]);

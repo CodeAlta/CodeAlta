@@ -138,7 +138,7 @@ public sealed class SessionPromptDraftPersistenceCoordinatorTests
         });
 
         coordinator.ObservePromptDraft("session", "older");
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         coordinator.ObservePromptDraft("session", newerText);
         var flush = coordinator.FlushAsync();
         Assert.IsFalse(flush.IsCompleted, "Flush must join the started write, not just cancel its delay.");
@@ -171,7 +171,7 @@ public sealed class SessionPromptDraftPersistenceCoordinatorTests
             return await store.SaveAsync(key, text, revision).ConfigureAwait(false);
         });
         coordinator.ObservePromptDraft("session", null);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         coordinator.ObservePromptDraft("session", "newer");
         var disposal = coordinator.DisposeAsync().AsTask();
         Assert.IsFalse(disposal.IsCompleted);

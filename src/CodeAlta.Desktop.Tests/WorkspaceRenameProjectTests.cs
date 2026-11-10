@@ -107,7 +107,7 @@ public sealed class WorkspaceRenameProjectTests
         var request = new WorkspaceRenameProjectRequest(Epoch, fixture.Id, fixture.Path, observed.SourcePath!, observed.Revision!, "New");
         using var cancel = new CancellationTokenSource();
         var pending = service.RenameProjectAsync(request, cancel.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WithinAsync(TestTime.Seconds(5));
         cancel.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await pending);
         Assert.AreEqual("busy", (await service.RenameProjectAsync(request, CancellationToken.None)).Status);

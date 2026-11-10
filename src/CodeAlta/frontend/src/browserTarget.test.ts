@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { browserVariable, endBrowser, findBrowser, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 test("an existing empty DevTools file is still a pending browser launch", async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-browser-startup-"));
@@ -92,7 +93,7 @@ test("an owned browser is ended before its profile is removed", async () => {
   await new Promise(resolve => browser.once("spawn", resolve));
   await endBrowser(browser);
   let timer: NodeJS.Timeout | undefined;
-  await Promise.race([gone, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("the process is still there")), 5000); })]);
+  await Promise.race([gone, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(testLimitRanOut(testLimit(5000), "the end of the process"))), testLimit(5000)); })]);
   clearTimeout(timer);
   assert.ok(browser.exitCode !== null || browser.signalCode !== null);
   await endBrowser(browser); // One that is gone, or was never started, is nothing to end.

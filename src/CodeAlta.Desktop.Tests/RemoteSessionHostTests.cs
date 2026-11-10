@@ -16,7 +16,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class RemoteSessionHostTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     private static readonly RemoteSessionHostOptions Quick = new()
     {
@@ -69,14 +69,14 @@ public sealed class RemoteSessionHostTests
         Assert.AreSame(host, registry.ResolveOperation(admission.Receipt.OperationId));
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, host.AdmitSend(new OwnedTextSendRequest("send-1", created.SessionId, "Hello node"), token).Kind,
             "A retry of the same key is the same receipt.");
-        var result = await admission.Receipt.Completion.WaitAsync(Patience, token);
+        var result = await admission.Receipt.Completion.WithinAsync(Patience, token);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
 
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
         var state = await host.ReadRuntimeStateAsync(created.SessionId, token);
         Assert.IsNotNull(state.Entry?.ActiveRunId, "The runtime state names the run at work, which steer and stop are bound to.");
         gate.SetResult();
-        Assert.IsTrue(await answered.WaitAsync(Patience, token), "The live display shows the answer.");
+        Assert.IsTrue(await answered.WithinAsync(Patience, token), "The live display shows the answer.");
 
         // The timeline: the journal's own events, with the ends of their records and the revision, as the page reads them here.
         OwnedTimelineTail tail = null!;

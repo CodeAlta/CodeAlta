@@ -186,13 +186,13 @@ public sealed class OwnedSessionPromptHookTests
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
 
         fixture.Plugin.Handler = _ => PluginPromptResult.Handled("Opened the ticket.");
-        var handled = await driver.RunAsync(opened.Session!, new HeadlessPrompt("/ticket 42")).WaitAsync(TestDeadlines.Hang);
+        var handled = await driver.RunAsync(opened.Session!, new HeadlessPrompt("/ticket 42")).WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(HeadlessRunStatus.Completed, handled.Status, handled.FailureMessage);
         Assert.AreEqual("Opened the ticket.", handled.FinalMessage);
         Assert.IsNull(handled.RunId);
 
         fixture.Plugin.Handler = _ => PluginPromptResult.Cancel("Secrets are not sent.");
-        var cancelled = await driver.RunAsync(opened.Session!, new HeadlessPrompt("my password")).WaitAsync(TestDeadlines.Hang);
+        var cancelled = await driver.RunAsync(opened.Session!, new HeadlessPrompt("my password")).WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(HeadlessRunStatus.Aborted, cancelled.Status);
         Assert.AreEqual("plugin", cancelled.AbortReason);
         Assert.AreEqual("Secrets are not sent.", cancelled.FailureMessage);
@@ -241,7 +241,7 @@ public sealed class OwnedSessionPromptHookTests
         {
             var receipt = Host.Commands.AdmitSend(request).Receipt;
             Assert.IsNotNull(receipt);
-            return await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+            return await receipt.Completion.WithinAsync(TestDeadlines.Hang);
         }
 
         // Starts a turn that holds, steers the text into it, then lets the turn go on: the send of that turn settles with
@@ -265,9 +265,9 @@ public sealed class OwnedSessionPromptHookTests
                 var runId = state.Entry.ActiveRunId;
                 var receipt = Host.Commands.AdmitSteer(new("steer", Session.SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration, runId, text)).Receipt;
                 Assert.IsNotNull(receipt);
-                var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+                var result = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
                 hold.TrySetResult();
-                Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(TestDeadlines.Hang)).Outcome);
+                Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WithinAsync(TestDeadlines.Hang)).Outcome);
                 return (runId, result);
             }
             finally

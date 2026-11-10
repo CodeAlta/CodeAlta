@@ -3,8 +3,9 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { session } from "./fixtureServer";
 import { openPhone, tapMenuItem } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
-test("the installed phone app offers a bell, enables and restores push, and fits both themes and narrow screens", { skip: !browserExecutable, timeout: 90_000 }, async () => {
+test("the installed phone app offers a bell, enables and restores push, and fits both themes and narrow screens", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const phone = await openPhone(server => { server.state.sessions = [session("s1", "Fix the parser", "p1", 0)]; }, process.env.CODEALTA_SHOTS ?? "");
   try {
     await phone.signIn();

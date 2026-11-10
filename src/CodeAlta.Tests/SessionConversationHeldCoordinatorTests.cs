@@ -15,7 +15,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class SessionConversationHeldCoordinatorTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
     private static readonly ModelProviderId Provider = new("claude-code");
 
     [TestMethod]
@@ -37,7 +37,7 @@ public sealed class SessionConversationHeldCoordinatorTests
         Assert.IsFalse(ask.IsCompleted, "The run waits for the answer.");
 
         answer(AgentConversationHeldChoice.ContinueAsCopy);
-        Assert.AreEqual(AgentConversationHeldChoice.ContinueAsCopy, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.ContinueAsCopy, await ask.WithinAsync(Timeout));
         fixture.Dispatcher.Take().Run(); // The dialog is closed on the UI thread.
         Assert.IsTrue(dialog.Closed);
         Assert.AreEqual(0, (await fixture.Service.ListAsync("session", default)).Count);
@@ -59,7 +59,7 @@ public sealed class SessionConversationHeldCoordinatorTests
         fixture.Dispatcher.Take().Run();
 
         await run.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WithinAsync(Timeout));
         fixture.Dispatcher.Take().Run();
         Assert.IsTrue(dialogs.Single().Closed);
     }
@@ -74,7 +74,7 @@ public sealed class SessionConversationHeldCoordinatorTests
         var ask = fixture.Service.Handler(Request(), run.Token);
         var show = fixture.Dispatcher.Take();
         await run.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WithinAsync(Timeout));
         show.Run();
         Assert.AreEqual(0, shown);
     }
@@ -97,7 +97,7 @@ public sealed class SessionConversationHeldCoordinatorTests
         Assert.AreEqual(2, buttons.Length, "Wait and Continue as a copy: a background session cannot be opened anyway; Cancel is Escape.");
 
         terminal.Key(TerminalKey.Escape);
-        Assert.AreEqual(AgentConversationHeldChoice.Cancel, ask.WaitAsync(Timeout).GetAwaiter().GetResult());
+        Assert.AreEqual(AgentConversationHeldChoice.Cancel, ask.WithinAsync(Timeout).GetAwaiter().GetResult());
         fixture.Dispatcher.Take().Run();
         terminal.Tick();
         Assert.AreEqual(0, terminal.DialogCount);
@@ -146,7 +146,7 @@ public sealed class SessionConversationHeldCoordinatorTests
         }
 
         public Task<T> InvokeAsync<T>(Func<T> action) => throw new AssertFailedException("Unexpected background UI read.");
-        public Work Take() => _work.Reader.ReadAsync().AsTask().WaitAsync(Timeout).GetAwaiter().GetResult();
+        public Work Take() => _work.Reader.ReadAsync().AsTask().WithinAsync(Timeout).GetAwaiter().GetResult();
     }
 
     private sealed class Work(Action action)

@@ -3638,7 +3638,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return;
         }
 
-        await admitted.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await admitted.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        // Admitted, then ended by the closure of the runtime, which cancels its work: that work has nothing left to abort.
+        catch (OperationCanceledException) when (_disposed && !cancellationToken.IsCancellationRequested)
+        {
+        }
     }
 
     private async Task AbortOwnedBodyAsync(string sessionId, CancellationToken cancellationToken)
@@ -3688,7 +3695,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             _forwarding.RetainDependencies(retained, dependencies);
             throw retained;
         }
-        catch (Exception ex) when (_disposed && ex is ObjectDisposedException or ChannelClosedException)
+        // The runtime that closes ends the runs of its sessions: it refuses the abort, or cancels it with the attachment
+        // it retires (a cancellation the caller did not ask for). Either way nothing is left to abort.
+        catch (Exception ex) when (_disposed && (ex is ObjectDisposedException or ChannelClosedException
+            || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
             return;
         }

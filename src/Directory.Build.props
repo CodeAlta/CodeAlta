@@ -12,4 +12,9 @@
     <CodeAltaCompatibilityConstants Condition="'$(UseLocalGitHubCopilotSdk)' == 'true'">CODEALTA_LOCAL_COPILOT_SDK</CodeAltaCompatibilityConstants>
     <DefineConstants Condition="'$(CodeAltaCompatibilityConstants)' != ''">$(DefineConstants);$(CodeAltaCompatibilityConstants)</DefineConstants>
   </PropertyGroup>
+  <!-- Every test project takes its time limits from TestTime: longer on CI, in one place (TestSupport/TestTime.cs). -->
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <Compile Include="$(MSBuildThisFileDirectory)TestSupport/TestTime.cs" Link="TestSupport/TestTime.cs" />
+    <Using Include="CodeAlta.Testing" />
+  </ItemGroup>
 </Project>

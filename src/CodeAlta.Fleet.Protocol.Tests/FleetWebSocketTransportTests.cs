@@ -60,10 +60,10 @@ public sealed class FleetWebSocketTransportTests
 
     private static async Task<FleetConnection> ConnectAsync(Uri address, Action<FleetConnection>? configure = null)
     {
-        var transport = await FleetWebSocketTransport.ConnectAsync(address, null, CancellationToken.None).WaitAsync(Json.Hang);
+        var transport = await FleetWebSocketTransport.ConnectAsync(address, null, CancellationToken.None).WithinAsync(Json.Hang);
         var welcome = await FleetHandshake.ConnectAsync(transport,
             new FleetHandshakeClientOptions { Protocol = Versions, Client = new FleetClientInfo("desktop", "4.0.0", "windows") },
-            new TestDeviceKeys("laptop"), CancellationToken.None).WaitAsync(Json.Hang);
+            new TestDeviceKeys("laptop"), CancellationToken.None).WithinAsync(Json.Hang);
         CollectionAssert.AreEqual(new[] { "relay" }, welcome.Features.ToArray());
         var connection = new FleetConnection(transport, FleetConnectionOptions.FromPolicy(welcome.Policy));
         configure?.Invoke(connection);
@@ -90,17 +90,17 @@ public sealed class FleetWebSocketTransportTests
         // Larger than one receive chunk, so that a frame arrives in several pieces.
         var text = new string('é', 50_000);
         var calls = Enumerable.Range(0, 20).Select(n => client.SendRequestAsync("echo", JsonSerializer.SerializeToElement($"{n}:{text}"))).ToArray();
-        var results = await Task.WhenAll(calls).WaitAsync(Json.Hang);
+        var results = await Task.WhenAll(calls).WithinAsync(Json.Hang);
         for (var n = 0; n < results.Length; n++) Assert.AreEqual($"{n}:{text}", results[n]!.Value.GetString());
-        Assert.AreEqual("echo.seen", (await seen.Task.WaitAsync(Json.Hang)).Event);
+        Assert.AreEqual("echo.seen", (await seen.Task.WithinAsync(Json.Hang)).Event);
 
-        var unknown = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SendRequestAsync("sessions.fly").WaitAsync(Json.Hang));
+        var unknown = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SendRequestAsync("sessions.fly").WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.MethodNotFound, unknown.Error.Code);
 
-        var server = await endpoint.Served.WaitAsync(Json.Hang);
-        await client.CloseAsync("done").WaitAsync(Json.Hang);
-        Assert.IsTrue((await client.Completion.WaitAsync(Json.Hang)).IsClean);
-        var serverClose = await server.Completion.WaitAsync(Json.Hang);
+        var server = await endpoint.Served.WithinAsync(Json.Hang);
+        await client.CloseAsync("done").WithinAsync(Json.Hang);
+        Assert.IsTrue((await client.Completion.WithinAsync(Json.Hang)).IsClean);
+        var serverClose = await server.Completion.WithinAsync(Json.Hang);
         Assert.IsTrue(serverClose.IsClean);
         Assert.IsFalse(serverClose.ClosedLocally);
         await client.DisposeAsync();
@@ -110,10 +110,10 @@ public sealed class FleetWebSocketTransportTests
     public async Task AFrameAboveThePolicyClosesTheReceivingSide()
     {
         await using var endpoint = await FleetEndpoint.StartAsync(new FleetConnectionPolicy(64 * 1024, 25_000), _ => { });
-        var transport = await FleetWebSocketTransport.ConnectAsync(endpoint.Address, null, CancellationToken.None).WaitAsync(Json.Hang);
+        var transport = await FleetWebSocketTransport.ConnectAsync(endpoint.Address, null, CancellationToken.None).WithinAsync(Json.Hang);
         var welcome = await FleetHandshake.ConnectAsync(transport,
             new FleetHandshakeClientOptions { Protocol = Versions, Client = new FleetClientInfo("node", "4.0.0", "linux") },
-            new TestDeviceKeys("laptop"), CancellationToken.None).WaitAsync(Json.Hang);
+            new TestDeviceKeys("laptop"), CancellationToken.None).WithinAsync(Json.Hang);
         Assert.AreEqual(64 * 1024, welcome.Policy.MaxFrameBytes);
 
         // A client that ignores the policy: the server reads no more than the limit and closes.
@@ -121,9 +121,9 @@ public sealed class FleetWebSocketTransportTests
         client.Start();
         await client.SendEventAsync(new FleetEvent("big", JsonSerializer.SerializeToElement(new string('x', 200_000))));
 
-        var server = await endpoint.Served.WaitAsync(Json.Hang);
-        Assert.AreEqual(FleetErrorCodes.FrameTooLarge, (await server.Completion.WaitAsync(Json.Hang)).Code);
-        var clientClose = await client.Completion.WaitAsync(Json.Hang);
+        var server = await endpoint.Served.WithinAsync(Json.Hang);
+        Assert.AreEqual(FleetErrorCodes.FrameTooLarge, (await server.Completion.WithinAsync(Json.Hang)).Code);
+        var clientClose = await client.Completion.WithinAsync(Json.Hang);
         Assert.IsFalse(clientClose.IsClean, $"{clientClose}");
     }
 }

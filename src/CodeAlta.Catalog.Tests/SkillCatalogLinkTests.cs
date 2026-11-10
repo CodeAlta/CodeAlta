@@ -60,7 +60,7 @@ public sealed class SkillCatalogLinkTests
         var catalog = new SkillCatalog([new UserCodeAltaSkillRootProvider()]);
 
         var listing = Task.Run(() => catalog.ListAsync(Query(userHome) with { IncludeShadowed = true }));
-        Assert.IsTrue(listing.Wait(TimeSpan.FromMinutes(1)), "the walk must end");
+        Assert.IsTrue(listing.Wait(TestTime.Minutes(1)), "the walk must end");
         var found = listing.Result.Where(static x => x.Name == "alpha").Select(static x => x.SkillRootPath).ToArray();
         CollectionAssert.Contains(found, Path.Combine(skills, "group", "alpha"));
     }

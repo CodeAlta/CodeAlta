@@ -32,11 +32,11 @@ public sealed class OpenSshRunnerTests
 
             var runner = new OpenSshRunner(ssh) { ForwardStarted = process => observed = Process.GetProcessById(process.Id) };
             using var cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
-            cancel.CancelAfter(TimeSpan.FromSeconds(1));
+            cancel.CancelAfter(TestTime.Seconds(1));
             await Assert.ThrowsAsync<OperationCanceledException>(() => runner.ForwardAsync(new SshTarget(null, "box", null), 2586, null, cancel.Token));
 
             Assert.IsNotNull(observed, "ssh started");
-            Assert.IsTrue(observed.WaitForExit(TimeSpan.FromSeconds(10)), "the ssh of a forward that was cancelled before it opened is ended, not left running");
+            Assert.IsTrue(observed.WaitForExit(TestTime.Seconds(10)), "the ssh of a forward that was cancelled before it opened is ended, not left running");
         }
         finally
         {

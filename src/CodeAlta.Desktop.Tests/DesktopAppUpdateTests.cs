@@ -125,7 +125,7 @@ public sealed class DesktopAppUpdateTests
         Assert.AreEqual(AppUpdateService.Period.Ticks, time.NextCheckAt, "an early timer callback must not postpone the check by another ten minutes");
         time.Advance(TimeSpan.FromSeconds(1));
         // No request from the page: the timer alone starts the next check.
-        await background.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await background.Task.WithinAsync(TestTime.Seconds(5));
         await service.CheckAsync(new(), CancellationToken.None);
         Assert.AreEqual(2, checks);
         time.Advance(AppUpdateService.MinimumAge);
@@ -160,7 +160,7 @@ public sealed class DesktopAppUpdateTests
         try
         {
             service.Start();
-            var token = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var token = await entered.Task.WithinAsync(TestTime.Seconds(5));
             page = service.CheckAsync(new(), CancellationToken.None);
             time.Advance(AppUpdateService.Period);
             about = service.CheckAsync(new(Refresh: true), CancellationToken.None);
@@ -172,7 +172,7 @@ public sealed class DesktopAppUpdateTests
             Assert.AreEqual(1, checks, "startup, About, periodic ticks and page reload share one network check");
             var disposing = service.DisposeAsync().AsTask();
             Assert.AreSame(disposing, service.DisposeAsync().AsTask());
-            await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await canceled.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(disposing.IsCompleted, "shutdown waits for the actual request, not only its cancellation");
             Assert.Throws<ObjectDisposedException>(service.Start);
             await Assert.ThrowsAsync<ObjectDisposedException>(() => service.CheckAsync(new(), CancellationToken.None));
@@ -180,7 +180,7 @@ public sealed class DesktopAppUpdateTests
         finally
         {
             release.TrySetResult();
-            await Task.WhenAll(service.DisposeAsync().AsTask(), page ?? Task.CompletedTask, about ?? Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(service.DisposeAsync().AsTask(), page ?? Task.CompletedTask, about ?? Task.CompletedTask).WithinAsync(TestTime.Seconds(5));
         }
         Assert.AreEqual(0, time.ActiveTimers);
         time.Advance(AppUpdateService.Period);

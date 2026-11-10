@@ -31,7 +31,7 @@ public sealed class BrowserFilesAndTraceTests
             var started = System.Diagnostics.Stopwatch.StartNew();
             StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveRead(@"\\codealta-test.invalid\share\x.txt", "filePaths")).Message, "outside the folders");
             Assert.IsFalse(files.CanRead(@"\\codealta-test.invalid\share\x.txt"));
-            Assert.IsTrue(started.Elapsed < TimeSpan.FromSeconds(1), "no lookup of the server");
+            Assert.IsTrue(started.Elapsed < TestTime.Seconds(1), "no lookup of the server");
         }
     }
 

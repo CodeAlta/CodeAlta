@@ -8,7 +8,7 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class SessionJobServiceTests
 {
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Wait = TestTime.Seconds(10);
     private static readonly string Folder = Path.GetTempPath();
 
     [TestMethod]
@@ -24,12 +24,12 @@ public sealed class SessionJobServiceTests
         {
             Assert.IsNull(jobs.TryReserveDeletion("session"));
             shell.Processes[^1].Exit(0);
-            await delivering.Task.WaitAsync(Wait);
+            await delivering.Task.WithinAsync(Wait);
             Assert.AreEqual(0, jobs.CountRunning("session"));
             Assert.IsNull(jobs.TryReserveDeletion("session"));
         }
         finally { shell.Processes[^1].Exit(0); release.TrySetResult("queued"); }
-        await settled.WaitAsync(Wait);
+        await settled.WithinAsync(Wait);
         Assert.IsNotNull(jobs.Get(job.Id));
         using var reservation = jobs.TryReserveDeletion("session");
         Assert.IsNotNull(reservation);
@@ -50,7 +50,7 @@ public sealed class SessionJobServiceTests
         }, shell.Start);
         var first = jobs.Start(Request("old", "fixture")).Job!;
         shell.Processes[^1].Exit(0);
-        await delivering.Task.WaitAsync(Wait);
+        await delivering.Task.WithinAsync(Wait);
         var settled = jobs.WhenSettledAsync(first.Id);
         try
         {
@@ -58,14 +58,14 @@ public sealed class SessionJobServiceTests
             {
                 var next = jobs.Start(Request("other", "fixture")).Job!;
                 shell.Processes[^1].Exit(0);
-                await jobs.WhenSettledAsync(next.Id).WaitAsync(Wait);
+                await jobs.WhenSettledAsync(next.Id).WithinAsync(Wait);
             }
             Assert.IsNull(jobs.Get(first.Id), "The presentation history must actually have evicted the job.");
             using var retirement = jobs.TryReserveRetirement("old");
             Assert.IsNull(retirement, "Unresolved delivery still owns the session after history eviction.");
         }
         finally { release.TrySetResult("queued"); }
-        await settled.WaitAsync(Wait);
+        await settled.WithinAsync(Wait);
         using var afterDelivery = jobs.TryReserveRetirement("old");
         Assert.IsNotNull(afterDelivery);
     }
@@ -106,7 +106,7 @@ public sealed class SessionJobServiceTests
         Assert.AreEqual(0, told.Count, "Nothing is told while the command runs.");
 
         shell.Processes[0].Exit(0);
-        await jobs.WhenSettledAsync(job.Id).WaitAsync(Wait);
+        await jobs.WhenSettledAsync(job.Id).WithinAsync(Wait);
 
         var ended = jobs.Get(job.Id)!;
         Assert.AreEqual(SessionJobState.Succeeded, ended.State);
@@ -145,7 +145,7 @@ public sealed class SessionJobServiceTests
         shell.Processes[1].Write("error CS1002: ; expected\n");
         shell.Processes[1].Exit(1);
         shell.Processes[2].Exit(0);
-        await Task.WhenAll(jobs.WhenSettledAsync(silent.Id), jobs.WhenSettledAsync(always.Id), jobs.WhenSettledAsync(never.Id)).WaitAsync(Wait);
+        await Task.WhenAll(jobs.WhenSettledAsync(silent.Id), jobs.WhenSettledAsync(always.Id), jobs.WhenSettledAsync(never.Id)).WithinAsync(Wait);
 
         Assert.AreEqual((SessionJobState.Failed, 3, "none"), (jobs.Get(silent.Id)!.State, jobs.Get(silent.Id)!.ExitCode, jobs.Get(silent.Id)!.Delivery));
         Assert.AreEqual((SessionJobState.Failed, 1, "queued"), (jobs.Get(always.Id)!.State, jobs.Get(always.Id)!.ExitCode, jobs.Get(always.Id)!.Delivery));
@@ -165,10 +165,10 @@ public sealed class SessionJobServiceTests
         var byUser = jobs.Start(Request("session-a", "sleep 900", notification: SessionJobNotification.Always)).Job!;
         var quiet = jobs.Start(Request("session-a", "sleep 100", notification: SessionJobNotification.Success)).Job!;
 
-        var cancelled = await jobs.CancelAsync(byAgent.Id).WaitAsync(Wait);
-        var stopped = await jobs.CancelAsync(byUser.Id, byUser: true).WaitAsync(Wait);
-        await jobs.CancelAsync(quiet.Id, byUser: true).WaitAsync(Wait);
-        await Task.WhenAll(jobs.WhenSettledAsync(byAgent.Id), jobs.WhenSettledAsync(byUser.Id), jobs.WhenSettledAsync(quiet.Id)).WaitAsync(Wait);
+        var cancelled = await jobs.CancelAsync(byAgent.Id).WithinAsync(Wait);
+        var stopped = await jobs.CancelAsync(byUser.Id, byUser: true).WithinAsync(Wait);
+        await jobs.CancelAsync(quiet.Id, byUser: true).WithinAsync(Wait);
+        await Task.WhenAll(jobs.WhenSettledAsync(byAgent.Id), jobs.WhenSettledAsync(byUser.Id), jobs.WhenSettledAsync(quiet.Id)).WithinAsync(Wait);
 
         Assert.IsTrue(shell.Processes.All(static process => process.Killed));
         Assert.AreEqual(SessionJobState.Cancelled, cancelled!.State);
@@ -192,7 +192,7 @@ public sealed class SessionJobServiceTests
 
         var stuck = jobs.Start(Request("session-a", "wait-for-ever") with { Timeout = TimeSpan.FromMilliseconds(50) }).Job!;
         Assert.AreEqual(TimeSpan.FromMilliseconds(50), stuck.Timeout);
-        await jobs.WhenSettledAsync(stuck.Id).WaitAsync(Wait);
+        await jobs.WhenSettledAsync(stuck.Id).WithinAsync(Wait);
 
         Assert.IsTrue(shell.Processes[0].Killed);
         var ended = jobs.Get(stuck.Id)!;
@@ -202,7 +202,7 @@ public sealed class SessionJobServiceTests
         // A command that ends within its time is not touched, and a job has no time unless it is given one.
         var quick = jobs.Start(Request("session-a", "echo") with { Timeout = TimeSpan.FromHours(1) }).Job!;
         shell.Processes[1].Exit(0);
-        await jobs.WhenSettledAsync(quick.Id).WaitAsync(Wait);
+        await jobs.WhenSettledAsync(quick.Id).WithinAsync(Wait);
         Assert.AreEqual(SessionJobState.Succeeded, jobs.Get(quick.Id)!.State);
         Assert.IsFalse(shell.Processes[1].Killed);
         Assert.IsNull(jobs.Start(Request("session-a", "sleep")).Job!.Timeout);
@@ -246,19 +246,19 @@ public sealed class SessionJobServiceTests
         shell.Processes[0].Write("one\n");
         await using var updates = jobs.ObserveOutputAsync(job.Id).GetAsyncEnumerator();
 
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(new RuntimeToolOutputUpdate("one\n", 0, 4, true, false), updates.Current);
         shell.Processes[0].Write("two\n");
         shell.Processes[0].Write("three\n");
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(new RuntimeToolOutputUpdate("two\nthree\n", 4, 14, false, false), updates.Current);
         shell.Processes[0].Exit(0);
-        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.IsTrue(updates.Current.IsComplete);
-        Assert.IsFalse(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsFalse(await updates.MoveNextAsync().AsTask().WithinAsync(Wait));
 
         // An ended job gives what it kept, at once; one that is not known gives nothing.
-        await jobs.WhenSettledAsync(job.Id).WaitAsync(Wait);
+        await jobs.WhenSettledAsync(job.Id).WithinAsync(Wait);
         var after = new List<RuntimeToolOutputUpdate>();
         await foreach (var update in jobs.ObserveOutputAsync(job.Id)) after.Add(update);
         CollectionAssert.AreEqual(new[] { new RuntimeToolOutputUpdate("one\ntwo\nthree\n", 0, 14, true, true) }, after);
@@ -286,7 +286,7 @@ public sealed class SessionJobServiceTests
         Assert.AreEqual("the end\n", jobs.ReadOutput(job.Id, 8)!.Text);
 
         shell.Processes[0].Exit(0);
-        await jobs.WhenSettledAsync(job.Id).WaitAsync(Wait);
+        await jobs.WhenSettledAsync(job.Id).WithinAsync(Wait);
         StringAssert.Contains(prompt, $"End of the output (`alta job output {job.Id}` reads more):");
         // The text has a fence of its own: the one around it is longer.
         StringAssert.EndsWith(prompt, "```\nthe end\n````");
@@ -327,7 +327,7 @@ public sealed class SessionJobServiceTests
             var job = jobs.Start(Request("session-a", "echo " + index)).Job!;
             ids.Add(job.Id);
             shell.Processes[index].Exit(0);
-            await jobs.WhenSettledAsync(job.Id).WaitAsync(Wait);
+            await jobs.WhenSettledAsync(job.Id).WithinAsync(Wait);
         }
 
         var running = jobs.Start(Request("session-a", "sleep")).Job!;
@@ -348,7 +348,7 @@ public sealed class SessionJobServiceTests
         var jobs = new SessionJobService((_, _) => { Interlocked.Increment(ref told); return Task.FromResult("queued"); }, shell.Start);
         var job = jobs.Start(Request("session-a", "sleep 600", notification: SessionJobNotification.Always)).Job!;
 
-        await jobs.DisposeAsync().AsTask().WaitAsync(Wait);
+        await jobs.DisposeAsync().AsTask().WithinAsync(Wait);
         await jobs.DisposeAsync();
 
         Assert.IsTrue(shell.Processes[0].Killed);
@@ -362,17 +362,17 @@ public sealed class SessionJobServiceTests
     {
         var written = new System.Text.StringBuilder();
         using var succeeded = ShellCommandProcess.Start("echo job-says-hello", Folder, text => { lock (written) written.Append(text); });
-        Assert.AreEqual(0, await succeeded.Completion.WaitAsync(TimeSpan.FromSeconds(60)));
+        Assert.AreEqual(0, await succeeded.Completion.WithinAsync(TestTime.Seconds(60)));
         lock (written) StringAssert.Contains(written.ToString(), "job-says-hello");
 
         using var failed = ShellCommandProcess.Start("exit 3", Folder, static _ => { });
-        Assert.AreEqual(3, await failed.Completion.WaitAsync(TimeSpan.FromSeconds(60)));
+        Assert.AreEqual(3, await failed.Completion.WithinAsync(TestTime.Seconds(60)));
 
         // A command that waits is ended with the processes it started.
         using var waiting = ShellCommandProcess.Start(OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 600" : "sleep 600", Folder, static _ => { });
         Assert.IsNotNull(waiting.ProcessId);
         waiting.Kill();
-        Assert.AreNotEqual(0, await waiting.Completion.WaitAsync(TimeSpan.FromSeconds(60)));
+        Assert.AreNotEqual(0, await waiting.Completion.WithinAsync(TestTime.Seconds(60)));
     }
 
     [TestMethod]
@@ -397,15 +397,17 @@ public sealed class SessionJobServiceTests
                 """);
             using var job = ShellCommandProcess.Start("& (Get-Process -Id $PID).Path -NoProfile -File intermediate.ps1 grandchild.txt; Start-Sleep -Seconds 60", folder, static _ => { });
             var file = Path.Combine(folder, "grandchild.txt");
-            for (var wait = 0; wait < 300 && !File.Exists(file); wait++) await Task.Delay(100);
+            // Two shells start one after the other: on a busy machine each takes seconds.
+            for (var wait = 0; wait < 1200 && !File.Exists(file); wait++) await Task.Delay(100);
+            Assert.IsTrue(File.Exists(file), "The child did not start its grandchild in two minutes.");
             grandchild = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(file), System.Globalization.CultureInfo.InvariantCulture));
             _ = grandchild.SafeHandle;
             Assert.IsFalse(grandchild.HasExited, "The regression requires a grandchild that outlives its parent.");
 
             job.Kill();
 
-            await grandchild.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.AreNotEqual(0, await job.Completion.WaitAsync(TimeSpan.FromSeconds(30)));
+            await grandchild.WaitForExitAsync().WithinAsync(TestTime.Seconds(10));
+            Assert.AreNotEqual(0, await job.Completion.WithinAsync(TestTime.Seconds(30)));
         }
         finally
         {
@@ -446,7 +448,7 @@ public sealed class SessionJobServiceTests
         var written = new System.Text.StringBuilder();
         using var process = ShellCommandProcess.Start(OperatingSystem.IsWindows() ? "Write-Output \"[$env:GIT_AUTHOR_EMAIL]\"" : "echo \"[$GIT_AUTHOR_EMAIL]\"", Folder, environment,
             text => { lock (written) written.Append(text); });
-        Assert.AreEqual(0, await process.Completion.WaitAsync(TimeSpan.FromSeconds(60)));
+        Assert.AreEqual(0, await process.Completion.WithinAsync(TestTime.Seconds(60)));
         lock (written) StringAssert.Contains(written.ToString(), "[alex@contoso.example]");
     }
 

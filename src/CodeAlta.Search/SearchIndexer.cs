@@ -79,6 +79,8 @@ public sealed class SearchIndexer : IAsyncDisposable
     private Task _loop = Task.CompletedTask;
     private ITimer? _timer;
     private SearchIndexerStatus _status = new();
+    // The key whose failure the status says, forgotten once that key reads well.
+    private string? _failedKey;
     private long _passStarted;
 
     /// <summary>Creates the indexer.</summary>
@@ -283,7 +285,11 @@ public sealed class SearchIndexer : IAsyncDisposable
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException or JsonException or InvalidDataException)
             {
                 _log?.Invoke($"Search could not read '{key}': {exception.Message}");
-                lock (_gate) _status = _status with { LastError = exception.Message };
+                lock (_gate)
+                {
+                    _failedKey = key;
+                    _status = _status with { LastError = exception.Message };
+                }
             }
             finally
             {
@@ -307,6 +313,7 @@ public sealed class SearchIndexer : IAsyncDisposable
             var sessions = await _host.GetSessionsAsync(cancellationToken).ConfigureAwait(false);
             var projects = await _host.GetProjectsAsync(cancellationToken).ConfigureAwait(false);
             await ReadJournalAsync(key["journal:".Length..], sessions, Excluded(projects), projects, cancellationToken).ConfigureAwait(false);
+            Recovered(key);
             return;
         }
 
@@ -457,11 +464,29 @@ public sealed class SearchIndexer : IAsyncDisposable
         var previousStamp = previous?.Stamp is { } kept && kept.EndsWith(exclusions, StringComparison.Ordinal) ? kept[..^exclusions.Length] : null;
         var read = await source.ReadAsync(previousStamp, cancellationToken).ConfigureAwait(false);
         lock (_gate) _checked[source.Key] = _time.GetUtcNow();
-        if (read is null) return;
+        if (read is null)
+        {
+            Recovered(source.Key);
+            return;
+        }
         var documents = read.Documents.Where(document => document.ProjectId is null || !excluded.Contains(document.ProjectId)).ToList();
         var state = new SearchSourceState(source.Key, read.Stamp + exclusions, null, null, 0, null, _time.GetUtcNow());
         var written = await _store.ApplyAsync(new SearchSourceUpdate(state, documents) { Complete = true }, cancellationToken).ConfigureAwait(false);
         if (written > 0) Changed?.Invoke();
+        Recovered(source.Key);
+    }
+
+    // A source whose failure the status says read well: a file read while it was written, read again whole.
+    private void Recovered(string key)
+    {
+        lock (_gate)
+        {
+            if (_failedKey != key) return;
+            _failedKey = null;
+            _status = _status with { LastError = null };
+        }
+
+        StatusChanged?.Invoke();
     }
 
     private async Task ReadJournalAsync(string sessionId, IReadOnlyDictionary<string, SearchSessionInfo> sessions, (HashSet<string> Projects, IReadOnlyList<string> Spaces) excluded,

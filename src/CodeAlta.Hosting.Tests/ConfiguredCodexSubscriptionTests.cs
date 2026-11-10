@@ -131,7 +131,7 @@ public sealed class ConfiguredCodexSubscriptionTests
                 case "cancel": callback.SetCanceled(new CancellationToken(true)); break;
                 default: callback.SetResult(); break;
             }
-            var actual = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5)));
+            var actual = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => operation.WithinAsync(TestTime.Seconds(5)));
             Assert.AreSame(presentationFailure, actual, "Secondary stop/wait failures must not replace the presentation failure.");
             Assert.IsTrue(released);
         }
@@ -143,7 +143,7 @@ public sealed class ConfiguredCodexSubscriptionTests
 
         async Task ObserveAsync(Task task)
         {
-            try { await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await task.WithinAsync(TestTime.Seconds(5)); }
             catch (Exception failure) when (ReferenceEquals(failure, presentationFailure)
                 || ReferenceEquals(failure, callbackFailure) || failure is OperationCanceledException) { }
         }
@@ -172,16 +172,16 @@ public sealed class ConfiguredCodexSubscriptionTests
             {
                 case "fault":
                     callback.SetException(failure);
-                    Assert.AreSame(failure, await Assert.ThrowsExactlyAsync<IOException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5))));
+                    Assert.AreSame(failure, await Assert.ThrowsExactlyAsync<IOException>(() => operation.WithinAsync(TestTime.Seconds(5))));
                     break;
                 case "cancel":
                     callback.SetCanceled(token);
-                    var canceled = await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5)));
+                    var canceled = await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => operation.WithinAsync(TestTime.Seconds(5)));
                     Assert.AreEqual(token, canceled.CancellationToken);
                     break;
                 default:
                     callback.SetResult();
-                    await operation.WaitAsync(TimeSpan.FromSeconds(5));
+                    await operation.WithinAsync(TestTime.Seconds(5));
                     break;
             }
             CollectionAssert.AreEqual(new[] { "report", "open" }, calls, "Only failed presentation stops the waiter.");
@@ -194,7 +194,7 @@ public sealed class ConfiguredCodexSubscriptionTests
 
         async Task ObserveAsync(Task task)
         {
-            try { await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await task.WithinAsync(TestTime.Seconds(5)); }
             catch (Exception actual) when (ReferenceEquals(actual, failure) || actual is OperationCanceledException) { }
         }
     }
@@ -345,14 +345,14 @@ public sealed class ConfiguredCodexSubscriptionTests
         {
             Assert.IsFalse(route.IsCompleted);
             original.SetException(failure);
-            var actual = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => route.WaitAsync(TimeSpan.FromSeconds(5)));
+            var actual = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => route.WithinAsync(TestTime.Seconds(5)));
             Assert.AreSame(failure, actual);
         }
         finally
         {
             original.TrySetException(failure);
-            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => original.Task.WaitAsync(TimeSpan.FromSeconds(5)));
-            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => route.WaitAsync(TimeSpan.FromSeconds(5)));
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => original.Task.WithinAsync(TestTime.Seconds(5)));
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => route.WithinAsync(TestTime.Seconds(5)));
         }
     }
 
@@ -366,12 +366,12 @@ public sealed class ConfiguredCodexSubscriptionTests
         {
             Assert.IsFalse(route.IsCompleted);
             original.SetResult(null);
-            Assert.IsNull(await route.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.IsNull(await route.WithinAsync(TestTime.Seconds(5)));
         }
         finally
         {
             original.TrySetResult(null);
-            await Task.WhenAll(original.Task, route).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(original.Task, route).WithinAsync(TestTime.Seconds(5));
         }
     }
 }

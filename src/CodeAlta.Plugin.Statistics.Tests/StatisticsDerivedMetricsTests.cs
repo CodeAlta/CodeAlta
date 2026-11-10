@@ -340,7 +340,7 @@ public sealed class StatisticsDerivedMetricsTests
         await harness.AddAsync(Session("self", parent: "self"));
         var request = new StatisticsRequest { Period = "2026-06-01..2026-06-30" };
 
-        var depth = await harness.Queries.DetailsAsync(request, "sub-agent-depth").AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        var depth = await harness.Queries.DetailsAsync(request, "sub-agent-depth").AsTask().WithinAsync(TestTime.Seconds(30));
         var beta = await harness.Queries.DetailsAsync(request with { Filter = new StatisticsFilter { Project = "Beta", Model = "m" } }, "sub-agent-depth");
 
         // The parent that is not known is the top of what is known: orphan is at 1 and its child at 2. A loop stops where it comes

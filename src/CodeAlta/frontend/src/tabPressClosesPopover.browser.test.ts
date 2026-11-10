@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host: a press on a tab of the dock is the dock's, which prevents its
 // mouse press. A popover open in the tab in front (a menu, the form that submits a review) still closes, as on any
 // press outside it, and does not take the keyboard back from the tab shown, which would show its own tab again.
-test("a press on another tab closes the popover of the tab in front and shows that tab", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("a press on another tab closes the popover of the tab in front and shows that tab", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ evaluate, until, press, session, title, exceptions }) => {
     const front = `document.querySelector('.session-dock .flexlayout__tab_button--selected [data-session-node]')?.textContent.trim()`;
     await until(`!!${session("one")} && ${session("one")}.getAttribute('aria-pressed')==='true'`, "the selected project with session one open");

@@ -5,7 +5,7 @@ internal sealed class TestTempDirectory(string path) : IDisposable
     // A process seen exited can still hold the folder as its working directory until Windows finishes tearing it down
     // (more than 100 ms for a killed shell on a loaded machine); a folder still held after this long is a leak, and the
     // deletion fails with its error.
-    private static readonly TimeSpan ReleaseDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ReleaseDeadline = TestTime.Seconds(10);
 
     public string Path { get; } = path;
 

@@ -270,7 +270,7 @@ public sealed class StatisticsSessionFilterTests
         }
 
         var loop = new HashSet<string>(StringComparer.Ordinal) { "loop-a", "loop-b", "loop-c" };
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
 
         var series = await harness.Queries.SeriesAsync(Scoped("loop-b"), "tokens", cancellationToken: timeout.Token);
         var sessions = await harness.Queries.SessionsAsync(Scoped("loop-b"), "tokens", timeout.Token);

@@ -20,7 +20,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopServerAutomationPlacementTests
 {
     private const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f21";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 

@@ -23,7 +23,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class RemoteChildSessionsTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     private static readonly RemoteSessionHostOptions Quick = new()
     {
@@ -73,7 +73,7 @@ public sealed class RemoteChildSessionsTests
             && session.ParentSessionId == parent.SessionId), "the machine to list the child with its parent and the parent's machine", token);
 
         // Its final answer comes back as the answer of a child of this computer: a delegated-agent message to the parent.
-        var message = await delivered.Task.WaitAsync(Patience, token);
+        var message = await delivered.Task.WithinAsync(Patience, token);
         StringAssert.Contains(message, "[CodeAlta delegated-agent message]");
         StringAssert.Contains(message, $"Source session: {childId}");
         StringAssert.Contains(message, "Source machine: test-node");
@@ -103,7 +103,7 @@ public sealed class RemoteChildSessionsTests
         var sent = await two.Children.SendAsync(new RemoteMessageRequest(parent.SessionId, childId, "Now the Android tests.", "send")
             { SpaceId = "default", Floor = await two.Desktop.RuntimeService.GetFleetFloorAsync(parent.SessionId, token) }, token);
         Assert.AreEqual("accepted", sent.Status, sent.Message);
-        StringAssert.Contains(await second.Task.WaitAsync(Patience, token), "The Android tests pass too.");
+        StringAssert.Contains(await second.Task.WithinAsync(Patience, token), "The Android tests pass too.");
         var report = await two.Children.ReportAsync(childId, token);
         Assert.AreEqual(("test-node", parent.SessionId), (report!.MachineName, report.ParentSessionId));
     }

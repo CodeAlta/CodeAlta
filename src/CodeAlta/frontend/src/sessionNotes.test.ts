@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { canClearNotes, copyNotesMarkdown, createNotesReader, maximumNotesUnits, type NotesClearState, type NotesState } from "./sessionNotes";
 import { createMutationCapability } from "./sessionOperations";
+import { testLimit } from "./testTime";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const otherEpoch = "22222222-2222-4222-8222-222222222222";
@@ -368,7 +369,7 @@ function acquire<T>(originals: Promise<unknown>[], start: () => Promise<T>): Pro
 async function join<T>(original: Promise<T>, owner: unknown): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(Object.assign(new Error("Notes deadline; original retained"), { original, owner })), 5000);
+    timer = setTimeout(() => reject(Object.assign(new Error(`Notes deadline of ${testLimit(5000)} ms; original retained`), { original, owner })), testLimit(5000));
   });
   try { return await Promise.race([original, deadline]); }
   finally { if (timer !== undefined) clearTimeout(timer); }

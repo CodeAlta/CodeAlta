@@ -170,7 +170,7 @@ public sealed class SessionLeaseStoreTests
         using var child = Process.Start(start)!;
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             var line = await child.StandardOutput.ReadLineAsync(timeout.Token);
             if (line != "HELD") Assert.Fail($"The holder did not start: {line} {await child.StandardError.ReadToEndAsync(timeout.Token)}");
 
@@ -193,7 +193,7 @@ public sealed class SessionLeaseStoreTests
         // Its exit is seen before Windows has closed its handles: under load, its file still reads as held for a moment.
         // A handle that is never closed still fails below, once the wait is over.
         var waited = Stopwatch.StartNew();
-        while (fixture.Store.TryReadHolder(SessionId) is not null && waited.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(50);
+        while (fixture.Store.TryReadHolder(SessionId) is not null && waited.Elapsed < TestTime.Seconds(10)) await Task.Delay(50);
         Assert.IsNull(fixture.Store.TryReadHolder(SessionId), "The lease of the ended holder is free once its handles are closed.");
         using var lease = fixture.Store.TryAcquire(SessionId, new SessionLeaseOwner(SessionLeaseOwner.CliKind, "run"));
         Assert.IsNotNull(lease, "The lease of a process that ended is taken again at once.");

@@ -65,7 +65,7 @@ public sealed class GitHostValueCacheTests
         await canceled.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => first);
-        CollectionAssert.AreEqual(new[] { "read again", "read again" }, await Task.WhenAll(others).WaitAsync(TimeSpan.FromSeconds(10)));
+        CollectionAssert.AreEqual(new[] { "read again", "read again" }, await Task.WhenAll(others).WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(1, reads, "One of those that waited reads in its place, for the others too.");
     }
 
@@ -80,7 +80,7 @@ public sealed class GitHostValueCacheTests
 
         await canceled.CancelAsync();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => second.WaitAsync(TimeSpan.FromSeconds(10)), "It stops at once, while the read it waited for goes on.");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => second.WithinAsync(TestTime.Seconds(10)), "It stops at once, while the read it waited for goes on.");
         Assert.IsFalse(first.IsCompleted);
         reading.SetResult("teams");
         Assert.AreEqual("teams", await first);
@@ -98,7 +98,7 @@ public sealed class GitHostValueCacheTests
         // What a client throws when its timeout passes: its token was not canceled by any caller.
         reading.SetException(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException()));
 
-        foreach (var one in waiting) await Assert.ThrowsAsync<TaskCanceledException>(() => one.WaitAsync(TimeSpan.FromSeconds(10)));
+        foreach (var one in waiting) await Assert.ThrowsAsync<TaskCanceledException>(() => one.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(1, reads, "Those that waited do not wait for another timeout.");
     }
 

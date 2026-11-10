@@ -213,7 +213,7 @@ public sealed class WorkspaceDeleteProjectTests
             closing = rpc.CloseImportsAsync();
             Assert.IsFalse(closing.IsCompleted);
             release.TrySetResult("delete_unconfirmed");
-            await closing.WaitAsync(TimeSpan.FromSeconds(10));
+            await closing.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(1, count);
             Assert.AreEqual("closed", (await rpc.DeleteProjectAsync(request, CancellationToken.None)).Status);
             await rpc.CloseSessionsAsync();
@@ -221,7 +221,7 @@ public sealed class WorkspaceDeleteProjectTests
         finally
         {
             release.TrySetResult("delete_unconfirmed");
-            if (closing is not null) await closing.WaitAsync(TimeSpan.FromSeconds(10));
+            if (closing is not null) await closing.WithinAsync(TestTime.Seconds(10));
             Directory.Delete(root, recursive: true);
         }
     }

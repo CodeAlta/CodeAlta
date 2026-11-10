@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -36,7 +37,7 @@ sequenceDiagram
 After the diagrams.
 `;
 
-test("the Markdown preview of the code editor draws its mermaid blocks, with and without the lines of a review", { skip: !edge, timeout: 180_000 }, async () => {
+test("the Markdown preview of the code editor draws its mermaid blocks, with and without the lines of a review", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-editor-preview-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -47,13 +48,13 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(`${method} timed out`)), 70_000);
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(70_000), `the answer to ${method}`))), testLimit(70_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -67,7 +68,7 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("window.previewFixture"), true);
@@ -78,7 +79,7 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
       await evaluate("previewFixture.clear()");
       await evaluate(`previewFixture.render(${JSON.stringify(text)}, ${sourceLines})`);
       const label = `sourceLines: ${sourceLines}${text.includes("\r") ? ", CRLF" : ""}`;
-      assert.equal(await wait(`${content}?.querySelectorAll('.markdown-rendered > .markdown-diagram > svg').length===2`, 60_000), true, `${label}: ${JSON.stringify(await shown())}`);
+      assert.equal(await wait(`${content}?.querySelectorAll('.markdown-rendered > .markdown-diagram > svg').length===2`, testLimit(60_000)), true, `${label}: ${JSON.stringify(await shown())}`);
       assert.deepEqual(await shown(), ["TABLE.markdown-front-matter", "H1", "P", "DIV.markdown-rendered", "DIV.markdown-rendered", "P"], label);
       // Each diagram keeps its source beside it, hidden until its Source button shows it.
       assert.equal(await evaluate(`${content}.querySelectorAll('.markdown-rendered > pre[data-language="mermaid"][hidden]').length`), 2, label);
@@ -141,7 +142,7 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     const invalid = "```mermaid\nsequenceDiagram\n  H->>H: to screen units; hit-test every window\n```";
     await evaluate("previewFixture.clear()");
     await evaluate(`previewFixture.render(${JSON.stringify(`${invalid}\n\n${invalid.replace("; ", "#59; ")}`)}, false)`);
-    assert.equal(await wait(`${content}?.querySelectorAll('.markdown-diagram > svg').length===1`, 60_000), true, JSON.stringify(await shown()));
+    assert.equal(await wait(`${content}?.querySelectorAll('.markdown-diagram > svg').length===1`, testLimit(60_000)), true, JSON.stringify(await shown()));
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(await wait(`${content}?.querySelector('.markdown-diagram-refused')`), true, JSON.stringify(await shown()));
     assert.deepEqual(await shown(), ["PRE", "P.markdown-diagram-refused", "DIV.markdown-rendered"]);

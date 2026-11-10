@@ -7,15 +7,15 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopTerminalsTests
 {
     private const string Esc = "\u001b";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     private sealed class Fixture : IDisposable
     {
         private readonly DirectoryInfo _folder = Directory.CreateTempSubdirectory("codealta-terminals-");
 
-        public Fixture(Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? identity = null)
+        public Fixture(Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? identity = null, string shellName = "sh")
         {
-            var shell = OperatingSystem.IsWindows() ? @"C:\shell\sh" : "/shell/sh";
+            var shell = OperatingSystem.IsWindows() ? @"C:\shell\" + shellName : "/shell/" + shellName;
             var profiles = new TerminalProfiles(name => name == "SHELL" ? shell : null, path => path == shell, static () => [], static _ => [], windows: false, mac: false);
             Terminals = new DesktopTerminals("1.2.3", profiles, start =>
             {
@@ -66,7 +66,7 @@ public sealed class DesktopTerminalsTests
         {
             _news ??= feed.ReadAsync(_stop.Token).GetAsyncEnumerator();
             _next ??= _news.MoveNextAsync().AsTask();
-            Assert.IsTrue(await _next.WaitAsync(Patience));
+            Assert.IsTrue(await _next.WithinAsync(Patience));
             _next = null;
             return _news.Current;
         }
@@ -278,7 +278,7 @@ public sealed class DesktopTerminalsTests
         var (kept, task) = fixture.Create(agent: true, title: "tests");
         task.Show("3 passed\r\n");
         task.End(0);
-        await kept.Ended.WaitAsync(Patience);
+        await kept.Ended.WithinAsync(Patience);
         var info = fixture.Terminals.List().Single();
         Assert.AreEqual(("tests", false, 0, true), (info.Title, info.Running, info.ExitCode, info.Agent));
         CollectionAssert.AreEqual(new[] { "3 passed", string.Empty, "[process exited with code 0]", string.Empty }, kept.ReadLines(10).ToArray());
@@ -289,7 +289,7 @@ public sealed class DesktopTerminalsTests
         var (failed, broken) = fixture.Create();
         broken.Show("bad option\r\n");
         broken.End(2);
-        await failed.Ended.WaitAsync(Patience);
+        await failed.Ended.WithinAsync(Patience);
         Assert.AreEqual((false, 2), (fixture.Terminals.List().Single().Running, fixture.Terminals.List().Single().ExitCode));
         Assert.IsTrue(failed.FailedToStart);
 
@@ -423,6 +423,50 @@ public sealed class DesktopTerminalsTests
     }
 
     [TestMethod]
+    public async Task WhatIsTypedAtThePromptOfPowerShell_WaitsForItsLineEditor()
+    {
+        using var fixture = new Fixture(shellName: "pwsh");
+        var (terminal, program) = fixture.Create(agent: true);
+        Assert.AreEqual("pwsh", Path.GetFileName(fixture.Starts[^1].FileName));
+        // The prompt is shown, and the pty is still in line mode: PSReadLine does not read the keys yet.
+        program.GatherLines(true);
+        program.Show($"{Esc}]633;A\u0007PS> {Esc}]633;B\u0007");
+        await Until(() => terminal.Describe().Integrated, "The prompt");
+        Assert.IsTrue(terminal.Write("ls\r"));
+        await Task.Delay(300);
+        Assert.AreEqual(string.Empty, program.Typed, "the line waits for the line editor");
+        program.GatherLines(false);
+        await Until(() => program.Typed == "ls\r", "The line once the editor reads the keys");
+
+        // A program that a command runs reads its lines from the line mode: they are not held.
+        program.Show($"ls\r\n{Esc}]633;E;cat\u0007{Esc}]633;C\u0007");
+        await Until(() => terminal.Describe().Busy, "The command");
+        program.GatherLines(true);
+        Assert.IsTrue(terminal.Write("text\r"));
+        await Until(() => program.Typed == "ls\rtext\r", "The line of the program");
+
+        // A line editor that never comes: the line goes after a moment.
+        program.Show($"{Esc}]633;D;0\u0007{Esc}]633;A\u0007PS> {Esc}]633;B\u0007");
+        await Until(() => !terminal.Describe().Busy, "The prompt back");
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        Assert.IsTrue(terminal.Write("dir\r"));
+        await Until(() => program.Typed.EndsWith("dir\r", StringComparison.Ordinal), "The line after the patience");
+        Assert.IsTrue(waited.Elapsed >= DesktopTerminal.LineEditorPatience - TimeSpan.FromMilliseconds(100), waited.Elapsed.ToString());
+    }
+
+    [TestMethod]
+    public async Task WhatIsTypedAtThePromptOfAnotherShell_IsNotHeld()
+    {
+        using var fixture = new Fixture();
+        var (terminal, program) = fixture.Create(agent: true);
+        program.GatherLines(true);
+        program.Show($"{Esc}]633;A\u0007$ {Esc}]633;B\u0007");
+        await Until(() => terminal.Describe().Integrated, "The prompt");
+        Assert.IsTrue(terminal.Write("ls\r"));
+        await Until(() => program.Typed == "ls\r", "The line");
+    }
+
+    [TestMethod]
     public async Task WhatIsTyped_IsWaitedFor_AndWhatItShowedIsRead()
     {
         using var fixture = new Fixture();
@@ -434,14 +478,14 @@ public sealed class DesktopTerminalsTests
         var typing = terminal.TypeAsync("ls\r", Patience, quiet, 100, default);
         await Until(() => program.Typed == "ls\r", "The line");
         program.Show("ls\r\nfile.txt\r\n$ ");
-        var typed = await typing.WaitAsync(Patience);
+        var typed = await typing.WithinAsync(Patience);
         Assert.AreEqual((true, true, null, "ls\nfile.txt\n$", false), (typed.Sent, typed.Settled, typed.Command, typed.Text, typed.Truncated));
         // Without a wait nothing is read, and only the last lines are when there are too many.
         Assert.AreEqual(new TerminalTyped(true, false, null, null, false), await terminal.TypeAsync("x", null, quiet, 100, default));
         typing = terminal.TypeAsync("seq\r", Patience, quiet, 2, default);
         await Until(() => program.Typed.EndsWith("seq\r", StringComparison.Ordinal), "The second line");
         program.Show("seq\r\n1\r\n2\r\n3\r\n$ ");
-        typed = await typing.WaitAsync(Patience);
+        typed = await typing.WithinAsync(Patience);
         Assert.AreEqual(("3\n$", true), (typed.Text, typed.Truncated));
 
         // One that reports its commands is at rest when the command has ended, however long it is quiet.
@@ -457,7 +501,7 @@ public sealed class DesktopTerminalsTests
         await Task.Delay(300);
         Assert.IsFalse(typing.IsCompleted);
         program.Show($"done\r\n{Esc}]633;D;2\u0007{Esc}]633;A\u0007$ {Esc}]633;B\u0007");
-        typed = await typing.WaitAsync(Patience);
+        typed = await typing.WithinAsync(Patience);
         var command = typed.Command!;
         Assert.AreEqual((true, null), (typed.Settled, typed.Text));
         Assert.AreEqual((1L, "make", true, 2, "compiling\ndone", false), (command.Number, command.CommandLine, command.Finished, command.ExitCode, command.Output, command.Truncated));
@@ -471,27 +515,27 @@ public sealed class DesktopTerminalsTests
         typing = terminal.TypeAsync("\r", Patience, quiet, 100, default);
         await Until(() => program.Typed.EndsWith("make\r\r", StringComparison.Ordinal), "The empty line");
         program.Show($"\r\n{Esc}]633;D\u0007{Esc}]633;A\u0007$ {Esc}]633;B\u0007");
-        typed = await typing.WaitAsync(Patience);
+        typed = await typing.WithinAsync(Patience);
         Assert.AreEqual((true, null, "\n$"), (typed.Settled, typed.Command, typed.Text));
 
         // A command that takes longer than the caller waits is left running: what it showed so far is read.
         typing = terminal.TypeAsync("serve\r", TimeSpan.FromMilliseconds(400), quiet, 100, default);
         await Until(() => program.Typed.EndsWith("serve\r", StringComparison.Ordinal), "The long command");
         program.Show($"serve\r\n{Esc}]633;E;serve\u0007{Esc}]633;C\u0007listening\r\n");
-        typed = await typing.WaitAsync(Patience);
+        typed = await typing.WithinAsync(Patience);
         Assert.AreEqual((true, false, null, "serve\nlistening", false), (typed.Sent, typed.Settled, typed.Command, typed.Text, typed.Truncated));
         // What is typed while it runs goes to the command, not to the shell: the terminal is at rest when it is quiet.
         typing = terminal.TypeAsync("q\r", Patience, quiet, 100, default);
         await Until(() => program.Typed.EndsWith("q\r", StringComparison.Ordinal), "The key");
         program.Show("bye\r\n");
-        typed = await typing.WaitAsync(Patience);
+        typed = await typing.WithinAsync(Patience);
         Assert.AreEqual((true, null, "bye"), (typed.Settled, typed.Command, typed.Text));
 
         // A program that draws the whole screen shows its screen.
         program.Show($"{Esc}[?1049h{Esc}[2J{Esc}[Hfile.txt\r\n~\r\n~");
         await Until(() => terminal.ReadScreen().Alternate, "The editor");
         typing = terminal.TypeAsync("i", Patience, quiet, 100, default);
-        typed = await typing.WaitAsync(Patience);
+        typed = await typing.WithinAsync(Patience);
         Assert.AreEqual((true, "file.txt\n~\n~"), (typed.Settled, typed.Text));
         program.Show($"{Esc}[?1049l");
         await Until(() => !terminal.ReadScreen().Alternate, "The end of the editor");
@@ -500,7 +544,7 @@ public sealed class DesktopTerminalsTests
         var ended = terminal.TypeAsync("exit\r", Patience, TimeSpan.FromSeconds(60), 100, default);
         await Until(() => program.Typed.EndsWith("exit\r", StringComparison.Ordinal), "The last line");
         program.End(0);
-        typed = await ended.WaitAsync(Patience);
+        typed = await ended.WithinAsync(Patience);
         Assert.IsTrue(typed.Sent && typed.Settled && typed.Text!.EndsWith("[process exited with code 0]", StringComparison.Ordinal), typed.Text);
         Assert.AreEqual(new TerminalTyped(false, false, null, null, false), await terminal.TypeAsync("x", Patience, quiet, 100, default));
         using var stop = new CancellationTokenSource();
@@ -580,7 +624,7 @@ public sealed class DesktopTerminalsTests
             terminal.Write(OperatingSystem.IsWindows() ? "echo terminal=%CODEALTA_TERMINAL% in %TERM_PROGRAM%\r" : "echo terminal=$CODEALTA_TERMINAL in $TERM_PROGRAM\r");
             await Until(() => terminal.ReadLines(50).Any(line => line == $"terminal={terminal.Id} in CodeAlta"), "The line of the shell");
             terminal.Write("exit 4\r");
-            await terminal.Ended.WaitAsync(Patience);
+            await terminal.Ended.WithinAsync(Patience);
             Assert.AreEqual(4, terminal.Describe().ExitCode);
             Assert.IsTrue(terminal.ReadLines(50).Contains("[process exited with code 4]"));
         }

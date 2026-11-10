@@ -933,6 +933,13 @@ internal sealed partial class CodeModeRun
 
     private CodeModeRunError Describe(Exception exception, CancellationToken cancellationToken)
     {
+        // The time limit and the stall watchdog cancel the calls in flight with the run: the AbortError of such a call can
+        // reach the script, and end it, before the engine sees the cancellation. The run still ended for that reason.
+        if (exception is PromiseRejectedException or JavaScriptException && Stopped(cancellationToken) is { } stopped)
+        {
+            return stopped;
+        }
+
         switch (exception)
         {
             case PromiseRejectedException rejected:
@@ -954,23 +961,31 @@ internal sealed partial class CodeModeRun
             case ParseErrorException parse:
                 return new(CodeModeErrorKind.Syntax, "SyntaxError", parse.Description) { Location = Location(Math.Max(1, parse.LineNumber), parse.Column + 1) };
             case OperationCanceledException or ExecutionCanceledException:
-                if (_stall.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                {
-                    return new(CodeModeErrorKind.Stalled, "Stalled",
-                        "The script waits for something that nothing can resolve: no call is in flight. Check for a promise that is never resolved, or a call that was not awaited.");
-                }
-
-                if (_timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                {
-                    return new(CodeModeErrorKind.Timeout, "Timeout", $"The run reached its time limit of {_limits.Timeout}.");
-                }
-
-                return new(CodeModeErrorKind.Cancelled, "Cancelled", "The run was stopped.");
+                return Stopped(cancellationToken) ?? new(CodeModeErrorKind.Cancelled, "Cancelled", "The run was stopped.");
             case JintException jint when jint.Message.Contains("call stack", StringComparison.OrdinalIgnoreCase):
                 return new(CodeModeErrorKind.Recursion, "RangeError", jint.Message);
             default:
                 return new(CodeModeErrorKind.Script, exception.GetType().Name, exception.Message);
         }
+    }
+
+    // The error of a run that its stall watchdog or its time limit stopped, not its caller; null otherwise.
+    private CodeModeRunError? Stopped(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        if (_stall.IsCancellationRequested)
+        {
+            return new(CodeModeErrorKind.Stalled, "Stalled",
+                "The script waits for something that nothing can resolve: no call is in flight. Check for a promise that is never resolved, or a call that was not awaited.");
+        }
+
+        return _timeout.IsCancellationRequested
+            ? new(CodeModeErrorKind.Timeout, "Timeout", $"The run reached its time limit of {_limits.Timeout}.")
+            : null;
     }
 
     private CodeModeRunError FromJavaScript(JsValue value, CodeModeSourceLocation? location)

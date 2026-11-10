@@ -4,6 +4,7 @@ import { setTimeout as deadlineTimer, clearTimeout as clearDeadlineTimer } from 
 import { askActionUnconfirmed, askWireHandle, askWireRequest, captureAskAction, createAskActions, parseAskPage, validAskHandle } from "./sessionAsks";
 import { createMutationCapability } from "./sessionOperations";
 import { askInPlace } from "./workspacePresentation";
+import { testLimit } from "./testTime";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const handle = Object.freeze({ operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1",
@@ -393,7 +394,7 @@ async function finish(originals: readonly Promise<unknown>[], owner: unknown, pr
 async function join<T>(original: Promise<T>, owner: unknown): Promise<T> {
   let timer: ReturnType<typeof deadlineTimer> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = deadlineTimer(() => reject(Object.assign(new Error("Ask fixture deadline; original and owner retained"), { original, owner })), 5000);
+    timer = deadlineTimer(() => reject(Object.assign(new Error(`Ask fixture deadline of ${testLimit(5000)} ms; original and owner retained`), { original, owner })), testLimit(5000));
   });
   const observation = Promise.race([original, deadline]);
   try { return await observation; }

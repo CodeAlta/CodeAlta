@@ -26,7 +26,7 @@ public sealed class ApplicationLogLevelsTests
             Assert.AreEqual(LogLevel.Debug, capture.Levels!.Current.LevelOf(LogFeatures.Mcp));
 
             LogManager.GetLogger("CodeAlta.Desktop.Mcp").Debug("an MCP detail");
-            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Any(static row => row.Text == "an MCP detail"), TimeSpan.FromSeconds(5)));
+            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Any(static row => row.Text == "an MCP detail"), TestTime.Seconds(5)));
             Assert.AreEqual(LogFeatures.Mcp, capture.Snapshot().Rows.Single(static row => row.Text == "an MCP detail").Feature);
         });
     }

@@ -13,7 +13,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ClaudeCodeTurnExecutorTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task ConversationOfAnotherProvider_IsGivenAsContextWithTheFirstPrompt()
@@ -144,7 +144,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         // The background command of the first turn ends: Claude Code starts a turn by itself, with a tool call.
         var process = cli.Last;
         EmitOwnTurn(process);
-        await asked.Task.WaitAsync(Timeout);
+        await asked.Task.WithinAsync(Timeout);
         var notice = executor.GetPendingProviderTurn("session-1");
         Assert.AreEqual("Claude Code started a turn by itself: Background command \"Run the tests\" completed (exit code 0)", notice);
 
@@ -157,7 +157,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         Assert.AreEqual("toolu_bg", call.CallId);
         var tool = executor.ResolveTool("session-1", call, null);
         Assert.IsNotNull(tool, "The tool call of the turn is run by the run that shows it.");
-        var result = await tool.Handler(new AgentToolInvocation(new ModelProviderId("claude-code"), "session-1", call.CallId, call.Name, call.Arguments), CancellationToken.None).WaitAsync(Timeout);
+        var result = await tool.Handler(new AgentToolInvocation(new ModelProviderId("claude-code"), "session-1", call.CallId, call.Name, call.Arguments), CancellationToken.None).WithinAsync(Timeout);
         Assert.AreEqual("done", result.Items.OfType<AgentToolResultItem.Text>().Single().Value);
 
         conversation.AddRange([second.AssistantMessage, new(AgentConversationRole.Tool, [new AgentMessagePart.ToolResult(call.CallId, result)])]);
@@ -463,7 +463,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             {
                 updates.Add(update);
                 return ValueTask.CompletedTask;
-            }).WaitAsync(Timeout);
+            }).WithinAsync(Timeout);
 
         Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning && update.Message == "Claude Code: Fast mode disabled · Out of usage credits"));
         Assert.IsFalse(response.Usage!.LastOperation!.FastMode, "the answer ran at standard speed");
@@ -483,7 +483,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             {
                 updates.Add(update);
                 return ValueTask.CompletedTask;
-            }).WaitAsync(Timeout);
+            }).WithinAsync(Timeout);
 
         Assert.AreEqual(1, cli.Last.FastModeRequests.Count);
         Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning && update.Message?.Contains("fast mode on", StringComparison.Ordinal) == true));
@@ -644,7 +644,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         // From claude.ai the mode can be changed where CodeAlta does not see it: a turn of CodeAlta puts the CLI in
         // its own mode again.
         Assert.AreEqual(AgentRemoteControlStatus.Connected,
-            (await executor.SetRemoteControlAsync(CreateRequest(conversation), enabled: true, null, CancellationToken.None).WaitAsync(Timeout)).Status);
+            (await executor.SetRemoteControlAsync(CreateRequest(conversation), enabled: true, null, CancellationToken.None).WithinAsync(Timeout)).Status);
         await SendAsync("three");
         await SendAsync("four");
 
@@ -672,7 +672,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var request = CreateRequest([User("one")]);
         Assert.IsFalse(await modes.SetRunningPermissionModeAsync(request.SessionId, "acceptEdits", CancellationToken.None), "No turn runs yet.");
         var turn = ExecuteAsync(executor, request);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
         var process = cli.Last;
 
         // The turn runs: its CLI is switched at once.
@@ -777,7 +777,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         stop.Cancel();
         try
         {
-            await stopped.WaitAsync(Timeout);
+            await stopped.WithinAsync(Timeout);
             Assert.Fail("The stopped turn did not end.");
         }
         catch (OperationCanceledException)
@@ -820,7 +820,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
         process.EmitAssistant("msg_remote", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The tests pass.")));
         process.EmitResult("The tests pass.");
-        await asked.Task.WaitAsync(Timeout);
+        await asked.Task.WithinAsync(Timeout);
 
         Assert.AreEqual("Run the tests", executor.GetPendingProviderTurn("session-1"), "The run that shows the turn records the prompt as it was sent.");
     }
@@ -833,7 +833,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var conversation = new List<AgentConversationMessage>();
 
         // Nothing runs yet: the CLI is started for Remote Control alone, without a turn.
-        var state = await executor.SetRemoteControlAsync(CreateRequest(conversation), enabled: true, "My session", CancellationToken.None).WaitAsync(Timeout);
+        var state = await executor.SetRemoteControlAsync(CreateRequest(conversation), enabled: true, "My session", CancellationToken.None).WithinAsync(Timeout);
 
         Assert.AreEqual(new AgentRemoteControl(AgentRemoteControlStatus.Connected, "https://claude.ai/code/session_1"), state);
         var first = cli.Last;
@@ -870,11 +870,11 @@ public sealed class ClaudeCodeTurnExecutorTests
         var changes = new List<AgentRemoteControl>();
         using var registration = executor.OnRemoteControlChanged("session-1", change => { lock (changes) changes.Add(change); });
 
-        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout);
         await Task.Delay(600);
         Assert.IsFalse(cli.Last.IsDisposed, "The bridge ends with the process: an idle process is kept while Remote Control is on.");
 
-        var off = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: false, null, CancellationToken.None).WaitAsync(Timeout);
+        var off = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: false, null, CancellationToken.None).WithinAsync(Timeout);
 
         Assert.AreEqual(AgentRemoteControl.Off, off);
         Assert.IsFalse(cli.Last.RemoteControlOn);
@@ -895,7 +895,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var cli = new ClaudeCodeFakeCli { RemoteControlAvailable = available, RemoteControlError = refusal };
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
 
-        var state = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        var state = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout);
 
         Assert.AreEqual(AgentRemoteControlStatus.Failed, state.Status);
         StringAssert.Contains(state.Error, expected);
@@ -907,7 +907,7 @@ public sealed class ClaudeCodeTurnExecutorTests
     {
         var cli = new ClaudeCodeFakeCli();
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
-        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout);
         var process = cli.Last;
 
         process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "bridge_state", ["state"] = "reconnecting", ["session_id"] = process.SessionId });
@@ -925,7 +925,7 @@ public sealed class ClaudeCodeTurnExecutorTests
     {
         var cli = new ClaudeCodeFakeCli();
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
-        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout);
 
         cli.Last.Exit(1);
 
@@ -954,7 +954,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             IdleTimeout = TimeSpan.FromMilliseconds(100),
         });
 
-        var state = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        var state = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout);
 
         Assert.AreEqual(AgentRemoteControlStatus.Failed, state.Status);
         Assert.IsTrue(await WaitUntilAsync(() => cli.Last.IsDisposed), "No bridge runs: the idle process is closed.");
@@ -972,9 +972,9 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         var on = executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None);
         Assert.IsTrue(await WaitUntilAsync(() => cli.Last.RemoteControlRequests.Count == 1));
-        var off = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: false, null, CancellationToken.None).WaitAsync(Timeout);
+        var off = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: false, null, CancellationToken.None).WithinAsync(Timeout);
         answer.SetResult();
-        await on.WaitAsync(Timeout);
+        await on.WithinAsync(Timeout);
 
         Assert.AreEqual(AgentRemoteControl.Off, off);
         Assert.AreEqual(AgentRemoteControl.Off, executor.GetRemoteControl("session-1"));
@@ -982,7 +982,7 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         // The bridge that was turned off is not taken up again by the next connection.
         cli.RemoteControlAnswer = null;
-        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout);
         Assert.IsFalse(cli.Last.RemoteControlRequests[^1].TryGetProperty("reattach_session_id", out _));
     }
 
@@ -1000,7 +1000,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var on = executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, caller.Token);
         Assert.IsTrue(await WaitUntilAsync(() => cli.Last.RemoteControlRequests.Count == 1));
         await caller.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => on.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => on.WithinAsync(Timeout));
         Assert.AreEqual(AgentRemoteControlStatus.Connecting, executor.GetRemoteControl("session-1").Status);
         answer.SetResult();
 
@@ -1020,7 +1020,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var on = executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, caller.Token);
         Assert.IsTrue(await WaitUntilAsync(() => cli.Processes.Count == 1 && executor.GetRemoteControl("session-1").Status == AgentRemoteControlStatus.Connecting));
         await caller.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => on.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => on.WithinAsync(Timeout));
         started.SetResult();
 
         var state = executor.GetRemoteControl("session-1");
@@ -1030,7 +1030,7 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         // Try again starts one, and connects it.
         cli.InitializeAnswer = null;
-        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout)).Status);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WithinAsync(Timeout)).Status);
         Assert.AreEqual(2, cli.Processes.Count);
     }
 
@@ -1258,7 +1258,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         await ExecuteAsync(executor, CreateRequest([User("one")]) with { Tools = [Tool("alta"), Tool("take_snapshot")] });
 
         // The first request of the model has them: they do not arrive with a later notification.
-        CollectionAssert.AreEqual(new[] { "alta", "take_snapshot" }, await cli.Last.ToolsListedAtStart.WaitAsync(Timeout));
+        CollectionAssert.AreEqual(new[] { "alta", "take_snapshot" }, await cli.Last.ToolsListedAtStart.WithinAsync(Timeout));
         Assert.IsFalse(cli.Last.Received.Any(static message =>
             message.GetProperty("type").GetString() == "control_request" &&
             message.GetProperty("request").GetProperty("subtype").GetString() == "mcp_message"));
@@ -1431,7 +1431,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         };
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
 
-        var response = await executor.ExecuteTurnAsync(CreateRequest([User("one")]), static (_, _) => ValueTask.CompletedTask, static (_, _) => ValueTask.CompletedTask).WaitAsync(Timeout);
+        var response = await executor.ExecuteTurnAsync(CreateRequest([User("one")]), static (_, _) => ValueTask.CompletedTask, static (_, _) => ValueTask.CompletedTask).WithinAsync(Timeout);
 
         // The five hours first and the week second, whichever of them is the one that limits now.
         var limits = response.Usage!.RateLimits!;
@@ -1478,7 +1478,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             {
                 updates.Add(update);
                 return ValueTask.CompletedTask;
-            }).WaitAsync(Timeout);
+            }).WithinAsync(Timeout);
 
         var reasoning = response.AssistantMessage.Parts.OfType<AgentMessagePart.Reasoning>().Single();
         Assert.AreEqual("let me see", reasoning.Value);
@@ -1583,7 +1583,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             {
                 updates.Add(update);
                 return ValueTask.CompletedTask;
-            }).WaitAsync(Timeout);
+            }).WithinAsync(Timeout);
 
         // Weeks away: the usage says it, nothing warns.
         var first = await Run(CreateRequest([User("one")]));
@@ -1845,7 +1845,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var recorded = new ClaudeCodeProviderState("c1", 1, 1, Leaf: "a1", Anchor: "a1").ToJson();
         var state = new AgentSessionState { SessionId = "session-1", ProviderState = recorded, UpdatedAt = DateTimeOffset.UtcNow };
 
-        var read = await executor.ReadExternalTurnsAsync(state, directory.Path, CancellationToken.None).WaitAsync(Timeout);
+        var read = await executor.ReadExternalTurnsAsync(state, directory.Path, CancellationToken.None).WithinAsync(Timeout);
         Assert.AreEqual(AgentExternalTurnsStatus.Read, read.Status);
         Assert.AreEqual(1, read.Turns.Count);
 
@@ -1860,7 +1860,7 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     private static Task<AgentTurnResponse> ExecuteAsync(ClaudeCodeTurnExecutor executor, AgentTurnRequest request)
-        => executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).WaitAsync(Timeout);
+        => executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).WithinAsync(Timeout);
 
     private static Task<AgentPermissionDecision> AllowAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
         => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));

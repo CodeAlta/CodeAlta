@@ -13,7 +13,7 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class SessionStateRowTests
 {
     private static readonly DateTimeOffset CreatedAt = new(2026, 10, 24, 8, 0, 0, TimeSpan.Zero);
-    private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Deadline = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task ANewStore_ReadsAndChangesTheStateOfASession_WithoutReadingItsJournal()
@@ -53,13 +53,13 @@ public sealed class SessionStateRowTests
 
             // A new store each time, as after a start of the application: nothing is remembered in memory.
             var restarted = new SessionViewCatalog(options).JournalStore;
-            var state = await restarted.ReadLatestStateAsync(session.SessionId, session.CreatedAt).WaitAsync(Deadline);
+            var state = await restarted.ReadLatestStateAsync(session.SessionId, session.CreatedAt).WithinAsync(Deadline);
             Assert.IsNotNull(state, name + ": the state is read from the row.");
             Assert.AreEqual(0, restarted.JournalStateReadCount, name);
 
             change(state);
             var expected = Serialize(SessionViewJournalStore.CompactForJournal(state));
-            await restarted.AppendStateAsync(session, state).WaitAsync(Deadline);
+            await restarted.AppendStateAsync(session, state).WithinAsync(Deadline);
 
             // The journal takes the record: it stays the record of the session.
             AssertSameJson(expected, LastStateRecord(path), name + ": the journal holds the state written.");
@@ -68,7 +68,7 @@ public sealed class SessionStateRowTests
                 name + ": the journal was appended to, never read and written again.");
 
             BlankJournal(path);
-            var read = await new SessionViewCatalog(options).JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).WaitAsync(Deadline);
+            var read = await new SessionViewCatalog(options).JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).WithinAsync(Deadline);
             AssertSameJson(expected, Serialize(read!), name + ": the next start reads the state written.");
         }
     }

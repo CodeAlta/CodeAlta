@@ -143,7 +143,7 @@ public sealed class RelayTests
 
         // A switch of versions does not wait for the shutdown timeout of the host (30 s) to cut the session channels.
         var stopping = System.Diagnostics.Stopwatch.StartNew();
-        await rig.Server.Server.DisposeAsync().AsTask().WaitAsync(Waits.Hang);
+        await rig.Server.Server.DisposeAsync().AsTask().WithinAsync(Waits.Hang);
         Assert.IsLessThan(TimeSpan.FromSeconds(15), stopping.Elapsed, $"The stop took {stopping.Elapsed}.");
         Assert.IsTrue(await EndsAsync(viewer));
         Assert.IsTrue(await EndsAsync(target));

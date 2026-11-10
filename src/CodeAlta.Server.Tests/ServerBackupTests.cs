@@ -67,9 +67,9 @@ public sealed class ServerBackupTests
             ConfigureServer = static options => new CoordinatorServerOptions { DataRoot = options.DataRoot, Urls = options.Urls, ConfigureLogging = static _ => { } },
         };
         var running = server.RunAsync(["run", "--data-root", root.Path, "--urls", "http://127.0.0.1:0"]);
-        var stop = await started.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
+        var stop = await started.Task.WithinAsync(TestTime.Seconds(30), token);
         stop();
-        await running.WaitAsync(TimeSpan.FromSeconds(30), token);
+        await running.WithinAsync(TestTime.Seconds(30), token);
         var said = error.ToString();
         Assert.AreEqual(1, said.Split("2 backups").Length - 1, said);
         StringAssert.Contains(said, "altaserver backups --delete-unsealed");

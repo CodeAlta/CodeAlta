@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { regionChurnScript } from "./regionChurn";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 // What moves in the regions of the window, in headless Edge with the production styles: the marks of a tab of the
 // title bar, the level of a microphone in a popover, the bar of a download in a toast. A box that moves there makes
@@ -24,7 +25,7 @@ async function settled(page: Page): Promise<void> {
   assert.fail(`the page never settled: ${JSON.stringify(last)}`);
 }
 
-test("nothing that animates in a region of the window moves a box", { skip: !edge, timeout: 120_000 }, async () => {
+test("nothing that animates in a region of the window moves a box", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#tab .activity-spinner') && document.querySelector('.speech-level > span') && document.querySelector('.painted-progress')
       && document.querySelector('.window-brand .plugin-button-badge[data-kind=busy]')`, "the marks, the level, the bar and the busy ring");
@@ -53,7 +54,7 @@ test("nothing that animates in a region of the window moves a box", { skip: !edg
 // Chromium gives the window one child window for each rectangle of the area that moves it, and makes them again at each
 // change of a region. Tabs cut that area between them, scrolled-out ones too: 27 tabs made 151 windows, and each popover
 // that opened stalled the UI thread for seconds. The tabs that show are one hole in it, whatever their number.
-test("the tab strip of the title bar is one region, whatever its tabs", { skip: !edge, timeout: 120_000 }, async () => {
+test("the tab strip of the title bar is one region, whatever its tabs", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#tab-strip .flexlayout__tab_button') !== null`, "the tab strip");
     const region = (selector: string) => page.evaluate<string>(`getComputedStyle(document.querySelector('#tab-strip ${selector}')).getPropertyValue('app-region')`);
@@ -85,7 +86,7 @@ test("the tab strip of the title bar is one region, whatever its tabs", { skip: 
 
 // Blueprint scales a popover as it opens, inside a box that stays. Each frame of that sent the regions to the window
 // again, as each frame of a scroll in a dialog did: a popover and a dialog are one box of a region, what moves inside is none.
-test("what moves inside a popover or a dialog moves no box of a region of the window", { skip: !edge, timeout: 120_000 }, async () => {
+test("what moves inside a popover or a dialog moves no box of a region of the window", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#popover-body') !== null && document.querySelector('#dialog-body') !== null`, "the popover and the dialog");
     await settled(page);
@@ -103,7 +104,7 @@ test("what moves inside a popover or a dialog moves no box of a region of the wi
 // The toasts of every start (the cleanup of sessions, of the scratchpad) slid in as regions of the window: each frame of
 // their entrance sent the regions to the window again, a burst of kernel work at the start that the mouse of the whole
 // desktop waited for. A toast sits below the title bar: it is no region.
-test("a toast that slides in moves no box of a region of the window", { skip: !edge, timeout: 120_000 }, async () => {
+test("a toast that slides in moves no box of a region of the window", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#tab') !== null`, "the title bar");
     await settled(page);

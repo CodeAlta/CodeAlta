@@ -20,7 +20,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class BookmarkHostTests
 {
     private const string Epoch = "5b6c1f0e-8d0c-4e0b-a1b2-9f1d5f6f7a11";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task ThePage_BookmarksASessionAndAMessage_AndListsThemTheNewestFirst()
@@ -112,26 +112,26 @@ public sealed class BookmarkHostTests
         await using var fixture = await Fixture.CreateAsync();
         using var stop = new CancellationTokenSource();
         await using var watch = fixture.Rpc.WatchAsync(new(Epoch), stop.Token).GetAsyncEnumerator();
-        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WithinAsync(Patience));
         Assert.AreEqual(0, watch.Current.Revision, "The page lists once when it starts listening.");
 
         var added = (await fixture.Rpc.AddAsync(new(Epoch, "in-project", null, null), default)).Bookmark!;
-        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WithinAsync(Patience));
         Assert.AreEqual(1, watch.Current.Revision);
 
         var named = await fixture.Rpc.RenameAsync(new(Epoch, added.Id, " The plan "), default);
         Assert.AreEqual(("ok", "The plan", added.Id, false), (named.Status, named.Bookmark!.Label, named.Bookmark.Id, named.Bookmark.SessionMissing));
-        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WithinAsync(Patience));
         Assert.IsNull((await fixture.Rpc.RenameAsync(new(Epoch, added.Id, ""), default)).Bookmark!.Label);
-        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WithinAsync(Patience));
 
         // A change made by an agent is told too.
         var byAgent = await fixture.One("alta.bookmark.added", ["bookmark", "add", "--session", "chat"]);
-        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WithinAsync(Patience));
 
         var removed = await fixture.Rpc.RemoveAsync(new(Epoch, added.Id), default);
         Assert.AreEqual(("ok", added.Id, "Planning session"), (removed.Status, removed.Bookmark!.Id, removed.Bookmark.SessionTitle));
-        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WaitAsync(Patience));
+        Assert.IsTrue(await watch.MoveNextAsync().AsTask().WithinAsync(Patience));
         Assert.AreEqual(Value(byAgent, "id"), (await fixture.Rpc.ListAsync(new(Epoch), default)).Bookmarks.Single().Id);
         await stop.CancelAsync();
     }
@@ -339,7 +339,7 @@ public sealed class BookmarkHostTests
         var existing = (await fixture.Rpc.AddAsync(new(Epoch, "chat", null, null), default)).Bookmark!;
 
         using var life = new DesktopBookmarks(fixture.Bookmarks, protection, fixture.Host.RuntimeService);
-        await life.Loaded.WaitAsync(Patience);
+        await life.Loaded.WithinAsync(Patience);
 
         Assert.IsNull(protection.TryReserveRetirement("chat"), "The bookmarks that were there protect their sessions.");
         using (var free = protection.TryReserveRetirement("in-project")) Assert.IsNotNull(free);
@@ -373,7 +373,7 @@ public sealed class BookmarkHostTests
         await database.DisposeAsync();
 
         using var life = new DesktopBookmarks(new BookmarkService(database, new SessionJournalBookmarks(fixture.Store)), protection);
-        await life.Loaded.WaitAsync(Patience);
+        await life.Loaded.WithinAsync(Patience);
 
         Assert.IsNull(protection.TryReserveRetirement("old-session"), "What the bookmarks protect is not known: nothing is retired.");
     }
@@ -495,7 +495,7 @@ public sealed class BookmarkHostTests
 
         public async Task<(int Code, List<JsonElement> Records, string Text)> Run(string[] arguments, AltaCallerIdentity? caller = null)
         {
-            var result = await Alta.InvokeAsync(arguments, null, caller ?? Session, Project.ProjectPath).AsTask().WaitAsync(Patience);
+            var result = await Alta.InvokeAsync(arguments, null, caller ?? Session, Project.ProjectPath).AsTask().WithinAsync(Patience);
             var records = new List<JsonElement>();
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {

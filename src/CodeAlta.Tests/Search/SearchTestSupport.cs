@@ -168,7 +168,7 @@ internal sealed class SearchFixture : IAsyncDisposable
     {
         Indexer.Start();
         Indexer.SignalPass();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
         await Task.Delay(20, timeout.Token);
         await Indexer.WaitIdleAsync(timeout.Token);
     }

@@ -485,7 +485,7 @@ public sealed class GitPluginTests
                 }
 
                 process.Start();
-                if (!process.WaitForExit(10_000))
+                if (!process.WaitForExit(TestTime.MillisecondsInt(10_000)))
                 {
                     TryKill(process);
                     error = "git timed out.";

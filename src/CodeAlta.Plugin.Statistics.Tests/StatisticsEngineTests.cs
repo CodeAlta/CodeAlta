@@ -140,7 +140,7 @@ public sealed class StatisticsEngineTests
         Assert.AreEqual(3000, harness.Engine.Status.SessionsTotal);
         Assert.AreEqual(12000L, harness.Engine.Status.BytesTotal);
         Assert.AreEqual(1, harness.Journals.Lists);
-        Assert.IsTrue(clock.Elapsed < TimeSpan.FromSeconds(10), clock.Elapsed.ToString());
+        Assert.IsTrue(clock.Elapsed < TestTime.Seconds(10), clock.Elapsed.ToString());
     }
 
     [TestMethod]
@@ -875,7 +875,7 @@ public sealed class StatisticsEngineTests
         Assert.IsNotNull(await store.GetJournalAsync("a"));
 
         await lifetime.CancelAsync();
-        await loop.WaitAsync(TimeSpan.FromSeconds(10));
+        await loop.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]
@@ -912,7 +912,7 @@ public sealed class StatisticsEngineTests
         Assert.IsNotNull(await store.GetJournalAsync("a"));
 
         await lifetime.CancelAsync();
-        await loop.WaitAsync(TimeSpan.FromSeconds(10));
+        await loop.WithinAsync(TestTime.Seconds(10));
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

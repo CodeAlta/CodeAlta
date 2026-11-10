@@ -282,10 +282,11 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false, readAt: null });
     const fresh = freshList.current;
     freshList.current = false;
+    // The age of what comes counts from when it came, not from the last tick of the minutes, which can be 30 s old.
     void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit, part: wanted.part,
       filters: listed.text ? listed.values : null, fresh: fresh || null },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
-      reply => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
+      reply => { if (controller.signal.aborted) return; setNow(Date.now()); setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
         problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn, readAt: reply.status === "ok" ? reply.readAt : null }); },
       () => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: [], more: false, problem: t("The list could not be read."), needsSignIn: false, readAt: null }); });
     return () => controller.abort();
@@ -306,7 +307,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     freshItem.current = false;
     void api.read({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: current.kind, id: current.id, fresh: fresh || null },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
-      reply => { if (!controller.signal.aborted) setDetail({ key: currentKey, loading: false, value: reply }); },
+      reply => { if (!controller.signal.aborted) { setNow(Date.now()); setDetail({ key: currentKey, loading: false, value: reply }); } },
       () => { if (!controller.signal.aborted) setDetail({ key: currentKey, loading: false, value: null }); });
     return () => controller.abort();
   }, [api, epoch, available, visible, currentKey, revision, itemRevision]);

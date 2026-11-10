@@ -24,13 +24,13 @@ public sealed class ScratchpadStartupCleanupTests
             {
                 if (++opened != 2) return;
                 paused.SetResult();
-                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Test did not release cleanup.");
+                if (!release.Wait(TestTime.Seconds(10))) throw new TimeoutException("Test did not release cleanup.");
             },
         };
         var worker = cleanup.RunAsync(true, true, CancellationToken.None);
         try
         {
-            await paused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await paused.Task.WithinAsync(TestTime.Seconds(10));
             Assert.IsFalse(worker.IsCompleted);
             Assert.AreEqual(ScratchpadCleanupState.Running, cleanup.Snapshot.State);
             Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles, "A long cleanup must publish progress before its final result.");
@@ -400,14 +400,14 @@ public sealed class ScratchpadStartupCleanupTests
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
             MaxAge = TimeSpan.Zero,
-            WorkerStarted = _ => { workerEntered.Set(); Assert.IsTrue(releaseWorker.Wait(TimeSpan.FromSeconds(10))); },
+            WorkerStarted = _ => { workerEntered.Set(); Assert.IsTrue(releaseWorker.Wait(TestTime.Seconds(10))); },
         };
         var observed = new List<ScratchpadCleanupState>();
         using var observer = cleanup.Subscribe(snapshot => observed.Add(snapshot.State));
         var original = cleanup.RunAsync(true, true, cancellation.Token);
         try
         {
-            Assert.IsTrue(workerEntered.Wait(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(workerEntered.Wait(TestTime.Seconds(10)));
             cancellation.Cancel();
             var second = cleanup.RunAsync(false, false, new CancellationToken(true));
             Assert.AreSame(original, second);
@@ -486,12 +486,12 @@ public sealed class ScratchpadStartupCleanupTests
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
             MaxAge = TimeSpan.Zero,
-            BeforeEntryDelete = _ => { entered.Set(); Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(10))); },
+            BeforeEntryDelete = _ => { entered.Set(); Assert.IsTrue(release.Wait(TestTime.Seconds(10))); },
         };
         var worker = cleanup.RunAsync(true, true, cancellation.Token);
         try
         {
-            Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(entered.Wait(TestTime.Seconds(10)));
             cancellation.Cancel();
             // Even premature guard disposal cannot close the OS ownership handle while deletion runs.
             fixture.Guard.Dispose();
@@ -541,6 +541,31 @@ public sealed class ScratchpadStartupCleanupTests
         await cleanup.RunAsync(true, true, CancellationToken.None);
         Assert.IsTrue(attemptedMutation);
         Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State);
+    }
+
+    [TestMethod]
+    public async Task AWritableHandleOfAnAncestor_ThatGoesSoon_DoesNotSkipThePass()
+    {
+        RequireWindows();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/note", "remove");
+        // Another process that moves an entry into an ancestor (the temp directory of a test run) holds it open for
+        // writing for that instant: the pass waits for it instead of giving up.
+        var writer = OpenWritableDirectory(fixture.Root);
+        Assert.IsFalse(writer.IsInvalid);
+        var release = new Thread(() => { Thread.Sleep(100); writer.Dispose(); }) { IsBackground = true };
+        try
+        {
+            var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard) { MaxAge = TimeSpan.Zero, WorkerStarted = _ => release.Start() };
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+            Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(", ", cleanup.Snapshot.Reasons));
+            Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+        }
+        finally
+        {
+            if (release.IsAlive) release.Join();
+            writer.Dispose();
+        }
     }
 
     [TestMethod]

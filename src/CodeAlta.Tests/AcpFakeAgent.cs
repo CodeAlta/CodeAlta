@@ -165,7 +165,7 @@ internal sealed class AcpFakeConnection
         var completion = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = completion;
         await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = parameters });
-        return await completion.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        return await completion.Task.WithinAsync(TestTime.Seconds(30));
     }
 
     private async Task RunAsync()

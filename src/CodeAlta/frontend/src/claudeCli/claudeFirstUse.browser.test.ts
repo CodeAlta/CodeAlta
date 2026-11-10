@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../claudeCli/claudeFirstUse.mount.tsx", fixture: "firstUseFixture", rpcFixture: "../demo-api.ts", width: 900, height: 650 } as const;
 const card = `document.querySelector('.claude-cli-first-use')`;
 
-test("a Claude Code provider without its CLI proposes the download in place, follows it, then gives the login command", { skip: !edge, timeout: 90_000 }, async () => {
+test("a Claude Code provider without its CLI proposes the download in place, follows it, then gives the login command", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${card}?.textContent.includes('Claude Code CLI 2.1.292 is not installed')`, "the card of the missing CLI");
     await page.clickText('.claude-cli-first-use button', 'Download 2.1.292 (108.5 MiB)');
@@ -26,7 +27,7 @@ test("a Claude Code provider without its CLI proposes the download in place, fol
   }, options);
 });
 
-test("the card says nothing for a provider that has a CLI or does not run Claude Code, and says why a download failed", { skip: !edge, timeout: 90_000 }, async () => {
+test("the card says nothing for a provider that has a CLI or does not run Claude Code, and says why a download failed", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${card}`, "the card of the missing CLI");
     await page.evaluate(`firstUseFixture.tell({ state: "failed", receivedBytes: "0", totalBytes: "113796621", error: "network" })`);

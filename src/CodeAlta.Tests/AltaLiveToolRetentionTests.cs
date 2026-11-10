@@ -73,7 +73,7 @@ public sealed partial class AltaLiveToolTests
         var original = dispatcher.InvokeAsync(RetentionArgs("send"), caller: AltaCallerIdentity.Cli).AsTask();
         try
         {
-            await query.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await query.Started.Task.WithinAsync(TestTime.Seconds(10));
             using var cancellation = new CancellationTokenSource();
             var waiter = original.WaitAsync(cancellation.Token);
             cancellation.Cancel();
@@ -87,7 +87,7 @@ public sealed partial class AltaLiveToolTests
         {
             query.Release.TrySetResult();
         }
-        await original.WaitAsync(TimeSpan.FromSeconds(10));
+        await original.WithinAsync(TestTime.Seconds(10));
         using var reservation = protection.TryReserveRetirement("target");
         Assert.IsNotNull(reservation);
     }
@@ -142,7 +142,7 @@ public sealed partial class AltaLiveToolTests
             cancellationToken: commandCancellation.Token).AsTask();
         try
         {
-            await provider.ModelsStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await provider.ModelsStarted.Task.WithinAsync(TestTime.Seconds(10));
             Assert.IsNull(protection.TryReserveRetirement(session.SessionId));
             using var cancellation = new CancellationTokenSource();
             var waiter = original.WaitAsync(cancellation.Token);
@@ -151,7 +151,7 @@ public sealed partial class AltaLiveToolTests
             if (cancelCommand)
             {
                 commandCancellation.Cancel();
-                await Assert.ThrowsAsync<TimeoutException>(() => original.WaitAsync(TimeSpan.FromMilliseconds(100)));
+                await Assert.ThrowsAsync<TimeoutException>(() => original.WithinAsync(TestTime.Milliseconds(100)));
             }
             Assert.IsFalse(original.IsCompleted, "Cancellation must not detach the model refresh's original work.");
             Assert.IsNull(protection.TryReserveRetirement(session.SessionId));
@@ -161,7 +161,7 @@ public sealed partial class AltaLiveToolTests
         {
             provider.ModelsBlocker.TrySetResult();
         }
-        var result = await original.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await original.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(cancelCommand ? AltaExitCodes.TimeoutOrCancellation : AltaExitCodes.Success, result.ExitCode, result.Transcript);
         if (cancelCommand) Assert.IsEmpty(provider.SentOptions);
         using var reservation = protection.TryReserveRetirement(session.SessionId);
@@ -204,16 +204,16 @@ public sealed partial class AltaLiveToolTests
             }
             original = dispatcher.InvokeAsync(["session", "send", session.SessionId, "--message", "synthetic"],
                 caller: AltaCallerIdentity.Cli, cancellationToken: cancellation.Token).AsTask();
-            await plugin.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await plugin.Started.Task.WithinAsync(TestTime.Seconds(10));
             cancellation.Cancel();
-            await Assert.ThrowsAsync<TimeoutException>(() => original.WaitAsync(TimeSpan.FromMilliseconds(100)));
+            await Assert.ThrowsAsync<TimeoutException>(() => original.WithinAsync(TestTime.Milliseconds(100)));
             Assert.IsNull(protection.TryReserveRetirement(session.SessionId));
             Assert.IsEmpty(provider.SentOptions);
         }
         finally
         {
             plugin.Release.TrySetResult();
-            if (original is not null) await original.WaitAsync(TimeSpan.FromSeconds(10));
+            if (original is not null) await original.WithinAsync(TestTime.Seconds(10));
             await active.DeactivateAsync(TimeSpan.FromSeconds(5));
         }
         Assert.AreEqual(AltaExitCodes.TimeoutOrCancellation, (await original!).ExitCode);
@@ -275,16 +275,16 @@ public sealed partial class AltaLiveToolTests
         var original = dispatcher.InvokeAsync(["retention-command"], caller: AltaCallerIdentity.Cli, cancellationToken: cancellation.Token).AsTask();
         try
         {
-            await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await started.Task.WithinAsync(TestTime.Seconds(10));
             cancellation.Cancel();
-            await Assert.ThrowsAsync<TimeoutException>(() => original.WaitAsync(TimeSpan.FromMilliseconds(100)));
+            await Assert.ThrowsAsync<TimeoutException>(() => original.WithinAsync(TestTime.Milliseconds(100)));
             Assert.IsNull(protection.TryReserveRetirement("any-target"));
         }
         finally
         {
             release.TrySetResult();
         }
-        await original.WaitAsync(TimeSpan.FromSeconds(10));
+        await original.WithinAsync(TestTime.Seconds(10));
         StringAssert.Contains(AltaHelpText.RenderRootHelp(services), "retention-command");
         using var reservation = protection.TryReserveRetirement("any-target");
         Assert.IsNotNull(reservation);

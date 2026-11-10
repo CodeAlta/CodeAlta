@@ -16,8 +16,8 @@ public sealed class CodexAppServerProcessTests
         for (var attempt = 0; attempt < 20; attempt++)
         {
             var process = CodexAppServerProcess.Start(startInfo);
-            await process.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(20));
-            await process.Exited.ContinueWith(static _ => { }, TaskScheduler.Default).WaitAsync(TimeSpan.FromSeconds(20));
+            await process.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(20));
+            await process.Exited.ContinueWith(static _ => { }, TaskScheduler.Default).WithinAsync(TestTime.Seconds(20));
             Assert.IsTrue(process.Exited.IsCompletedSuccessfully, $"attempt {attempt}: {process.Exited.Exception?.InnerException?.Message}");
         }
     }

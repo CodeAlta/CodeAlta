@@ -426,7 +426,8 @@ public sealed partial class WorkItemService
 
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var stream = SharedTextFile.OpenRead(path);
+            if (stream is null) return null;
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             // The front matter is small: one more block is enough to return a full window of the body.
             var buffer = new char[maximumLength + 4096];
@@ -623,18 +624,22 @@ public sealed partial class WorkItemService
     {
         try
         {
-            if (!File.Exists(path))
+            byte[] bytes;
+            using (var stream = SharedTextFile.OpenRead(path))
             {
-                return false;
+                if (stream is null) return false;
+                using var copy = new MemoryStream();
+                stream.CopyTo(copy);
+                bytes = copy.ToArray();
             }
 
-            var bytes = File.ReadAllBytes(path);
             var bom = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble);
             var text = Encoding.UTF8.GetString(bom ? bytes.AsSpan(3) : bytes);
             var next = change(text);
             if (!string.Equals(next, text, StringComparison.Ordinal))
             {
-                File.WriteAllText(path, next, new UTF8Encoding(bom));
+                // Replaced, never rewritten in place: a reader of the items finds the file whole.
+                SharedTextFile.WriteAllText(path, next, new UTF8Encoding(bom));
             }
 
             return true;

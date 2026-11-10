@@ -152,7 +152,7 @@ public sealed class DesktopMacBundleTests
         using var process = Process.Start(start)!;
         var error = process.StandardError.ReadToEndAsync();
         var output = process.StandardOutput.ReadToEnd();
-        Assert.IsTrue(process.WaitForExit(TimeSpan.FromSeconds(60)), program);
+        Assert.IsTrue(process.WaitForExit(TestTime.Seconds(60)), program);
         return output + error.Result;
     }
 }

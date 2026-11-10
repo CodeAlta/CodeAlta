@@ -65,12 +65,12 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
             using var release = new ManualResetEventSlim();
             var cleanup = new ScratchpadStartupCleanup(profile, guard)
             {
-                BeforeEntryDelete = _ => { entered.Set(); Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(10))); },
+                BeforeEntryDelete = _ => { entered.Set(); Assert.IsTrue(release.Wait(TestTime.Seconds(10))); },
             };
             var worker = cleanup.RunAsync(true, true, CancellationToken.None);
             try
             {
-                Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)));
+                Assert.IsTrue(entered.Wait(TestTime.Seconds(10)));
                 await contender.BeginAsync();
                 // Legacy guard startup cannot acquire a delete-pending name; it exits on AccessDenied.
                 await contender.ExpectExitAsync(1);
@@ -220,7 +220,7 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
 
     private sealed class Scenario(string apphost, string root)
     {
-        private readonly CancellationTokenSource _deadline = new(TimeSpan.FromSeconds(30));
+        private readonly CancellationTokenSource _deadline = new(TestTime.Seconds(30));
         private readonly List<OwnedProbe> _probes = [];
         public string Root { get; } = root;
 
@@ -409,7 +409,7 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
             _ownedPid = _process.Id; // Never obtain termination identity from a lock file or wire PID.
             // A synchronous OS launch cannot be preempted. Fail on a slow return rather than hide
             // an outstanding native launch behind a detached Task.Run continuation.
-            if (_startup.Elapsed >= TimeSpan.FromSeconds(5)) throw new TimeoutException("Helper startup exceeded five seconds.");
+            if (_startup.Elapsed >= TestTime.Seconds(5)) throw new TimeoutException($"The start of the helper ran out of its {TestTime.Seconds(5).TotalSeconds:0.#} s (TestTime).");
         }
 
         public async Task ReadyAsync()
@@ -417,7 +417,7 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
             var remaining = TimeSpan.FromSeconds(5) - _startup.Elapsed;
             if (remaining <= TimeSpan.Zero) throw new TimeoutException("Helper READY exceeded the startup budget.");
             var line = Track(_lines.Reader.ReadAsync(_scenarioToken).AsTask());
-            Assert.AreEqual("READY " + _nonce, await line.WaitAsync(remaining, _scenarioToken));
+            Assert.AreEqual("READY " + _nonce, await line.WithinAsync(remaining, _scenarioToken));
         }
         public Task BeginAsync() => SendAsync("BEGIN");
 
@@ -488,10 +488,10 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
         }
 
         private async Task ObserveAsync(Task task)
-            => await Track(task).WaitAsync(TimeSpan.FromSeconds(5), _scenarioToken);
+            => await Track(task).WithinAsync(TestTime.Seconds(5), _scenarioToken);
 
         private async Task<T> ObserveAsync<T>(Task<T> task)
-            => await Track(task).WaitAsync(TimeSpan.FromSeconds(5), _scenarioToken);
+            => await Track(task).WithinAsync(TestTime.Seconds(5), _scenarioToken);
 
         private async Task<string> ReadOutputAsync(StreamReader reader, bool protocol)
         {
@@ -564,7 +564,7 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
                 }
             }
 
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(TestTime.Seconds(5));
             Attempt(() => _ownedPid ??= _process.Id);
             Attempt(() => _stdout ??= Track(ReadOutputAsync(_process.StandardOutput, protocol: true)));
             Attempt(() => _stderr ??= Track(ReadOutputAsync(_process.StandardError, protocol: false)));
@@ -575,7 +575,7 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
                 if (!_process.HasExited && _inputOperation is not { IsCompleted: false })
                 {
                     using var grace = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
-                    grace.CancelAfter(TimeSpan.FromSeconds(1));
+                    grace.CancelAfter(TestTime.Seconds(1));
                     _inputOperation = Track(_process.StandardInput.WriteLineAsync("RELEASE"));
                     await _inputOperation.WaitAsync(grace.Token);
                     _inputOperation = Track(_process.StandardInput.FlushAsync());
@@ -590,7 +590,7 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
             Attempt(CloseInput);
             Attempt(() => { if (!_process.HasExited) _process.Kill(); });
             var joinedOperations = Task.WhenAll(_operations.ToArray());
-            try { await joinedOperations.WaitAsync(TimeSpan.FromSeconds(2), deadline.Token); }
+            try { await joinedOperations.WithinAsync(TestTime.Seconds(2), deadline.Token); }
             catch (Exception error)
             {
                 // Completion racing the catch must not erase an observed timeout/cancellation.

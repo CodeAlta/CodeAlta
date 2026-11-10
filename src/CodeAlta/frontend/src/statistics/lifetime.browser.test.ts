@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./browserHarness";
+import { testLimit } from "../testTime";
 
 const harness = { entry: "./lifetime.mount.tsx", fixture: "lifetimeFixture" };
 const state = `JSON.parse(document.querySelector('#answer').textContent)`;
@@ -10,7 +11,7 @@ const read = (page: Page) => page.evaluate<{ total: number; header: { from: stri
 const first = { total: 9, from: "2026-10-09", to: "2026-10-09" };
 const grown = { total: 12, from: "2026-10-09", to: "2026-10-10" };
 
-test("live Statistics changes do not re-query the UI after each turn", { skip: !edge, timeout: 60_000 }, async () => {
+test("live Statistics changes do not re-query the UI after each turn", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await mount(page, { ...first, sessionId: "root" });
     await waitTotal(page, 9);
@@ -26,7 +27,7 @@ test("live Statistics changes do not re-query the UI after each turn", { skip: !
   }, harness);
 });
 
-test("manual refresh, interval changes and hiding preserve pending Statistics changes", { skip: !edge, timeout: 60_000 }, async () => {
+test("manual refresh, interval changes and hiding preserve pending Statistics changes", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await mount(page, { ...first, sessionId: "root" });
     await waitTotal(page, 9);
@@ -46,7 +47,7 @@ test("manual refresh, interval changes and hiding preserve pending Statistics ch
   }, harness);
 });
 
-test("a session All-time query rereads its expanded lifetime, including a new child announced while hidden", { skip: !edge, timeout: 60_000 }, async () => {
+test("a session All-time query rereads its expanded lifetime, including a new child announced while hidden", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await mount(page, { ...first, sessionId: "root" });
     await waitTotal(page, 9);
@@ -71,7 +72,7 @@ test("a session All-time query rereads its expanded lifetime, including a new ch
   }, harness);
 });
 
-test("an unknown session's empty All-time answer is replaced when that session is read outside the old range", { skip: !edge, timeout: 60_000 }, async () => {
+test("an unknown session's empty All-time answer is replaced when that session is read outside the old range", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await mount(page, { total: 0, from: "2026-10-09", to: "2026-10-10", unknown: true, sessionId: "unread" });
     await waitTotal(page, 0);
@@ -85,7 +86,7 @@ test("an unknown session's empty All-time answer is replaced when that session i
   }, harness);
 });
 
-test("a scoped All-time answer in flight across lifetime growth is read again instead of cached as fresh", { skip: !edge, timeout: 60_000 }, async () => {
+test("a scoped All-time answer in flight across lifetime growth is read again instead of cached as fresh", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await mount(page, { ...first, sessionId: "root", deferFirst: true });
     await page.until(`lifetimeFixture.calls().length === 1`, "the old answer in flight");
@@ -99,7 +100,7 @@ test("a scoped All-time answer in flight across lifetime growth is read again in
   }, harness);
 });
 
-test("lifetime changes keep fixed session periods and unrestricted All-time entries outside their days cached", { skip: !edge, timeout: 60_000 }, async () => {
+test("lifetime changes keep fixed session periods and unrestricted All-time entries outside their days cached", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     for (const scope of [{ sessionId: "root", period: "2026-10-09..2026-10-09" }, { sessionId: null }]) {
       await mount(page, { ...first, ...scope });

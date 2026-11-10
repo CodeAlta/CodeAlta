@@ -13,7 +13,7 @@ namespace CodeAlta.Fleet.Tests;
 public sealed class FleetDirectoryWatchTests
 {
     private static readonly DateTimeOffset Time = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task ChangesSentWhileTheSnapshotWaitsApplyOverIt()
@@ -87,9 +87,9 @@ public sealed class FleetDirectoryWatchTests
             if (self.Directory.Sessions.Count > 0 && answered.Task.IsCompleted) snapshotSet.TrySetResult();
         };
         connector.Start();
-        await serving.WaitAsync(Hang);
-        await answered.Task.WaitAsync(Hang);
-        await snapshotSet.Task.WaitAsync(Hang);
+        await serving.WithinAsync(Hang);
+        await answered.Task.WithinAsync(Hang);
+        await snapshotSet.Task.WithinAsync(Hang);
         // The events, sent before the answer, were all read by the time the answer is: what the directory holds now is final.
         await Task.Delay(100);
         var directory = connector.Directory;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 // The images of a message in headless Edge, under the production content security policy and React StrictMode.
 
@@ -15,7 +16,7 @@ async function rightClick(page: Page, element: string) {
   await page.command("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", buttons: 0, clickCount: 1 });
 }
 
-test("an image of the timeline is copied from its context menu, and from the window that shows it", { skip: !edge, timeout: 120_000 }, async () => {
+test("an image of the timeline is copied from its context menu, and from the window that shows it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.timeline-image-thumbnail img').length === 2`, "the two thumbnails");
 

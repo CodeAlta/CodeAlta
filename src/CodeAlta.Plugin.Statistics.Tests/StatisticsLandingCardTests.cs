@@ -14,7 +14,7 @@ public sealed class StatisticsLandingCardTests
         var watch = System.Diagnostics.Stopwatch.StartNew();
         while (!condition())
         {
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(60), $"Timed out waiting for {what}.");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(60), $"Timed out waiting for {what}.");
             await Task.Delay(10);
         }
     }

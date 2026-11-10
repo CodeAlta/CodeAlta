@@ -149,7 +149,7 @@ public sealed class AgentSessionPermissionTests
             var work = fixture.RunOwnedAsync(body);
             try
             {
-                await work.WaitAsync(TimeSpan.FromSeconds(30));
+                await work.WithinAsync(TestTime.Seconds(30));
             }
             catch (Exception ex)
             {
@@ -169,7 +169,7 @@ public sealed class AgentSessionPermissionTests
 
         private async Task RunOwnedAsync(Func<Fixture, Task> body)
         {
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var cancellation = new CancellationTokenSource(TestTime.Seconds(15));
             CancellationToken = cancellation.Token;
             try
             {

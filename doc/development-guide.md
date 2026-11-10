@@ -37,6 +37,7 @@ Rules that hold across the repository. The reasons are in [architecture](archite
 
 - New or changed behavior has tests; a bug fix starts with a failing regression test.
 - Tests hold on a loaded machine: bound by counts, start concurrent sides on a signal, deadlines only tell a hang. A test that fails only while two suites run is rerun alone before it is called a regression.
+- Every time limit of a test comes from one place, 4 times longer on CI (`CI` or `GITHUB_ACTIONS` set; `CODEALTA_TEST_TIME_SCALE` gives another factor): `TestTime` (`src/TestSupport/TestTime.cs`, in every .NET test project) and `testLimit` (`src/CodeAlta/frontend/src/testTime.ts`). A .NET test waits for a task with `WithinAsync`, which names the file, the line and what it waited for when its limit runs out. A time that is what the test checks, not a limit, ends its line with `// not a limit`. A guard test of each side names every line that writes a bare limit.
 - A test never listens beyond the loopback (`127.0.0.1`, `::1`): servers, nodes and fixtures of a test bind there, on ports the system chooses where it can.
 - Browser tests use `browserTarget.ts` and `waitForBrowserPort`, end browsers with `endBrowser`, and render fixtures under StrictMode.
 - All .NET tests, `npm test` and `lunet build` pass before submitting; CI runs on Ubuntu, so no Windows-only path assumptions.

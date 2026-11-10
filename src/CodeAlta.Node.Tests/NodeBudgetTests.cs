@@ -16,7 +16,7 @@ namespace CodeAlta.Node.Tests;
 public sealed class NodeBudgetTests
 {
     private const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f17";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan Patience = TestTime.Seconds(45);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -333,7 +333,7 @@ public sealed class NodeBudgetTests
             }) { BlockedHeldSendsRetry = TimeSpan.FromMilliseconds(200) };
             service.ResumeHeldSends();
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(10);
             while (!admitted.Contains("send-blocked") && DateTime.UtcNow < deadline) await Task.Delay(50, token);
             CollectionAssert.AreEquivalent(new[] { "send-open", "send-blocked" }, admitted.ToArray(), "the send another reader opened is taken again too, once");
         }
@@ -381,7 +381,7 @@ public sealed class NodeBudgetTests
             await ChangeAsync(() => File.Delete(links), token);
             var deadline = DateTime.UtcNow + Patience;
             while (servers.Connections.LoadProblem is not null && DateTime.UtcNow < deadline) await Task.Delay(50, token);
-            await servers.Connections.Loaded.WaitAsync(Patience, token);
+            await servers.Connections.Loaded.WithinAsync(Patience, token);
             Assert.IsNull((await node.Budgets.AdmitAsync(run with { RunId = "run-2" }, null, token)).Problem, "no link, no budget");
             await ChangeAsync(() => File.WriteAllText(links, "{ damaged"), token);
             Assert.IsNotNull((await node.Budgets.AdmitAsync(run with { RunId = "run-3" }, null, token)).Problem, "a run asked between two reloads of damaged links does not start");
@@ -437,7 +437,7 @@ public sealed class NodeBudgetTests
         var servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
         try
         {
-            await servers.Connections.Loaded.WaitAsync(Patience, token);
+            await servers.Connections.Loaded.WithinAsync(Patience, token);
             // What the policies and budgets of spaces read is known as soon as the links are: the default space is linked to that server.
             Assert.IsTrue(servers.Connections.Connections.Single().Connector!.LinksSpace(null), "the spaces linked to the server are known before it answers");
         }

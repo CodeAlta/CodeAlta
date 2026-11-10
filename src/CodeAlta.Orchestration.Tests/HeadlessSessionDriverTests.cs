@@ -45,7 +45,7 @@ public sealed class HeadlessSessionDriverTests
         Assert.AreEqual("scripted:scripted-model@high", session.ModelRef);
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("First answer."));
 
-        var first = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+        var first = await driver.RunAsync(session, new HeadlessPrompt("hello")).WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Completed, first.Status, first.FailureMessage);
         Assert.AreEqual("First answer.", first.FinalMessage);
@@ -63,7 +63,7 @@ public sealed class HeadlessSessionDriverTests
         Assert.AreEqual(SessionPermissionPolicy.Approve, host.RuntimeService.GetPermissionPolicy(session.SessionId));
 
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Second answer."));
-        var second = await driver.RunAsync(session, new HeadlessPrompt("again")).WaitAsync(Hang);
+        var second = await driver.RunAsync(session, new HeadlessPrompt("again")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.Completed, second.Status);
         Assert.AreEqual("Second answer.", second.FinalMessage);
         Assert.AreEqual(100, second.Usage.InputTokens, "The usage of a run is its own, not the session's.");
@@ -93,7 +93,7 @@ public sealed class HeadlessSessionDriverTests
             ScriptedTurnProvider.Reply("The child said it."));
         provider.Script(childId, ScriptedTurnProvider.Reply("Child result."));
 
-        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
         Assert.AreEqual("The child said it.", result.FinalMessage, "The run ends after the parent read its child.");
@@ -131,7 +131,7 @@ public sealed class HeadlessSessionDriverTests
             ScriptedTurnProvider.Reply("Recovered."));
         provider.Script(childId, ScriptedTurnProvider.WaitThenReply(rootFailed.Task, "Child result."));
 
-        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
         Assert.AreEqual("Recovered.", result.FinalMessage);
@@ -146,7 +146,7 @@ public sealed class HeadlessSessionDriverTests
         await using var driver = new HeadlessSessionDriver(host);
         var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("The answer."));
-        var run = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+        var run = await driver.RunAsync(session, new HeadlessPrompt("hello")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.Completed, run.Status, run.FailureMessage);
 
         // The index of the journal names a turn of the run that starts where the journal ends, as an update of the index
@@ -163,7 +163,7 @@ public sealed class HeadlessSessionDriverTests
             Assert.AreEqual(1, await command.ExecuteNonQueryAsync(token), "The index has the turn of the run.");
         });
 
-        var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, run.RunId!.Value).WaitAsync(Hang);
+        var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, run.RunId!.Value).WithinAsync(Hang);
 
         Assert.AreEqual(SessionOutcomeStatus.Completed, outcome.Status);
         Assert.AreEqual("The answer.", outcome.FinalMessage);
@@ -189,7 +189,7 @@ public sealed class HeadlessSessionDriverTests
         var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("The answer."));
 
-        var result = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("hello")).WithinAsync(Hang);
 
         Assert.IsGreaterThan(1, reads, "The journal is read again before the driver falls back on what it saw.");
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
@@ -232,7 +232,7 @@ public sealed class HeadlessSessionDriverTests
             ScriptedTurnProvider.Reply("The child said it."));
         provider.Script(childId, ScriptedTurnProvider.Reply("Child result."));
 
-        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
         Assert.AreEqual("The child said it.", result.FinalMessage);
@@ -257,13 +257,13 @@ public sealed class HeadlessSessionDriverTests
         });
         var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("The answer."));
-        var result = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("hello")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
 
         var flush = driver.FlushEventsAsync();
         Assert.IsFalse(flush.IsCompleted, "The observer has not taken the events of the run yet.");
         gate.SetResult();
-        await flush.WaitAsync(Hang);
+        await flush.WithinAsync(Hang);
 
         Assert.IsTrue(events.Any(static item => item.Event is SessionAgentEvent { Event: AgentContentCompletedEvent { Kind: AgentContentKind.Assistant, Content: "The answer." } }),
             "Every event published before the flush reached the observer.");
@@ -293,7 +293,7 @@ public sealed class HeadlessSessionDriverTests
         var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
         var runtime = host.RuntimeService;
         Assert.IsTrue(runtime.TryPublishToReader(new Filler(session.SessionId, -1)));
-        await entered.Task.WaitAsync(Hang);
+        await entered.Task.WithinAsync(Hang);
 
         // The observer holds the reader: the stream fills up, and drops the newest events.
         var accepted = new List<int>();
@@ -309,7 +309,7 @@ public sealed class HeadlessSessionDriverTests
         await Task.Delay(50);
         Assert.IsFalse(flush.IsCompleted, "The marker of the flush waits for room instead of being dropped.");
         gate.SetResult();
-        await flush.WaitAsync(Hang);
+        await flush.WithinAsync(Hang);
 
         var observed = events.Select(static item => item.Event).OfType<Filler>().Where(static filler => filler.Index >= 0).Select(static filler => filler.Index).ToArray();
         CollectionAssert.AreEqual(accepted, observed, "Every event accepted before the flush reached the observer before it ended.");
@@ -336,13 +336,13 @@ public sealed class HeadlessSessionDriverTests
         var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
 
         provider.Turns.Enqueue(ScriptedTurnProvider.Fail(AgentFailureKind.Other, "The tool broke."));
-        var failed = await driver.RunAsync(session, new HeadlessPrompt("work")).WaitAsync(Hang);
+        var failed = await driver.RunAsync(session, new HeadlessPrompt("work")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.Failed, failed.Status);
         StringAssert.Contains(failed.FailureMessage, "The tool broke.");
         Assert.AreEqual(AgentFailureKind.Other, failed.FailureKind);
 
         provider.Turns.Enqueue(ScriptedTurnProvider.Fail(AgentFailureKind.Auth, "Sign in again."));
-        var signIn = await driver.RunAsync(session, new HeadlessPrompt("work again")).WaitAsync(Hang);
+        var signIn = await driver.RunAsync(session, new HeadlessPrompt("work again")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.ProviderNotReady, signIn.Status);
     }
 
@@ -372,7 +372,7 @@ public sealed class HeadlessSessionDriverTests
         var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
         provider.Turns.Enqueue(ScriptedTurnProvider.WaitThenReply(new TaskCompletionSource().Task, "never"));
 
-        var result = await driver.RunAsync(session, new HeadlessPrompt("work"), TimeSpan.FromMilliseconds(300)).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("work"), TimeSpan.FromMilliseconds(300)).WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Timeout, result.Status);
         Assert.AreEqual("timeout", result.AbortReason);
@@ -409,13 +409,13 @@ public sealed class HeadlessSessionDriverTests
         };
 
         var run = driver.RunAsync(session, new HeadlessPrompt("work"));
-        await started.Task.WaitAsync(Hang);
+        await started.Task.WithinAsync(Hang);
         var cancel = driver.CancelAsync(session, "signal");
-        await stopped.Task.WaitAsync(Hang);
+        await stopped.Task.WithinAsync(Hang);
         release.SetResult();
-        await hold.WaitAsync(Hang);
-        await cancel.WaitAsync(Hang);
-        var result = await run.WaitAsync(Hang);
+        await hold.WithinAsync(Hang);
+        await cancel.WithinAsync(Hang);
+        var result = await run.WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Aborted, result.Status, result.FailureMessage);
         Assert.AreEqual("signal", result.AbortReason);
@@ -456,12 +456,12 @@ public sealed class HeadlessSessionDriverTests
         // The prompt is admitted, then held before its run starts until the timeout has aborted it.
         host.Commands.SendStarting = (_, token) => HoldUntilAbortedAsync(aborted.Task, token);
 
-        var result = await driver.RunAsync(session, new HeadlessPrompt("work"), TimeSpan.FromMilliseconds(100)).WaitAsync(Hang);
+        var result = await driver.RunAsync(session, new HeadlessPrompt("work"), TimeSpan.FromMilliseconds(100)).WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Timeout, result.Status, result.FailureMessage);
         Assert.AreEqual("timeout", result.AbortReason);
         Assert.AreEqual(0, provider.RequestsOf(session.SessionId).Length, "A prompt admitted before the abort does not start after it.");
-        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, result.RunId);
         Assert.AreEqual(SessionOutcomeStatus.Cancelled, outcome.Status);
         Assert.AreEqual("timeout", outcome.AbortReason, "The journal records the abort and its reason.");
@@ -489,10 +489,10 @@ public sealed class HeadlessSessionDriverTests
 
         // As altacli does on a signal: the tree is aborted, then the token stops the wait of the run.
         var run = driver.RunAsync(session, new HeadlessPrompt("work"), null, signalled.Token);
-        await held.Task.WaitAsync(Hang);
-        await driver.CancelAsync(session, "signal").WaitAsync(Hang);
+        await held.Task.WithinAsync(Hang);
+        await driver.CancelAsync(session, "signal").WithinAsync(Hang);
         await signalled.CancelAsync();
-        var result = await run.WaitAsync(Hang);
+        var result = await run.WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Aborted, result.Status, result.FailureMessage);
         Assert.IsNotNull(result.AbortReason);
@@ -503,7 +503,7 @@ public sealed class HeadlessSessionDriverTests
 
         host.Commands.SendStarting = null;
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Later answer."));
-        var later = await driver.RunAsync(session, new HeadlessPrompt("again")).WaitAsync(Hang);
+        var later = await driver.RunAsync(session, new HeadlessPrompt("again")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.Completed, later.Status, later.FailureMessage);
         Assert.AreEqual("Later answer.", later.FinalMessage, "The abort does not hold a prompt sent after it.");
         Assert.IsNull(host.RuntimeService.GetAbortReason(session.SessionId));
@@ -515,7 +515,7 @@ public sealed class HeadlessSessionDriverTests
         var (root, provider, host) = await CreateAsync();
         await using var scope = root;
         var aborted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var grace = TimeSpan.FromSeconds(10);
+        var grace = TestTime.Seconds(10);
         await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
         {
             // A run of the child left going after the abort would make the driver wait this long.
@@ -546,23 +546,23 @@ public sealed class HeadlessSessionDriverTests
         using var signalled = new CancellationTokenSource();
 
         var run = driver.RunAsync(session, new HeadlessPrompt("delegate"), null, signalled.Token);
-        await held.Task.WaitAsync(Hang);
+        await held.Task.WithinAsync(Hang);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         await signalled.CancelAsync();
-        var result = await run.WaitAsync(Hang);
+        var result = await run.WithinAsync(Hang);
         stopwatch.Stop();
 
         Assert.AreEqual(HeadlessRunStatus.Aborted, result.Status, result.FailureMessage);
         Assert.AreEqual("cancelled", result.AbortReason);
         Assert.AreEqual(0, provider.RequestsOf(childId).Length, "A prompt sent to a child before the abort of its tree does not start after it.");
         Assert.IsTrue(stopwatch.Elapsed < grace, $"The driver does not wait the grace for a child that starts nothing ({stopwatch.Elapsed}).");
-        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
 
         host.RuntimeService.SendStarting = null;
         provider.SessionTurns.TryRemove(childId, out _);
         provider.Script(childId, ScriptedTurnProvider.Reply("Later answer."));
-        await host.RuntimeService.SendAsync(child!, options, new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(childId).WaitAsync(Hang);
+        await host.RuntimeService.SendAsync(child!, options, new AgentSendOptions { Input = AgentInput.Text("again") }).WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(childId).WithinAsync(Hang);
         Assert.AreEqual(1, provider.RequestsOf(childId).Length, "The abort does not hold a prompt sent to the child after it.");
     }
 
@@ -630,7 +630,7 @@ public sealed class HeadlessSessionDriverTests
         Assert.AreEqual(AgentReasoningEffort.Low, changed.Session.ReasoningEffort);
         Assert.AreEqual("scripted-model", changed.Session.ModelId, "What the change does not name stays.");
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Planned."));
-        var result = await driver.RunAsync(changed.Session, new HeadlessPrompt("plan it")).WaitAsync(Hang);
+        var result = await driver.RunAsync(changed.Session, new HeadlessPrompt("plan it")).WithinAsync(Hang);
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
         Assert.AreEqual(AgentReasoningEffort.Low, provider.RequestsOf(session.SessionId).Last().ReasoningEffort);
         var stored = await host.RuntimeService.TryGetResumableSessionAsync(session.SessionId);

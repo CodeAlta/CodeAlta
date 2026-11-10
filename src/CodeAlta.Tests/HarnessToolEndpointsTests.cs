@@ -83,7 +83,7 @@ public sealed class HarnessToolEndpointsTests
         }
 
         Assert.IsTrue(sent);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         Assert.AreEqual("event: message", await reader.ReadLineAsync(timeout.Token));
         var data = await reader.ReadLineAsync(timeout.Token);
         StringAssert.StartsWith(data, "data: ");

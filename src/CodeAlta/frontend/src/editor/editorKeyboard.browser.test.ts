@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { openReviewPage } from "../review/reviewBrowserHarness";
+import { testLimit } from "../testTime";
 
 const edge = browserExecutable;
 
 // The buttons of the view of a file take the press of the mouse, and then give the keyboard to the view they show:
 // the text after the preview, the page of the preview after the text.
-test("the view of a file chosen with the mouse takes the keyboard, the text after the preview and the preview after the text", { skip: !edge, timeout: 180_000 }, async () => {
+test("the view of a file chosen with the mouse takes the keyboard, the text after the preview and the preview after the text", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   const page = await openReviewPage(new URL("./editorKeyboard.mount.tsx", import.meta.url), "!!window.editorKeyboardFixture && !!document.querySelector('.editor-markdown')",
     new URL("../demo-api.ts", import.meta.url));
   const { until, clickOn, type, frames, errors } = page;
