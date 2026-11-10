@@ -1,6 +1,6 @@
 ---
 title: Try an Adaptive mode that fits the model to each request (#273)
-status: in-progress
+status: done
 created: 2026-10-30
 summary: Write an Adaptive agent prompt that inherits Default and moves its session between the user's model tiers (up when a request needs it or its checks keep failing), measure it against Default on multi-turn scenarios with every leg and the cache counted, and decide from the numbers whether it ships as is or needs a router in CodeAlta.
 ---

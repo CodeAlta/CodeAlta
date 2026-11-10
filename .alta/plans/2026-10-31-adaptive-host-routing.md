@@ -1,6 +1,6 @@
 ---
 title: Adaptive model choice by CodeAlta, turn by turn (#273)
-status: in-progress
+status: done
 created: 2026-10-31
 summary: An Adaptive choice of the model list where CodeAlta, not the agent, runs each user turn on the tier its kind calls for, asks a turn that changed code to recheck it against the request, escalates a turn that ends in visible trouble, and shows the model of each turn, as the evaluation of #273 found that agents do not adapt by themselves.
 ---

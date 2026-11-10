@@ -1,6 +1,6 @@
 ---
 title: Start nodes and servers at boot on every OS
-status: in-progress
+status: done
 created: 2026-11-07
 summary: A node or a server keeps running after a restart with nobody logged in, on Windows, macOS and Linux. Windows gets a real service, macOS a LaunchDaemon set up by the desktop, Windows machines can be added over SSH, and the machine page says whether a machine will still run after a restart, with the fix.
 ---

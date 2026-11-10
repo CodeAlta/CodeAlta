@@ -1,6 +1,6 @@
 ---
 title: Sign in on a machine from the desktop in one click
-status: in-progress
+status: done
 created: 2026-11-07
 summary: Every sign-in a node keeps for itself (Codex and other providers, MCP servers with OAuth, gh, az, Codex CLI, Claude Code) is made from the desktop's machine page, with the browser of the person's computer and no SSH, while the node does the exchange and keeps the token. On team machines, other people's sessions keep to account credentials.
 ---

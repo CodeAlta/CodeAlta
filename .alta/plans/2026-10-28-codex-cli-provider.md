@@ -1,6 +1,6 @@
 ---
 title: "Codex CLI provider (`codex-cli`) over `codex-app-server` (#250)"
-status: in-progress
+status: done
 created: 2026-10-28
 summary: A new provider type `codex-cli` runs OpenAI's standalone `codex-app-server` from the latest Codex release, signed in from CodeAlta with Codex's own login, so ChatGPT Business workspaces can use Codex in CodeAlta. CodeAlta's instructions, tools, sandbox and permission modes take over as they do for Claude Code. It ships as a built-in plugin over the harness toolkit, like ACP.
 ---
