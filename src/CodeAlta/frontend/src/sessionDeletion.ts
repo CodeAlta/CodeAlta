@@ -1,4 +1,6 @@
-import type { WorkspaceDeleteSessionRequest, WorkspaceDeleteSessionResponse, WorkspaceSnapshot } from "#neoastra";
+import type { WorkspaceDeleteSessionRequest, WorkspaceDeleteSessionResponse, WorkspaceSessionChildrenRequest, WorkspaceSessionChildrenResponse,
+  WorkspaceSnapshot } from "#neoastra";
+import { readSessionChildren } from "./sessionChildren/sessionChildren";
 import type { createMutationCapability } from "./sessionOperations";
 import type { RenameTarget } from "./sessionRename";
 import { sessionsForProject } from "./workspace";
@@ -55,7 +57,7 @@ export function createSessionDeletion(invoke: Invoke) {
   };
 }
 
-// Absence is not proof when the catalog response is truncated or the project scope changed.
+// Absence is not proof when the catalog response is truncated or the project scope changed: see confirmDeletedSession.
 export function deletedSessionRecovery(snapshot: WorkspaceSnapshot, result: DeletedTarget) {
   if (!snapshot.configured || snapshot.sessionsTruncated) return undefined;
   const projectId = result.target.scope === "project" ? result.target.projectId : null;
@@ -64,6 +66,29 @@ export function deletedSessionRecovery(snapshot: WorkspaceSnapshot, result: Dele
   if (snapshot.sessions.some(session => session.id === result.id)) return undefined;
   const remaining = sessionsForProject(snapshot, projectId);
   return { projectId, sessionId: remaining[0]?.id ?? null };
+}
+
+/** Whether the host still has a session: `unknown` when it could not say. */
+export type SessionPresence = (id: string) => Promise<"absent" | "present" | "unknown">;
+
+/**
+ * Confirms a deletion against the refreshed catalog. A catalog cut at its size limit cannot show that a session is
+ * gone: the host, which reads every session, is asked about that one instead.
+ */
+export async function confirmDeletedSession(snapshot: WorkspaceSnapshot, result: DeletedTarget, presence: SessionPresence) {
+  if (!snapshot.sessionsTruncated) return deletedSessionRecovery(snapshot, result);
+  const recovered = deletedSessionRecovery({ ...snapshot, sessionsTruncated: false }, result);
+  return recovered && await presence(result.id) === "absent" ? recovered : undefined;
+}
+
+/** Asks the host whether a session exists, with the read of the sessions below it, which reads them all. */
+export function hostSessionPresence(
+  invoke: (request: WorkspaceSessionChildrenRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceSessionChildrenResponse>,
+  epoch: string | null | undefined): SessionPresence {
+  return async id => {
+    const read = await readSessionChildren(invoke, epoch, id);
+    return read.kind === "read" ? "present" : read.code === "session_missing" ? "absent" : "unknown";
+  };
 }
 
 export function deleteSelectionCurrent(result: DeletedTarget, projectId: string | null, sessionId: string | null) {
