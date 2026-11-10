@@ -1,5 +1,8 @@
 name: ci
 
+# A push to a branch and a pull request run the daily checks, in parallel jobs: the .NET tests on Linux, Windows and
+# macOS, the frontend tests, and the NuGet packages of each tool, built as dotnet-releaser builds them but not
+# published. A tag runs dotnet-releaser alone: it builds, tests, packs and publishes the release.
 on:
   push:
     paths-ignore:
@@ -11,8 +14,108 @@ on:
     - '*.txt'
   pull_request:
 
+# A newer push to a pull request replaces its run still going; the runs of a branch or a tag all go to their end.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
 jobs:
-  build:
+  test:
+    name: "Tests (${{ matrix.os }})"
+    if: github.ref_type != 'tag'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Ubuntu 24.04 denies unprivileged user namespaces, which the sandbox of Chromium browsers needs: Edge then falls
+      # back to a setuid helper the image leaves unconfigured, and aborts. The tests of the browser tools keep the sandbox.
+      - name: "Allow the sandbox of Chromium browsers"
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: "Build"
+        run: dotnet build src/CodeAlta.slnx -c Release
+      - name: "Test"
+        run: dotnet test src/CodeAlta.slnx -c Release --no-build
+
+  frontend:
+    name: "Frontend tests"
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: "Allow the sandbox of Chromium browsers"
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      # The build restores the npm packages and generates the RPC client that the frontend tests import.
+      - name: "Build"
+        run: dotnet build src/CodeAlta/CodeAlta.csproj -c Release
+      - name: "Test"
+        working-directory: src/CodeAlta/frontend
+        run: npm test
+
+  pack:
+    name: "Pack (${{ matrix.project }})"
+    if: github.ref_type != 'tag'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [CodeAlta, CodeAlta.Tui, CodeAlta.Cli, CodeAlta.Node, CodeAlta.Server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # MinVer versions the packages from the tags, as for a release.
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      # What dotnet-releaser runs for each packable project of the release: its pack, with a package for each runtime.
+      - name: "Pack"
+        run: dotnet pack src/${{ matrix.project }}/${{ matrix.project }}.csproj -c Release -o artifacts/nuget
+      - name: "Check the packages"
+        shell: bash
+        run: |
+          project=src/${{ matrix.project }}/${{ matrix.project }}.csproj
+          rids=$(dotnet msbuild "$project" -getProperty:RuntimeIdentifiers -p:Configuration=Release)
+          expected=$(( $(tr ';' '\n' <<< "$rids" | grep -c .) + 1 ))
+          ls -l artifacts/nuget
+          actual=$(find artifacts/nuget -name '*.nupkg' | wc -l)
+          if [ "$actual" -ne "$expected" ]; then
+            echo "::error::$actual packages for $expected expected: the tool package and one for each of $rids"
+            exit 1
+          fi
+          # nuget.org refuses a package over 250 MB.
+          large=$(find artifacts/nuget -name '*.nupkg' -size +250M)
+          if [ -n "$large" ]; then
+            echo "::error::Packages over the 250 MB that nuget.org accepts: $large"
+            exit 1
+          fi
+
+  release:
+    name: "Release"
+    if: github.ref_type == 'tag'
     permissions:
       id-token: write
       actions: write
@@ -27,6 +130,5 @@ jobs:
         uses: xoofx/.github/.github/actions/dotnet-releaser-action@main
         env:
           # The Google client of CodeAlta sign-in, built into CodeAlta Server (CodeAlta.Server.csproj): never in the source.
-          # Pull requests from forks get no secret and build without it.
           CODEALTA_SIGNIN_GOOGLE_CLIENT_ID: ${{ secrets.CODEALTA_SIGNIN_GOOGLE_CLIENT_ID }}
           CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET: ${{ secrets.CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET }}
