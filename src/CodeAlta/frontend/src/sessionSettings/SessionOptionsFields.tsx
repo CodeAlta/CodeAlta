@@ -10,7 +10,7 @@ import { sessionFastMode, sessionOptionsOf, storedSessionOptions, type ModelCont
  * one line, the fast mode where its model has one, and the size of its context where its model has several. A change
  * gives the options the session records (null for the defaults).
  */
-export function SessionOptionsFields({ id, value, context = null, reportedFastMode = null, disabled = false, onChange }: {
+export function SessionOptionsFields({ id, value, context = null, reportedFastMode = null, disabled = false, privateOption = true, onChange }: {
   /** Tells the controls of this form apart from the others of the page. */
   id: string;
   value: SessionOptionsChoice | null;
@@ -19,6 +19,8 @@ export function SessionOptionsFields({ id, value, context = null, reportedFastMo
   /** The fast mode the provider last reported for the session, which a session that chose none runs in. */
   reportedFastMode?: boolean | null;
   disabled?: boolean;
+  /** Whether a session can be made Private here: one started on another machine cannot, since that machine would never list it here. */
+  privateOption?: boolean;
   onChange: (value: SessionOptionsChoice | null) => void;
 }) {
   const { t } = useShellLanguage();
@@ -31,12 +33,12 @@ export function SessionOptionsFields({ id, value, context = null, reportedFastMo
         labelElement={<span className="composer-selection-label"><AppIcon name="subAgents" size={14} />{t("Sub-sessions")}</span>}
         onChange={event => onChange(storedSessionOptions({ ...options, subSessions: event.currentTarget.checked }))} />
     </FormGroup>
-    <FormGroup className="composer-selection-option" labelFor={`composer-private-${id}`}
+    {privateOption && <FormGroup className="composer-selection-option" labelFor={`composer-private-${id}`}
       helperText={t(options.private ? "Never published to a CodeAlta Server, not even its state." : "Its state and model are published to the server of its space, if any; never its content.")}>
       <Switch id={`composer-private-${id}`} checked={!!options.private} disabled={disabled}
         labelElement={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Private")}</span>}
         onChange={event => onChange(storedSessionOptions({ ...options, private: event.currentTarget.checked }))} />
-    </FormGroup>
+    </FormGroup>}
     {fastMode !== null && <FormGroup className="composer-selection-option" labelFor={`composer-fast-mode-${id}`}
       helperText={t(fastMode ? "Faster output, at a higher price per token." : "Standard speed and price.")}>
       <Switch id={`composer-fast-mode-${id}`} checked={fastMode} disabled={disabled}

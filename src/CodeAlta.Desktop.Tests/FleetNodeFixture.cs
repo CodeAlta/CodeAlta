@@ -223,7 +223,8 @@ internal sealed class ScriptedFleetProvider
             {
                 ProviderId = owner.Descriptor.ProviderId,
                 Availability = ModelProviderAvailability.Ready,
-                Models = [new AgentModelInfo(Model, DisplayName: Model)],
+                Models = [new AgentModelInfo(Model, DisplayName: Model, DefaultReasoningEffort: AgentReasoningEffort.High,
+                    SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High])],
                 SelectedModelId = Model,
             });
 

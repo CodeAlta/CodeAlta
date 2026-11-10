@@ -52,7 +52,13 @@ public sealed partial class FleetNodeService
         var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath, device);
         // The policy of the organization of the space, before the session exists: who starts, the provider, the model, the mode.
         var rules = RequirePolicyStart(parameters.SpaceId, provider, parameters.Selection?.ModelId, agent: false);
-        var permissionMode = PolicyPermissionMode(provider.ProviderId.Value, rules?.PermissionMode);
+        var permissionMode = RequestedPermissionMode(parameters.PermissionMode, provider.ProviderId.Value, rules?.PermissionMode)
+            ?? PolicyPermissionMode(provider.ProviderId.Value, rules?.PermissionMode);
+        var sandbox = await RequestedSandboxAsync(parameters.Sandbox, provider.ProviderId.Value, parameters.Selection?.ModelId, project?.Id, parameters.SpaceId, rules)
+            .ConfigureAwait(false);
+        // What goes with the first prompt is checked before the session exists: a refusal leaves no session behind.
+        _ = Selection(parameters.Selection, provider.ProviderId.Value, null);
+        if (parameters.Selection?.AgentPromptId is { } agentPrompt) await RequireAgentPromptAsync(agentPrompt, project, parameters.SpaceId).ConfigureAwait(false);
         var sessionId = Guid.NewGuid().ToString();
         if (rules?.ToolsOff is { Count: > 0 } off)
         {
@@ -67,8 +73,8 @@ public sealed partial class FleetNodeService
         SessionViewDescriptor session;
         try
         {
-            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, null, worktree.Folder, parameters.SpaceId, permissionMode, sessionId, null, null)
-                .ConfigureAwait(false);
+            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, null, worktree.Folder, parameters.SpaceId, permissionMode, sessionId, null,
+                parameters.SubSessions == false ? new AgentSessionOptions { SubSessions = false } : null).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -80,7 +86,13 @@ public sealed partial class FleetNodeService
 
         // Work of the fleet: a stop of the kill switch and the longest time of a policy reach it.
         Work.Record(session.SessionId, parameters.SpaceId, "remote", _options.TimeProvider.GetUtcNow());
-        if (rules is not null) await ApplyPolicySandboxAsync(session.SessionId, rules).ConfigureAwait(false);
+        // The sandbox the person chose holds the policy already; without one, the policy gives its own.
+        if (sandbox is not null)
+        {
+            var set = await _host.Commands.SetSandboxAsync(session.SessionId, sandbox).ConfigureAwait(false);
+            if (set.Status != "ok") throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"{_options.Name} could not give the session the sandbox '{sandbox}' ({set.Status}).");
+        }
+        else if (rules is not null) await ApplyPolicySandboxAsync(session.SessionId, rules).ConfigureAwait(false);
 
         // The session is admitted to its environment before its first prompt: an approval may wait, the creation does not.
         if (parameters.Environment is { } environment)
@@ -200,6 +212,58 @@ public sealed partial class FleetNodeService
             ?? providers.FirstOrDefault(static value => value.IsEnabled && value.IsDefault)
             ?? providers.FirstOrDefault(static value => value.IsEnabled)
             ?? throw new FleetException(FleetNodeErrorCodes.Unavailable, null, "The node has no enabled provider.");
+    }
+
+    // An agent prompt a new session of the project and the space can run with.
+    private async Task RequireAgentPromptAsync(string promptId, ProjectDescriptor? project, string? spaceId)
+    {
+        var prompts = await _host.Commands.GetDraftPromptsAsync(project is null ? null : new OwnedProjectReferenceScope(project.Id, project.ProjectPath), spaceId,
+            CancellationToken.None).ConfigureAwait(false);
+        if (prompts is not null && !prompts.Prompts.Any(prompt => string.Equals(prompt.Id, promptId, StringComparison.Ordinal)))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, $"{_options.Name} has no agent prompt '{promptId}' for the session.");
+    }
+
+    // The mode a person chose for a session started from another device: one the provider offers, never one that asks less
+    // than the mode the session would run in without it, nor than the policy of the organization allows; null for none.
+    private string? RequestedPermissionMode(string? requested, string providerKey, string? ceiling)
+    {
+        if (requested is null) return null;
+        var choices = _host.Commands.GetNewSessionPermissionModes(providerKey);
+        var mode = choices.Modes.FirstOrDefault(value => string.Equals(value, requested.Trim(), StringComparison.Ordinal))
+            ?? throw new FleetException(FleetErrorCodes.InvalidParams, null,
+                choices.Modes.Count == 0 ? $"The provider '{providerKey}' offers no permission mode." : $"The provider '{providerKey}' offers the modes {string.Join(", ", choices.Modes)}.");
+        var given = _host.RuntimeService.GetNewSessionPermissionMode(providerKey);
+        if (SessionPermissionModes.Rank(mode) > SessionPermissionModes.Rank(given))
+            throw new FleetException(FleetErrorCodes.Forbidden, null,
+                $"{_options.Name} runs its sessions in '{given}': a session started from another device cannot ask less ('{mode}'). Its owner can change that on the machine.");
+        if (ceiling is not null && SessionPermissionModes.Rank(mode) > SessionPermissionModes.Rank(ceiling))
+            throw Refused($"The policy of the organization allows no mode that asks less than '{ceiling}': '{mode}' is refused.");
+        return mode;
+    }
+
+    // The sandbox a person chose for a session started from another device: a profile of this machine, or off, never weaker
+    // than the sandbox its settings give the session, and one the policy of the organization allows; null for none.
+    private async Task<string?> RequestedSandboxAsync(string? requested, string providerKey, string? modelId, string? projectId, string? spaceId, FleetPolicyRules? rules)
+    {
+        if (requested is null) return null;
+        var name = requested.Trim();
+        var off = string.Equals(name, CodeAlta.Sandbox.SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase);
+        var profiles = _host.RuntimeService.ReadSandboxSettings().Profiles;
+        if (!off && !CodeAlta.Sandbox.SandboxProfiles.Names(profiles).Contains(name, StringComparer.OrdinalIgnoreCase))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, $"{_options.Name} has no sandbox profile '{name}'.");
+        var given = (await _host.RuntimeService.ResolveSandboxAsync(null, providerKey, modelId, projectId, spaceId).ConfigureAwait(false)).Choice.Profile;
+        if (given is not null && _host.RuntimeService.ResolveSandboxConfinement(given) is { } floor)
+        {
+            var weaker = off ? "it would run without a sandbox" : _host.RuntimeService.ResolveSandboxConfinement(name)?.WeakerThan(floor);
+            if (weaker is not null)
+                throw new FleetException(FleetErrorCodes.Forbidden, null,
+                    $"The settings of {_options.Name} run the session in the sandbox '{given}': a session started from another device cannot have less ({weaker}).");
+        }
+
+        if (!off && !_host.RuntimeService.GetSandboxAvailability().IsAvailable)
+            throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"{_options.Name} cannot start a sandbox.");
+        if (rules is not null && PolicySandboxProblem(off ? null : name, rules) is { } problem) throw Refused($"{_options.Name} cannot run the session: {problem}.");
+        return off ? CodeAlta.Sandbox.SandboxProfiles.Off : name;
     }
 
     private static OwnedSessionSelection? Selection(FleetModelSelection? selection, string sessionProvider, string? sessionPrompt)

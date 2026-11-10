@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineNewSessionChoices, MachineView } from "#neoastra";
-import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, runOnMachine, runOnTargets } from "./runOn";
+import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
+import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets } from "./runOn";
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
@@ -11,10 +12,14 @@ const choices = (change: Partial<MachineNewSessionChoices> = {}): MachineNewSess
   status: "ok", machineName: "mac-mini", message: null, suggestedProjectId: "p-alta",
   projects: [{ id: "p-alta", name: "CodeAlta", repositoryKey: "github.com/codealta/codealta" }, { id: "p-notes", name: "notes", repositoryKey: null }],
   providers: [
-    { key: "claude", name: "Claude Code", isDefault: false, defaultModelId: "opus", models: [{ id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }] },
-    { key: "codex", name: "Codex", isDefault: true, defaultModelId: "gpt-mini", models: [{ id: "gpt", name: "GPT" }, { id: "gpt-mini", name: "GPT mini" }] },
+    { key: "claude", name: "Claude Code", isDefault: false, defaultModelId: "opus", models: [model("opus", "Opus"), model("sonnet", "Sonnet")], ...modes },
+    { key: "codex", name: "Codex", isDefault: true, defaultModelId: "gpt-mini", models: [model("gpt", "GPT"), model("gpt-mini", "GPT mini")], ...modes },
   ],
+  prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }], defaultPromptId: "default", sandboxProfiles: ["workspace"],
   ...change });
+function model(id: string, name: string) { return { id, name, efforts: ["Low", "High"], defaultEffort: "High" }; }
+const modes = { permissionModes: ["default", "acceptEdits"], defaultPermissionMode: "default", sandbox: null };
+const settings = (change: Partial<typeof defaultSessionSettings> = {}) => ({ ...defaultSessionSettings, ...change });
 
 test("Run on offers this machine, then the online machines that let this computer start sessions", () => {
   const targets = runOnTargets([machine({ id: "b", name: "zeta" }), machine({ id: "a", name: "alpha" }), machine({ id: "off", state: "offline" }),
@@ -37,37 +42,46 @@ test("The machine of the chip: the one of the row of a machine, else the chosen 
   assert.equal(runOnMachine(null, machines, "m2"), "m2", "The row of a machine starts its sessions there, whatever its state: the start says why it cannot.");
 });
 
-test("The selection follows the machine: the project of the same repository, the default provider and its default model", () => {
-  assert.deepEqual(remoteSelection(choices(), noRemoteSelection), { projectId: "p-alta", providerKey: "codex", modelId: "gpt-mini" });
+test("The project follows the machine: the one of the same repository, else the person chooses one", () => {
+  assert.deepEqual(remoteSelection(choices(), noRemoteSelection), { projectId: "p-alta", settings: defaultSessionSettings });
   assert.deepEqual(remoteSelection(choices({ suggestedProjectId: null }), noRemoteSelection).projectId, undefined, "Without a suggestion, the person chooses a project.");
   assert.deepEqual(remoteSelection(choices({ suggestedProjectId: "gone" }), noRemoteSelection).projectId, undefined);
   assert.deepEqual(remoteSelection(null, noRemoteSelection), noRemoteSelection, "Nothing is chosen while the machine is read.");
-  const noDefault = choices({ providers: [{ key: "x", name: "X", isDefault: false, defaultModelId: "missing", models: [{ id: "m", name: "M" }] }] });
-  assert.deepEqual(remoteSelection(noDefault, noRemoteSelection), { projectId: "p-alta", providerKey: "x", modelId: "m" }, "Else the first provider and its first model.");
-  const noModels = choices({ providers: [{ key: "x", name: "X", isDefault: true, defaultModelId: null, models: [] }] });
-  assert.equal(remoteSelection(noModels, noRemoteSelection).modelId, null, "A provider that lists no model chooses its own.");
 });
 
-test("What the person chose is kept while the machine still offers it", () => {
-  assert.deepEqual(remoteSelection(choices(), { projectId: "p-notes", providerKey: "claude", modelId: "sonnet" }),
-    { projectId: "p-notes", providerKey: "claude", modelId: "sonnet" });
-  assert.deepEqual(remoteSelection(choices(), { projectId: null, providerKey: "claude", modelId: null }),
-    { projectId: null, providerKey: "claude", modelId: "opus" }, "A chat stays a chat; a provider just chosen takes its default model.");
-  assert.deepEqual(remoteSelection(choices(), { projectId: "removed", providerKey: "removed", modelId: "removed" }),
-    { projectId: "p-alta", providerKey: "codex", modelId: "gpt-mini" }, "What the machine no longer has falls back to its defaults.");
-  assert.equal(remoteSelection(choices(), { projectId: "p-alta", providerKey: "codex", modelId: "opus" }).modelId, "gpt-mini",
-    "A model of another provider is not kept.");
+test("What the person chose is kept while the machine still offers its provider", () => {
+  const chosen = settings({ providerId: "claude", modelId: "sonnet", reasoningEffort: "Low", permissionMode: "acceptEdits", sandbox: "workspace", agentPromptId: "plan" });
+  assert.deepEqual(remoteSelection(choices(), { projectId: "p-notes", settings: chosen }), { projectId: "p-notes", settings: chosen });
+  assert.deepEqual(remoteSelection(choices(), { projectId: null, settings: chosen }).projectId, null, "A chat stays a chat.");
+  // A provider the machine no longer has goes back to its default, with its model, effort and mode; the rest stays.
+  assert.deepEqual(remoteSelection(choices(), { projectId: "removed", settings: { ...chosen, providerId: "removed" } }),
+    { projectId: "p-alta", settings: settings({ sandbox: "workspace", agentPromptId: "plan" }) });
 });
 
 test("A session is started on a machine once it is read, has a ready provider and a project is chosen", () => {
   const ready = remoteSelection(choices(), noRemoteSelection);
-  assert.equal(remoteStartBlocker(choices(), ready), null);
-  assert.equal(remoteStartBlocker(choices(), { ...ready, projectId: null }), null, "A chat needs no project.");
-  assert.equal(remoteStartBlocker(null, ready), "Reading the machine…");
-  assert.equal(remoteStartBlocker(choices(), { ...ready, projectId: undefined }), "Choose a project of the machine.");
-  assert.equal(remoteStartBlocker(choices({ providers: [] }), { ...ready, providerKey: null }), "The machine has no provider ready.");
-  assert.equal(remoteStartBlocker(choices({ status: "not_allowed" }), ready), "This computer may not start sessions on that machine.");
-  assert.equal(remoteStartBlocker(choices({ status: "offline" }), ready), "The machine does not answer.");
+  assert.equal(remoteStartBlocker(choices(), ready, "codex"), null);
+  assert.equal(remoteStartBlocker(choices(), { ...ready, projectId: null }, "codex"), null, "A chat needs no project.");
+  assert.equal(remoteStartBlocker(null, ready, null), "Reading the machine…");
+  assert.equal(remoteStartBlocker(choices(), { ...ready, projectId: undefined }, "codex"), "Choose a project of the machine.");
+  assert.equal(remoteStartBlocker(choices({ providers: [] }), ready, null), "The machine has no provider ready.");
+  assert.equal(remoteStartBlocker(choices(), ready, "removed"), "The machine has no provider ready.");
+  assert.equal(remoteStartBlocker(choices({ status: "not_allowed" }), ready, "codex"), "This computer may not start sessions on that machine.");
+  assert.equal(remoteStartBlocker(choices({ status: "offline" }), ready, "codex"), "The machine does not answer.");
+});
+
+test("A start on a machine asks it for what the Agent chip shows, and leaves the rest to the machine", () => {
+  const shown = { providerId: "codex", modelId: "gpt-mini", reasoningEffort: "High" };
+  const none = { providerKey: null, modelId: null, reasoningEffort: null, agentPromptId: null, permissionMode: null, sandbox: null, subSessions: null };
+  assert.deepEqual(remoteStartRequest(noRemoteSelection, shown), none, "the defaults of the machine");
+  assert.deepEqual(remoteStartRequest({ projectId: null, settings: settings({ agentPromptId: "plan" }) }, shown), { ...none, agentPromptId: "plan" });
+  // A choice of the mode or the sandbox names the provider, the model and the effort it was shown with.
+  assert.deepEqual(remoteStartRequest({ projectId: null, settings: settings({ permissionMode: "acceptEdits", sandbox: "workspace" }) }, shown),
+    { ...none, providerKey: "codex", modelId: "gpt-mini", reasoningEffort: "High", permissionMode: "acceptEdits", sandbox: "workspace" });
+  assert.deepEqual(remoteStartRequest({ projectId: null, settings: settings({ providerId: "claude", modelId: "opus", reasoningEffort: "Low" }) },
+    { providerId: "claude", modelId: "opus", reasoningEffort: "Low" }), { ...none, providerKey: "claude", modelId: "opus", reasoningEffort: "Low" });
+  assert.deepEqual(remoteStartRequest({ projectId: null, settings: settings({ options: { subSessions: false } }) }, shown),
+    { ...none, subSessions: false }, "the options of the session");
 });
 
 test("Why a start on a machine failed, in words", () => {

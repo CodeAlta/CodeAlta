@@ -220,6 +220,8 @@ import { WorkItemSettings } from "./workItems/WorkItemSettings";
 import type { RunModelsLoader, RunProvider } from "./workItems/runsWith";
 import type { SessionStartRequest } from "./sessionSettings/sessionSettings";
 import { sessionSettingsApi } from "./sessionSettings/sessionSettingsApi";
+import { SessionSettingsChip, useSessionSettingsChoices } from "./sessionSettings/SessionSettingsChip";
+import { machineRunProviders, onMachine } from "./machines/machineProviderNames";
 import { startWorkItem, type WorkStartSession } from "./workItems/startWorkItem";
 import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workItems, type WorkItem, type WorkStart } from "./workItems/workItems";
 import { SessionWorkMark } from "./workItems/SessionWorkMark";
@@ -311,7 +313,7 @@ import { FleetApprovals, showHeldStartToast } from "./fleet/FleetApprovals";
 import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { QueuedSessionNotice } from "./machines/QueuedSessionNotice";
-import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
+import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
@@ -3201,7 +3203,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const remoteKey = `${draftMachine}|${runOnKey}`;
   const [remoteChosen, setRemoteChosen] = useState<{ key: string; selection: RemoteSelection } | null>(null);
   const remoteSelected = remoteSelection(remoteChoices.choices, remoteChosen?.key === remoteKey ? remoteChosen.selection : noRemoteSelection);
-  const remoteBlocker = draftMachine ? remoteStartBlocker(remoteChoices.choices, remoteSelected) : null;
+  // What the session runs with there: the Agent chip of the composer, with the providers, models, efforts, agent prompts,
+  // permission modes and sandbox profiles of that machine, never the ones of this computer.
+  const remoteProviders = useMemo(() => machineRunProviders(remoteChoices.choices) ?? [], [remoteChoices.choices]);
+  const remoteApi = useMemo(() => draftMachine && remoteChoices.choices?.status === "ok" ? onMachine(null, draftMachine, remoteChoices.choices) : null,
+    [draftMachine, remoteChoices.choices]);
+  const remoteSettings = useSessionSettingsChoices(remoteApi, remoteProviders, null, remoteSelected.settings);
+  const remoteBlocker = draftMachine ? remoteStartBlocker(remoteChoices.choices, remoteSelected, remoteSettings.shown.providerId) : null;
   // The start on a machine under way: its key, until the machine answered.
   const [remoteStart, setRemoteStart] = useState<string | null>(null);
   const chooseRunOn = (machineId: string | null) => {
@@ -5151,7 +5159,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const prompt = (localDrafts.peek(scope) ?? localDraft).text.trim();
     const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
     if (!prompt) return;
-    const blocker = remoteStartBlocker(choices, selection);
+    const blocker = remoteStartBlocker(choices, selection, remoteSettings.shown.providerId);
     if (blocker || !choices) { showToast({ message: say(blocker ?? "Reading the machine…"), intent: "warning", icon: "warning-sign", timeout: 6000 }); return; }
     const machineName = choices.machineName ?? machineId;
     const requestId = crypto.randomUUID();
@@ -5159,7 +5167,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     let result: Awaited<ReturnType<typeof machinesApi.newSession>> | null = null;
     try {
       result = await machinesApi.newSession({ expectedEpoch: epoch, machineId, clientRequestId: requestId, projectId: selection.projectId ?? null, prompt,
-        providerKey: selection.providerKey, modelId: selection.modelId }, { timeoutMilliseconds: 60_000 });
+        ...remoteStartRequest(selection, remoteSettings.shown) }, { timeoutMilliseconds: 60_000 });
     } catch { /* Said below. */ }
     setRemoteStart(current => current === requestId ? null : current);
     if (!creationAlive.current) return;
@@ -6483,7 +6491,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft,
                     options: draftMachine ? <><RunOnChip targets={runOnShown} value={draftMachine} locked={!!scopeMachine} disabled={!!remoteStart} onChange={chooseRunOn} />
                       <RemoteSessionChoice choices={remoteChoices.choices} selection={remoteSelected} disabled={!!remoteStart} onRetry={remoteChoices.reload}
-                        onChange={selection => { invalidateCreation(); setRemoteChosen({ key: remoteKey, selection }); }} /></>
+                        onChange={selection => { invalidateCreation(); setRemoteChosen({ key: remoteKey, selection }); }} />
+                      {remoteChoices.choices?.status === "ok" && <SessionSettingsChip id="remote" providers={remoteProviders} choices={remoteSettings}
+                        value={remoteSelected.settings} withDefaults={false} privateOption={false} disabled={!!remoteStart}
+                        onChange={settings => { invalidateCreation(); setRemoteChosen({ key: remoteKey, selection: { ...remoteSelected, settings } }); }} />}</>
                       : draftCloud ? <CloudAccountChoice accounts={cloudAccounts} value={draftChoices.value.providerKey || null} disabled={!!cloudStart && !cloudStart.outcome}
                       onChange={id => { invalidateCreation(); draftChoices.change("providerKey", id); }}
                       onLocal={() => { if (draftProjectId) setWorkPlace(draftProjectId, inProjectFolder);

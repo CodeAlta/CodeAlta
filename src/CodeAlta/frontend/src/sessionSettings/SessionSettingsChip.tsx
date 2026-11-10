@@ -66,7 +66,7 @@ export type SessionSettingsChoices = ReturnType<typeof useSessionSettingsChoices
  * with the switch of the defaults at the top. With the defaults, the rows are disabled and show what the session will
  * run with, so that the user sees which provider and model the settings give.
  */
-export function SessionSettingsChip({ id, providers, choices, value, onChange, disabled = false }: {
+export function SessionSettingsChip({ id, providers, choices, value, onChange, disabled = false, withDefaults = true, privateOption = true }: {
   /** Tells the controls of this form apart from the others of the page. */
   id: string;
   /** The enabled providers. */
@@ -74,11 +74,18 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
   choices: SessionSettingsChoices;
   value: SessionSettings; onChange: (value: SessionSettings) => void;
   disabled?: boolean;
+  /**
+   * Whether the form has the switch of the defaults. Without it, as the composer of a new session, every row can be
+   * changed at once, and a part not changed is the default it shows.
+   */
+  withDefaults?: boolean;
+  /** Whether the options offer to make the session Private (see `SessionOptionsFields`). */
+  privateOption?: boolean;
 }) {
   const { t } = useShellLanguage();
   const { shown, provider, models } = choices;
   const defaults = usesDefaults(value);
-  const locked = disabled || defaults;
+  const locked = disabled || withDefaults && defaults;
   const model = models.find(candidate => candidate.id === shown.modelId);
   const modelName = (candidate: SessionSettingsModel | undefined) => candidate ? candidate.name || candidate.id : undefined;
   const reasoning = reasoningShown(shown.reasoningEffort, model && { name: modelName(model)!, efforts: model.efforts, effortsComplete: model.effortsComplete });
@@ -91,7 +98,7 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
   const permission = choices.permissionModes.length > 0 ? value.permissionMode ?? choices.defaultPermissionMode : undefined;
   const permissionName = (mode: string | null) => mode === null ? t("The setting of the CLI") : permissionModeName(mode) ? t(permissionModeName(mode)!) : mode;
   return <ComposerSelectionFields sessionId={id} disabled={disabled}
-    defaults={{ on: defaults, disabled: !shown.providerId, onChange: on => onChange(switchDefaults(value, on, shown)) }}
+    defaults={withDefaults ? { on: defaults, disabled: !shown.providerId, onChange: on => onChange(switchDefaults(value, on, shown)) } : null}
     summary={{ agent: agentName, provider: provider ? provider.name || provider.id : shown.providerId ?? t("No provider"), providerKey: shown.providerId, modelId: shown.modelId,
       model: modelName(model) ?? shown.modelId ?? t(choices.loadingModels ? "Loading…" : "No model"),
       reasoning: reasoning.effort ?? (choices.loadingModels ? t("Loading…") : null),
@@ -126,5 +133,5 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
     sandbox={choices.sandbox && <SessionSandboxSelect id={`composer-sandbox-${id}`} own={value.sandbox} inherited={choices.sandbox.profile} choices={choices.sandbox.choices}
       disabled={locked} onChange={sandbox => onChange({ ...value, sandbox })} />}
     options={{ changed: changedSessionOptions(value.options),
-      content: <SessionOptionsFields id={id} value={value.options} disabled={disabled} onChange={options => onChange({ ...value, options })} /> }} />;
+      content: <SessionOptionsFields id={id} value={value.options} disabled={disabled} privateOption={privateOption} onChange={options => onChange({ ...value, options })} /> }} />;
 }

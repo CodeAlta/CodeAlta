@@ -13,16 +13,35 @@ export function machineRunProviders(choices: Pick<MachineNewSessionChoices, "sta
 }
 
 /**
- * The catalogs of the Agent chip of an automation placed on a machine: the models are those the machine lists for its
- * provider; the agent prompts, permission modes and sandbox are read as this computer has them.
+ * The catalogs of the Agent chip of a session that runs on a machine, as that machine says them: the models of its
+ * providers with their efforts, its agent prompts, the permission modes it lets a session started from here have, and
+ * its sandbox profiles. What an older machine does not say is read from `base` (this computer, for an automation),
+ * else left out of the form (null). The review of the changes is the setting of `base`; none without it.
  */
-export function onMachine(api: SessionSettingsApi, machineId: string, choices: Pick<MachineNewSessionChoices, "providers">): SessionSettingsApi {
+export function onMachine(base: SessionSettingsApi | null, machineId: string,
+  choices: Pick<MachineNewSessionChoices, "providers"> & Partial<Pick<MachineNewSessionChoices, "prompts" | "defaultPromptId" | "sandboxProfiles">>): SessionSettingsApi {
+  const provider = (providerId: string | null) => choices.providers.find(candidate => candidate.key === providerId);
   return {
-    ...api,
-    key: JSON.stringify([api.key, machineId]),
+    key: JSON.stringify([base?.key ?? null, machineId, choices]),
     // The machine says nothing of the order of its models: they are listed as it gives them.
-    models: async providerId => ({ models: choices.providers.find(provider => provider.key === providerId)?.models
-      .map(model => ({ id: model.id, name: model.name, efforts: [], defaultEffort: null })) ?? [], order: null }),
+    models: async providerId => ({ models: provider(providerId)?.models
+      .map(model => ({ id: model.id, name: model.name, efforts: model.efforts ?? [], defaultEffort: model.defaultEffort ?? null, effortsComplete: model.efforts ? true : null })) ?? [],
+      order: null }),
+    prompts: async signal => choices.prompts
+      ? { prompts: choices.prompts.map(prompt => ({ id: prompt.id, name: prompt.name })), defaultPromptId: choices.defaultPromptId ?? null }
+      : base ? base.prompts(signal) : null,
+    permissionModes: async (providerId, signal) => {
+      const named = provider(providerId);
+      if (named?.permissionModes) return { modes: named.permissionModes.map(id => ({ id })), defaultMode: named.defaultPermissionMode ?? null };
+      return base ? base.permissionModes(providerId, signal) : null;
+    },
+    reviewSetting: async signal => base ? base.reviewSetting(signal) : null,
+    sandbox: async (providerId, modelId, signal) => {
+      // A machine that cannot start a sandbox offers none: the row is left out.
+      if (choices.sandboxProfiles) return choices.sandboxProfiles.length === 0 ? null : { status: "ok", own: null, problem: null,
+        profile: provider(providerId)?.sandbox ?? null, source: provider(providerId)?.sandbox ? "machine" : "none", choices: ["off", ...choices.sandboxProfiles] };
+      return base ? base.sandbox(providerId, modelId, signal) : null;
+    },
   };
 }
 

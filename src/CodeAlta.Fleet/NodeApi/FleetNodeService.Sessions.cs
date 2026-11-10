@@ -36,6 +36,7 @@ public sealed partial class FleetNodeService
         await Parallel.ForEachAsync(Enumerable.Range(0, projects.Length), new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
             async (index, token) => locations[index] = string.IsNullOrWhiteSpace(projects[index].ProjectPath) ? null
                 : await _locations.GetAsync(projects[index].ProjectPath, token).ConfigureAwait(false)).ConfigureAwait(false);
+        var prompts = await ReadAgentPromptsAsync(cancellationToken).ConfigureAwait(false);
         return new FleetNodeInfo(_options.Name, _options.Identity.DeviceId, FleetChannelProtocol.OperatingSystemName, _options.Version,
             [.. spaces.Select(static space => new FleetSpaceInfo(space.Id, space.Name) { Published = space.Settings.Fleet?.Server is { Length: > 0 } })],
             [.. projects.Select((project, index) => FleetProjectEditor.Describe(project, locations[index]))],
@@ -46,8 +47,27 @@ public sealed partial class FleetNodeService
             Update = _options.UpdateStatus?.Invoke(),
             Load = await ReadLoadAsync(cancellationToken).ConfigureAwait(false),
             Tags = ReadTags(),
+            AgentPrompts = prompts?.Prompts.Take(MaxListedPrompts).Select(static prompt => new FleetAgentPromptInfo(prompt.Id, prompt.Name)).ToArray(),
+            DefaultAgentPromptId = prompts?.DefaultPromptId,
+            SandboxProfiles = SandboxProfilesOffered(),
         };
     }
+
+    /// <summary>The most agent prompts <c>node.info</c> lists.</summary>
+    internal const int MaxListedPrompts = 64;
+
+    // The agent prompts of a new session, as the composer of a new session of this machine lists them: of its default space.
+    private async Task<OwnedDraftPrompts?> ReadAgentPromptsAsync(CancellationToken cancellationToken)
+    {
+        try { return await _host.Commands.GetDraftPromptsAsync(null, null, cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ObjectDisposedException) { return null; }
+    }
+
+    // The sandbox profiles a new session can be given; none where this machine cannot start a sandbox.
+    private IReadOnlyList<string> SandboxProfilesOffered()
+        => _host.RuntimeService.GetSandboxAvailability().IsAvailable
+            ? [.. CodeAlta.Sandbox.SandboxProfiles.Names(_host.RuntimeService.ReadSandboxSettings().Profiles).Take(MaxListedPrompts)]
+            : [];
 
     // The tags of the machine as its file says them; none when the file does not read.
     private IReadOnlyList<string> ReadTags()
@@ -101,7 +121,26 @@ public sealed partial class FleetNodeService
             catch (TimeoutException) { /* Listed once ready, by a later call. */ }
         }
 
-        return ReadyProviders(device);
+        // The sandbox the settings give a new session of each provider, with its default model.
+        var ready = ReadyProviders(device);
+        var described = new FleetProviderInfo[ready.Count];
+        for (var index = 0; index < ready.Count; index++)
+        {
+            var provider = ready[index];
+            string? sandbox = null;
+            try
+            {
+                sandbox = (await _host.RuntimeService.ResolveSandboxAsync(null, provider.Key, provider.DefaultModelId, null, null, cancellationToken).ConfigureAwait(false)).Choice.Profile;
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ObjectDisposedException)
+            {
+                // Unknown: the provider is listed without it.
+            }
+
+            described[index] = provider with { Sandbox = sandbox };
+        }
+
+        return described;
 
         async Task PrepareAsync(ModelProviderId provider)
         {
@@ -130,7 +169,33 @@ public sealed partial class FleetNodeService
                 string.IsNullOrWhiteSpace(state.Descriptor.DisplayName) ? state.ProviderId.Value : state.Descriptor.DisplayName,
                 string.Equals(state.ProviderId.Value, defaultKey, StringComparison.Ordinal),
                 state.SelectedModelId ?? state.Descriptor.DefaultModelId,
-                [.. state.Models.Take(MaxListedModels).Select(static model => new FleetModelInfo(model.Id, string.IsNullOrWhiteSpace(model.DisplayName) ? model.Id : model.DisplayName))]))];
+                [.. state.Models.Take(MaxListedModels).Select(static model => new FleetModelInfo(model.Id, string.IsNullOrWhiteSpace(model.DisplayName) ? model.Id : model.DisplayName)
+                {
+                    Efforts = [.. (model.SupportedReasoningEfforts ?? []).Take(8).Select(static effort => effort.ToString())],
+                    DefaultEffort = model.DefaultReasoningEffort?.ToString(),
+                })])
+            {
+                PermissionModes = RemotePermissionModes(state.ProviderId.Value, out var defaultMode),
+                DefaultPermissionMode = defaultMode,
+            })];
+    }
+
+    // The modes a session started from another device can be given on a provider: never one that asks less than the
+    // mode its sessions run in without one (the settings of the provider, else what no mode means on this machine).
+    private IReadOnlyList<string>? RemotePermissionModes(string providerKey, out string? defaultMode)
+    {
+        defaultMode = null;
+        try
+        {
+            var choices = _host.Commands.GetNewSessionPermissionModes(providerKey);
+            defaultMode = choices.DefaultMode;
+            var ceiling = SessionPermissionModes.Rank(_host.RuntimeService.GetNewSessionPermissionMode(providerKey));
+            return [.. choices.Modes.Where(mode => SessionPermissionModes.Rank(mode) <= ceiling)];
+        }
+        catch (ObjectDisposedException)
+        {
+            return null;
+        }
     }
 
     // The sessions as the desktop lists them: the snapshot of the owned workspace (WorkspaceReads), the project and the

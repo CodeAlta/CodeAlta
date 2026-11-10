@@ -398,7 +398,17 @@ public sealed record FleetProjectInfo(string Id, string Name, string Path, IRead
 /// <summary>A model a ready provider of the node offers.</summary>
 /// <param name="Id">Its id.</param>
 /// <param name="Name">Its name.</param>
-public sealed record FleetModelInfo(string Id, string Name);
+public sealed record FleetModelInfo(string Id, string Name)
+{
+    /// <summary>
+    /// Gets the reasoning efforts the model takes (<c>Low</c>, <c>High</c>...), which <see cref="FleetModelSelection.ReasoningEffort"/>
+    /// names; empty for a model without one, null for a node that does not say (an older one).
+    /// </summary>
+    public IReadOnlyList<string>? Efforts { get; init; }
+
+    /// <summary>Gets the effort the model runs with when none is named; null when it has none, or the node does not say.</summary>
+    public string? DefaultEffort { get; init; }
+}
 
 /// <summary>A provider of the node that is ready to run sessions.</summary>
 /// <param name="Key">Its key, which <see cref="FleetModelSelection.ProviderKey"/> names.</param>
@@ -406,7 +416,26 @@ public sealed record FleetModelInfo(string Id, string Name);
 /// <param name="IsDefault">Whether a session that names no provider runs on it.</param>
 /// <param name="DefaultModelId">The model a session takes when it names none; null when the provider chooses.</param>
 /// <param name="Models">Its models, as its last probe listed them.</param>
-public sealed record FleetProviderInfo(string Key, string Name, bool IsDefault, string? DefaultModelId, IReadOnlyList<FleetModelInfo> Models);
+public sealed record FleetProviderInfo(string Key, string Name, bool IsDefault, string? DefaultModelId, IReadOnlyList<FleetModelInfo> Models)
+{
+    /// <summary>
+    /// Gets the permission modes a session started from another device can be given on this provider
+    /// (<see cref="FleetCreateSessionParams.PermissionMode"/>): those that ask at least as much as the mode it runs in without
+    /// one; empty for a provider without modes, null for a node that does not say (an older one).
+    /// </summary>
+    public IReadOnlyList<string>? PermissionModes { get; init; }
+
+    /// <summary>Gets the permission mode a new session of the provider runs in when it is given none; null when the node does not say.</summary>
+    public string? DefaultPermissionMode { get; init; }
+
+    /// <summary>Gets the sandbox profile the settings of the node give a new session of the provider; null for none.</summary>
+    public string? Sandbox { get; init; }
+}
+
+/// <summary>An agent prompt a session of the node can run with.</summary>
+/// <param name="Id">Its id, which <see cref="FleetModelSelection.AgentPromptId"/> names.</param>
+/// <param name="Name">Its name.</param>
+public sealed record FleetAgentPromptInfo(string Id, string Name);
 
 /// <summary>The result of <c>node.info</c>.</summary>
 /// <param name="Name">The name of the node.</param>
@@ -433,6 +462,18 @@ public sealed record FleetNodeInfo(string Name, string DeviceId, string Os, stri
 
     /// <summary>Gets the tags its owner gives the machine (<c>gpu</c>, <c>prod</c>); null for a node that does not say (an older one).</summary>
     public IReadOnlyList<string>? Tags { get; init; }
+
+    /// <summary>Gets the agent prompts a new session of the node can run with; null for a node that does not say (an older one).</summary>
+    public IReadOnlyList<FleetAgentPromptInfo>? AgentPrompts { get; init; }
+
+    /// <summary>Gets the agent prompt a new session runs with when it names none; null when the node does not say.</summary>
+    public string? DefaultAgentPromptId { get; init; }
+
+    /// <summary>
+    /// Gets the sandbox profiles a new session can be given (<see cref="FleetCreateSessionParams.Sandbox"/>); empty when the node
+    /// cannot start a sandbox, null for a node that does not say (an older one).
+    /// </summary>
+    public IReadOnlyList<string>? SandboxProfiles { get; init; }
 }
 
 /// <summary>The load of a machine (<see cref="FleetSessionSeats"/>).</summary>
@@ -660,6 +701,21 @@ public sealed record FleetCreateSessionParams(string? ProjectId = null, string? 
     /// the calling device (<see cref="Protocol.FleetAgentRequestKinds.Start"/>); null for a session a person starts.
     /// </summary>
     public Protocol.FleetSignedAgentRequest? Agent { get; init; }
+
+    /// <summary>
+    /// Gets the permission mode the session runs in: one of <see cref="FleetProviderInfo.PermissionModes"/>, never one that asks
+    /// less than the mode the node gives it; null for that mode. A session an agent starts takes its mode from its request.
+    /// </summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>
+    /// Gets the sandbox the session runs in: a profile of <see cref="FleetNodeInfo.SandboxProfiles"/>, or <c>off</c>, never one
+    /// weaker than the sandbox the settings of the node give it; null for that sandbox.
+    /// </summary>
+    public string? Sandbox { get; init; }
+
+    /// <summary>Gets whether the session can start sessions of its own; null for yes. A session an agent starts takes it from its request.</summary>
+    public bool? SubSessions { get; init; }
 }
 
 /// <summary>The result of <c>sessions.create</c>.</summary>

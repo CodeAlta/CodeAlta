@@ -48,7 +48,6 @@ export const machineMessages = {
   "Project on {name}": ["Proyecto en {name}", "Projet sur {name}", "Projekt auf {name}", "{name} のプロジェクト", "{name} 上的项目"],
   "Chat (no project)": ["Chat (sin proyecto)", "Chat (sans projet)", "Chat (kein Projekt)", "チャット (プロジェクトなし)", "聊天（无项目）"],
   "The default of the provider": ["El predeterminado del proveedor", "Celui du fournisseur par défaut", "Standard des Anbieters", "プロバイダーの既定", "提供方的默认值"],
-  "Project and model on {name}": ["Proyecto y modelo en {name}", "Projet et modèle sur {name}", "Projekt und Modell auf {name}", "{name} のプロジェクトとモデル", "{name} 上的项目和模型"],
   "The machine has no provider ready.": ["La máquina no tiene ningún proveedor listo.", "La machine n’a aucun fournisseur prêt.", "Die Maschine hat keinen bereiten Anbieter.", "マシンに使用可能なプロバイダーがありません。", "该机器没有就绪的提供方。"],
   "Choose a project of the machine.": ["Elige un proyecto de la máquina.", "Choisissez un projet de la machine.", "Ein Projekt der Maschine wählen.", "マシンのプロジェクトを選択してください。", "请选择该机器的项目。"],
   "This computer may not start sessions on that machine.": ["Este ordenador no puede iniciar sesiones en esa máquina.", "Cet ordinateur ne peut pas démarrer de sessions sur cette machine.", "Dieser Computer darf auf dieser Maschine keine Sitzungen starten.", "このコンピューターはそのマシンでセッションを開始できません。", "本机无权在该机器上启动会话。"],

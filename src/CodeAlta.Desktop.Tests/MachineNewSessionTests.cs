@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using CodeAlta.Agent;
 using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.NodeApi;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -117,6 +119,75 @@ public sealed class MachineNewSessionTests
         Assert.AreEqual(machine.DeviceId, row.MachineId);
     }
 
+    // A session started on a machine is given what a session started here is: the effort of its model, its agent prompt,
+    // its permission mode, its sandbox and its options, among what that machine offers, never what asks less than it would.
+    [TestMethod]
+    public async Task NewSession_OnAMachine_TakesTheEffortAgentPromptModeSandboxAndOptionsTheMachineOffers()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        // Its sessions run in acceptEdits when they have no mode of their own.
+        fixture.Provider.Descriptor = fixture.Provider.Descriptor with
+        {
+            PermissionModes = [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass], DefaultPermissionMode = SessionPermissionModes.AcceptEdits,
+        };
+        fixture.Provider.Register(fixture.Host.ModelProviderRegistry);
+        var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+        await using var fleet = new DesktopFleet(Path.Combine(fixture.Root, "desktop-fleet"), registry.TakeMembership(), "desktop",
+            static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick,
+                localDeviceId: identity.DeviceId));
+        var machine = await fleet.PairAsync(fixture.CreatePairingLink(), token);
+        var host = fleet.Find(machine.DeviceId)!;
+        await WaitForAsync(() => host.State == RemoteMachineState.Online, "the machine to be online", token);
+        var epoch = Guid.NewGuid().ToString("D");
+        var service = new MachinesService(fleet, epoch);
+
+        var choices = await service.NewSessionChoicesAsync(new MachineNewSessionChoicesRequest(epoch, machine.DeviceId, null), token);
+        Assert.AreEqual("ok", choices.Status, choices.Message);
+        var provider = choices.Providers.Single();
+        var model = provider.Models.Single();
+        CollectionAssert.AreEqual(new[] { "Low", "High" }, model.Efforts, "The efforts of its model, as this computer names them.");
+        Assert.AreEqual("High", model.DefaultEffort);
+        CollectionAssert.AreEqual(new[] { SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits }, provider.PermissionModes,
+            "The modes that ask at least as much as the one its sessions run in: never one that asks less.");
+        Assert.AreEqual(SessionPermissionModes.AcceptEdits, provider.DefaultPermissionMode);
+        Assert.IsTrue(choices.Prompts!.Any(static prompt => prompt.Id == "plan"), "Its agent prompts.");
+        Assert.IsNotNull(choices.DefaultPromptId);
+        Assert.IsNotNull(choices.SandboxProfiles, "Its sandbox profiles, empty where it cannot start a sandbox.");
+
+        var before = (await fixture.Host.WorkspaceReads.ReadSnapshotAsync(token)).Sessions.Count;
+        async Task RefusedAsync(string key, MachineNewSessionRequest request, string expected)
+        {
+            var refused = await service.NewSessionAsync(request with { ClientRequestId = key }, token);
+            Assert.IsNull(refused.SessionId, key);
+            Assert.AreNotEqual("ok", refused.Status, key);
+            StringAssert.Contains(refused.Message, expected, key);
+        }
+
+        var basic = new MachineNewSessionRequest(epoch, machine.DeviceId, "", null, "Hello", "scripted", ScriptedFleetProvider.Model);
+        await RefusedAsync("bypass", basic with { PermissionMode = SessionPermissionModes.Bypass }, "cannot ask less");
+        await RefusedAsync("unknown-mode", basic with { PermissionMode = "plan" }, "offers the modes");
+        await RefusedAsync("unknown-sandbox", basic with { Sandbox = "missing" }, "no sandbox profile 'missing'");
+        await RefusedAsync("unknown-effort", basic with { ReasoningEffort = "Loud" }, "not a reasoning effort");
+        await RefusedAsync("unknown-prompt", basic with { AgentPromptId = "missing" }, "no agent prompt 'missing'");
+        Assert.IsTrue(fixture.Provider.Prompts.IsEmpty, "Nothing was sent.");
+        Assert.AreEqual(before, (await fixture.Host.WorkspaceReads.ReadSnapshotAsync(token)).Sessions.Count, "A refusal leaves no session behind.");
+
+        var created = await service.NewSessionAsync(basic with
+        {
+            ClientRequestId = "new-1", ReasoningEffort = "Low", AgentPromptId = "plan", PermissionMode = SessionPermissionModes.Ask, Sandbox = "off", SubSessions = false,
+        }, token);
+        Assert.AreEqual("ok", created.Status, created.Message);
+        var id = created.SessionId!;
+        await WaitForAsync(() => !fixture.Provider.Prompts.IsEmpty, "the first prompt", token);
+        var current = (await fixture.Host.Commands.GetSelectionChoicesAsync(id, token))!.Current;
+        Assert.AreEqual((ScriptedFleetProvider.Model, AgentReasoningEffort.Low, "plan"), (current.ModelId, current.ReasoningEffort, current.AgentPromptId));
+        Assert.AreEqual(SessionPermissionModes.Ask, await fixture.Host.RuntimeService.GetPermissionModeAsync(id, token));
+        Assert.AreEqual(CodeAlta.Sandbox.SandboxScope.Session, (await fixture.Host.RuntimeService.GetSessionSandboxAsync(id, token)).Choice.Source, "The sandbox chosen is the session's.");
+        var snapshot = await fixture.Host.WorkspaceReads.ReadSnapshotAsync(token);
+        Assert.IsFalse(snapshot.Sessions.Single(session => session.SessionId == id).ViewState?.Options?.SubSessions ?? true, "It starts no session of its own.");
+    }
+
     [TestMethod]
     public void MatchProject_OfAProjectWithARepositoryKey_IsTheSameFolderOfTheSameRepository_AndNothingElse()
     {
@@ -169,7 +240,12 @@ public sealed class MachineNewSessionTests
                 new FleetProjectInfo("t", "beta-tools", "/x/beta/tools", []) { RepositoryKey = "github.com/a/beta", RepositoryPath = "tools" },
             ], ["view", "drive", "start"])
         {
-            Providers = [new FleetProviderInfo("codex", "Codex", true, "gpt", [new FleetModelInfo("gpt", "GPT")])],
+            Providers = [new FleetProviderInfo("codex", "Codex", true, "gpt", [new FleetModelInfo("gpt", "GPT") { Efforts = ["Low", "High"], DefaultEffort = "High" }])
+            {
+                PermissionModes = ["default"], DefaultPermissionMode = "default", Sandbox = "workspace",
+            }],
+            AgentPrompts = [new FleetAgentPromptInfo("default", "Default"), new FleetAgentPromptInfo("plan", "Plan")], DefaultAgentPromptId = "default",
+            SandboxProfiles = ["workspace"],
         };
 
         var choices = MachinesService.Choices(info, new RepositoryLocation("github.com/a/beta", ""));
@@ -180,6 +256,16 @@ public sealed class MachineNewSessionTests
         var provider = choices.Providers.Single();
         Assert.AreEqual(("codex", "Codex", true, "gpt"), (provider.Key, provider.Name, provider.IsDefault, provider.DefaultModelId));
         Assert.AreEqual("GPT", provider.Models.Single().Name);
+        CollectionAssert.AreEqual(new[] { "Low", "High" }, provider.Models.Single().Efforts);
+        Assert.AreEqual(("default", "default", "workspace"), (provider.PermissionModes!.Single(), provider.DefaultPermissionMode, provider.Sandbox));
+        CollectionAssert.AreEqual(new[] { "default", "plan" }, choices.Prompts!.Select(static prompt => prompt.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "workspace" }, choices.SandboxProfiles);
+        // An older machine says none of them: the page then leaves them to this computer, or out.
+        var older = MachinesService.Choices(info with { AgentPrompts = null, SandboxProfiles = null, Providers = [new FleetProviderInfo("codex", "Codex", true, "gpt", [new FleetModelInfo("gpt", "GPT")])] }, null);
+        Assert.IsNull(older.Prompts);
+        Assert.IsNull(older.SandboxProfiles);
+        Assert.IsNull(older.Providers.Single().PermissionModes);
+        Assert.IsNull(older.Providers.Single().Models.Single().Efforts);
     }
 
     private static string CreateRepository(string root, string name, string origin)

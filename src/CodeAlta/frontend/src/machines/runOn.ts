@@ -1,5 +1,6 @@
-import type { MachineNewSessionChoices, MachineNewSessionResult, MachineView } from "#neoastra";
+import type { MachineNewSessionChoices, MachineNewSessionRequest, MachineNewSessionResult, MachineView } from "#neoastra";
 import type { MessageKey } from "../localization";
+import { defaultSessionSettings, startRequest, type SessionSettings, type ShownModel } from "../sessionSettings/sessionSettings";
 import { machineState, orderedMachines } from "./machines";
 import type { MachineLoad } from "./seats";
 
@@ -33,37 +34,48 @@ export function runOnMachine(chosen: string | null, machines: readonly MachineVi
 
 /**
  * What a new session on a machine is given: a project of that machine (null for a chat; undefined while none is
- * chosen), a provider of that machine and one of its models.
+ * chosen), and what it runs with, as the Agent chip of the composer chooses it among what the machine offers (a part
+ * left null is the default the chip shows).
  */
-export type RemoteSelection = Readonly<{ projectId: string | null | undefined; providerKey: string | null; modelId: string | null }>;
+export type RemoteSelection = Readonly<{ projectId: string | null | undefined; settings: SessionSettings }>;
 
 /** Nothing chosen yet: the choices of the machine fill it in. */
-export const noRemoteSelection: RemoteSelection = Object.freeze({ projectId: undefined, providerKey: null, modelId: null });
+export const noRemoteSelection: RemoteSelection = Object.freeze({ projectId: undefined, settings: defaultSessionSettings });
 
 /**
- * The selection shown for the choices of a machine: what the person chose while the machine still offers it, else the
- * project the machine has of the same repository, its default provider (else its first one), and the default model of
- * that provider (else its first one). No project is chosen for the person: without a suggestion, they choose one.
+ * The selection shown for the choices of a machine: the project the person chose while the machine still has it, else
+ * the project the machine has of the same repository. No project is chosen for the person: without a suggestion, they
+ * choose one. A provider the machine no longer offers goes back to its default, with its model, effort and mode.
  */
 export function remoteSelection(choices: Pick<MachineNewSessionChoices, "projects" | "suggestedProjectId" | "providers"> | null, chosen: RemoteSelection): RemoteSelection {
   if (!choices) return chosen;
   const projectId = chosen.projectId === null || chosen.projectId !== undefined && choices.projects.some(project => project.id === chosen.projectId)
     ? chosen.projectId
     : choices.suggestedProjectId && choices.projects.some(project => project.id === choices.suggestedProjectId) ? choices.suggestedProjectId : undefined;
-  const provider = choices.providers.find(value => value.key === chosen.providerKey) ?? choices.providers.find(value => value.isDefault) ?? choices.providers[0] ?? null;
-  const models = provider?.models ?? [];
-  const modelId = provider && provider.key === chosen.providerKey && models.some(model => model.id === chosen.modelId) ? chosen.modelId
-    : models.find(model => model.id === provider?.defaultModelId)?.id ?? models[0]?.id ?? null;
-  return { projectId, providerKey: provider?.key ?? null, modelId };
+  const offered = chosen.settings.providerId === null || choices.providers.some(provider => provider.key === chosen.settings.providerId);
+  const settings = offered ? chosen.settings : { ...chosen.settings, providerId: null, modelId: null, reasoningEffort: null, permissionMode: null };
+  return { projectId, settings };
 }
 
-/** Why a session cannot be started on the machine with that selection now; null when it can. */
-export function remoteStartBlocker(choices: Pick<MachineNewSessionChoices, "status" | "providers"> | null, selection: RemoteSelection): MessageKey | null {
+/** Why a session cannot be started on the machine with that selection now; null when it can. `shownProvider` is the provider the Agent chip shows. */
+export function remoteStartBlocker(choices: Pick<MachineNewSessionChoices, "status" | "providers"> | null, selection: RemoteSelection, shownProvider: string | null): MessageKey | null {
   if (!choices) return "Reading the machine…";
   if (choices.status !== "ok") return newSessionProblem(choices.status);
-  if (!selection.providerKey || !choices.providers.some(provider => provider.key === selection.providerKey)) return "The machine has no provider ready.";
+  if (!shownProvider || !choices.providers.some(provider => provider.key === shownProvider)) return "The machine has no provider ready.";
   if (selection.projectId === undefined) return "Choose a project of the machine.";
   return null;
+}
+
+/**
+ * What a start on a machine asks of it, besides its project and prompt: the provider, the model and the effort the
+ * Agent chip shows, and each other part the person chose; a part left to the defaults is the machine's.
+ */
+export function remoteStartRequest(selection: RemoteSelection, shown: ShownModel)
+  : Pick<MachineNewSessionRequest, "providerKey" | "modelId" | "reasoningEffort" | "agentPromptId" | "permissionMode" | "sandbox" | "subSessions"> {
+  const start = startRequest(selection.settings, shown);
+  return { providerKey: start.providerId, modelId: start.providerId ? start.modelId : null, reasoningEffort: start.modelId ? start.reasoningEffort : null,
+    agentPromptId: start.agentPromptId, permissionMode: start.permissionMode, sandbox: start.sandbox,
+    subSessions: start.options?.subSessions === false ? false : null };
 }
 
 /**

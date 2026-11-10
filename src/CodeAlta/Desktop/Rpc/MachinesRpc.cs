@@ -204,10 +204,28 @@ internal sealed partial class MachinesService
             same.Length == 1 ? same[0].Id : null,
             [.. info.Providers.Where(static provider => provider.Key is { Length: > 0 and <= MaximumNameLength }).Select(static provider => new MachineProviderChoice(provider.Key,
                 Bounded(provider.Name), provider.IsDefault, provider.DefaultModelId,
-                [.. provider.Models.Where(static model => model.Id is { Length: > 0 and <= MaximumNameLength }).Select(static model => new MachineModelChoice(model.Id, Bounded(model.Name)))]))],
-            null);
+                [.. provider.Models.Where(static model => model.Id is { Length: > 0 and <= MaximumNameLength }).Select(static model => new MachineModelChoice(model.Id, Bounded(model.Name))
+                {
+                    Efforts = model.Efforts is null ? null : [.. Names(model.Efforts, 8)],
+                    DefaultEffort = Name(model.DefaultEffort),
+                })])
+            {
+                PermissionModes = provider.PermissionModes is null ? null : [.. Names(provider.PermissionModes, 16)],
+                DefaultPermissionMode = Name(provider.DefaultPermissionMode),
+                Sandbox = Name(provider.Sandbox),
+            })],
+            null)
+        {
+            // What a machine that does not say them leaves to this computer: null, not empty.
+            Prompts = info.AgentPrompts is null ? null
+                : [.. info.AgentPrompts.Where(static prompt => prompt.Id is { Length: > 0 and <= MaximumNameLength }).Take(64).Select(static prompt => new MachinePromptChoice(prompt.Id, Bounded(prompt.Name)))],
+            DefaultPromptId = Name(info.DefaultAgentPromptId),
+            SandboxProfiles = info.SandboxProfiles is null ? null : [.. Names(info.SandboxProfiles, 64)],
+        };
 
         static string Bounded(string value) => value.Length <= MaximumNameLength ? value : value[..MaximumNameLength];
+        static string? Name(string? value) => value is { Length: > 0 and <= MaximumNameLength } ? value : null;
+        static IEnumerable<string> Names(IEnumerable<string> values, int most) => values.Where(static value => value is { Length: > 0 and <= MaximumNameLength }).Take(most);
     }
 
     /// <summary>Creates a session on a machine, in one of its projects, with its provider and model and its first prompt.</summary>
@@ -217,14 +235,23 @@ internal sealed partial class MachinesService
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (request!.MachineId is not { Length: > 0 and <= 64 } id || request.ClientRequestId is not { Length: > 0 and <= 256 } key
             || request.ProjectId is { Length: > MaximumNameLength } || request.Prompt is { Length: > MaximumPromptLength }
-            || request.ProviderKey is { Length: > MaximumNameLength } || request.ModelId is { Length: > MaximumNameLength } || request.ModelId is not null && request.ProviderKey is null)
+            || request.ProviderKey is { Length: > MaximumNameLength } || request.ModelId is { Length: > MaximumNameLength } || request.ModelId is not null && request.ProviderKey is null
+            || request.ReasoningEffort is { Length: > MaximumNameLength } || request.AgentPromptId is { Length: > MaximumNameLength }
+            || request.PermissionMode is { Length: > MaximumNameLength } || request.Sandbox is { Length: > MaximumNameLength })
             return new("invalid_request", null, null);
         if (_fleet!.Find(id) is not { } host) return new("not_found", null, null);
-        var selection = request.ProviderKey is { Length: > 0 } provider ? new FleetModelSelection(provider, request.ModelId is { Length: > 0 } model ? model : null) : null;
+        // The provider and the model, the effort and the agent prompt go with the first prompt; the mode, the sandbox and the
+        // options are the session's from its creation. The machine checks each against what it offers.
+        var selection = request.ProviderKey is { Length: > 0 } || request.ReasoningEffort is { Length: > 0 } || request.AgentPromptId is { Length: > 0 }
+            ? new FleetModelSelection(Text(request.ProviderKey), Text(request.ModelId), Text(request.AgentPromptId), Text(request.ReasoningEffort))
+            : null;
         try
         {
             var created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(request.ProjectId, null, null,
-                string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt, selection), key, cancellationToken).ConfigureAwait(false);
+                string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt, selection)
+            {
+                PermissionMode = Text(request.PermissionMode), Sandbox = Text(request.Sandbox), SubSessions = request.SubSessions == false ? false : null,
+            }, key, cancellationToken).ConfigureAwait(false);
             // The page opens the session from its next list: the machine is asked for it until it lists it.
             await host.WaitListedAsync(created.SessionId, ListedWait, cancellationToken).ConfigureAwait(false);
             return new(created.Send is { Status: not ("accepted" or "replay") } send ? send.Status : "ok", created.SessionId, null) { Position = created.Send?.Position };
@@ -312,6 +339,8 @@ internal sealed partial class MachinesService
         catch (FleetException exception) { return MachineMoveResult.Refused(exception.Error.Code, exception.Error.Message); }
         catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineMoveResult.Refused(RemoteSessionHost.MachineOfflineCode, exception.Message); }
     }
+
+    private static string? Text(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool Valid(MachineMoveRequest request)
         => request.SessionId is { Length: > 0 and <= 128 } && request.SourceMachineId is null or { Length: > 0 and <= 64 }
@@ -474,7 +503,23 @@ internal sealed record MachineActionResult(string Status);
 /// <param name="ProviderKey">The provider of the machine; null for its default.</param>
 /// <param name="ModelId">The model of that provider; null for its default. Only with a provider.</param>
 internal sealed record MachineNewSessionRequest(string ExpectedEpoch, string MachineId, string ClientRequestId, string? ProjectId, string? Prompt,
-    string? ProviderKey = null, string? ModelId = null);
+    string? ProviderKey = null, string? ModelId = null)
+{
+    /// <summary>Gets the reasoning effort of the model, one the machine lists for it; null for its default.</summary>
+    public string? ReasoningEffort { get; init; }
+
+    /// <summary>Gets the agent prompt, one of the machine; null for its default.</summary>
+    public string? AgentPromptId { get; init; }
+
+    /// <summary>Gets the permission mode, one the machine lists for the provider; null for the one it gives.</summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>Gets the sandbox, a profile of the machine or <c>off</c>; null for the one its settings give.</summary>
+    public string? Sandbox { get; init; }
+
+    /// <summary>Gets whether the session can start sessions of its own; null for yes.</summary>
+    public bool? SubSessions { get; init; }
+}
 
 /// <summary>A request for what a new session on a machine can be given.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
@@ -497,7 +542,19 @@ internal sealed record MachineProjectChoice(string Id, string Name, string? Repo
 /// <summary>A model of a provider of a machine.</summary>
 /// <param name="Id">Its id.</param>
 /// <param name="Name">Its name.</param>
-internal sealed record MachineModelChoice(string Id, string Name);
+internal sealed record MachineModelChoice(string Id, string Name)
+{
+    /// <summary>Gets its reasoning efforts; null when the machine does not say them (an older one).</summary>
+    public string[]? Efforts { get; init; }
+
+    /// <summary>Gets the effort it runs with when none is chosen; null for none, or when the machine does not say.</summary>
+    public string? DefaultEffort { get; init; }
+}
+
+/// <summary>An agent prompt of a machine.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Name">Its name.</param>
+internal sealed record MachinePromptChoice(string Id, string Name);
 
 /// <summary>A provider of a machine that is ready to run sessions.</summary>
 /// <param name="Key">Its key on the machine.</param>
@@ -505,7 +562,17 @@ internal sealed record MachineModelChoice(string Id, string Name);
 /// <param name="IsDefault">Whether a session that names no provider runs on it.</param>
 /// <param name="DefaultModelId">The model a session takes when it names none; null when the provider chooses.</param>
 /// <param name="Models">Its models.</param>
-internal sealed record MachineProviderChoice(string Key, string Name, bool IsDefault, string? DefaultModelId, MachineModelChoice[] Models);
+internal sealed record MachineProviderChoice(string Key, string Name, bool IsDefault, string? DefaultModelId, MachineModelChoice[] Models)
+{
+    /// <summary>Gets the permission modes a session started from this computer can be given there; null when the machine does not say them.</summary>
+    public string[]? PermissionModes { get; init; }
+
+    /// <summary>Gets the mode a new session of the provider runs in when it is given none.</summary>
+    public string? DefaultPermissionMode { get; init; }
+
+    /// <summary>Gets the sandbox profile the settings of the machine give a new session of the provider; null for none.</summary>
+    public string? Sandbox { get; init; }
+}
 
 /// <summary>What a new session on a machine can be given.</summary>
 /// <param name="Status">
@@ -521,6 +588,15 @@ internal sealed record MachineProviderChoice(string Key, string Name, bool IsDef
 internal sealed record MachineNewSessionChoices(string Status, string? MachineName, MachineProjectChoice[] Projects, string? SuggestedProjectId,
     MachineProviderChoice[] Providers, string? Message)
 {
+    /// <summary>Gets the agent prompts of the machine; null when it does not say them (an older one).</summary>
+    public MachinePromptChoice[]? Prompts { get; init; }
+
+    /// <summary>Gets the agent prompt a session runs with when none is chosen.</summary>
+    public string? DefaultPromptId { get; init; }
+
+    /// <summary>Gets the sandbox profiles a session can be given there; empty when it cannot start a sandbox, null when it does not say.</summary>
+    public string[]? SandboxProfiles { get; init; }
+
     internal static MachineNewSessionChoices Refused(string status) => new(status, null, [], null, [], null);
 }
 

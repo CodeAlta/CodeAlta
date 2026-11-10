@@ -31,8 +31,10 @@ While a machine is offline, its sessions stay listed with what was last known of
 1. Open a new session in a project, or in **Chats**.
 2. Beside the agent chip above the prompt, click **Run on** (it shows **This machine**) and choose the machine. Only machines that are online are offered.
 3. Choose the project of that machine: when the machine has a checkout of the same repository as the project you are in, it is already chosen. **Chat (no project)** starts a session in no project.
-4. Choose the provider and the model among the ones ready on that machine.
+4. Click the agent chip beside it to choose what the session runs with, as for a session of this computer: the agent prompt, the provider and the model among the ones ready on that machine, the reasoning effort, the permissions, the sandbox and the sub-sessions. Each one you leave is the default of that machine, which the chip shows.
 5. Write your prompt and send it. The session starts on the machine and opens in its tab.
+
+The permissions and the sandbox are those of the machine, never less than it gives: a mode that asks less than the one its sessions run in (see [What its sessions may do](#what-its-sessions-may-do)) is not offered, and a sandbox weaker than the one its settings give is refused when you send. A session started on another machine cannot be Private: that machine would not list it here.
 
 **Run on** shows the load of each machine, such as `3 of 3 at work, 2 queued`. A machine that already runs as many sessions as its owner [lets it](machines.md#limit-the-sessions-at-work) takes the session and queues its prompt: its row in the Explorer says **Queued on Workstation (1 before it)**, and its tab says so above the prompt, with **Start now** and **Take out of the queue**. The prompt is sent once its turn comes, and its conversation shows then.
 
@@ -91,6 +93,7 @@ An automation of yours can run on a paired machine, or on a machine of your serv
 The machine fires its schedules and starts its sessions; **Run now** runs it there too. When a [budget](operations.md#set-budgets-for-your-machines) of the machine holds new runs, **Run now** says at once that the run waits, with **Continue anyway**, and the run is listed as **Waits for Continue anyway** until you decide. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
 
 - The automation keeps its definition here; edit it here, and the machine gets the change.
+- Its **Runs with** lists what that machine offers: its providers and their models with their efforts, its agent prompts, the permission modes of its providers and its sandbox profiles. A machine of an older version says only its providers and models: the rest is then what this computer has.
 - Moved to another machine, or brought back to this computer, while the machine it ran on is offline, an enabled automation waits: its card says **Waits for the machine it left** until that machine takes its copy away, so that both never run it. A machine that refuses to take it away (its copy could not be deleted there) keeps it waiting, and the card says why. **Start anyway…** starts it at once where it is now; both machines may then run it until the old one answers, and it still takes its copy away then.
 - Turning off **Running** in the **Automations** tab pauses the automations on machines too: they get them disabled until you turn it on again.
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.

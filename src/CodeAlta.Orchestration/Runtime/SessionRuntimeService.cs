@@ -445,6 +445,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return false;
     }
 
+    /// <summary>
+    /// Gets the permission mode a new session of a provider runs in when it is given none: the one its provider is configured
+    /// with, else what no mode means on this host (it asks when the host reviews what sessions do, else it does not).
+    /// </summary>
+    /// <param name="providerKey">The provider.</param>
+    /// <returns>The mode.</returns>
+    public string GetNewSessionPermissionMode(string? providerKey)
+        => ConfiguredPermissionMode(providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+
     private string? ConfiguredPermissionMode(string? providerKey)
     {
         if (string.IsNullOrWhiteSpace(providerKey)) return null;
