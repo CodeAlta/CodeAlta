@@ -1,8 +1,8 @@
 name: ci
 
 # A push to a branch and a pull request run the daily checks, in parallel jobs: the .NET tests on Linux, Windows and
-# macOS, the frontend tests, and the NuGet packages of each tool, built as dotnet-releaser builds them but not
-# published. A tag runs dotnet-releaser alone: it builds, tests, packs and publishes the release.
+# macOS, and the frontend tests. A push to main also builds the NuGet packages of each tool, as dotnet-releaser builds
+# them but not published. A tag runs dotnet-releaser alone: it builds, tests, packs and publishes the release.
 on:
   push:
     paths-ignore:
@@ -136,9 +136,10 @@ jobs:
         working-directory: src/CodeAlta/frontend
         run: npx tsx --test --test-concurrency=1 --test-shard=${{ matrix.shard }}/6 --test-reporter=./scripts/failures-reporter.mjs "src/**/*.test.ts" "src/**/*.test.tsx"
 
+  # The packs are five more long jobs: they run for main only, not for a pull request or another branch.
   pack:
     name: "Pack (${{ matrix.project }})"
-    if: github.ref_type != 'tag'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
