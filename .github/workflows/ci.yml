@@ -101,13 +101,13 @@ jobs:
           if-no-files-found: error
 
   frontend:
-    name: "Frontend tests (${{ matrix.shard }}/4)"
+    name: "Frontend tests (${{ matrix.shard }}/6)"
     if: github.ref_type != 'tag'
     needs: frontend-client
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -130,10 +130,11 @@ jobs:
       # (browserTarget.ts): it is done once here, and the tests start a warm Edge.
       - name: "Start Edge once"
         run: timeout 120 microsoft-edge --headless=new --disable-gpu --no-first-run --guest --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null
-      # `npm test` with a shard of the files: each runs in this job, two at a time as in `npm test`.
+      # `npm test` with a shard of the files, one at a time: two headless Edge at once on the cores of a runner drew their
+      # pages late enough to fail tests that read them. More shards keep the time.
       - name: "Test"
         working-directory: src/CodeAlta/frontend
-        run: npx tsx --test --test-concurrency=2 --test-shard=${{ matrix.shard }}/4 --test-reporter=./scripts/failures-reporter.mjs "src/**/*.test.ts" "src/**/*.test.tsx"
+        run: npx tsx --test --test-concurrency=1 --test-shard=${{ matrix.shard }}/6 --test-reporter=./scripts/failures-reporter.mjs "src/**/*.test.ts" "src/**/*.test.tsx"
 
   pack:
     name: "Pack (${{ matrix.project }})"
