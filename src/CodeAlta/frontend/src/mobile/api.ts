@@ -167,6 +167,8 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       return result;
     },
     choices: (id: string) => call<SessionChoices>("GET", `${session(id)}/choices`),
+    /** Moves an idle session to another provider of its space, as the provider chooser of the desktop does. */
+    selectProvider: (id: string, provider: string) => command<ActionResult>(`${session(id)}/provider`, { provider }),
     /** Sends a prompt; a send or a queue carries what was chosen of the session (a steer takes nothing). Files go with a send. */
     prompt: (id: string, text: string, mode: PromptMode, selection: PromptSelection = {}, attachments: readonly PromptAttachment[] = []) =>
       command<ActionResult>(`${session(id)}/prompt`, { text, mode, ...(attachments.length ? { attachments } : {}), ...(mode === "steer" ? {} : selection) }),

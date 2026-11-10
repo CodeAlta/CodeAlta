@@ -36,6 +36,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     createAnswer: {} as Record<string, unknown>,
     /** The next prompt fails with this text, once. */
     promptError: null as string | null,
+    /** The next move to another provider fails with this text, once. */
+    providerError: null as string | null,
     /** The asks the sessions wait on: an answer or a cancel that goes ends it. */
     asks: new Map<string, Ask>(),
     /** What the next answer or cancel of an ask becomes; null: it goes. */
@@ -230,7 +232,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       }
       return send(response, 200, { job, text: state.jobOutput.get(jobId) ?? "", truncated: false, error: null });
     }
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive-children|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve|takeover))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive-children|archive|restore|choices|provider|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve|takeover))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -271,6 +273,19 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, { since: page.at(-1)?.seq ?? 0, before: page[0]?.seq ?? null, hasMore: start > 0, events: page, error: null });
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
+      // A move to another provider: the session takes its default model and mode there, as alta would say.
+      if (action === "provider") {
+        if (state.providerError) {
+          const error = state.providerError;
+          state.providerError = null;
+          return send(response, 200, { ok: false, error });
+        }
+        const { provider } = body as { provider: string };
+        const choices = choicesOf(target), name = choices.providers?.find(p => p.id === provider)?.name ?? provider;
+        state.choices.set(id, { ...choices, current: { ...choices.current, provider, providerName: name, model: null, modelName: null, reasoning: null, permissionMode: null } });
+        Object.assign(target, { model: { ...target.model!, provider, providerName: name } });
+        return send(response, 200, { ok: true, error: null });
+      }
       if (action === "permissions") return send(response, 200, { requests: state.approvals.get(id) ?? [], hasMore: false, error: null, automation: state.automations.get(id) ?? null });
       if (action === "takeover") {
         const result = state.takeOverResult ?? { ok: true, error: null };

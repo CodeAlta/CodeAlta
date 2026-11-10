@@ -468,6 +468,7 @@ public sealed class MobileSessionsTests
                 ["prompts"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Default" }, new JsonObject { ["id"] = "plan", ["name"] = "Plan" }),
                 ["permissionModes"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Ask first" }, new JsonObject { ["id"] = "acceptEdits", ["name"] = "Accept edits", ["description"] = "Accept file edits." }),
                 ["defaultPermissionMode"] = "default", ["tier"] = "complex", ["modelsOrder"] = "name",
+                ["providers"] = new JsonArray(new JsonObject { ["providerKey"] = "claude", ["name"] = "Claude Code" }, new JsonObject { ["providerKey"] = "codex" }),
             });
         var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
 
@@ -484,12 +485,37 @@ public sealed class MobileSessionsTests
         Assert.IsFalse(models[1]!.AsObject().ContainsKey("imageInput"), "A model that does not say is left without the field.");
         CollectionAssert.AreEqual(new[] { "default", "acceptEdits" }, ((JsonArray)choices["permissionModes"]!).Select(static mode => (string?)mode!["id"]).ToArray());
         Assert.AreEqual("name", (string?)choices["modelsOrder"], "the order the settings of the provider put its models in");
+        var providers = (JsonArray)choices["providers"]!;
+        Assert.AreEqual(("claude", "Claude Code"), ((string?)providers[0]!["id"], (string?)providers[0]!["name"]));
+        Assert.AreEqual(("codex", "codex"), ((string?)providers[1]!["id"], (string?)providers[1]!["name"]), "A provider without a name is named by its key.");
         Assert.IsNull(choices["error"]);
 
         Assert.IsNull(await api.ChoicesAsync("theirs", default), "A session of another space has no choices on the phone.");
         Assert.AreEqual(1, alta.CallsOf("session choices").Length);
         alta.Answer("session choices a", (_, _) => FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "Unknown command." }));
         Assert.AreEqual("Unknown command.", (string?)(await api.ChoicesAsync("a", default))!["error"], "An alta without the command says why.");
+    }
+
+    [TestMethod]
+    public async Task Provider_MovesASessionThePhoneSees_AndSaysWhatRefusedIt()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "work"))
+            .Answer("session set_provider a", new JsonObject { ["type"] = "alta.session.provider_set", ["sessionId"] = "a", ["providerKey"] = "codex" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+
+        var moved = await api.ProviderAsync("a", new JsonObject { ["provider"] = "codex" }, default);
+        Assert.AreEqual((true, null), ((bool?)moved!["ok"], (string?)moved["error"]));
+        CollectionAssert.AreEqual(new[] { "session", "set_provider", "a", "--provider", "codex" }, alta.CallsOf("session set_provider").Single());
+
+        Assert.IsNull(await api.ProviderAsync("theirs", new JsonObject { ["provider"] = "codex" }, default), "A session of another space is not moved from the phone.");
+        Assert.AreEqual(false, (bool?)(await api.ProviderAsync("a", new JsonObject(), default))!["ok"], "A provider is needed.");
+        Assert.AreEqual(1, alta.CallsOf("session set_provider").Length);
+
+        alta.Answer("session set_provider a", (_, _) => FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "A prompt waits in the queue of the session." }));
+        var refused = await api.ProviderAsync("a", new JsonObject { ["provider"] = "codex" }, default);
+        Assert.AreEqual((false, "A prompt waits in the queue of the session."), ((bool?)refused!["ok"], (string?)refused["error"]));
     }
 
     [TestMethod]

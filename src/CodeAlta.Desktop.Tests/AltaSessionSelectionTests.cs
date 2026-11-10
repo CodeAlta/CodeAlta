@@ -305,6 +305,68 @@ public sealed class AltaSessionSelectionTests
                 JsonDocument.Parse("{}").RootElement.Clone()), null, null, CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.All);
     }
 
+    // The provider chooser of the window, for a client of alta (the phone): the providers of the space are listed with the
+    // choices, an idle session moves to one of them, and its next turn runs there; a session at work stays where it is.
+    [TestMethod]
+    public async Task SetProvider_MovesAnIdleSessionToAnotherProviderOfItsSpace()
+    {
+        using var temp = new TempFolder();
+        var provider = new GatedProvider();
+        var other = new GatedProvider("other", "Other");
+        await using var host = await CreateHostAsync(temp, provider, inherit: () => false, other);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()));
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Phone");
+
+        var listed = await commands.InvokeAsync(["session", "choices", session.SessionId], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Transcript);
+        using (var choices = Record(listed, "alta.session.choices"))
+        {
+            var providers = choices.RootElement.GetProperty("providers").EnumerateArray().ToArray();
+            CollectionAssert.AreEquivalent(new[] { "gated", "other" }, providers.Select(static item => item.GetProperty("providerKey").GetString()).ToArray());
+            Assert.AreEqual("Other", providers.Single(static item => item.GetProperty("providerKey").GetString() == "other").GetProperty("name").GetString());
+        }
+
+        var unknown = await commands.InvokeAsync(["session", "set_provider", session.SessionId, "--provider", "missing"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.NotFound, unknown.ExitCode, unknown.Transcript);
+        StringAssert.Contains(unknown.Transcript, "provider.notFound");
+
+        // A session at work keeps its provider.
+        var gate = provider.Hold();
+        var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "long work")).Receipt!;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        {
+            while (!await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
+        }
+
+        var busy = await commands.InvokeAsync(["session", "set_provider", session.SessionId, "--provider", "other"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Unsupported, busy.ExitCode, busy.Transcript);
+        StringAssert.Contains(busy.Transcript, "session.running");
+        gate.SetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(20))).Outcome);
+        await WaitIdleAsync(host, session, provider, turns: 1);
+
+        var moved = await commands.InvokeAsync(["session", "set_provider", session.SessionId, "--provider", "other"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, moved.ExitCode, moved.Transcript);
+        using (var record = Record(moved, "alta.session.provider_set"))
+        {
+            Assert.AreEqual("other", record.RootElement.GetProperty("providerKey").GetString());
+            Assert.AreEqual("gated", record.RootElement.GetProperty("previousProviderKey").GetString());
+            Assert.IsTrue(record.RootElement.GetProperty("changed").GetBoolean());
+        }
+
+        Assert.AreEqual("other", (await host.Commands.GetSelectionChoicesAsync(session.SessionId))!.Current.ProviderKey);
+        var sent = await commands.InvokeAsync(["session", "send", session.SessionId, "--message", "again", "--model", "large"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Transcript);
+        await WaitIdleAsync(host, session, other, turns: 1);
+        Assert.AreEqual("large", other.Turns[0].Model);
+        Assert.AreEqual(1, provider.Turns.Count, "the turn ran on the new provider");
+
+        var again = await commands.InvokeAsync(["session", "set_provider", session.SessionId, "--provider", "other"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, again.ExitCode, again.Transcript);
+        using (var record = Record(again, "alta.session.provider_set"))
+            Assert.IsFalse(record.RootElement.GetProperty("changed").GetBoolean());
+    }
+
     [TestMethod]
     public async Task Choices_RefuseWithoutTheOwnerOfTheSessions()
     {
@@ -313,7 +375,7 @@ public sealed class AltaSessionSelectionTests
         Assert.AreEqual(AltaExitCodes.ServiceUnavailable, result.ExitCode, result.Transcript);
     }
 
-    private static async Task<CodeAltaHost> CreateHostAsync(TempFolder temp, GatedProvider provider, Func<bool> inherit)
+    private static async Task<CodeAltaHost> CreateHostAsync(TempFolder temp, GatedProvider provider, Func<bool> inherit, params GatedProvider[] others)
     {
         var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
         var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
@@ -321,7 +383,11 @@ public sealed class AltaSessionSelectionTests
         {
             GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, OwnedCommandReceiptCapacity = 32,
             SessionPermissionModes = true, ReviewOwnedPermissionsPolicy = () => true, InheritPermissionModePolicy = inherit,
-            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+            ConfigureModelProviders = registry =>
+            {
+                registry.RegisterOrReplace(provider.Descriptor, () => provider);
+                foreach (var other in others) registry.RegisterOrReplace(other.Descriptor, () => other);
+            },
         }, CancellationToken.None);
     }
 
@@ -337,17 +403,17 @@ public sealed class AltaSessionSelectionTests
 
     // A provider with two models that have their efforts; it records the model and the effort of each turn, and a turn
     // can wait for the test.
-    private sealed class GatedProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    private sealed class GatedProvider(string key = "gated", string name = "Gated") : IAgentModelProviderRuntime, IModelProviderTurnExecutor
     {
         private TaskCompletionSource? _gate;
 
         public List<(string? Model, AgentReasoningEffort? Effort)> Turns { get; } = [];
 
-        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("gated"), "Gated") { DefaultModelId = "small" };
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(key), name) { DefaultModelId = "small" };
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
         {
-            ProtocolFamily = "test", ProviderKey = "gated", DisplayName = "Gated", TransportKind = AgentTransportKind.OpenAIResponses,
+            ProtocolFamily = "test", ProviderKey = key, DisplayName = name, TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         public IModelProviderModelCatalog? ModelCatalog => null;

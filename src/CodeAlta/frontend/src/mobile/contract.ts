@@ -236,6 +236,8 @@ export type SessionChoices = Readonly<{
   prompts: readonly Readonly<{ id: string; name: string }>[];
   /** Empty when the provider offers no mode. */
   permissionModes: readonly PermissionModeOption[];
+  /** The providers of its space it can be moved to while it is idle; absent from an older CodeAlta, which moves none. */
+  providers?: readonly Readonly<{ id: string; name: string }>[];
   error: string | null;
 }>;
 

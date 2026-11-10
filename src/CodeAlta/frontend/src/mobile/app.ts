@@ -862,12 +862,15 @@ export function startMobile(window: Window & typeof globalThis) {
   const pickModelButton = $<HTMLButtonElement>("pick-model"), pickMoreButton = $<HTMLButtonElement>("pick-more");
   const sessionMoreSheet = createSheet(document, $("session-more-sheet"));
   const sessionAgent = $<HTMLSelectElement>("session-agent"), sessionMode = $<HTMLSelectElement>("session-mode"), queueFirstBox = $<HTMLInputElement>("session-queue-first");
+  const sessionProvider = $<HTMLSelectElement>("session-provider");
+  // A move of a session to another provider under way, or why the last one was refused.
+  const providerSwitch = new Map<string, Readonly<{ busy: boolean; error: string | null }>>();
   const readChoices = async (id: string) => {
     const before = JSON.stringify(choicesOf.get(id) ?? null);
     try {
       const read = await api.choices(id);
       choicesOf.set(id, { current: read.current, models: read.models ?? [], modelsOrder: read.modelsOrder ?? null, prompts: read.prompts ?? [], permissionModes: read.permissionModes ?? [],
-        error: read.error ?? null });
+        providers: read.providers ?? [], error: read.error ?? null });
       files.reconcile(id);
     } catch (error) {
       if (error instanceof SignedOutError) return;
@@ -940,7 +943,8 @@ export function startMobile(window: Window & typeof globalThis) {
     void readChoices(id);
   });
 
-  // "⋯" of a session: its agent prompt, its permissions (when its provider has modes), and whether a prompt typed while it works is queued.
+  // "⋯" of a session: its agent prompt, its provider (as the desktop, it moves an idle session to another provider of its space at
+  // once), its permissions (when its provider has modes), and whether a prompt typed while it works is queued.
   function renderSessionMore() {
     const id = detail.id;
     if (!id) return;
@@ -948,6 +952,15 @@ export function startMobile(window: Window & typeof globalThis) {
     const prompts = choices?.prompts.length ? choices.prompts : shown.agent ? [{ id: shown.agent, name: shown.agentName ?? shown.agent }] : [];
     sessionAgent.replaceChildren(...prompts.map(p => option(p.id, p.name, p.id === shown.agent)));
     sessionAgent.disabled = !choices?.prompts.length;
+    // A provider the session can no longer use (removed, turned off, out of its space) is named, and any other can be chosen.
+    const current = choices?.current.provider ?? null, offered = choices && !choices.error ? choices.providers ?? [] : [];
+    const providerList = current && !offered.some(p => p.id === current) ? [{ id: current, name: `${shown.providerName ?? current}${offered.length ? " · Unavailable" : ""}` }, ...offered] : offered;
+    const switching = providerSwitch.get(id), busy = isBusy(sessions.view(id)?.live?.live);
+    $("session-provider-field").hidden = providerList.length < 2;
+    sessionProvider.replaceChildren(...providerList.map(p => option(p.id, p.name, p.id === current)));
+    sessionProvider.disabled = busy || !!switching?.busy;
+    $("session-provider-text").textContent = switching?.busy ? "Switching provider…" : switching?.error
+      ?? (busy ? "The provider can be changed once the session is idle." : "History is kept: the next prompt runs on the new provider.");
     const modes = choices?.permissionModes ?? [];
     $("session-mode-field").hidden = modes.length === 0;
     sessionMode.replaceChildren(option(providerPermissionMode, modeName(null), !shown.permissionMode),
@@ -963,6 +976,24 @@ export function startMobile(window: Window & typeof globalThis) {
     void readChoices(id);
   });
   sessionAgent.addEventListener("change", () => { const id = detail.id; if (id) pick(id, { ...picks.get(id), agent: sessionAgent.value }); });
+  sessionProvider.addEventListener("change", async () => {
+    const id = detail.id, target = sessionProvider.value;
+    if (!id || !target || target === choicesOf.get(id)?.current.provider || providerSwitch.get(id)?.busy) return;
+    providerSwitch.set(id, { busy: true, error: null });
+    renderSessionMore();
+    try {
+      await api.selectProvider(id, target);
+      providerSwitch.delete(id);
+      // The model, the effort and the mode picked were of the provider it left: the new one gives its own. The agent prompt stays.
+      const agent = picks.get(id)?.agent;
+      pick(id, agent ? { agent } : {});
+    } catch (error) {
+      if (error instanceof SignedOutError) return;
+      providerSwitch.set(id, { busy: false, error: failureText(error, host) });
+    }
+    await readChoices(id);
+    if (detail.id === id && sessionMoreSheet.shown) renderSessionMore();
+  });
   sessionMode.addEventListener("change", () => {
     const id = detail.id;
     if (!id) return;

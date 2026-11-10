@@ -86,6 +86,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session unqueue"),
         Read("session tool"),
         Mutating("session set_agent"),
+        Mutating("session set_provider"),
         Mutating("session set_worktree"),
         // It gives the session to another machine; a sandboxed session may not (it is not among the commands its sandbox allows).
         Mutating("session move"),
@@ -840,6 +841,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionUnqueueCommand(context));
         group.Add(CreateSessionToolCommand(context));
         group.Add(CreateSessionSetAgentCommand(context));
+        group.Add(CreateSessionSetProviderCommand(context));
         group.Add(CreateSessionSetWorktreeCommand(context));
         // A host with paired machines (the desktop app) moves sessions to them.
         if (context.Services.Get<IAltaSessionMachineMoves>() is not null) group.Add(CreateSessionMoveCommand(context));
@@ -1239,7 +1241,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static Command CreateSessionChoicesCommand(AltaCommandContext context)
     {
         string? sessionId = null;
-        var command = Leaf("choices", "List the models, efforts, agent prompts and permission modes a session can run with, and the ones it runs with.");
+        var command = Leaf("choices", "List the providers, models, efforts, agent prompts and permission modes a session can run with, and the ones it runs with.");
         command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => sessionId = value);
         command.Add(async (_, _) => await HandleSessionChoicesAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId)).ConfigureAwait(false));
         AddHelpText(
@@ -1249,6 +1251,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "`current` is what its next turn runs with; a `permissionMode` of null is the mode its provider is configured with (`defaultPermissionMode`).",
             "`alta session send` and `alta session queue` take them with `--model`, `--reasoning`, `--prompt-id` and `--permission-mode`.",
             "`sandbox` is its sandbox and the profiles it can take with `--sandbox`: `alta sandbox show <profile>` says what each allows.",
+            "`providers` are the providers of its space it can move to, idle, with `alta session set_provider`.",
             "Example: `alta session choices <session-id>`.");
         return command;
     }
@@ -3985,6 +3988,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return NotFound(context, "session.notFound", $"Session '{session.SessionId}' has no choices: it is unknown, or CodeAlta is closing.");
         }
 
+        // The providers it can be moved to with `alta session set_provider`: the enabled ones of its space.
+        var spaceProviders = await commands.GetSessionSpaceProvidersAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false);
+
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = "alta.session.choices",
@@ -4017,6 +4023,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             defaultPermissionMode = choices.DefaultPermissionMode,
             tier = choices.Tier,
             sandbox = await SandboxChoicesAsync(context, session.SessionId).ConfigureAwait(false),
+            providers = spaceProviders?.Providers.Take(32).Select(static provider => new
+            {
+                providerKey = provider.ProviderId.Value,
+                name = string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.ProviderId.Value : provider.DisplayName,
+            }).ToArray(),
         });
         return AltaExitCodes.Success;
     }

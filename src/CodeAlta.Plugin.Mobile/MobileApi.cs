@@ -226,6 +226,11 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
         foreach (var prompt in (choices["prompts"] as JsonArray ?? []).OfType<JsonObject>())
             if (MobileAlta.Text(prompt, "id") is { } promptId) prompts.Add(new JsonObject { ["id"] = promptId, ["name"] = MobileAlta.Text(prompt, "name") ?? promptId });
 
+        // The providers of its space it can be moved to while it is idle, by name.
+        var providers = new JsonArray();
+        foreach (var item in (choices["providers"] as JsonArray ?? []).OfType<JsonObject>())
+            if (MobileAlta.Text(item, "providerKey") is { } key) providers.Add(new JsonObject { ["id"] = key, ["name"] = MobileAlta.Text(item, "name") ?? key });
+
         var current = choices["current"] as JsonObject;
         var provider = MobileAlta.Text(current, "providerKey");
         var model = MobileAlta.Text(current, "modelId");
@@ -240,8 +245,24 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
                 ["agent"] = agent, ["agentName"] = prompts.OfType<JsonObject>().Where(item => (string?)item["id"] == agent).Select(static item => (string?)item["name"]).FirstOrDefault() ?? agent,
                 ["permissionMode"] = MobileAlta.Text(current, "permissionMode"),
             },
-            ["models"] = models, ["modelsOrder"] = MobileAlta.Text(choices, "modelsOrder"), ["prompts"] = prompts, ["permissionModes"] = Modes(choices), ["error"] = null,
+            ["models"] = models, ["modelsOrder"] = MobileAlta.Text(choices, "modelsOrder"), ["prompts"] = prompts, ["permissionModes"] = Modes(choices),
+            ["providers"] = providers, ["error"] = null,
         };
+    }
+
+    /// <summary>
+    /// Moves an idle session to another provider of its space, as the provider chooser of the window's composer does:
+    /// <c>{ provider }</c>. Its next prompt runs with the default model, effort and permission mode of that provider.
+    /// </summary>
+    /// <returns>Whether it moved, with what refused it; null when the phone does not see the session.</returns>
+    internal async Task<JsonObject?> ProviderAsync(string id, JsonObject body, CancellationToken cancellationToken)
+    {
+        if (MobileAlta.Text(body, "provider") is not { Length: > 0 and <= 256 } provider || provider.Any(char.IsControl))
+            return new JsonObject { ["ok"] = false, ["error"] = "A provider is needed." };
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        // Not tied to the request: a phone that gives up must not leave the switch half way.
+        var result = await MobileAlta.RunAsync(alta, ["session", "set_provider", id, "--provider", provider], null, CancellationToken.None).ConfigureAwait(false);
+        return new JsonObject { ["ok"] = result.Error is null, ["error"] = result.Error };
     }
 
     /// <summary>Continues a session from a body read whole (a small one, or a test's).</summary>

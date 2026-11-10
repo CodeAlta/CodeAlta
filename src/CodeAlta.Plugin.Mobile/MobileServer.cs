@@ -165,6 +165,8 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}/file", async (string id, long? seq, string? link, int? offset, int? before, CancellationToken ct) =>
             Json(await _options.Sessions.Files.ReadAsync(id, seq, link, offset, before, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/provider", async (string id, HttpRequest request, CancellationToken ct) =>
+            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Api.ProviderAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
         api.MapGet("/sessions/{id}/jobs", async (string id, CancellationToken ct) => Json(await _options.Api.JobsAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/jobs/{jobId}", async (string id, string jobId, CancellationToken ct) => Json(await _options.Api.JobAsync(id, jobId, false, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/jobs/{jobId}/stop", async (string id, string jobId, CancellationToken ct) => Json(await _options.Api.JobAsync(id, jobId, true, ct).ConfigureAwait(false)));
