@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { ctrl, openReviewPage, shift, type Point } from "./reviewBrowserHarness";
+import { testLimit } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -9,7 +10,7 @@ type Box = { top: number; height: number } | null;
 
 // The review of the changes as the Changes tab draws it: real Monaco diffs with their comment layers, the view of all
 // files and the whole tab, over a reviews hub whose host is in memory, driven with the mouse and the keys of the page.
-test("the review of the changes is written and shown in the diffs of the Changes tab", { skip: !edge, timeout: 240_000 }, async t => {
+test("the review of the changes is written and shown in the diffs of the Changes tab", { skip: !edge, timeout: testLimit(240_000) }, async t => {
   const page = await openReviewPage(new URL("./diffReview.mount.tsx", import.meta.url), "!!window.diffReviewFixture", new URL("../demo-api.ts", import.meta.url));
   const { command, evaluate, value, until, frames, click, clickOn, key, type } = page;
   const f = "diffReviewFixture";
@@ -39,7 +40,7 @@ test("the review of the changes is written and shown in the diffs of the Changes
 
     await t.test("a click on the glyph margin of either side opens a composer there, Ctrl+Enter writes a thread of that side, and both sides stay in line", async () => {
       await evaluate(`${f}.show("diff")`);
-      await until(`${f}.state.editors && ${f}.state.editors.diff.getLineChanges()?.length === 3`, "null", 10_000);
+      await until(`${f}.state.editors && ${f}.state.editors.diff.getLineChanges()?.length === 3`, "null", testLimit(10_000));
       await frames();
       // Registered with the review (twice: StrictMode mounts the effects again).
       assert.deepEqual(await value(`[...new Set(${f}.state.calls)]`), ["register:src/file.txt"]);
@@ -190,7 +191,7 @@ test("the review of the changes is written and shown in the diffs of the Changes
 
       await evaluate(`${f}.release()`);
       const card = `document.querySelector('.changes-section[data-path="a.txt"] .editor.modified .review-zone [data-thread-id="${id}"]')`;
-      await until(`(b => b["a.txt"].editor && b["b.txt"].editor)(${bodies}) && !!${card}?.offsetParent`, bodies, 10_000);
+      await until(`(b => b["a.txt"].editor && b["b.txt"].editor)(${bodies}) && !!${card}?.offsetParent`, bodies, testLimit(10_000));
       // Drawn: the body of the file with a thread is taller by the zone of its card, both sides of its diff in line under it.
       await until(`(b => b["a.txt"].height - b["b.txt"].height)(${bodies}) === ${card}.closest(".review-zone").offsetHeight`,
         `[${bodies}, ${card}.closest(".review-zone").offsetHeight]`);
@@ -205,7 +206,7 @@ test("the review of the changes is written and shown in the diffs of the Changes
       const panel = `document.querySelector(".changes-panel")`;
       // The diff of a file is shown, its texts compared.
       const diffOf = (path: string) => `${panel}.querySelector(".changes-diff")?.getAttribute("aria-label") === "${path}" && ${f}.compared("${path}")`;
-      await until(`!!${panel}?.querySelector('.changes-file[data-path="b.txt"]') && ${diffOf("a.txt")}`, `${panel}?.textContent`, 10_000);
+      await until(`!!${panel}?.querySelector('.changes-file[data-path="b.txt"]') && ${diffOf("a.txt")}`, `${panel}?.textContent`, testLimit(10_000));
       const toggle = `${panel}.querySelector(".changes-review-toggle")`;
       // Without a comment, the tab is not in review mode; the toggle turns it on and off.
       assert.deepEqual(await value(`[${panel}.dataset.review ?? null, ${toggle}.getAttribute("aria-pressed"), ${panel}.querySelectorAll(".changes-side-view").length]`), [null, "false", 0]);

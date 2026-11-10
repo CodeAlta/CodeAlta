@@ -61,13 +61,13 @@ public sealed class AgentSessionCatalogTests
         var firstTask = Task.Run(async () => await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false));
         var secondTask = Task.Run(async () => await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false));
 
-        await store.LoadStarted.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await store.LoadStarted.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         await Task.Delay(100).ConfigureAwait(false);
 
         Assert.AreEqual(1, store.LoadCount);
 
         store.ReleaseLoad.SetResult();
-        var results = await Task.WhenAll(firstTask, secondTask).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        var results = await Task.WhenAll(firstTask, secondTask).WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
 
         Assert.AreEqual(1, store.LoadCount);
         CollectionAssert.AreEqual(new[] { "session-shared-load" }, results[0].Select(static item => item.SessionId).ToArray());
@@ -90,9 +90,9 @@ public sealed class AgentSessionCatalogTests
 
         await using var enumerator = catalog.ListSessionsAsync().GetAsyncEnumerator();
 
-        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false));
+        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false));
         Assert.AreEqual("session-first", enumerator.Current.SessionId);
-        await store.WaitingAfterFirst.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await store.WaitingAfterFirst.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         Assert.AreEqual(1, store.LoadCount);
 
         var secondMove = enumerator.MoveNextAsync().AsTask();
@@ -100,7 +100,7 @@ public sealed class AgentSessionCatalogTests
         Assert.IsFalse(secondMove.IsCompleted, "The store is still blocked after the first yielded session.");
 
         store.ReleaseRemaining.SetResult();
-        Assert.IsTrue(await secondMove.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false));
+        Assert.IsTrue(await secondMove.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false));
         Assert.AreEqual("session-second", enumerator.Current.SessionId);
     }
 
@@ -113,17 +113,17 @@ public sealed class AgentSessionCatalogTests
         var catalog = new AgentSessionCatalog(store);
 
         await using var enumerator = catalog.ListSessionsAsync().GetAsyncEnumerator();
-        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false));
+        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false));
         Assert.AreEqual("session-first", enumerator.Current.SessionId);
-        await store.WaitingAfterFirst.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await store.WaitingAfterFirst.Task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
 
         // A session is created while the listing reads: the load it reads is not kept, but its reader never loses a session.
         await catalog.NotifySessionCreatedAsync("session-third").ConfigureAwait(false);
         var next = enumerator.MoveNextAsync().AsTask();
         store.ReleaseRemaining.SetResult();
-        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false), "The listing ended before the store did.");
+        Assert.IsTrue(await next.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false), "The listing ended before the store did.");
         Assert.AreEqual("session-second", enumerator.Current.SessionId);
-        Assert.IsFalse(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false));
+        Assert.IsFalse(await enumerator.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false));
 
         CollectionAssert.AreEquivalent(new[] { "session-first", "session-second" },
             (await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Select(static session => session.SessionId).ToArray());

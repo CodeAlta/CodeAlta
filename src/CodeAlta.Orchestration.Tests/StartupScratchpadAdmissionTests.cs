@@ -24,7 +24,7 @@ public sealed class StartupScratchpadAdmissionTests
             if (snapshot.State == ScratchpadCleanupState.Running)
             {
                 entered.Set();
-                release.Wait(TimeSpan.FromSeconds(10));
+                release.Wait(TestTime.Seconds(10));
             }
         });
         var configuredProviders = false;
@@ -42,7 +42,7 @@ public sealed class StartupScratchpadAdmissionTests
         }, cancellation.Token);
         try
         {
-            Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(entered.Wait(TestTime.Seconds(10)));
             cancellation.Cancel();
             Assert.IsFalse(creation.IsCompleted, "A canceled admission waiter must still join filesystem work.");
             Assert.IsFalse(configuredProviders, "Not even provider construction may run before the barrier.");

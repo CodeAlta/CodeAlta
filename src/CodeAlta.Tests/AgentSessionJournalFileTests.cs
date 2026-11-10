@@ -24,7 +24,7 @@ public sealed class AgentSessionJournalFileTests
             },
             CancellationToken.None);
 
-        await firstEntered.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await firstEntered.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
 
         var secondTask = journalFile.WithPathLockAsync(
             path,
@@ -39,7 +39,7 @@ public sealed class AgentSessionJournalFileTests
         Assert.IsFalse(secondEntered.Task.IsCompleted);
 
         releaseFirst.SetResult();
-        await Task.WhenAll(firstTask, secondTask).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await Task.WhenAll(firstTask, secondTask).WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         Assert.IsTrue(secondEntered.Task.IsCompleted);
     }
 
@@ -62,17 +62,17 @@ public sealed class AgentSessionJournalFileTests
             },
             CancellationToken.None);
 
-        await firstEntered.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await firstEntered.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
 
         var secondTask = journalFile.WithPathLockAsync(
             secondPath,
             () => Task.CompletedTask,
             CancellationToken.None);
 
-        await secondTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await secondTask.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         Assert.IsFalse(firstTask.IsCompleted);
 
         releaseFirst.SetResult();
-        await firstTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await firstTask.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
     }
 }

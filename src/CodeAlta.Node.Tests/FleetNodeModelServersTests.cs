@@ -15,7 +15,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class FleetNodeModelServersTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -186,7 +186,7 @@ public sealed class FleetNodeModelServersTests
         {
             await Client.DisposeAsync();
             await _stop.CancelAsync();
-            try { await _serving.WaitAsync(Patience); }
+            try { await _serving.WithinAsync(Patience); }
             catch (OperationCanceledException) { }
             await _service.DisposeAsync();
             await Host.DisposeAsync();

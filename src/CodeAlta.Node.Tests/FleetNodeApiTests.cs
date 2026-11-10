@@ -14,7 +14,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class FleetNodeApiTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -127,7 +127,7 @@ public sealed class FleetNodeApiTests
         Assert.AreEqual("replay", replayed.Status, "A retry of a send gets the first receipt and sends nothing.");
         Assert.AreEqual(sent.OperationId, replayed.OperationId);
 
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
         var state = await client.GetSessionStateAsync(created.SessionId, token);
         Assert.IsNotNull(state.ActiveRunId, "The node says which run is at work.");
         gate.SetResult();
@@ -221,7 +221,7 @@ public sealed class FleetNodeApiTests
         {
             await client.ListSessionsAsync(cancellationToken: token);
             Assert.IsTrue(await fixture.Fleet.Service.RevokeAsync(fixture.ViewerIdentity.DeviceId));
-            var closed = await client.Completion.WaitAsync(Patience, token);
+            var closed = await client.Completion.WithinAsync(Patience, token);
             Assert.IsFalse(closed.ClosedLocally, "The node closed the channel of the revoked device.");
             await Assert.ThrowsAsync<FleetException>(() => client.ListSessionsAsync(cancellationToken: token));
         }
@@ -268,8 +268,8 @@ public sealed class FleetNodeApiTests
         }, token);
 
         await using var client = await FleetNodeClient.ConnectAsync(clientStream, fixture.NodeIdentity.Fingerprint, fixture.NodeIdentity, token);
-        await serve.WaitAsync(Patience, token);
-        var closed = await client.Completion.WaitAsync(Patience, token);
+        await serve.WithinAsync(Patience, token);
+        var closed = await client.Completion.WithinAsync(Patience, token);
         Assert.IsFalse(closed.ClosedLocally, "The node closed the channel of its own key from another machine.");
     }
 

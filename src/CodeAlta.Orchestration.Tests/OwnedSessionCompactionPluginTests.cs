@@ -130,7 +130,7 @@ public sealed class OwnedSessionCompactionPluginTests
             {
                 var receipt = Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, text)).Receipt;
                 Assert.IsNotNull(receipt);
-                var sent = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+                var sent = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
                 Assert.AreEqual(OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
                 using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
                 await Provider.Turns.Reader.ReadAsync(timeout.Token);
@@ -142,11 +142,11 @@ public sealed class OwnedSessionCompactionPluginTests
 
         public async Task<OwnedSessionCommandResult> CompactAsync(SessionViewDescriptor session)
         {
-            var state = await Host.RuntimeService.GetCurrentStateAsync(session.SessionId).WaitAsync(TestDeadlines.Hang);
+            var state = await Host.RuntimeService.GetCurrentStateAsync(session.SessionId).WithinAsync(TestDeadlines.Hang);
             Assert.IsNotNull(state.Entry);
             var admission = Host.Commands.AdmitCompact(new("compact", session.SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration));
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, admission.Kind);
-            return await admission.Receipt!.Completion.WaitAsync(TestDeadlines.Hang);
+            return await admission.Receipt!.Completion.WithinAsync(TestDeadlines.Hang);
         }
 
         public async ValueTask DisposeAsync()

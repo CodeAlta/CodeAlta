@@ -92,7 +92,7 @@ public sealed class PluginLandingCardRegistrationTests
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var entries = await adapter.GetLandingCardEntriesAsync([cards, stuck], "space-1", null, TimeSpan.FromSeconds(2));
 
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(30), "the reading ends at the limit, whatever the plugin does with its token");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(30), "the reading ends at the limit, whatever the plugin does with its token");
             Assert.IsFalse(entries.Single(static entry => entry.Contribution.Id == "numbers").Failed);
             Assert.IsTrue(entries.Single(static entry => entry.Contribution.Id == "stuck").Failed);
             Assert.AreEqual(1, diagnostics.GetSnapshot().Count(static diagnostic => diagnostic.Message.Contains("did not answer in time", StringComparison.Ordinal)));
@@ -110,7 +110,7 @@ public sealed class PluginLandingCardRegistrationTests
             plugin.Release.TrySetResult();
             var watchRelease = System.Diagnostics.Stopwatch.StartNew();
             PluginLandingCardEntry? shown = null;
-            while (shown is not { Failed: false } && watchRelease.Elapsed < TimeSpan.FromSeconds(30))
+            while (shown is not { Failed: false } && watchRelease.Elapsed < TestTime.Seconds(30))
             {
                 shown = (await adapter.GetLandingCardEntriesAsync([stuck], "space-1", null, TimeSpan.FromSeconds(2))).Single();
             }

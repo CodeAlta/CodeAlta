@@ -42,7 +42,7 @@ public sealed class BrowserDrawingTests
     public async Task TheUserDrawsWithRealInput_UndoesAStroke_AndSavesTheDrawingWithANote()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -107,7 +107,7 @@ public sealed class BrowserDrawingTests
     public async Task TheKeysOfDraw_PickATool_AlsoWhileAButtonOfTheBarHasTheFocus()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -142,7 +142,7 @@ public sealed class BrowserDrawingTests
     public async Task EveryTool_DrawsWithRealInput_AndTheEraserRemovesAShape()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -202,7 +202,7 @@ public sealed class BrowserDrawingTests
     public async Task ThePageCannotDraw_WithEventsItMakesUp()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -232,7 +232,7 @@ public sealed class BrowserDrawingTests
     public async Task ADrawing_BecomesAnAnnotationOfItsOwnKind_WithAPictureOfThePageAndTheDrawing()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         await using var files = new ProjectFileServer();
@@ -287,7 +287,7 @@ public sealed class BrowserDrawingTests
     public async Task ADrawing_NamesTheElementsItsShapesSurroundOrPointAt_AndItsPictureKeepsTheMarksOfTheOtherAnnotations()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         await using var files = new ProjectFileServer();
@@ -342,7 +342,7 @@ public sealed class BrowserDrawingTests
     public async Task ANoteOfADrawingCancelledWhileItsImageIsRead_IsNotSaved_AndTheNextNoteStaysOpen()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         using var folder = new BrowserPluginTests.TempFolder();
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
@@ -354,7 +354,8 @@ public sealed class BrowserDrawingTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "draw(true)", timeout.Token));
         var large = Path.Combine(folder.Path, "photo.png");
-        await File.WriteAllBytesAsync(large, BrowserAnnotationsTests.Png(1100, 1100, noise: true), timeout.Token);
+        // The largest image kept at its size: its read outlasts the keys that save and cancel the note, on a fast machine too.
+        await File.WriteAllBytesAsync(large, BrowserAnnotationsTests.Png(2400, 2400, noise: true), timeout.Token);
 
         // The note of the drawing opens under it; a large image is dropped on it, and the note is saved and cancelled
         // while the image is read.

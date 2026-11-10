@@ -16,7 +16,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class NodeStatisticsTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Patience = TestTime.Seconds(60);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -95,7 +95,7 @@ public sealed class NodeStatisticsTests
             ServiceEnvironment = static () => null,
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--no-listen", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var joined = await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
@@ -124,7 +124,7 @@ public sealed class NodeStatisticsTests
         finally
         {
             stop();
-            Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token));
+            Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, token));
         }
     }
 }

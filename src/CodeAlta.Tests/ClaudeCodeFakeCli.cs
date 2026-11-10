@@ -189,7 +189,7 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
             ProcessProbe = Probe,
             HeldConversationPollInterval = TimeSpan.FromMilliseconds(20),
             IdleTimeout = TimeSpan.Zero,
-            StartupTimeout = startupTimeout ?? TimeSpan.FromSeconds(10),
+            StartupTimeout = startupTimeout ?? TestTime.Seconds(10),
             InterruptTimeout = TimeSpan.FromSeconds(2),
         };
 }
@@ -457,7 +457,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _requests[requestId] = completion;
         Emit(new JsonObject { ["type"] = "control_request", ["request_id"] = requestId, ["request"] = request });
-        return await completion.Task.WaitAsync(timeout ?? TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        return await completion.Task.WithinAsync(timeout ?? TestTime.Seconds(10)).ConfigureAwait(false);
     }
 
     /// <summary>Sends a control request and returns its identifier without waiting.</summary>

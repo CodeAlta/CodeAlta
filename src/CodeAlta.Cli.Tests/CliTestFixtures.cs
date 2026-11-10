@@ -227,7 +227,7 @@ internal sealed class CliTestRoot : IDisposable
             Stdout = stdout,
             Stderr = TextWriter.Synchronized(stderr),
         };
-        var code = await CliApplication.RunAsync(args, streams, environment, cancellationToken).WaitAsync(TimeSpan.FromSeconds(60));
+        var code = await CliApplication.RunAsync(args, streams, environment, cancellationToken).WithinAsync(TestTime.Seconds(60));
         return new CliRun(code, Encoding.UTF8.GetString(stdout.ToArray()), stderr.ToString());
     }
 

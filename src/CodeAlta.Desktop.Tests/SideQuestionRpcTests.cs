@@ -47,7 +47,7 @@ public sealed class SideQuestionRpcTests
             Assert.IsTrue(await reader.MoveNextAsync());
             Assert.AreEqual("partial", reader.Current.Value);
         }
-        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancelled.Task.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]
@@ -71,9 +71,9 @@ public sealed class SideQuestionRpcTests
         await using (var reader = service.AskAsync(new("epoch", "session", "q"), default).GetAsyncEnumerator())
         {
             Assert.IsTrue(await reader.MoveNextAsync());
-            await writing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await writing.Task.WithinAsync(TestTime.Seconds(10));
         }
-        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancelled.Task.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]

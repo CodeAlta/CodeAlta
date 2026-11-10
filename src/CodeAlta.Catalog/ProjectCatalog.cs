@@ -291,7 +291,7 @@ public sealed partial class ProjectCatalog
         var added = !File.Exists(markdownPath);
         try
         {
-            await File.WriteAllTextAsync(markdownPath, markdown, cancellationToken).ConfigureAwait(false);
+            await SharedTextFile.WriteAllTextAsync(markdownPath, markdown, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -416,7 +416,7 @@ public sealed partial class ProjectCatalog
             foreach (var markdownPath in EnumerateProjectMarkdownPaths(projectsRoot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
+                var markdown = await SharedTextFile.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
                 var descriptor = _serializer.DeserializeProjectMarkdown(markdown);
                 descriptor.ProjectPath = NormalizePath(descriptor.ProjectPath);
                 descriptor.SourcePath = markdownPath;

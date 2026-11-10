@@ -312,7 +312,7 @@ public sealed class OwnedProviderEventForwardingTests
             catch (Exception ex) { lock (_gate) _faults.Add((task, ex)); }
         }
 
-        internal Task Wait(Task task) => Track(task.WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Wait(Task task) => Track(task.WithinAsync(TestTime.Seconds(5)));
 
         internal async Task Cleanup()
         {
@@ -351,7 +351,7 @@ public sealed class OwnedProviderEventForwardingTests
 
         private async Task Drain(IEnumerable<Task> tasks)
         {
-            var waits = tasks.Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
+            var waits = tasks.Select(task => task.WithinAsync(TestTime.Seconds(5))).ToArray();
             var observers = waits.Select(ObserveBounded).ToArray();
             foreach (var observer in observers) await observer.ConfigureAwait(false);
         }

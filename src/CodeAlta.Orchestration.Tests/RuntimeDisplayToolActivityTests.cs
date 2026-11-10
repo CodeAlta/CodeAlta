@@ -179,7 +179,7 @@ public sealed class RuntimeDisplayToolActivityTests
             retained.Add(original);
             var observer = ObserveFailureAsync(original);
             retained.Add(observer);
-            var bounded = original.WaitAsync(TimeSpan.FromSeconds(5));
+            var bounded = original.WithinAsync(TestTime.Seconds(5));
             retained.Add(bounded);
             try { await bounded; }
             catch (TimeoutException error)

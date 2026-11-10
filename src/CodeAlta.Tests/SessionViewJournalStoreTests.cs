@@ -34,7 +34,7 @@ public sealed class SessionViewJournalStoreTests
         Assert.IsFalse(listTask.IsCompleted);
 
         await exclusiveStream.DisposeAsync().ConfigureAwait(false);
-        var headers = await listTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        var headers = await listTask.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         Assert.AreEqual(session.SessionId, headers.Single().SessionId);
     }
 

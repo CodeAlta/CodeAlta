@@ -75,8 +75,8 @@ public sealed class OrchestrationMailboxActorTests
             }
 
             release.SetResult();
-            await Task.WhenAll(posts).WaitAsync(TimeSpan.FromSeconds(30));
-            await actor.AskAsync(_ => ValueTask.FromResult(true)).AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+            await Task.WhenAll(posts).WithinAsync(TestTime.Seconds(30));
+            await actor.AskAsync(_ => ValueTask.FromResult(true)).AsTask().WithinAsync(TestTime.Seconds(30));
             CollectionAssert.AreEqual(Enumerable.Range(0, 300).ToArray(), observed.ToArray());
         }
     }
@@ -96,8 +96,8 @@ public sealed class OrchestrationMailboxActorTests
         await Assert.ThrowsExactlyAsync<TaskCanceledException>(async () => await canceled);
 
         release.SetResult();
-        await next.WaitAsync(TimeSpan.FromSeconds(30));
-        await actor.AskAsync(_ => ValueTask.FromResult(true)).AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        await next.WithinAsync(TestTime.Seconds(30));
+        await actor.AskAsync(_ => ValueTask.FromResult(true)).AsTask().WithinAsync(TestTime.Seconds(30));
         CollectionAssert.AreEqual(new[] { "next" }, ran);
     }
 
@@ -130,7 +130,7 @@ public sealed class OrchestrationMailboxActorTests
         Assert.IsFalse(blockedNormalPost.IsCompleted);
 
         var reservedPost = actor.PostReservedAsync(_ => ValueTask.CompletedTask).AsTask();
-        await reservedPost.WaitAsync(TimeSpan.FromSeconds(5));
+        await reservedPost.WithinAsync(TestTime.Seconds(5));
 
         releaseFirst.SetResult();
         await blockedNormalPost;

@@ -17,7 +17,7 @@ namespace CodeAlta.Cli.Tests;
 [TestClass]
 public sealed class CliSandboxEscapeTests
 {
-    private static readonly TimeSpan Deadline = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan Deadline = TestTime.Minutes(2);
 
     [TestMethod]
     public async Task NothingOutsideTheSandbox_IsReachedFromInside()
@@ -57,12 +57,12 @@ public sealed class CliSandboxEscapeTests
             await using var proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, new HashSet<int> { reserved });
             var executable = Path.Combine(AppContext.BaseDirectory, windows ? "altacli.exe" : "altacli");
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", proxy.Endpoint,
-                new SandboxWorkerInit("session-1", "test", project, [project], null, home, false), CancellationToken.None).WaitAsync(Deadline);
+                new SandboxWorkerInit("session-1", "test", project, [project], null, home, false), CancellationToken.None).WithinAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
             async Task<string> Run(string command)
-                => Text(await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline));
+                => Text(await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WithinAsync(Deadline));
             async Task<string> Tool(string tool, object arguments)
-                => Text(await worker.InvokeAsync(Call(tool, arguments), host, CancellationToken.None).WaitAsync(Deadline));
+                => Text(await worker.InvokeAsync(Call(tool, arguments), host, CancellationToken.None).WithinAsync(Deadline));
 
             foreach (var secret in secrets)
             {
@@ -127,7 +127,7 @@ public sealed class CliSandboxEscapeTests
             var id = int.Parse(started.Split('\n').Select(static line => line.Trim()).First(static line => line.Length > 0 && line.All(char.IsAsciiDigit)), System.Globalization.CultureInfo.InvariantCulture);
             await worker.DisposeAsync();
             var watch = Stopwatch.StartNew();
-            while (watch.Elapsed < TimeSpan.FromSeconds(10) && IsRunning(id)) await Task.Delay(200);
+            while (watch.Elapsed < TestTime.Seconds(10) && IsRunning(id)) await Task.Delay(200);
             Assert.IsFalse(IsRunning(id), "the process left behind ended with the container");
         }
         finally
@@ -165,10 +165,10 @@ public sealed class CliSandboxEscapeTests
                 SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "network");
             await using var proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, new HashSet<int> { reserved });
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{Path.Combine(AppContext.BaseDirectory, "altacli")}\" {SandboxWorker.Option}", proxy.Endpoint,
-                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None).WaitAsync(Deadline);
+                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None).WithinAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
             async Task<string> Bash(string script)
-                => Text(await worker.InvokeAsync(Call("shell_command", new { command = $"bash -c '{script}'" }), host, CancellationToken.None).WaitAsync(Deadline));
+                => Text(await worker.InvokeAsync(Call("shell_command", new { command = $"bash -c '{script}'" }), host, CancellationToken.None).WithinAsync(Deadline));
             // The status line of the proxy for a tunnel to a target, through the proxy the container is given.
             string Connect(string target)
                 => $"p=${{HTTPS_PROXY:-$HTTP_PROXY}}; p=${{p#http://}}; p=${{p%/}}; exec 3<>/dev/tcp/${{p%:*}}/${{p##*:}} && printf \"CONNECT {target} HTTP/1.1\\r\\nHost: {target}\\r\\n\\r\\n\" >&3 && head -c 12 <&3";
@@ -227,15 +227,15 @@ public sealed class CliSandboxEscapeTests
             await using var proxy = policy.ThroughProxy ? SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, new HashSet<int>()) : null;
             var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", proxy?.Endpoint,
-                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None).WaitAsync(Deadline);
+                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None).WithinAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
             async Task<string> Connect(string address, int to)
             {
                 var command = OperatingSystem.IsWindows()
-                    ? $"try {{ $c = [Net.Sockets.TcpClient]::new(); if ($c.ConnectAsync('{address}', {to}).Wait(10000)) {{ 'connected' }} else {{ 'refused' }} }} catch {{ 'refused' }}"
+                    ? $"try {{ $c = [Net.Sockets.TcpClient]::new(); if ($c.ConnectAsync('{address}', {to}).Wait(10000)) {{ 'connected' }} else {{ 'refused' }} }} catch {{ 'refused' }}" // not a limit of the test: the PowerShell in the sandbox waits
                     // macOS has no `timeout`: without it the connection is still tried, and the test waits for it.
                     : $"$(command -v timeout >/dev/null && echo timeout 10) bash -c '(exec 3<>/dev/tcp/{address}/{to}) 2>/dev/null' && echo connected || echo refused";
-                return Text(await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline));
+                return Text(await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WithinAsync(Deadline));
             }
 
             // On macOS a network that is on goes through the proxy, which programs reach by its variables.

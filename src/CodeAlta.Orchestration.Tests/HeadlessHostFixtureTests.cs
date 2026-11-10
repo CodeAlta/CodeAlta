@@ -67,7 +67,7 @@ public sealed class HeadlessHostFixtureTests
             new AgentSendOptions { Input = AgentInput.Text("hello from headless") },
             CancellationToken.None);
 
-        await receivedAssistantContent.Task.WaitAsync(TestDeadlines.Hang);
+        await receivedAssistantContent.Task.WithinAsync(TestDeadlines.Hang);
         await streamCts.CancelAsync();
         await streamTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 

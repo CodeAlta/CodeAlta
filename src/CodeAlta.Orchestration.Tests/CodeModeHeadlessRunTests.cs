@@ -62,7 +62,7 @@ public sealed class CodeModeHeadlessRunTests
         Assert.IsFalse(running.IsCompleted, "the run waits for the script that went on in the background");
         Assert.IsNotNull(runId);
         release.SetResult();
-        var result = await running.WaitAsync(Hang);
+        var result = await running.WithinAsync(Hang);
 
         Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
         var requests = provider.RequestsOf(session.SessionId);

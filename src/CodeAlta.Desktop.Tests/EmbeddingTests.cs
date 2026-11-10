@@ -70,7 +70,7 @@ public sealed class EmbeddingTests
         // While a batch runs, a query given after the batches that wait goes before them.
         engines.Gate.Reset();
         var running = client.EmbedDocumentsAsync(["slow"], default);
-        await engines.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await engines.Started.WaitAsync(TestTime.Seconds(10)); // not a Task
         var waiting = client.EmbedDocumentsAsync(["later"], default);
         var query = client.EmbedQueryAsync("query", default);
         engines.Gate.Set();
@@ -87,7 +87,7 @@ public sealed class EmbeddingTests
         // A worker that dies fails what it had; the next request starts another one.
         engines.Gate.Reset();
         var lost = client.EmbedDocumentsAsync(["lost"], default);
-        await engines.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await engines.Started.WaitAsync(TestTime.Seconds(10)); // not a Task
         workers[^1].Kill();
         engines.Gate.Set();
         Assert.AreEqual("worker_died", (await Assert.ThrowsExactlyAsync<EmbeddingException>(() => lost)).Code);
@@ -105,9 +105,11 @@ public sealed class EmbeddingTests
             new EmbeddingWorkerLoad("granite-97m-multilingual-r2", "/models", "/runtime", 1), idle: TimeSpan.FromMilliseconds(200));
         await client.EmbedQueryAsync("one", default);
         Assert.IsTrue(client.Running);
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+        using (var timeout = new CancellationTokenSource(TestTime.Seconds(10)))
         {
             while (client.Running) await Task.Delay(20, timeout.Token);
+            // The client lets the worker go at once; the worker's thread ends once it has read the request to exit.
+            while (!workers[0].Ended) await Task.Delay(20, timeout.Token);
         }
 
         Assert.IsTrue(workers[0].Ended, "an idle worker is asked to exit");
@@ -118,7 +120,7 @@ public sealed class EmbeddingTests
         await Task.Delay(100);
         Assert.IsFalse(batch.IsCompleted, "a paused indexing waits");
         client.Paused = false;
-        Assert.HasCount(1, await batch.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.HasCount(1, await batch.WithinAsync(TestTime.Seconds(10)));
 
         using var canceled = new CancellationTokenSource();
         client.Paused = true;
@@ -145,16 +147,16 @@ public sealed class EmbeddingTests
         var first = client.EmbedDocumentsAsync(["one"], default);
         var second = client.EmbedDocumentsAsync(["two"], default);
         var third = client.EmbedDocumentsAsync(["three"], default);
-        await engines.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        await engines.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await engines.Started.WaitAsync(TestTime.Seconds(10)); // not a Task
+        await engines.Started.WaitAsync(TestTime.Seconds(10)); // not a Task
         Assert.AreEqual(2, client.Workers);
         Assert.IsFalse(third.IsCompleted, "the third batch waits for a free worker");
         engines.Gate.Set();
-        await Task.WhenAll(first, second, third).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(first, second, third).WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(2, engines.MostAtOnce);
 
         // The second worker ends soon after the work; the first stays for the queries.
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+        using (var timeout = new CancellationTokenSource(TestTime.Seconds(10)))
         {
             while (client.Workers > 1) await Task.Delay(20, timeout.Token);
         }

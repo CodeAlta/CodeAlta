@@ -10,9 +10,10 @@ import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browse
 import { projectRailVisibilityKey } from "./explorer/projectRailVisibility";
 import { landingStartupKey } from "./landing/landingPreferences";
 import { languageStorageKey } from "./localization";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 test("a session title the Explorer cuts and a settings page name the navigation cuts are shown whole, on hover and on keyboard focus",
-  { skip: !browserExecutable, timeout: 90_000 }, async () => {
+  { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-truncated-labels-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -43,7 +44,7 @@ test("a session title the Explorer cuts and a settings page name the navigation 
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -55,7 +56,7 @@ test("a session title the Explorer cuts and a settings page name the navigation 
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const until = async (condition: string, message?: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{
+    const until = async (condition: string, message?: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{
       let ok=false;try{ok=!!(${condition})}catch{}if(ok)resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true, message ?? condition);
     const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
     // The pointer rests on an element, as a user's does.

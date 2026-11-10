@@ -24,7 +24,7 @@ public sealed class SessionPermissionRequestCoordinatorTests
         Assert.IsFalse(response.IsCompleted, "Queued presentation must be joined, not abandoned.");
         show.Run();
         fixture.Dispatcher.Take().Run(); // Timeline, even without a tab.
-        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, response.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult().Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, response.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult().Kind);
         Assert.AreEqual(0, fixture.Terminal.DialogCount);
         Assert.AreEqual(0, fixture.Service.ListAsync().AsTask().GetAwaiter().GetResult().Count);
     }
@@ -51,7 +51,7 @@ public sealed class SessionPermissionRequestCoordinatorTests
 
         fixture.Dispatcher.Take().Run(); // Close is marshaled and joined.
         fixture.Dispatcher.Take().Run(); // Timeline.
-        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, response.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult().Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, response.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult().Kind);
         Assert.AreEqual(0, fixture.Terminal.DialogCount);
         Assert.AreEqual(0, fixture.Service.ListAsync().AsTask().GetAwaiter().GetResult().Count);
     }
@@ -67,7 +67,7 @@ public sealed class SessionPermissionRequestCoordinatorTests
         Assert.IsTrue(fixture.Service.ResolveAsync(snapshot.Handle, AgentPermissionDecisionKind.AllowForSession).AsTask().GetAwaiter().GetResult());
         fixture.Dispatcher.Take().Run();
         fixture.Dispatcher.Take().Run();
-        Assert.AreEqual(AgentPermissionDecisionKind.AllowForSession, response.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult().Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowForSession, response.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult().Kind);
         Assert.AreEqual(0, fixture.Terminal.DialogCount);
     }
 
@@ -90,7 +90,7 @@ public sealed class SessionPermissionRequestCoordinatorTests
         {
             show.Fail();
         }
-        Assert.ThrowsExactly<InvalidOperationException>(() => response.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult());
+        Assert.ThrowsExactly<InvalidOperationException>(() => response.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult());
         Assert.AreEqual(0, fixture.Service.ListAsync().AsTask().GetAwaiter().GetResult().Count);
         Assert.IsFalse(fixture.Service.ResolveAsync(snapshot.Handle, AgentPermissionDecisionKind.AllowOnce).AsTask().GetAwaiter().GetResult());
         Assert.AreEqual(0, fixture.Terminal.DialogCount);
@@ -144,7 +144,7 @@ public sealed class SessionPermissionRequestCoordinatorTests
         }
 
         public Task<T> InvokeAsync<T>(Func<T> action) => throw new AssertFailedException("Unexpected background UI read.");
-        public Work Take() => _work.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        public Work Take() => _work.Reader.ReadAsync().AsTask().WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
     }
 
     private sealed class Work(Action action)

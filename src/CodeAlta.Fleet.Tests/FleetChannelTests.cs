@@ -11,7 +11,7 @@ namespace CodeAlta.Fleet.Tests;
 [TestClass]
 public sealed class FleetChannelTests
 {
-    private static readonly TimeSpan Deadline = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan Deadline = TestTime.Minutes(1);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -28,8 +28,8 @@ public sealed class FleetChannelTests
 
         var accepting = FleetChannelStack.AcceptAsync(serverStream, new FleetChannelServerOptions { Certificate = certificate, TrustPolicy = trusted }, TestContext.CancellationToken);
         var connecting = FleetChannelStack.ConnectAsync(clientStream, new FleetChannelClientOptions { Identity = viewer, NodeFingerprint = node.Fingerprint }, TestContext.CancellationToken);
-        await using var server = await accepting.WaitAsync(Deadline, TestContext.CancellationToken);
-        await using var client = await connecting.WaitAsync(Deadline, TestContext.CancellationToken);
+        await using var server = await accepting.WithinAsync(Deadline, TestContext.CancellationToken);
+        await using var client = await connecting.WithinAsync(Deadline, TestContext.CancellationToken);
 
         Assert.AreEqual(viewer.DeviceId, server.RemoteDeviceId, "The node knows the device TLS authenticated.");
         Assert.AreEqual("viewer", server.RemoteDevice?.Name);
@@ -60,7 +60,7 @@ public sealed class FleetChannelTests
         var refused = await Assert.ThrowsExactlyAsync<DeviceAuthenticationException>(() => FleetChannelStack.ConnectAsync(clientStream,
             new FleetChannelClientOptions { Identity = viewer, NodeFingerprint = node.Fingerprint }, TestContext.CancellationToken));
         Assert.AreEqual(DeviceAuthenticationFailure.ServerKeyMismatch, refused.Failure);
-        await Assert.ThrowsAsync<Exception>(() => accepting.WaitAsync(Deadline, TestContext.CancellationToken));
+        await Assert.ThrowsAsync<Exception>(() => accepting.WithinAsync(Deadline, TestContext.CancellationToken));
     }
 
     [TestMethod]
@@ -77,7 +77,7 @@ public sealed class FleetChannelTests
             TimeSpan.FromSeconds(5), TestContext.CancellationToken);
         await using (stream)
         {
-            var incoming = await accepted.Task.WaitAsync(Deadline, TestContext.CancellationToken);
+            var incoming = await accepted.Task.WithinAsync(Deadline, TestContext.CancellationToken);
             await using (incoming.Stream)
             {
                 Assert.IsTrue(incoming.IsFromThisMachine);

@@ -22,7 +22,7 @@ public sealed class PluginBuildLockServiceTests
         await Task.Delay(200);
         Assert.IsFalse(acquiredSecond);
         await acquiredSignal.DisposeAsync();
-        await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondTask.WithinAsync(TestTime.Seconds(5));
         Assert.IsTrue(acquiredSecond);
     }
 

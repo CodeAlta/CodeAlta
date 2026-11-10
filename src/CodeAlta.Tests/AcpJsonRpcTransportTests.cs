@@ -66,7 +66,7 @@ public sealed class AcpJsonRpcTransportTests
             clientInput,
             AcpClient.CreateJsonSerializerOptions());
 
-        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cancellationTokenSource = new CancellationTokenSource(TestTime.Seconds(2));
         var notification = await transport.Messages.ReadAsync(cancellationTokenSource.Token).ConfigureAwait(false);
         var request = await transport.Messages.ReadAsync(cancellationTokenSource.Token).ConfigureAwait(false);
 
@@ -152,7 +152,7 @@ public sealed class AcpJsonRpcTransportTests
 
         var error = await Assert.ThrowsExactlyAsync<AcpConnectionClosedException>(() => requestTask).ConfigureAwait(false);
         Assert.AreEqual("The ACP agent 'fake' exited with code 3.", error.Message);
-        await transport.Completion.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await transport.Completion.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
         await Assert.ThrowsExactlyAsync<AcpConnectionClosedException>(
                 () => transport.SendRequestAsync<InitializeRequest, InitializeResponse>("initialize", CreateInitializeRequest()))
             .ConfigureAwait(false);
@@ -188,7 +188,7 @@ public sealed class AcpJsonRpcTransportTests
         await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes(
             """{"jsonrpc":"2.0","id":"1","result":{"protocolVersion":1,"agentCapabilities":{}}}""" + "\n"));
 
-        var result = await requestTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        var result = await requestTask.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
         Assert.AreEqual(1, result.ProtocolVersion.Value.GetInt32());
         await pipe.Writer.CompleteAsync();
     }

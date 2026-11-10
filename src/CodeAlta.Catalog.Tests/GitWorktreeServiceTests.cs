@@ -276,13 +276,13 @@ public sealed partial class GitWorktreeServiceTests
         });
 
         var slow = service.CreateAsync(repository.Project);
-        await reached.Task.WaitAsync(TimeSpan.FromSeconds(60));
-        var quick = await service.CreateAsync(repository.Project).WaitAsync(TimeSpan.FromSeconds(60));
+        await reached.Task.WithinAsync(TestTime.Seconds(60));
+        var quick = await service.CreateAsync(repository.Project).WithinAsync(TestTime.Seconds(60));
 
         Assert.AreEqual(GitWorktreeService.Ok, quick.Status, quick.Message);
         Assert.IsFalse(slow.IsCompleted);
         held.SetResult();
-        var late = await slow.WaitAsync(TimeSpan.FromSeconds(60));
+        var late = await slow.WithinAsync(TestTime.Seconds(60));
         Assert.AreEqual(GitWorktreeService.Ok, late.Status, late.Message);
         Assert.AreNotEqual(quick.Name, late.Name);
         Assert.AreEqual("one", File.ReadAllText(Path.Combine(late.Root!, "readme.md")));

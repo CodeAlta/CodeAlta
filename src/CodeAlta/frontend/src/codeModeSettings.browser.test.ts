@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const options = { entry: "../codeModeSettings.mount.tsx", fixture: "codeModeFixture", rpcFixture: "../demo-api.ts", width: 1300, height: 1000 } as const;
 // Chooses an option of a native select as the user does: React reads the change event.
@@ -9,7 +10,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 const optionTexts = (selector: string) => `[...document.querySelector(${JSON.stringify(selector)}).options].map(option => option.textContent)`;
 
-test("the mode of every session is On when nothing is set, and the providers and models that choose are links", { skip: !edge, timeout: 90_000 }, async () => {
+test("the mode of every session is On when nothing is set, and the providers and models that choose are links", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#settings-code-mode')`, "the page");
     assert.deepEqual(await page.evaluate(optionTexts("#settings-code-mode")), ["Off", "On", "Only"]);
@@ -30,7 +31,7 @@ test("the mode of every session is On when nothing is set, and the providers and
   }, options);
 });
 
-test("a provider and its models choose their mode, and say what they follow without one", { skip: !edge, timeout: 90_000 }, async () => {
+test("a provider and its models choose their mode, and say what they follow without one", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-code-mode') && document.querySelector('.provider-code-mode-model')?.textContent === 'Claude Haiku 4.5'`, "the field, with its model named");
     assert.deepEqual(await page.evaluate(optionTexts("#provider-code-mode")), ["Follow the settings (On)", "Off", "On", "Only"]);

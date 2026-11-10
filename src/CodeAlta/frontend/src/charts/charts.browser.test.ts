@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 const origin = "https://charts.invalid", pageUrl = `${origin}/index.html`;
@@ -51,7 +52,7 @@ async function withGallery(body: (page: Page) => Promise<void>, options: { reduc
     const problems: string[] = [];
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method} timed out`)); }, 20_000);
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(testLimit(20_000), `the answer to ${method}`))); }, testLimit(20_000));
       waiting.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -73,10 +74,10 @@ async function withGallery(body: (page: Page) => Promise<void>, options: { reduc
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
     const until = async (expression: string, what: string) => {
-      const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + 12000; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
+      const limit = testLimit(12000), found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${limit}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
       if (!found) {
         const summary = await evaluate<string>(`[...document.querySelectorAll('[data-chart]')].map(box => box.dataset.chart + ':' + (box.querySelector('svg, canvas') ? 'drawn' : 'empty') + (box.querySelector('.chart-failure') ? '!' + box.querySelector('.chart-failure').textContent : '')).join(' ')`);
-        assert.fail(`waited for ${what}: ${summary}; ${problems.join(" | ")}`);
+        assert.fail(`waited for ${what} (limit ${limit} ms): ${summary}; ${problems.join(" | ")}`);
       }
     };
     const shot = async (name: string) => {
@@ -101,7 +102,7 @@ async function withGallery(body: (page: Page) => Promise<void>, options: { reduc
 
 const allDrawn = `["lines","lines2","stacked","grouped","ranked","treemap","pie","scatter","histogram","boxes","calendar-echarts","canvas"].every(id => document.querySelector('[data-chart="' + id + '"] .chart-surface svg, [data-chart="' + id + '"] .chart-surface canvas'))`;
 
-test("every kind of chart is drawn under the production policy, in both themes, with the colors of the page", { skip: !edge, timeout: 120_000 }, async () => {
+test("every kind of chart is drawn under the production policy, in both themes, with the colors of the page", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(allDrawn, "the charts of the gallery");
     // The accessible name, and the description ECharts generates for the picture.
@@ -139,7 +140,7 @@ test("every kind of chart is drawn under the production policy, in both themes, 
   });
 });
 
-test("the chart keeps the zoom and the hidden series through a change of theme, and tells the page about both", { skip: !edge, timeout: 120_000 }, async () => {
+test("the chart keeps the zoom and the hidden series through a change of theme, and tells the page about both", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(allDrawn, "the charts");
     await page.evaluate(`chartsFixture.instance('lines').dispatchAction({ type: 'dataZoom', start: 20, end: 60 })`);
@@ -169,7 +170,7 @@ test("the chart keeps the zoom and the hidden series through a change of theme, 
   });
 });
 
-test("a chart follows its box, waits while hidden, redraws at every page zoom, and moves less when the user asks for calm", { skip: !edge, timeout: 120_000 }, async () => {
+test("a chart follows its box, waits while hidden, redraws at every page zoom, and moves less when the user asks for calm", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(allDrawn, "the charts");
     const width = () => page.evaluate<number>(`Math.round(document.querySelector('[data-chart="grouped"] .chart-surface svg').getBoundingClientRect().width)`);
@@ -212,7 +213,7 @@ test("a chart follows its box, waits while hidden, redraws at every page zoom, a
   }, { reducedMotion: true });
 });
 
-test("a chart whose option cannot be drawn says so and leaves the page around it, then draws an option that can", { skip: !edge, timeout: 120_000 }, async () => {
+test("a chart whose option cannot be drawn says so and leaves the page around it, then draws an option that can", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(allDrawn, "the charts");
     await page.until(`document.querySelector('[data-chart="fragile"] .chart-surface svg')`, "the chart drawn");
@@ -248,7 +249,7 @@ test("a chart whose option cannot be drawn says so and leaves the page around it
   });
 });
 
-test("the table shows what the chart draws and copies it, and the legend is a row of buttons", { skip: !edge, timeout: 120_000 }, async () => {
+test("the table shows what the chart draws and copies it, and the legend is a row of buttons", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(allDrawn, "the charts");
     await page.evaluate(`window.copied = []; Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.copied.push(text); } }, configurable: true })`);
@@ -270,7 +271,7 @@ test("the table shows what the chart draws and copies it, and the legend is a ro
   });
 });
 
-test("the heat maps take the focus by day, move with the arrow keys and report a selection", { skip: !edge, timeout: 120_000 }, async () => {
+test("the heat maps take the focus by day, move with the arrow keys and report a selection", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(`document.querySelectorAll('[data-chart="calendar"] .heat-cell').length >= 365`, "the calendar");
     assert.equal(await page.evaluate(`document.querySelectorAll('[data-chart="calendar"] .heat-cell[tabindex="0"]').length`), 1, "one tab stop");
@@ -300,7 +301,7 @@ test("the heat maps take the focus by day, move with the arrow keys and report a
   });
 });
 
-test("a calendar of a few days has room for the name of its month, and a year keeps its width", { skip: !edge, timeout: 120_000 }, async () => {
+test("a calendar of a few days has room for the name of its month, and a year keeps its width", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withGallery(async page => {
     await page.until(`document.querySelectorAll('[data-chart="calendar-week"] .heat-cell').length === 4`, "the calendar of a few days");
     // Each label of a month ends inside the picture; the squares are where they were.

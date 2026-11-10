@@ -217,7 +217,7 @@ public sealed class JiraPluginTests
         Assert.AreEqual("example.atlassian.net", cli.Account);
 
         use.Dispose();
-        using var next = await waiting.WaitAsync(TimeSpan.FromSeconds(10));
+        using var next = await waiting.WithinAsync(TestTime.Seconds(10));
         Assert.IsNull(next.Problem);
         Assert.AreEqual("contoso.atlassian.net", cli.Account, "Its turn come, the account is switched.");
         use.Dispose();

@@ -192,7 +192,7 @@ public sealed class SessionBundleMoveTests
         var moves = new SessionMoveService(source, "Windows PC");
         var gate = provider.Block();
         var receipt = source.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "A long turn.")).Receipt!;
-        await gate.Started.WaitAsync(TestDeadlines.Hang);
+        await gate.Started.WithinAsync(TestDeadlines.Hang);
 
         var refused = await moves.OfferAsync(sessionId, "move-busy", "Mac mini");
 
@@ -201,11 +201,11 @@ public sealed class SessionBundleMoveTests
         Assert.IsNull(moves.Store.Read("move-busy", SessionMoveRole.Source));
         Assert.IsFalse(Directory.Exists(moves.GetBundleFolder("move-busy", SessionMoveRole.Source)));
         gate.Release();
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TestDeadlines.Hang)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestDeadlines.Hang)).Outcome);
 
         // A prompt queued for later keeps it too: it would run on neither machine.
         var session = (await source.RuntimeService.ResolveOwnedSessionAsync(sessionId, CancellationToken.None))!;
-        await source.RuntimeService.WhenSettledAsync(sessionId).WaitAsync(TestDeadlines.Hang);
+        await source.RuntimeService.WhenSettledAsync(sessionId).WithinAsync(TestDeadlines.Hang);
         await source.RuntimeService.QueuePromptAsync(session, "Later.", "send", submittedBy: null);
         var queued = await moves.OfferAsync(sessionId, "move-queued", "Mac mini");
         Assert.AreNotEqual(SessionMoveState.Offered, queued.Status);
@@ -431,7 +431,7 @@ public sealed class SessionBundleMoveTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        return await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        return await receipt.Completion.WithinAsync(TestDeadlines.Hang);
     }
 
     // Stands for the end of the process: nothing after it runs.

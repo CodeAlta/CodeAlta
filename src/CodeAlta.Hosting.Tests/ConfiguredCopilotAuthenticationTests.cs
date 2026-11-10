@@ -363,12 +363,12 @@ public sealed class ConfiguredCopilotAuthenticationTests
         var task = fake.InvokeAsync(operation);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(task.IsCompleted);
             CollectionAssert.AreEqual(new[] { "factory", "root", "operation" }, fake.Events);
             release.TrySetResult();
 
-            var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
+            var result = await task.WithinAsync(TestTime.Seconds(5));
 
             Assert.AreSame(operation == "delete" ? null : fake.Result, result);
             CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "operation-completed" }, fake.Events);
@@ -376,7 +376,7 @@ public sealed class ConfiguredCopilotAuthenticationTests
         finally
         {
             release.TrySetResult();
-            await task.WaitAsync(TimeSpan.FromSeconds(5));
+            await task.WithinAsync(TestTime.Seconds(5));
         }
     }
 
@@ -394,12 +394,12 @@ public sealed class ConfiguredCopilotAuthenticationTests
         var task = fake.InvokeAsync(operation, cancellation.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(task.IsCompleted);
             cancellation.Cancel();
 
             var failure = await Assert.ThrowsAsync<OperationCanceledException>(
-                () => task.WaitAsync(TimeSpan.FromSeconds(5)));
+                () => task.WithinAsync(TestTime.Seconds(5)));
 
             Assert.AreEqual(cancellation.Token, failure.CancellationToken);
             Assert.AreEqual(cancellation.Token, fake.ObservedToken);
@@ -411,7 +411,7 @@ public sealed class ConfiguredCopilotAuthenticationTests
             release.TrySetResult();
             try
             {
-                await task.WaitAsync(TimeSpan.FromSeconds(5));
+                await task.WithinAsync(TestTime.Seconds(5));
             }
             catch (OperationCanceledException)
             {
@@ -495,18 +495,18 @@ public sealed class ConfiguredCopilotAuthenticationTests
         var task = fake.InvokeAsync("login");
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(task.IsCompleted);
             CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "callback" }, fake.Events);
             release.TrySetResult();
 
-            Assert.AreSame(fake.Result, await task.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.AreSame(fake.Result, await task.WithinAsync(TestTime.Seconds(5)));
             CollectionAssert.AreEqual(new[] { "factory", "root", "operation", "callback", "callback-completed", "operation-completed" }, fake.Events);
         }
         finally
         {
             release.TrySetResult();
-            await task.WaitAsync(TimeSpan.FromSeconds(5));
+            await task.WithinAsync(TestTime.Seconds(5));
         }
     }
 

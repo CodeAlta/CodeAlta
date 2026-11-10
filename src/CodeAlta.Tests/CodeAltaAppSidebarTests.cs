@@ -497,8 +497,8 @@ public sealed class CodeAltaAppSidebarTests
         finally
         {
             notesService.ClearRelease.TrySetResult();
-            await clickTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
-            await notesService.ClearCompleted.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            await clickTask.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
+            await notesService.ClearCompleted.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         }
     }
 

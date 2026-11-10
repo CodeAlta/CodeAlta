@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../claudeCli/claudeProvider.mount.tsx", fixture: "claudeFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000 } as const;
 const panel = `document.querySelector('.provider-claude-cli')`;
 
-test("the Claude Code form offers the pinned CLI, shows its download and gives the login command of the account", { skip: !edge, timeout: 90_000 }, async () => {
+test("the Claude Code form offers the pinned CLI, shows its download and gives the login command of the account", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${panel}?.textContent.includes('Your version 2.1.300')`, "the CLI of the user, newer than the pin");
     assert.match(await page.evaluate(`${panel}.textContent`) as string, /tested with Claude Code 2\.1\.292.*\.local\\bin\\claude\.exe is used/);
@@ -36,7 +37,7 @@ test("the Claude Code form offers the pinned CLI, shows its download and gives t
   }, options);
 });
 
-test("each account shows its spaces on its row and in its form, where a click changes them", { skip: !edge, timeout: 90_000 }, async () => {
+test("each account shows its spaces on its row and in its form, where a click changes them", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const chip = (key: string) => `document.querySelector('[data-provider-key="${key}"] .space-scope')`;
     await page.until(`${chip("claude-tools")}?.textContent === 'Only: Work'`, "the account of Work");
@@ -63,7 +64,7 @@ test("each account shows its spaces on its row and in its form, where a click ch
   }, options);
 });
 
-test("the question of a removal closes once answered and when another provider is selected", { skip: !edge, timeout: 90_000 }, async () => {
+test("the question of a removal closes once answered and when another provider is selected", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const question = `(document.querySelector('.provider-settings-confirm')?.textContent ?? '')`;
     await page.until(`document.querySelector('[aria-label="Remove provider"]')`, "the form");
@@ -83,7 +84,7 @@ test("the question of a removal closes once answered and when another provider i
   }, options);
 });
 
-test("a favorite provider comes first, and the enabled providers before the disabled ones", { skip: !edge, timeout: 90_000 }, async () => {
+test("a favorite provider comes first, and the enabled providers before the disabled ones", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const order = `[...document.querySelectorAll('.provider-settings-list [data-provider-key]')].map(card => card.dataset.providerKey).join()`;
     const titles = `[...document.querySelectorAll('.provider-settings-group')].map(title => title.textContent).join()`;
@@ -102,7 +103,7 @@ test("a favorite provider comes first, and the enabled providers before the disa
   }, options);
 });
 
-test("changing the folder of a provider that has sessions asks first, and Duplicate adds another account", { skip: !edge, timeout: 90_000 }, async () => {
+test("changing the folder of a provider that has sessions asks first, and Duplicate adds another account", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-config-dir')`, "the form");
     await page.click('#provider-config-dir');

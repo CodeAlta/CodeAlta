@@ -467,8 +467,8 @@ public sealed class SessionWorkspaceViewTests
 
             InvokeTerminalApp(app, "DispatchTextInput", "@");
 
-            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TimeSpan.FromSeconds(1)));
-            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 1, TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TestTime.Seconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 1, TestTime.Seconds(1)));
             Assert.AreEqual("src/app.cs", editor.ProjectFileReferenceItems[0].Result.Item.RelativePath);
             Assert.AreEqual(1, searchSession.RefreshCount);
         }

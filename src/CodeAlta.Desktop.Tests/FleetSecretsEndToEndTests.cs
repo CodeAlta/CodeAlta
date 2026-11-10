@@ -30,7 +30,7 @@ public sealed class FleetSecretsEndToEndTests
 {
     private const string GrafanaToken = "glsa_e2e_grafana_0123456789abcdef";
     private const string DeployToken = "deploy_e2e_production_fedcba9876543210";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan Patience = TestTime.Seconds(120);
 
     public TestContext TestContext { get; set; } = null!;
 

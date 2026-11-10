@@ -21,7 +21,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class FleetMoveTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Patience = TestTime.Seconds(60);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -86,7 +86,7 @@ public sealed class FleetMoveTests
         Assert.AreEqual("from the node\n", File.ReadAllText(Path.Combine(folder, "src", "node.txt")));
         Assert.IsTrue(fixture.Node.Host.RuntimeService.Relinquishments.Read(created)!.IsRelinquished);
         var receipt = fixture.Node.Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), created, "Still there?")).Receipt!;
-        Assert.AreEqual(SessionRuntimeService.SessionInUseCode, (await receipt.Completion.WaitAsync(Patience, token)).Code,
+        Assert.AreEqual(SessionRuntimeService.SessionInUseCode, (await receipt.Completion.WithinAsync(Patience, token)).Code,
             "The node no longer runs a session it gave away.");
 
         await fixture.SendOnViewerAsync(created, "Here now.");
@@ -249,7 +249,7 @@ public sealed class FleetMoveTests
         var started = new TaskCompletionSource();
         fixture.NodeProvider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Finally.", started));
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(fixture.NodeProjectId, Prompt: "A long turn."), cancellationToken: token);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
 
         var refused = await client.StartMoveAsync(new FleetMoveStartParams(created.SessionId, "move-busy", "viewer"), cancellationToken: token);
 
@@ -271,7 +271,7 @@ public sealed class FleetMoveTests
         var started = new TaskCompletionSource();
         fixture.NodeProvider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Finally.", started));
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(fixture.NodeProjectId, Prompt: "Run git status."), cancellationToken: token);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
 
         // Its turn asks to run a command: the session waits for a person, not for its turn to end.
         using var asking = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -325,7 +325,7 @@ public sealed class FleetMoveTests
     private static async Task<OwnedSessionCommandResult> TrySendOnViewerAsync(MoveFixture fixture, string sessionId)
     {
         var receipt = fixture.ViewerHost.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Back here?")).Receipt!;
-        return await receipt.Completion.WaitAsync(Patience);
+        return await receipt.Completion.WithinAsync(Patience);
     }
 
     // A target whose commit happens, but whose answer is lost with the channel.
@@ -375,7 +375,7 @@ public sealed class FleetMoveTests
 /// </summary>
 internal sealed class MoveFixture : IAsyncDisposable
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Patience = TestTime.Seconds(60);
     private readonly NodeTestRoot _root;
 
     private MoveFixture(NodeTestRoot root, NodeHost node, NodeFleet fleet, ScriptedNodeProvider nodeProvider, CodeAltaHost viewer,
@@ -520,7 +520,7 @@ internal sealed class MoveFixture : IAsyncDisposable
     {
         var receipt = ViewerHost.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(Patience);
+        var result = await receipt.Completion.WithinAsync(Patience);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 
@@ -530,7 +530,7 @@ internal sealed class MoveFixture : IAsyncDisposable
         var project = await Node.Host.ProjectCatalog.GetByIdAsync(NodeProjectId, cancellationToken);
         var session = await Node.Host.Commands.CreateDraftSessionAsync(project, NodeProvider.Descriptor, "Node work");
         var receipt = Node.Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "Start.")).Receipt!;
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(Patience, cancellationToken)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(Patience, cancellationToken)).Outcome);
         return session.SessionId;
     }
 

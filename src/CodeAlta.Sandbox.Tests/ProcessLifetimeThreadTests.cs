@@ -46,12 +46,12 @@ public sealed class ProcessLifetimeThreadTests
             return "late";
         }, late => disposed.TrySetResult(late), cancellation.Token);
         // Canceled once it runs: an operation canceled before it starts never runs, and has no result to release.
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
         await cancellation.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => run);
         release.Set();
-        Assert.AreEqual("late", await disposed.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreEqual("late", await disposed.Task.WithinAsync(TestTime.Seconds(10)));
     }
 
     [TestMethod]
@@ -62,7 +62,7 @@ public sealed class ProcessLifetimeThreadTests
         using var cancellation = new CancellationTokenSource();
         var ran = false;
 
-        var blocker = lifetime.RunAsync(() => release.Wait(TimeSpan.FromSeconds(10)), static _ => { }, CancellationToken.None);
+        var blocker = lifetime.RunAsync(() => release.Wait(TestTime.Seconds(10)), static _ => { }, CancellationToken.None);
         var canceled = lifetime.RunAsync(() => ran = true, static _ => { }, cancellation.Token);
         await cancellation.CancelAsync();
         release.Set();

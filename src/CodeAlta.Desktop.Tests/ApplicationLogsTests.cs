@@ -72,7 +72,7 @@ public sealed class ApplicationLogsTests
         {
             var capture = DesktopLogging.Initialize(root)!;
             LogManager.GetLogger("CodeAlta.Desktop.Test").Info("literal disposable root log entry");
-            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Length > 0, TimeSpan.FromSeconds(5)));
+            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Length > 0, TestTime.Seconds(5)));
             var rpc = new ApplicationLogsService(capture);
             var observed = rpc.Read(new());
             var cleared = rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS"));
@@ -135,7 +135,7 @@ public sealed class ApplicationLogsTests
             Assert.IsNotNull(capture);
             var logger = LogManager.GetLogger("CodeAlta.Desktop.Test");
             logger.Info("literal captured info");
-            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Any(row => row.Text.Contains("literal captured info", StringComparison.Ordinal)), TimeSpan.FromSeconds(5)));
+            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Any(row => row.Text.Contains("literal captured info", StringComparison.Ordinal)), TestTime.Seconds(5)));
             Assert.IsNull(DesktopLogging.Initialize("unused-external-owner"));
             Assert.IsTrue(LogManager.IsInitialized);
         }

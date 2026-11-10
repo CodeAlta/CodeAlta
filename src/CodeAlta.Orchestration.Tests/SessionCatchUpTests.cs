@@ -14,7 +14,7 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class SessionCatchUpTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task CatchUp_WritesTheTurnsMadeElsewhere_RetiresTheAttachment_AndTheNextPromptFollowsThem()
@@ -81,7 +81,7 @@ public sealed class SessionCatchUpTests
         provider.Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         var send = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "two")).Receipt;
         Assert.IsNotNull(send);
-        await provider.Started.Task.WaitAsync(Timeout);
+        await provider.Started.Task.WithinAsync(Timeout);
         var reads = provider.Reads;
         try
         {
@@ -92,7 +92,7 @@ public sealed class SessionCatchUpTests
         }
         finally { provider.Release.TrySetResult(); }
 
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(Timeout)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WithinAsync(Timeout)).Outcome);
         Assert.IsFalse((await host.SessionViewCatalog.JournalStore.CreateSessionStore().ReadTurnsAsync(sessionId)).Turns.Any(static turn => turn.MadeElsewhere));
     }
 
@@ -136,7 +136,7 @@ public sealed class SessionCatchUpTests
                 ],
                 AgentExternalTurnOrigin.VsCode, "claude-vscode", DateTimeOffset.UtcNow)],
             static (_, _, _) => throw new InvalidOperationException("The state cannot be made."));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Commands.CatchUpExternalTurnsAsync(sessionId).WaitAsync(Timeout));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Commands.CatchUpExternalTurnsAsync(sessionId).WithinAsync(Timeout));
 
         Assert.AreEqual(0, Directory.EnumerateFiles(temp.Root, "*.png", SearchOption.AllDirectories).Count(), "No image is left without a turn that names it.");
         Assert.AreEqual(1, (await host.SessionViewCatalog.JournalStore.CreateSessionStore().ReadTurnsAsync(sessionId)).Turns.Count);
@@ -156,7 +156,7 @@ public sealed class SessionCatchUpTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.ReadGate = gate;
         var catchUp = host.Commands.CatchUpExternalTurnsAsync(sessionId);
-        await provider.ReadStarted.Task.WaitAsync(Timeout);
+        await provider.ReadStarted.Task.WithinAsync(Timeout);
         // Written while the conversation is read: what the read found is stale.
         var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
         await store.UpsertStateAsync((await store.GetStateAsync(sessionId))! with { UpdatedAt = DateTimeOffset.UtcNow });
@@ -166,11 +166,11 @@ public sealed class SessionCatchUpTests
         var send = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "two")).Receipt;
         Assert.IsNotNull(send);
         // The send joins the catch-up in progress, which then ends.
-        await joined.Task.WaitAsync(Timeout);
+        await joined.Task.WithinAsync(Timeout);
         gate.TrySetResult();
-        Assert.AreEqual("stale", await catchUp.WaitAsync(Timeout));
+        Assert.AreEqual("stale", await catchUp.WithinAsync(Timeout));
 
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(Timeout)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WithinAsync(Timeout)).Outcome);
         CollectionAssert.AreEqual(new[] { "one", "answer", "From VS Code.", "Answered there.", "two" }, provider.LastConversation(),
             "The send read the conversation again: the turns made elsewhere are before its prompt.");
         Assert.AreEqual(2, provider.Reads, "Once by the catch-up that found the session changed, once by the send.");
@@ -193,7 +193,7 @@ public sealed class SessionCatchUpTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.ReadGate = gate;
         var catchUp = host.Commands.CatchUpExternalTurnsAsync(sessionId);
-        await provider.ReadStarted.Task.WaitAsync(Timeout);
+        await provider.ReadStarted.Task.WithinAsync(Timeout);
         SessionLease? other;
         try
         {
@@ -204,7 +204,7 @@ public sealed class SessionCatchUpTests
         finally { gate.TrySetResult(); }
 
         Assert.IsNull(other, "The catch-up holds the lease while it reads the conversation it will append.");
-        Assert.AreEqual("appended", await catchUp.WaitAsync(Timeout));
+        Assert.AreEqual("appended", await catchUp.WithinAsync(Timeout));
         Assert.IsNull(leases.TryReadHolder(sessionId), "The lease goes with the catch-up.");
         using (other = leases.TryAcquire(sessionId, new SessionLeaseOwner(SessionLeaseOwner.CliKind, "other")))
             Assert.IsNotNull(other, "Another process takes the session once the catch-up ended.");
@@ -222,17 +222,17 @@ public sealed class SessionCatchUpTests
 
         var compaction = host.RuntimeService.CompactOwnedCommandAsync(
             new OwnedCompactRequest("compact", sessionId, current.RuntimeInstanceId, current.Entry!.AttachmentGeneration), CancellationToken.None);
-        await provider.CompactStarted.Task.WaitAsync(Timeout);
+        await provider.CompactStarted.Task.WithinAsync(Timeout);
         var reads = provider.Reads;
         try
         {
             provider.External = state => provider.Turns(state, AgentExternalTurnOrigin.VsCode, "Too early.", "Not written.");
-            Assert.AreEqual("busy", await host.RuntimeService.CatchUpExternalTurnsAsync(sessionId).WaitAsync(Timeout), "No run is active, but a compaction is.");
+            Assert.AreEqual("busy", await host.RuntimeService.CatchUpExternalTurnsAsync(sessionId).WithinAsync(Timeout), "No run is active, but a compaction is.");
             Assert.AreEqual(reads, provider.Reads);
         }
         finally { provider.CompactRelease.TrySetResult(); }
 
-        Assert.IsTrue((await compaction.WaitAsync(Timeout))!.Success);
+        Assert.IsTrue((await compaction.WithinAsync(Timeout))!.Success);
         Assert.IsNotNull(await host.RuntimeService.TryGetActiveSessionDescriptorAsync(sessionId));
     }
 
@@ -254,7 +254,7 @@ public sealed class SessionCatchUpTests
         }
 
         provider.External = state => provider.Turns(state, AgentExternalTurnOrigin.VsCode, "From VS Code.", "Answered there.");
-        Assert.AreEqual("busy", await host.Commands.CatchUpExternalTurnsAsync(sessionId).WaitAsync(Timeout), "Retiring the attachment would end the remote control.");
+        Assert.AreEqual("busy", await host.Commands.CatchUpExternalTurnsAsync(sessionId).WithinAsync(Timeout), "Retiring the attachment would end the remote control.");
         Assert.IsNotNull(await host.RuntimeService.TryGetActiveSessionDescriptorAsync(sessionId));
     }
 
@@ -267,7 +267,7 @@ public sealed class SessionCatchUpTests
         var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Not shared")).SessionId;
         await SendAsync(host, sessionId, "one");
 
-        Assert.AreEqual("none", await host.Commands.CatchUpExternalTurnsAsync(sessionId).WaitAsync(Timeout));
+        Assert.AreEqual("none", await host.Commands.CatchUpExternalTurnsAsync(sessionId).WithinAsync(Timeout));
         Assert.AreEqual(0, provider.Reads);
     }
 
@@ -279,12 +279,12 @@ public sealed class SessionCatchUpTests
         await using var host = await CreateHostAsync(temp, provider);
         var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Not shared")).SessionId;
 
-        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.GetSharedConversationAsync(sessionId).WaitAsync(Timeout),
+        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.GetSharedConversationAsync(sessionId).WithinAsync(Timeout),
             "No turn yet, and no conversation to share whatever the turns.");
         await SendAsync(host, sessionId, "one");
 
-        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.GetSharedConversationAsync(sessionId).WaitAsync(Timeout));
-        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.ReleaseSharedConversationAsync(sessionId).WaitAsync(Timeout));
+        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.GetSharedConversationAsync(sessionId).WithinAsync(Timeout));
+        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.ReleaseSharedConversationAsync(sessionId).WithinAsync(Timeout));
         Assert.IsNotNull(await host.RuntimeService.TryGetActiveSessionDescriptorAsync(sessionId), "Nothing is released for a provider that shares nothing.");
     }
 
@@ -292,7 +292,7 @@ public sealed class SessionCatchUpTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(Timeout);
+        var result = await receipt.Completion.WithinAsync(Timeout);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 

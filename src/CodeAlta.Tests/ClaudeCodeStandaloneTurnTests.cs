@@ -127,7 +127,7 @@ public sealed class ClaudeCodeStandaloneTurnTests
             return ValueTask.CompletedTask;
         }, cancellation.Token);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await turn.WaitAsync(TimeSpan.FromSeconds(20)));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await turn.WithinAsync(TestTime.Seconds(20)));
         Assert.IsTrue(cli.Last.Interrupted.IsCompleted, "The request to the model is stopped.");
         Assert.IsTrue(cli.Last.IsDisposed, "The process is stopped.");
     }
@@ -197,7 +197,7 @@ public sealed class ClaudeCodeStandaloneTurnTests
         {
             deltas?.Add(delta);
             return ValueTask.CompletedTask;
-        }, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+        }, CancellationToken.None).WithinAsync(TestTime.Seconds(20));
 
     private static string Text(AgentTurnResponse response)
         => string.Concat(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value));

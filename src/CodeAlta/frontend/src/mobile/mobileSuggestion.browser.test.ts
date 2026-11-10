@@ -4,12 +4,13 @@ import { browserExecutable } from "../browserTarget";
 import type { Live } from "./contract";
 import { session } from "./fixtureServer";
 import { openPhone } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
 const long = "run the whole test suite of the parser again, fix what fails, then commit the change on a branch named for the fix";
 
-test("the phone offers the suggested next prompt as a chip that fills the box, never sends, and goes while typing or working", { skip: !browserExecutable, timeout: 90_000 }, async () => {
+test("the phone offers the suggested next prompt as a chip that fills the box, never sends, and goes while typing or working", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const phone = await openPhone(server => {
     server.state.sessions = [session("s1", "Fix the parser", "p1", 1, { line: "The parser is fixed.", suggestion: long })];
   }, shots);

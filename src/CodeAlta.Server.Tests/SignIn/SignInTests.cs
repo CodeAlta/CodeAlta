@@ -1034,7 +1034,7 @@ public sealed class SignInTests
         var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.TokenDelay = async () => { asked.TrySetResult(); await held.Task; };
         var completing = CompleteAsync(server, laptop, signIn, signInBack);
-        await asked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await asked.Task.WithinAsync(TestTime.Seconds(30));
         provider.TokenDelay = null;
         await ConfigureCompanyAsync(server, owner, provider, false, domains: ["fabrikam.example"]);
         server.Clock.Advance(TimeSpan.FromSeconds(30));

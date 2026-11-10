@@ -608,7 +608,7 @@ public sealed class AcpTurnExecutorTests
         await using var fixture = new Fixture(agent);
         using var cancellation = new CancellationTokenSource();
         var run = fixture.RunAsync([User("wait")], cancellation.Token);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
 
         await cancellation.CancelAsync();
         await Assert.ThrowsAsync<OperationCanceledException>(() => run);
@@ -1068,7 +1068,7 @@ public sealed class AcpTurnExecutorTests
         Assert.AreEqual("agent-session-2", agent.RequestsOf("session/delete").Single()!["sessionId"]!.GetValue<string>());
         var methods = agent.Requests.Select(static request => request.Method).ToList();
         Assert.IsLessThan(methods.IndexOf("session/delete"), methods.IndexOf("session/close"), "closed, then deleted");
-        await agent.Clients.Last().Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await agent.Clients.Last().Completion.WithinAsync(TestTime.Seconds(10));
         Assert.IsFalse(agent.Clients.First().Completion.IsCompleted, "the process of the CodeAlta session goes on");
     }
 
@@ -1146,14 +1146,14 @@ public sealed class AcpTurnExecutorTests
         using var cancellation = new CancellationTokenSource();
 
         var turn = fixture.RunStandaloneAsync("Wait.", cancellationToken: cancellation.Token);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
         await cancellation.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => turn);
         Assert.HasCount(1, agent.RequestsOf("session/cancel"));
         Assert.HasCount(1, agent.RequestsOf("session/close"));
         Assert.HasCount(1, agent.RequestsOf("session/delete"));
-        await agent.Clients.Single().Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await agent.Clients.Single().Completion.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]
@@ -1171,7 +1171,7 @@ public sealed class AcpTurnExecutorTests
         StringAssert.Contains(error.Message, "The model failed.");
         Assert.HasCount(1, agent.RequestsOf("session/close"));
         Assert.HasCount(1, agent.RequestsOf("session/delete"));
-        await agent.Clients.Single().Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await agent.Clients.Single().Completion.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]

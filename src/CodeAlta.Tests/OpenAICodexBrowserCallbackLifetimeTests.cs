@@ -51,12 +51,12 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
             accept.SetException(lateFault);
             if (callerCanceled)
             {
-                var error = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => wait.WaitAsync(TimeSpan.FromSeconds(5)));
+                var error = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => wait.WithinAsync(TestTime.Seconds(5)));
                 Assert.AreEqual(callerToken, error.CancellationToken);
             }
             else
             {
-                var error = await Assert.ThrowsExactlyAsync<TimeoutException>(() => wait.WaitAsync(TimeSpan.FromSeconds(5)));
+                var error = await Assert.ThrowsExactlyAsync<TimeoutException>(() => wait.WithinAsync(TestTime.Seconds(5)));
                 Assert.AreEqual("ChatGPT sign-in expired. Continue with ChatGPT to try again.", error.Message);
             }
 
@@ -69,7 +69,7 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
             // Even the red fixture owns and observes the original fault; it never relies
             // on finalization or installs a global unobserved-task suppression handler.
             accept.TrySetException(lateFault);
-            await Task.WhenAll(ObserveAsync(accept.Task), ObserveAsync(wait)).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(ObserveAsync(accept.Task), ObserveAsync(wait)).WithinAsync(TestTime.Seconds(5));
         }
     }
 
@@ -130,7 +130,7 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
         }
         finally
         {
-            await Task.WhenAll(ObserveAsync(accept), ObserveAsync(wait)).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(ObserveAsync(accept), ObserveAsync(wait)).WithinAsync(TestTime.Seconds(5));
         }
     }
 
@@ -181,29 +181,29 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
         {
             var missing = browser.GetAsync(baseUri + "favicon.ico", cancellation.Token);
             requests.Add(missing);
-            using var missingResponse = await missing.WaitAsync(TimeSpan.FromSeconds(5));
+            using var missingResponse = await missing.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(HttpStatusCode.NotFound, missingResponse.StatusCode);
 
             var post = browser.PostAsync(callbackUri, null, cancellation.Token);
             requests.Add(post);
-            using var postResponse = await post.WaitAsync(TimeSpan.FromSeconds(5));
+            using var postResponse = await post.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(HttpStatusCode.NotFound, postResponse.StatusCode);
 
             var callback = browser.GetAsync(callbackUri, cancellation.Token);
             requests.Add(callback);
-            using var response = await callback.WaitAsync(TimeSpan.FromSeconds(5));
+            using var response = await callback.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(callbackFails ? HttpStatusCode.BadRequest : HttpStatusCode.OK, response.StatusCode);
             Assert.IsTrue(response.Headers.CacheControl?.NoStore);
             StringAssert.Contains(await response.Content.ReadAsStringAsync(cancellation.Token), callbackFails ? "login failed" : "login complete");
 
             if (callbackFails)
             {
-                var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => wait.WaitAsync(TimeSpan.FromSeconds(5)));
+                var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => wait.WithinAsync(TestTime.Seconds(5)));
                 Assert.AreSame(failure, error);
             }
             else
             {
-                Assert.AreSame(credential, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.AreSame(credential, await wait.WithinAsync(TestTime.Seconds(5)));
             }
 
             Assert.AreEqual(1, completedLogin);
@@ -218,8 +218,8 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
         finally
         {
             cancellation.Cancel();
-            await Task.WhenAll(requests.Select(ObserveAsync).Append(ObserveAsync(wait))).WaitAsync(TimeSpan.FromSeconds(5));
-            await Task.WhenAll(accepts.Select(ObserveAsync)).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(requests.Select(ObserveAsync).Append(ObserveAsync(wait))).WithinAsync(TestTime.Seconds(5));
+            await Task.WhenAll(accepts.Select(ObserveAsync)).WithinAsync(TestTime.Seconds(5));
             foreach (var request in requests.Where(request => request.IsCompletedSuccessfully))
             {
                 request.Result.Dispose();
@@ -262,12 +262,12 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
             (callerCanceled ? cancellation : timeout).Cancel();
             if (callerCanceled)
             {
-                var error = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => wait.WaitAsync(TimeSpan.FromSeconds(5)));
+                var error = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => wait.WithinAsync(TestTime.Seconds(5)));
                 Assert.AreEqual(callerToken, error.CancellationToken);
             }
             else
             {
-                await Assert.ThrowsExactlyAsync<TimeoutException>(() => wait.WaitAsync(TimeSpan.FromSeconds(5)));
+                await Assert.ThrowsExactlyAsync<TimeoutException>(() => wait.WithinAsync(TestTime.Seconds(5)));
             }
 
             Assert.IsTrue(accept.IsFaulted);
@@ -279,7 +279,7 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
         finally
         {
             cancellation.Cancel();
-            await Task.WhenAll(ObserveAsync(wait), ObserveAsync(accept ?? Task.CompletedTask)).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(ObserveAsync(wait), ObserveAsync(accept ?? Task.CompletedTask)).WithinAsync(TestTime.Seconds(5));
         }
     }
 
@@ -313,7 +313,7 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
                 listener.Stop();
             }
 
-            var error = await Assert.ThrowsAsync<Exception>(() => wait.WaitAsync(TimeSpan.FromSeconds(5)));
+            var error = await Assert.ThrowsAsync<Exception>(() => wait.WithinAsync(TestTime.Seconds(5)));
             Assert.IsTrue(error is HttpListenerException or ObjectDisposedException);
             Assert.IsTrue(accept.IsFaulted);
             Assert.AreSame(accept.Exception?.InnerException, error);
@@ -323,7 +323,7 @@ public sealed class OpenAICodexBrowserCallbackLifetimeTests
         finally
         {
             listener.Close();
-            await Task.WhenAll(ObserveAsync(wait), ObserveAsync(accept ?? Task.CompletedTask)).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(ObserveAsync(wait), ObserveAsync(accept ?? Task.CompletedTask)).WithinAsync(TestTime.Seconds(5));
         }
     }
 

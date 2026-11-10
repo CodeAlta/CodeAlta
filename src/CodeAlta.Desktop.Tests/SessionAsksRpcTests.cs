@@ -114,7 +114,7 @@ public sealed class SessionAsksRpcTests
                 Assert.AreEqual(domain, incomingDomain);
                 var answer = rpc.AnswerAsync(incoming, default);
                 originals.Add(answer);
-                var answerResult = await answer.WaitAsync(TimeSpan.FromSeconds(5));
+                var answerResult = await answer.WithinAsync(TestTime.Seconds(5));
                 Assert.AreEqual("ok", answerResult.Status);
                 Assert.IsNotNull(answerResult.Disposition);
                 Assert.AreEqual("rejected", answerResult.Disposition.Status); // A valid DTO is not queue authority.
@@ -130,7 +130,7 @@ public sealed class SessionAsksRpcTests
                 Assert.AreEqual(domain, observationDomain);
                 var observed = rpc.ObserveAsync(incomingObservation, default);
                 originals.Add(observed);
-                Assert.AreEqual("not_found", (await observed.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+                Assert.AreEqual("not_found", (await observed.WithinAsync(TestTime.Seconds(5))).Status);
             }
         }
         catch (Exception ex) { primary = ex; throw; }
@@ -157,10 +157,10 @@ public sealed class SessionAsksRpcTests
                 Assert.IsFalse(SessionAsksService.TryHandle(action.Action.Handle, out _), actionJson);
                 var answer = rpc.AnswerAsync(action, default);
                 originals.Add(answer);
-                Assert.AreEqual("invalid_request", (await answer.WaitAsync(TimeSpan.FromSeconds(5))).Status, actionJson);
+                Assert.AreEqual("invalid_request", (await answer.WithinAsync(TestTime.Seconds(5))).Status, actionJson);
                 var cancel = rpc.CancelAsync(action, default);
                 originals.Add(cancel);
-                Assert.AreEqual("invalid_request", (await cancel.WaitAsync(TimeSpan.FromSeconds(5))).Status, actionJson);
+                Assert.AreEqual("invalid_request", (await cancel.WithinAsync(TestTime.Seconds(5))).Status, actionJson);
 
                 var observationJson = InboundJson(epoch, field, invalid, observation: true);
                 var observation = JsonSerializer.Deserialize(observationJson, DesktopJsonContext.Default.SessionAskObservationRequest);
@@ -168,7 +168,7 @@ public sealed class SessionAsksRpcTests
                 Assert.IsFalse(SessionAsksService.TryHandle(observation.Handle, out _), observationJson);
                 var observed = rpc.ObserveAsync(observation, default);
                 originals.Add(observed);
-                Assert.AreEqual("invalid_request", (await observed.WaitAsync(TimeSpan.FromSeconds(5))).Status, observationJson);
+                Assert.AreEqual("invalid_request", (await observed.WithinAsync(TestTime.Seconds(5))).Status, observationJson);
             }
         }
         catch (Exception ex) { primary = ex; throw; }
@@ -211,7 +211,7 @@ public sealed class SessionAsksRpcTests
     {
         var drain = owner.DrainAsync();
         var all = Task.WhenAll(originals.Append(drain));
-        try { await all.WaitAsync(TimeSpan.FromSeconds(5)); }
+        try { await all.WithinAsync(TestTime.Seconds(5)); }
         catch (Exception ex)
         {
             ex.Data["OriginalJoin"] = all;

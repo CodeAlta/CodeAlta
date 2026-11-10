@@ -33,7 +33,7 @@ public sealed class ExternalSessionFollowerTests
         var changes = Record(follower);
         Assert.IsFalse(await ListsAsync(desktop, session.SessionId), "The instance does not list a session it never projected.");
 
-        await follower.RefreshAsync().WaitAsync(Hang);
+        await follower.RefreshAsync().WithinAsync(Hang);
 
         Assert.AreEqual(0, markers.List().Count, "The markers are deleted: the one projected and the one whose journal is gone.");
         Assert.IsTrue(await ListsAsync(desktop, session.SessionId), "The session the marker named is listed.");
@@ -53,7 +53,7 @@ public sealed class ExternalSessionFollowerTests
         await using var follower = CreateFollower(desktop);
         var changes = Record(follower);
 
-        await follower.RefreshAsync().WaitAsync(Hang);
+        await follower.RefreshAsync().WithinAsync(Hang);
 
         var hold = follower.GetHold(session.SessionId);
         Assert.IsNotNull(hold, "The session the command line runs is followed.");
@@ -65,20 +65,20 @@ public sealed class ExternalSessionFollowerTests
 
         // Nothing changed: nothing is projected again.
         changes.Clear();
-        await follower.RefreshAsync().WaitAsync(Hang);
+        await follower.RefreshAsync().WithinAsync(Hang);
         Assert.AreEqual(0, changes.Count);
 
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Second answer."));
         await cli.RuntimeService.SendAsync(session, HeadlessTestRoot.Options(provider, root.ProjectRoot), new AgentSendOptions { Input = AgentInput.Text("second") });
-        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
-        await follower.RefreshAsync().WaitAsync(Hang);
+        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
+        await follower.RefreshAsync().WithinAsync(Hang);
 
         Assert.IsTrue(follower.GetHold(session.SessionId)?.JournalLength > first, "The journal that grew is projected again.");
         CollectionAssert.Contains(changes.Select(static change => change.Kind).ToArray(), ExternalSessionChangeKind.Updated);
 
         changes.Clear();
         Assert.IsTrue(await cli.RuntimeService.DetachRuntimeSessionAsync(session.SessionId));
-        await follower.RefreshAsync().WaitAsync(Hang);
+        await follower.RefreshAsync().WithinAsync(Hang);
 
         Assert.IsNull(follower.GetHold(session.SessionId));
         Assert.AreEqual(0, follower.Held.Count);
@@ -129,11 +129,11 @@ public sealed class ExternalSessionFollowerTests
         long? length;
         try
         {
-            await started.Task.WaitAsync(Hang);
+            await started.Task.WithinAsync(Hang);
             // Well within the period of the listing: the watchers and the follow cadence tell it. A session is followed once
             // its journal was projected, which a pass does after it listed the session and found its lease.
             var listed = false;
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(5);
             while (DateTime.UtcNow < deadline && !(listed = await ListsAsync(desktop, session.SessionId) && markers.List().Count == 0
                 && follower.GetHold(session.SessionId)?.JournalLength is not null))
                 await Task.Delay(50);
@@ -152,8 +152,8 @@ public sealed class ExternalSessionFollowerTests
         }
 
         // The end of the turn grows the journal while the command line still holds the session: the change is told.
-        await send.WaitAsync(Hang);
-        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await send.WithinAsync(Hang);
+        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         await WaitUntilAsync(() => changes.Any(static change => change.Kind == ExternalSessionChangeKind.Updated)
             && follower.GetHold(session.SessionId)?.JournalLength > length, "The grown journal of a held session is told as an update.");
         Assert.IsTrue(await cli.RuntimeService.DetachRuntimeSessionAsync(session.SessionId));
@@ -191,7 +191,7 @@ public sealed class ExternalSessionFollowerTests
         await writer.WriteAsync("{\"$type\":\"raw\",\"backendEventType\":\"local.sessionSummary\",\"raw\":{"u8.ToArray());
         await writer.FlushAsync();
 
-        await WaitUntilAsync(() => markers.List().Count == 0, "The marker is projected at the follow pace, not the listing period.", TimeSpan.FromSeconds(3));
+        await WaitUntilAsync(() => markers.List().Count == 0, "The marker is projected at the follow pace, not the listing period.", TimeSpan.FromSeconds(3)); // not a limit: shorter than the listing period
         Assert.IsTrue(await ListsAsync(desktop, session.SessionId), "The session the marker named is listed.");
         CollectionAssert.AreEqual(new[] { (session.SessionId, ExternalSessionChangeKind.Listed) },
             changes.Select(static change => (change.SessionId, change.Kind)).ToArray());
@@ -199,7 +199,7 @@ public sealed class ExternalSessionFollowerTests
 
     private static async Task WaitUntilAsync(Func<bool> condition, string message, TimeSpan? within = null)
     {
-        var deadline = DateTime.UtcNow + (within ?? TimeSpan.FromSeconds(5));
+        var deadline = DateTime.UtcNow + (within ?? TestTime.Seconds(5));
         while (!condition())
         {
             if (DateTime.UtcNow >= deadline) Assert.Fail(message);
@@ -220,7 +220,7 @@ public sealed class ExternalSessionFollowerTests
         var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
         var session = await cli.RuntimeService.CreateProjectSessionAsync(cli.CurrentProject, options, "From the command line");
         await cli.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text(prompt) });
-        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         return session;
     }
 

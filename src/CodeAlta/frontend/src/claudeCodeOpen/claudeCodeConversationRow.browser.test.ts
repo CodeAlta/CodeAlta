@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The row of the Session Info window that names the conversation of the Claude Code CLI a session continues, in headless Edge
 // under React StrictMode: read once when the window opens, absent for a session that has none, and its identifier copied.
@@ -8,7 +9,7 @@ import { edge, withCanvas } from "../statistics/browserHarness";
 const options = { entry: "../claudeCodeOpen/claudeCodeConversationRow.mount.tsx", fixture: "conversationFixture", rpcFixture: "../demo-api.ts", width: 900, height: 800 } as const;
 const row = `document.querySelector('.claude-code-conversation-row')`;
 
-test("Session Info names the Claude Code conversation of the session, and nothing for a session that has none", { skip: !edge, timeout: 240_000 }, async () => {
+test("Session Info names the Claude Code conversation of the session, and nothing for a session that has none", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     // A session of another provider, or before its first turn: the window gives no reader, and the row is not there.
     await page.evaluate(`conversationFixture.render(false)`);
@@ -31,7 +32,7 @@ test("Session Info names the Claude Code conversation of the session, and nothin
   }, options);
 });
 
-test("the identifier of the conversation is copied, and another program that holds it is named", { skip: !edge, timeout: 240_000 }, async () => {
+test("the identifier of the conversation is copied, and another program that holds it is named", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`conversationFixture.state.answer = conversationFixture.conversation({ origin: "vsCode", originText: "VS Code", processId: 4242,
       entrypoint: "claude-vscode", kind: "interactive", status: "idle", workingDirectory: null, name: null }); conversationFixture.renderRow()`);

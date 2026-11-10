@@ -162,7 +162,7 @@ public sealed class FleetSessionSeatsTests
 
         lock (gate) busy.Clear();
         seats.Poke();
-        await waiting.Admitted.WaitAsync(TimeSpan.FromSeconds(10), token);
+        await waiting.Admitted.WithinAsync(TestTime.Seconds(10), token);
     }
 
     [TestMethod]

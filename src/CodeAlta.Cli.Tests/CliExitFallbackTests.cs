@@ -19,7 +19,7 @@ public sealed class CliExitFallbackTests
 
         fallback.Arm(TimeSpan.FromMilliseconds(50), new CliRunReport("aborted", CliExitCodes.Aborted) { SessionId = "session-1", AbortReason = "signal" });
 
-        Assert.AreEqual(CliExitCodes.Aborted, await exited.Task.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual(CliExitCodes.Aborted, await exited.Task.WithinAsync(TestTime.Seconds(30)));
         var line = JsonDocument.Parse(Encoding.UTF8.GetString(stdout.ToArray()).TrimEnd('\n')).RootElement;
         Assert.AreEqual(CodeAltaAcpExtensions.ResultMethod, line.GetProperty("method").GetString());
         Assert.AreEqual("signal", line.GetProperty("params").GetProperty("abortReason").GetString());
@@ -40,7 +40,7 @@ public sealed class CliExitFallbackTests
         // The shutdown of the host outlived the bound of the timeout armed at the start.
         fallback.Arm(TimeSpan.FromMilliseconds(50), new CliRunReport("timeout", CliExitCodes.Timeout));
 
-        Assert.AreEqual(CliExitCodes.Completed, await exited.Task.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual(CliExitCodes.Completed, await exited.Task.WithinAsync(TestTime.Seconds(30)));
         Assert.AreEqual(1, Encoding.UTF8.GetString(stdout.ToArray()).Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
     }
 

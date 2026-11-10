@@ -179,6 +179,25 @@ internal sealed partial class UnixPseudoTerminal : PseudoTerminal
     }
 
     /// <inheritdoc />
+    public override bool GathersLines
+    {
+        get
+        {
+            if (!Enter()) return false;
+            try
+            {
+                Span<byte> settings = stackalloc byte[256];
+                if (tcgetattr(_master, ref MemoryMarshal.GetReference(settings)) != 0) return false;
+                // The local flags follow the input, output and control flags: 4 bytes each on Linux, 8 on macOS.
+                return OperatingSystem.IsMacOS()
+                    ? (BinaryPrimitives.ReadUInt64LittleEndian(settings[24..]) & MacLineMode) != 0
+                    : (BinaryPrimitives.ReadUInt32LittleEndian(settings[12..]) & LinuxLineMode) != 0;
+            }
+            finally { Leave(); }
+        }
+    }
+
+    /// <inheritdoc />
     public override void Resize(int columns, int rows)
     {
         if (!Enter()) return;
@@ -342,6 +361,9 @@ internal sealed partial class UnixPseudoTerminal : PseudoTerminal
     private static nuint CloseOnExecute => OperatingSystem.IsMacOS() ? 0x20006601u : 0x5451u;
     private const nuint LinuxSetWindowSize = 0x5414, MacSetWindowSize = 0x80087467;
     private const uint InputIsUtf8 = 0x4000;
+    // ICANON, the line mode of the terminal.
+    private const uint LinuxLineMode = 0x2;
+    private const ulong MacLineMode = 0x100;
     private const int SpawnSetSignalDefaults = 0x04, SpawnSetSignalMask = 0x08, LinuxSpawnSetSession = 0x80, MacSpawnSetSession = 0x0400, MacSpawnCloseByDefault = 0x4000;
     private const int Hangup = 1, Kill9 = 9, Interrupted = 4;
     private static int Continue => OperatingSystem.IsMacOS() ? 19 : 18;

@@ -748,7 +748,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
                 null,
                 "Done"));
 
-        var renderedWhileLockHeld = await renderCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var renderedWhileLockHeld = await renderCompleted.Task.WithinAsync(TestTime.Seconds(2));
 
         Assert.IsFalse(renderedWhileLockHeld, "Plugin projection visuals must not be rendered while the projection lock is held because UI dispatch can re-enter session reset.");
     }
@@ -810,7 +810,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         {
             var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _original = Core(launch.Task); _outcome = Observe(_original); launch.SetResult();
-            try { await _original.WaitAsync(TimeSpan.FromSeconds(30)); await _outcome; }
+            try { await _original.WithinAsync(TestTime.Seconds(30)); await _outcome; }
             catch (Exception ex) { ex.Data["RetainedFixture"] = this; ex.Data["RetainedRoot"] = _root; throw; }
             finally { Console.WriteLine("Retained cache history fixture root: " + _root); }
         }
@@ -971,7 +971,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         }
 
         public Task WaitForProjectionAsync()
-            => _projectionCompletion.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            => _projectionCompletion.Task.WithinAsync(TestTime.Seconds(2));
     }
 
     private sealed class DerivedProjectionObserver(Func<PluginDerivedSessionEvent> createEvent) : IPluginAgentEventObserver
@@ -1002,7 +1002,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         };
 
         public Task<bool> WaitForRenderAsync()
-            => _renderCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            => _renderCompleted.Task.WithinAsync(TestTime.Seconds(2));
 
         public void ResetRenderSignal()
             => _renderCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

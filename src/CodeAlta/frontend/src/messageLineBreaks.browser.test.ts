@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const options = { entry: "../messageLineBreaks.mount.tsx", fixture: "lineBreaks", width: 900, height: 600 } as const;
 
-test("a line of a message follows the one above it, and a paragraph stands further away than a line", { skip: !edge, timeout: 60_000 }, async () => {
+test("a line of a message follows the one above it, and a paragraph stands further away than a line", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await page.until("window.lineBreaks", "the page is ready");
     for (const category of ["user", "assistant"]) {

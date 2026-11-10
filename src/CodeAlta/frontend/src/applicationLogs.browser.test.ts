@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const options = { entry: "../applicationLogs.mount.tsx", fixture: "logsFixture", rpcFixture: "../demo-api.ts", width: 1300, height: 900 } as const;
 // Chooses an option of a native select as the user does: React reads the change event.
@@ -10,7 +11,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
 const optionTexts = (selector: string) => `[...document.querySelector(${JSON.stringify(selector)}).options].map(option => option.textContent)`;
 const shown = `[...document.querySelectorAll('.logs-view .log-line .log-text')].map(line => line.textContent)`;
 
-test("the log viewer filters by feature, with the rows of each one counted, and by level and words with it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the log viewer filters by feature, with the rows of each one counted, and by level and words with it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.logs-view .log-line').length === 4 && document.querySelector('.logs-feature-filter select')?.options.length === 5`, "the rows and the features");
     assert.deepEqual(await page.evaluate(optionTexts(".logs-feature-filter select")),
@@ -32,7 +33,7 @@ test("the log viewer filters by feature, with the rows of each one counted, and 
   }, options);
 });
 
-test("the level of a feature is chosen in the log levels and saved at once, the others keeping the level of every feature", { skip: !edge, timeout: 90_000 }, async () => {
+test("the level of a feature is chosen in the log levels and saved at once, the others keeping the level of every feature", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.logs-view .log-line').length === 4`, "the rows");
     await page.clickText(".logs-toolbar .bp6-button", "Log levels");

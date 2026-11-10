@@ -101,7 +101,7 @@ public sealed class CodexCliLiveTests
         await using var fixture = LiveFixture.Create(turns: true);
         fixture.Mode = "bypassPermissions";
         using var stop = new CancellationTokenSource();
-        fixture.OnToolCall = _ => stop.CancelAfter(TimeSpan.FromSeconds(2));
+        fixture.OnToolCall = _ => stop.CancelAfter(TestTime.Seconds(2));
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => fixture.RunAsync("Run the shell command `sleep 60`, then answer done.", stop.Token));
 
@@ -245,7 +245,7 @@ public sealed class CodexCliLiveTests
         public async Task<List<AgentConversationMessage>> RunAsync(IReadOnlyList<AgentConversationMessage> start, CancellationToken cancellationToken = default)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromMinutes(5));
+            timeout.CancelAfter(TestTime.Minutes(5));
             var conversation = new List<AgentConversationMessage>(start);
             Executor.AttachRun(new AgentProviderRunContext("live-1", new AgentRunId("run-1"), (request, _) =>
             {

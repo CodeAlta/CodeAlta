@@ -476,8 +476,8 @@ public sealed class AdaptiveTurnTests
         // Waits until the session and what CodeAlta decides at the end of its runs have settled.
         internal async Task SettleAsync()
         {
-            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WaitAsync(Timeout);
-            await Host.RuntimeService.WhenSettledAsync(Session.SessionId).WaitAsync(Timeout);
+            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WithinAsync(Timeout);
+            await Host.RuntimeService.WhenSettledAsync(Session.SessionId).WithinAsync(Timeout);
         }
 
         internal async Task<AgentSessionUpdateEvent> WaitForCardAsync(Func<AgentSessionUpdateEvent, bool> match, string what)
@@ -498,7 +498,7 @@ public sealed class AdaptiveTurnTests
 
         public async ValueTask DisposeAsync()
         {
-            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WaitAsync(Timeout);
+            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WithinAsync(Timeout);
             await _closing.CancelAsync();
             await Host.DisposeAsync();
             await _collector;
@@ -523,7 +523,7 @@ public sealed class AdaptiveTurnTests
         internal ConcurrentQueue<Action<RunScript>> Scripts { get; } = new();
         internal int SendCount => Volatile.Read(ref _sendCount);
 
-        internal async Task<SendRecord> NextSendAsync() => await _sends.Reader.ReadAsync().AsTask().WaitAsync(Timeout);
+        internal async Task<SendRecord> NextSendAsync() => await _sends.Reader.ReadAsync().AsTask().WithinAsync(Timeout);
 
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);
 

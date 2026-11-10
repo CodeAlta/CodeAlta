@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host: asking again for the changes of a project brings its Changes
 // tab in front of the session shown in its pane, also when another pane has the keyboard.
-test("Review changes brings the Changes tab in front of the session of its pane", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("Review changes brings the Changes tab in front of the session of its pane", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ evaluate, until, press, session, title, exceptions }) => {
     // The tabs of each pane, the one in front of it ending with "*".
     const panes = `[...document.querySelectorAll('.session-dock .flexlayout__tabset')].map(pane => [...pane.querySelectorAll('.flexlayout__tab_button')]

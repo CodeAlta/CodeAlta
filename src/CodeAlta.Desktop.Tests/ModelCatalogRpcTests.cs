@@ -243,7 +243,7 @@ public sealed class ModelCatalogRpcTests
         var probe = service.Probe(new("epoch", "selected"), canceled.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual("busy", (await service.Probe(new("epoch", "other"), default)).Status);
             canceled.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(async () => await probe);
@@ -252,12 +252,12 @@ public sealed class ModelCatalogRpcTests
             var drain = service.DrainAsync();
             Assert.IsFalse(drain.IsCompleted);
             release.TrySetResult();
-            await drain.WaitAsync(TimeSpan.FromSeconds(5));
+            await drain.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(1, count);
             Assert.AreEqual("closed", service.Providers(new("epoch")).Status);
             Assert.AreEqual(ModelProviderAvailability.Ready, initialization.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId).Availability);
         }
-        finally { release.TrySetResult(); await service.DrainAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+        finally { release.TrySetResult(); await service.DrainAsync().WithinAsync(TestTime.Seconds(5)); }
     }
 
     [TestMethod]

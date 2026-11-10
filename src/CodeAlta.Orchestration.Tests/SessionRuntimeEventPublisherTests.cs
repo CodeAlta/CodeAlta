@@ -132,7 +132,7 @@ public sealed class SessionRuntimeEventPublisherTests
         {
             Assert.IsFalse(pending.IsCompleted);
             cancellation.Cancel();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5)));
+            await Assert.ThrowsAsync<OperationCanceledException>(() => pending.WithinAsync(TestTime.Seconds(5)));
             var value = Event("successor");
             Assert.IsTrue(publisher.TryPublish(value));
             publisher.Complete();
@@ -145,7 +145,7 @@ public sealed class SessionRuntimeEventPublisherTests
         {
             cancellation.Cancel();
             publisher.Complete();
-            try { await pending.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await pending.WithinAsync(TestTime.Seconds(5)); }
             catch (OperationCanceledException) { }
         }
     }
@@ -212,7 +212,7 @@ public sealed class SessionRuntimeEventPublisherTests
         var a = Task.Run(() => Claim(first));
         var b = Task.Run(() => Claim(second));
         start.SetResult();
-        var outcomes = await Task.WhenAll(a, b).WaitAsync(TimeSpan.FromSeconds(5));
+        var outcomes = await Task.WhenAll(a, b).WithinAsync(TestTime.Seconds(5));
         Assert.AreEqual(1, outcomes.Count(admitted => admitted));
         var winner = outcomes[0] ? first : second;
         Assert.AreSame(firstEvent, winner.Current);
@@ -234,8 +234,8 @@ public sealed class SessionRuntimeEventPublisherTests
         var publisher = new SessionRuntimeEventPublisher(1);
         await using var displayA = publisher.Display.ObserveAsync().GetAsyncEnumerator();
         await using var displayB = publisher.Display.ObserveAsync().GetAsyncEnumerator();
-        Assert.IsTrue(await displayA.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
-        Assert.IsTrue(await displayB.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(await displayA.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5)));
+        Assert.IsTrue(await displayB.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5)));
         var firstEvent = Event("first");
         var secondEvent = Event("second");
         var dropped = Event("dropped original, committed display");
@@ -249,10 +249,10 @@ public sealed class SessionRuntimeEventPublisherTests
         publisher.Complete();
         foreach (var display in new[] { displayA, displayB })
         {
-            Assert.IsTrue(await display.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.IsTrue(await display.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5)));
             Assert.IsTrue(display.Current.HasGap && display.Current.Snapshot.IsClosed);
             Assert.AreEqual(dropped.Message, display.Current.Snapshot.Sessions.Single().StatusMessage);
-            Assert.IsFalse(await display.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.IsFalse(await display.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5)));
         }
         await using (var competitor = publisher.ReadAllAsync().GetAsyncEnumerator())
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => Move(competitor));
@@ -263,7 +263,7 @@ public sealed class SessionRuntimeEventPublisherTests
     }
 
     private static Task<bool> Move(IAsyncEnumerator<SessionRuntimeEvent> reader)
-        => reader.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        => reader.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(5));
 
     private static SessionHostEvent Event(string message)
         => new("session", DateTimeOffset.UtcNow, AgentSessionUpdateKind.Warning, message);

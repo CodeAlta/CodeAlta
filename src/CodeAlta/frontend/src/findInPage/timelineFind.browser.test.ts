@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The search in the timeline of a session in headless Edge, under React StrictMode, with the real keys.
 
@@ -35,7 +36,7 @@ const key = async (page: Page, name: string, code: number, modifiers = 0) => {
 const typed = (page: Page, text: string) => page.evaluate(`(() => { const box = ${input};
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(box, ${JSON.stringify(text)}); box.dispatchEvent(new Event("input", { bubbles: true })); })()`);
 
-test("Ctrl+F in a session finds in its timeline: every match marked and counted, from the prompt too, the reader taken to them", { skip: !edge, timeout: 180_000 }, async () => {
+test("Ctrl+F in a session finds in its timeline: every match marked and counted, from the prompt too, the reader taken to them", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.history[data-window-ready="true"]') && document.querySelectorAll('.timeline-message').length > 0`, "the timeline read");
     await page.until(`${atEnd} && ${scroller}.dataset.following === 'true'`, "the reader at its end");

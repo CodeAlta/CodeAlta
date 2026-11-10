@@ -674,11 +674,11 @@ public sealed class McpConfigTests
             // A save of the store is under way: it has read the file and writes it back with its change.
             var read = File.ReadAllText(path);
             toggled = Task.Run(() => new McpPolicyWriter().SetServerEnabledAsync(path, McpConfigScope.Global, "docs", enabled: false, CancellationToken.None));
-            Assert.IsFalse(toggled.Wait(500), "the policy is written after the save that holds the file");
+            Assert.IsFalse(toggled.Wait(TestTime.MillisecondsInt(500)), "the policy is written after the save that holds the file");
             File.WriteAllText(path, read + "\n[sessions]\ntitle = \"first_prompt\"\n");
         }
 
-        await toggled.WaitAsync(TimeSpan.FromSeconds(10));
+        await toggled.WithinAsync(TestTime.Seconds(10));
         Assert.IsFalse(new McpPolicyLoader().Load(path, null).Servers["docs"].Enabled!.Value);
         Assert.AreEqual(CodeAlta.Agent.AgentSessionTitleMode.FirstPrompt, store.LoadGlobalSessionTitleMode());
         Assert.AreEqual("codex", store.LoadGlobal().Chat?.DefaultProvider);

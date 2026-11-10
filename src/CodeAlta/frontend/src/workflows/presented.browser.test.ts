@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // What a script presented (`present()`) on the cards of its run, in headless Edge under React StrictMode, in both themes,
 // in a 1600×1000 and a 900×650 window: the block in the timeline as the parts come, a part read whole, the card of the
@@ -27,7 +28,7 @@ const fits = (selector: string) => `[...document.querySelectorAll(${JSON.stringi
 
 for (const light of [false, true]) {
   const theme = light ? "light" : "dark";
-  test(`the block of a run shows its parts as they come, and reads a shortened one whole (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {
+  test(`the block of a run shows its parts as they come, and reads a shortened one whole (${theme})`, { skip: !edge, timeout: testLimit(240_000) }, async () => {
     await withCanvas(async page => {
       await page.evaluate(`presentedFixture.theme(${light}); presentedFixture.renderBlock(1180, 2)`);
       await page.until(`document.querySelectorAll('.workflow-block .script-presented-part').length === 1`, "the first part");
@@ -53,7 +54,7 @@ for (const light of [false, true]) {
     }, options);
   });
 
-  test(`the result of a run of an agent folds its value as plain text; a run of the user keeps it as Markdown (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {
+  test(`the result of a run of an agent folds its value as plain text; a run of the user keeps it as Markdown (${theme})`, { skip: !edge, timeout: testLimit(240_000) }, async () => {
     await withCanvas(async page => {
       await page.evaluate(`presentedFixture.theme(${light}); presentedFixture.renderResult(1180, false)`);
       await page.until(`!!document.querySelector('.script-result-facts')`, "the card of the result");
@@ -90,7 +91,7 @@ for (const light of [false, true]) {
   });
 }
 
-test("the tab of a run shows what it presented, and its value as plain text or, for a run of the user, as Markdown", { skip: !edge, timeout: 240_000 }, async () => {
+test("the tab of a run shows what it presented, and its value as plain text or, for a run of the user, as Markdown", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`presentedFixture.theme(false); presentedFixture.renderTab(false)`);
     await page.until(`document.querySelectorAll('.workflow-run-section h3').length >= 4`, "the tab of the run");

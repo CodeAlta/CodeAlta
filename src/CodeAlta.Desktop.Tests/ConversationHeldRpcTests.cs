@@ -10,7 +10,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class ConversationHeldRpcTests
 {
     private const string Epoch = "abcdefab-1234-5678-9abc-abcdefabcdef";
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task List_ShowsTheQuestion_WithItsHolderAndChoices()
@@ -63,7 +63,7 @@ public sealed class ConversationHeldRpcTests
         var resolved = await service.ResolveAsync(new(Epoch, handle, "openAnyway"), default);
         Assert.AreEqual("resolved", resolved.Status);
         Assert.AreEqual(handle, resolved.Handle);
-        Assert.AreEqual(AgentConversationHeldChoice.OpenAnyway, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.OpenAnyway, await ask.WithinAsync(Timeout));
         Assert.AreEqual("rejected", (await service.ResolveAsync(new(Epoch, handle, "wait"), default)).Status, "A question is answered once.");
     }
 
@@ -79,7 +79,7 @@ public sealed class ConversationHeldRpcTests
         Assert.AreEqual("rejected", (await service.ResolveAsync(new(Epoch, entry.Handle, "openAnyway"), default)).Status);
         Assert.AreEqual("invalid_request", (await service.ResolveAsync(new(Epoch, entry.Handle, "OpenAnyway"), default)).Status);
         Assert.AreEqual("resolved", (await service.ResolveAsync(new(Epoch, entry.Handle, "continueAsCopy"), default)).Status);
-        Assert.AreEqual(AgentConversationHeldChoice.ContinueAsCopy, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.ContinueAsCopy, await ask.WithinAsync(Timeout));
     }
 
     [TestMethod]
