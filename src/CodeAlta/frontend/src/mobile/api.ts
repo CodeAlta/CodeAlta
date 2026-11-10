@@ -40,13 +40,9 @@ export function takeAddressToken(address: Readonly<{ search: string; hash: strin
   const query = new URLSearchParams(address.search);
   const inQuery = query.get("k");
   if (!inHash && inQuery === null) return null;
-  let search = address.search;
-  if (inQuery !== null) {
-    query.delete("k");
-    const others = query.toString();
-    search = others ? `?${others}` : "";
-  }
-  leave(search + (inHash ? "" : address.hash));
+  query.delete("k");
+  const others = query.toString();
+  leave((others ? `?${others}` : "") + (inHash ? "" : address.hash));
   if (!inHash) return inQuery || null;
   try { return decodeURIComponent(inHash[1]) || null; } catch { return null; }
 }

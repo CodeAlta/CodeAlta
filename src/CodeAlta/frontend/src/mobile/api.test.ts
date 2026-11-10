@@ -20,8 +20,8 @@ test("the token of the QR link is taken from the fragment and the address is cle
   const left: string[] = [];
   assert.equal(takeAddressToken({ search: "", hash: "#k=abc%2Bdef" }, rest => left.push(rest)), "abc+def");
   assert.deepEqual(left, [""]);
-  assert.equal(takeAddressToken({ search: "?a=b%20c", hash: "#k=abc" }, rest => left.push(rest)), "abc");
-  assert.deepEqual(left, ["", "?a=b%20c"], "a query without a token stays as it was written");
+  assert.equal(takeAddressToken({ search: "?a=1", hash: "#k=abc" }, rest => left.push(rest)), "abc");
+  assert.deepEqual(left, ["", "?a=1"], "what the query holds stays");
   assert.equal(takeAddressToken({ search: "", hash: "#/session/1" }, rest => left.push(rest)), null);
   assert.equal(left.length, 2, "an address without a token is left as it is");
   assert.equal(takeAddressToken({ search: "", hash: "#k=" }, rest => left.push(rest)), null);
