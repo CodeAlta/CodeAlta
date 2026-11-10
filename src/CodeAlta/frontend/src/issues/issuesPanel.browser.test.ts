@@ -608,6 +608,19 @@ test("the tab says how old the list and the item are, and reads them again on de
   }, options);
 });
 
+test("the age of a list that comes late counts from when it came", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    const listAge = `document.querySelector('.issues-stages .issues-read-at time')?.textContent`;
+    await page.until(`${rows}.join() === '#128' && ${listAge} === 'Read 3 min. ago'`, "the list with its age");
+    // The minutes the tab follows were last counted before the list was asked: the list read 3 minutes before it came is not younger.
+    await page.evaluate(`issuesFixture.state.late = 1500`);
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items of the view of the team");
+    assert.equal(await page.evaluate(listAge), "Read 3 min. ago");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the images of a description and of its comments are read through the host and drawn; one that cannot be read stays a link", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     const pictures = `[...document.querySelectorAll('.work-detail .markdown-content a[href]')].filter(a => a.querySelector('img')).map(a => [a.textContent, a.querySelector('img').getAttribute('src')?.slice(0, 22) ?? null])`;
