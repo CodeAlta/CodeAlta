@@ -66,7 +66,7 @@ public sealed class SessionViewCatalog
         foreach (var markdownPath in Directory.EnumerateFiles(root, "readme.md", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
+            var markdown = await SharedTextFile.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
             var descriptor = _serializer.DeserializeSessionMarkdown(markdown);
             descriptor.SourcePath = markdownPath;
             descriptor.Validate();
@@ -97,7 +97,7 @@ public sealed class SessionViewCatalog
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "readme.md");
         var markdown = _serializer.SerializeSessionMarkdown(session);
-        await File.WriteAllTextAsync(path, markdown, cancellationToken).ConfigureAwait(false);
+        await SharedTextFile.WriteAllTextAsync(path, markdown, cancellationToken).ConfigureAwait(false);
         session.SourcePath = path;
     }
 

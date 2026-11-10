@@ -349,7 +349,7 @@ public sealed class TextFileCodec
 
     // The attributes and the creation time of the file, given to the staged file that replaces it; its access rules were
     // given at its creation. Read-only files are refused before.
-    private static void KeepWindowsMetadata(string path, string stagingPath)
+    internal static void KeepWindowsMetadata(string path, string stagingPath)
     {
         const FileAttributes kept = FileAttributes.Hidden | FileAttributes.System | FileAttributes.Archive | FileAttributes.NotContentIndexed;
         File.SetCreationTimeUtc(stagingPath, File.GetCreationTimeUtc(path));

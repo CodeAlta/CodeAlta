@@ -218,7 +218,8 @@ public sealed partial class WorkItemService
                 return new(false, [], []);
             }
 
-            return WorkItemFiles.TryParseTagsFile(File.ReadAllText(path), out var tags, out var declined) ? new(true, tags, declined) : new(false, [], []);
+            if (SharedTextFile.TryReadAllText(path) is not { } text) return new(true, [], []);
+            return WorkItemFiles.TryParseTagsFile(text, out var tags, out var declined) ? new(true, tags, declined) : new(false, [], []);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -251,7 +252,7 @@ public sealed partial class WorkItemService
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, WorkItemFiles.SerializeTagsFile(tags, declined), new UTF8Encoding(false));
+            SharedTextFile.WriteAllText(path, WorkItemFiles.SerializeTagsFile(tags, declined));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
