@@ -197,15 +197,15 @@ Each phase ships alone, in this order.
 
 ## How it is verified
 
-- [ ] `FleetSessionSeats` tests: a limit of 2 starts two and queues the third in order; a sub-session takes no second seat; a session waiting for a person frees its seat; a cancelled waiter leaves the queue; **Start now** starts one over the limit.
-- [ ] Node tests (`FleetNodeApiTests`, `NodeAutomationTests`): a third prompt answers `queued` with its position and is sent when a run ends; a queued prompt survives a restart of the node and is sent once; a run of an automation reads `queued`, then runs.
-- [ ] `ProviderRequestGate` tests: order, cancellation, a limit changed while requests wait, the gate kept across `RegisterOrReplace`; a turn executor test that the gate is held for the stream and released on failure.
-- [ ] Model server tests (`FleetNodeModelServersTests`): two machines and a local session on a one-slot model are served one at a time in order; a relayed request whose connection closes frees its place.
-- [ ] Pool tests (`DesktopServerAutomationPlacementTests`, `NodeServerAutomationTests`, `AutomationServerTests`): two members and one due time give one run; a member without the tag does not claim; a member that cannot reach the server does not run; a member that loses its tag gets a removal.
-- [ ] `altanode tags add gpu` and `altanode labels add gpu` write the same file; `alta fleet machine list --tag gpu` and `--label gpu` give the same machines, with `tags` and `labels` in each record.
-- [ ] Frontend tests for the queued row and notice, the load in **Run on**, **Requests at once**, and the tag target of the editor.
-- [ ] In the developer instance with a node on the same computer (`altanode --data-root`), limit 1: start two sessions on it, see the second queued with its place, then start when the first ends. Screenshots in both themes.
-- [ ] `dotnet test -c <Configuration>`, `npm test` and `lunet build` pass.
+- [x] `FleetSessionSeats` tests: a limit of 2 starts two and queues the third in order; a sub-session takes no second seat; a session waiting for a person frees its seat; a cancelled waiter leaves the queue; **Start now** starts one over the limit.
+- [x] Node tests (`FleetNodeApiTests`, `NodeAutomationTests`): a third prompt answers `queued` with its position and is sent when a run ends; a queued prompt survives a restart of the node and is sent once; a run of an automation reads `queued`, then runs.
+- [x] `ProviderRequestGate` tests: order, cancellation, a limit changed while requests wait, the gate kept across `RegisterOrReplace`; a turn executor test that the gate is held for the stream and released on failure.
+- [x] Model server tests (`FleetNodeModelServersTests`): two machines and a local session on a one-slot model are served one at a time in order; a relayed request whose connection closes frees its place. Covered as `ModelServerSlotsTests` (the gate of a model in order, a caller that leaves, the host sizing and listing, the transport carrying the session), not across two machines with a running server.
+- [x] Pool tests (`DesktopServerAutomationPlacementTests`, `NodeServerAutomationTests`, `AutomationServerTests`): two members and one due time give one run; a member without the tag does not claim; a member that cannot reach the server does not run; a member that loses its tag gets a removal.
+- [x] `altanode tags add gpu` and `altanode labels add gpu` write the same file; `alta fleet machine list --tag gpu` and `--label gpu` give the same machines, with `tags` and `labels` in each record.
+- [x] Frontend tests for the queued row and notice, the load in **Run on**, **Requests at once**, and the tag target of the editor. The load, the limit, the queued labels and the Requests at once field are tested; the queued row and its notice in a tab are not.
+- [ ] In the developer instance with a node on the same computer (`altanode --data-root`), limit 1: start two sessions on it, see the second queued with its place, then start when the first ends. Screenshots in both themes. Not done yet: the behavior is covered by the node, desktop and frontend tests, not seen in a window.
+- [x] `dotnet test -c <Configuration>`, `npm test` and `lunet build` pass.
 
 ## Decisions
 
