@@ -49,7 +49,7 @@ Each task has a short id of four characters, such as `p53b`, which agents use to
 
 Tags are yours, to organize tasks that pile up: `mobile`, `flaky-tests`, `windows`. Each has a name and one line that says what it is for.
 
-- **Give a task a tag** in its details: **Add tag** offers the tags of its project, found by a part of their name or description, or **New tag** for a name it does not have. The **×** of a tag removes it.
+- **Give a task a tag** in its details: **Add tag** offers the tags of its project, found by a part of their name or description, or **New tag** for a name it does not have. It stays open for the next tag until you press Escape or click outside it. The **×** of a tag removes it.
 - **Find tasks by tag** with the **Tags** menu beside the search box: the list keeps the tasks that have one of the tags you tick. Typing `#mobile` in the search box does the same.
 - **Manage tags** from the **Tags** menu: edit the name and the description of a tag, delete it (from its tasks too), describe a tag that was only written on tasks, and forget a name you declined.
 - **A new tag finds its tasks.** With **Find the tasks it fits** ticked, a session reads the open tasks of the project and proposes the ones the tag fits. They wait above the list: **Review** shows them, with why each fits; untick the wrong ones and apply.

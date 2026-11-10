@@ -23,6 +23,10 @@ test("a task's tags are added from the project's, removed, or created, and the t
     await page.until(`tagsFixture.calls.length === 1`, "the tags of the task saved");
     assert.deepEqual(await page.evaluate(calls), ["task:mobile,flaky-tests"]);
     await page.until(`${chips}.join() === 'mobile,flaky-tests'`, "the new chip");
+    // The picker stays open for the next tag, its search cleared.
+    assert.equal(await page.evaluate(`new Promise(done => setTimeout(() => done(document.querySelector('.work-tag-picker input')?.value ?? null), 600))`), "");
+    await page.key("Escape", 27);
+    await page.until(`!document.querySelector('.work-tag-picker')`, "the picker closed by Escape");
 
     // A chip removes its tag.
     await page.click(`.work-task-tags > .work-tag .work-tag-remove`, 0);
@@ -85,6 +89,35 @@ test("a task's tags are added from the project's, removed, or created, and the t
     await page.until(`tagsFixture.calls.length === 9`, "the proposal applied");
     assert.equal(await page.evaluate(`tagsFixture.calls[8]`), "apply:parser:Parsing files:2026-11-10-fix-the-parser-p53b");
     await page.until(`!document.querySelector('.work-tag-proposal') && !document.querySelector('.work-tag-review')`, "the proposal gone");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the tag picker stays open for several tags, saves them in turn, and a click outside only closes it", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelectorAll('.work-task-tags > .work-tag').length === 1`, "the tag of the task");
+    await page.clickText(".work-tag-add", "Add tag");
+    await page.until(`!!document.querySelector('.work-tag-picker input')`, "the picker");
+
+    // Two tags clicked before the first save is back: both show at once, and the second save keeps the first tag.
+    await page.evaluate(`tagsFixture.held = true`);
+    await page.clickText(".work-tag-picker .bp6-menu-item .work-tag-option > .work-tag", "flaky-tests");
+    await page.until(`${chips}.join() === 'mobile,flaky-tests'`, "the first tag shown before its save is back");
+    await page.clickText(".work-tag-picker .bp6-menu-item .work-tag-option > .work-tag", "handmade");
+    await page.until(`${chips}.join() === 'mobile,flaky-tests,handmade'`, "the second tag shown too");
+    assert.deepEqual(await page.evaluate(calls), ["task:mobile,flaky-tests"], "the second save waits for the first");
+    await page.evaluate(`tagsFixture.release()`);
+    await page.until(`tagsFixture.calls.length === 2`, "the second save");
+    assert.deepEqual(await page.evaluate(calls), ["task:mobile,flaky-tests", "task:mobile,flaky-tests,handmade"]);
+    assert.ok(await page.evaluate(`!!document.querySelector('.work-tag-picker')`), "the picker is still open");
+
+    // A click outside closes the picker without reaching what is under it.
+    const point = await page.evaluate<{ x: number; y: number }>(`(() => { const box = document.querySelector('#behind').getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`);
+    await page.command("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
+    await page.command("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
+    await page.until(`!document.querySelector('.work-tag-picker')`, "the picker closed");
+    assert.equal(await page.evaluate(`tagsFixture.behind`), 0, "the click did not reach the button behind the picker");
+    assert.deepEqual(await page.evaluate(chips), ["mobile", "flaky-tests", "handmade"]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

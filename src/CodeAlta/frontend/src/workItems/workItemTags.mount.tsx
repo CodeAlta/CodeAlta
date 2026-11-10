@@ -8,6 +8,12 @@ import type { WorkItemsHub, WorkItemTarget, WorkTagAction } from "./workItemsHub
 // A task of project p1 with the tag mobile, the tags of p1, and a hub that keeps them as the host would: the calls are a list.
 const state = {
   calls: [] as string[],
+  // While held, a save of the task's tags waits for release(), as a slow host would.
+  held: false,
+  waiting: [] as (() => void)[],
+  release() { state.held = false; for (const resolve of state.waiting.splice(0)) resolve(); },
+  // The clicks that reached the button under the picker.
+  behind: 0,
   tags: ["mobile"] as string[],
   projectTags: [{ name: "mobile", description: "The phone app.", openTasks: 1, listed: true }, { name: "flaky-tests", description: "A test that fails at random.", openTasks: 0, listed: true },
     { name: "handmade", description: null, openTasks: 1, listed: false }] as WorkItemTagRow[],
@@ -25,7 +31,9 @@ const hub = {
   subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   getSnapshot: () => version,
   async findTagTasks(_projectId: string, name: string) { state.calls.push(`find:${name}`); return ok; },
-  async tagTask(_target: WorkItemTarget, tags: readonly string[]) { state.calls.push(`task:${tags.join(",")}`); state.tags = [...tags]; changed(); return ok; },
+  async tagTask(_target: WorkItemTarget, tags: readonly string[]) { state.calls.push(`task:${tags.join(",")}`);
+    if (state.held) await new Promise<void>(resolve => state.waiting.push(resolve));
+    state.tags = [...tags]; changed(); return ok; },
   async tag(_projectId: string, action: WorkTagAction, name: string, value: string | null = null, tasks: readonly string[] | null = null) {
     state.calls.push(`${action}:${name}:${value ?? ""}${tasks ? `:${tasks.join(",")}` : ""}`);
     if (action === "apply" || action === "dismiss") state.proposals = state.proposals.filter(proposal => proposal.name !== name);
@@ -59,6 +67,7 @@ function Page() {
     <TagProposalBanners proposals={proposals} onReview={setReviewing} onDismiss={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)} />
     {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
     <TaskTagField hub={hub} item={item} tags={state.projectTags} disabled={false} />
+    <button type="button" id="behind" style={{ display: "block", marginTop: 8 }} onClick={() => { state.behind++; }}>Behind the picker</button>
     <button type="button" id="manage" onClick={() => setManaging(true)}>Manage</button>
     {managing && <TagManagerDialog hub={hub} projectId="p1" onClose={() => setManaging(false)}
       projects={[{ id: "p1", name: "Alpha", tags: state.projectTags, declined: state.declined }]} />}

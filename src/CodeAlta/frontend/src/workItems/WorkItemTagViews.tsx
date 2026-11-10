@@ -1,5 +1,5 @@
 // The tags the user organizes tasks with: their chips, the filter of the list, the field of a task, and the dialog of a new tag.
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { Alert, Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
 import type { WorkItemTagProposalRow, WorkItemTagRow } from "#neoastra";
 import { AppIcon } from "../AppIcon";
@@ -59,9 +59,26 @@ export function TaskTagField({ hub, item, tags, disabled }: { hub: WorkItemsHub;
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const own = item.tags ?? [];
-  const save = async (next: readonly string[]) => { setFailed(!(await hub.tagTask(item, next)).ok); };
-  const add = (name: string) => { setOpen(false); setTyped(""); if (!own.includes(name)) void save([...own, name]); };
+  // Each save writes the whole list, so saves run in turn, and the field shows what the last one writes until they are all back.
+  const [saving, setSaving] = useState<readonly string[] | null>(null);
+  const saves = useRef({ last: Promise.resolve(), running: 0 });
+  const own = saving ?? item.tags ?? [];
+  const save = (next: readonly string[]) => {
+    setSaving(next);
+    const queue = saves.current;
+    queue.running++;
+    queue.last = queue.last.then(async () => {
+      setFailed(!(await hub.tagTask(item, next)).ok);
+      if (--queue.running === 0) setSaving(null);
+    });
+  };
+  // The picker stays open for the next tag, until the task has all it can have.
+  const add = (name: string) => {
+    setTyped("");
+    if (own.includes(name)) return;
+    if (own.length + 1 >= maximumTaskTags) setOpen(false);
+    save([...own, name]);
+  };
   const words = typed.trim().toLowerCase().replace(/^#/, "");
   const offered = tags.filter(tag => !own.includes(tag.name) && (!words || tag.name.includes(words) || (tag.description ?? "").toLowerCase().includes(words)));
   const name = tagNameOf(typed);
@@ -69,8 +86,9 @@ export function TaskTagField({ hub, item, tags, disabled }: { hub: WorkItemsHub;
   const full = own.length >= maximumTaskTags;
   return <div className="work-task-tags" role="group" aria-label={t("Tags")}>
     {own.map(tag => <TagChip key={tag} name={tag} title={tags.find(known => known.name === tag)?.description}
-      onRemove={disabled ? undefined : () => void save(own.filter(other => other !== tag))} />)}
-    {!full && <PopoverNext isOpen={open} onInteraction={setOpen} placement="bottom-start" autoFocus={false} content={<div className="work-tag-picker">
+      onRemove={disabled ? undefined : () => save(own.filter(other => other !== tag))} />)}
+    {/* The backdrop takes the click that closes the picker, which would otherwise reach what is under it, such as the buttons of the task. */}
+    {!full && <PopoverNext isOpen={open} onInteraction={setOpen} placement="bottom-start" autoFocus={false} hasBackdrop content={<div className="work-tag-picker">
       <InputGroup size="small" autoFocus value={typed} placeholder={t("Find or create a tag")} aria-label={t("Find or create a tag")}
         onChange={event => setTyped(event.target.value)}
         onKeyDown={event => {
@@ -82,7 +100,7 @@ export function TaskTagField({ hub, item, tags, disabled }: { hub: WorkItemsHub;
         }} />
       <Menu aria-label={t("Tags of the project")}>
         {offered.map(tag => <MenuItem key={tag.name} text={<span className="work-tag-option"><TagChip name={tag.name} />{tag.description && <small>{tag.description}</small>}</span>}
-          onClick={() => add(tag.name)} />)}
+          shouldDismissPopover={false} onClick={() => add(tag.name)} />)}
         {fresh && <MenuItem icon={<AppIcon name="plus" size={14} />} text={t("New tag \"{name}\"…", { name: name! })} onClick={() => { setOpen(false); setCreating(name); }} />}
         {!offered.length && !fresh && <MenuItem disabled text={t(tags.length ? "No tag matches. A name is lower case letters, digits and hyphens." : "Type the name of a new tag.")} />}
       </Menu>
