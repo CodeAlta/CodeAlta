@@ -100,7 +100,11 @@ function sessionWindow(id: string, window: SessionUsageRateWindow | null): Usage
 /** The limits the turns of a session reported: its two windows, the shorter one first. */
 export function sessionLimits(rateLimits: SessionUsageRateLimits | null | undefined): UsageLimit[] {
   if (!rateLimits) return [];
-  return [sessionWindow("session:primary", rateLimits.primary), sessionWindow("session:secondary", rateLimits.secondary)].filter((limit): limit is UsageLimit => !!limit);
+  const primary = sessionWindow("session:primary", rateLimits.primary);
+  // Without unified windows, Claude reports the limiting model's week as the primary window, not the account's.
+  const scope = primary?.windowMinutes && near(primary.windowMinutes, 7 * 24 * 60) && rateLimits.name?.startsWith("seven_day_")
+    ? planLabel(rateLimits.name.slice("seven_day_".length)) : null;
+  return [primary && scope ? { ...primary, name: scope } : primary, sessionWindow("session:secondary", rateLimits.secondary)].filter((limit): limit is UsageLimit => !!limit);
 }
 
 /**
@@ -113,7 +117,7 @@ export function withLiveWindows(asked: readonly UsageLimit[], live: readonly Usa
   return asked.map(limit => {
     // A limit of a model or a quota is not one of the two windows a session reports.
     if (limit.name || !limit.windowMinutes || limit.usedPercent === null) return limit;
-    const window = live.find(value => value.usedPercent !== null && !!value.windowMinutes && near(value.windowMinutes, limit.windowMinutes!));
+    const window = live.find(value => !value.name && value.usedPercent !== null && !!value.windowMinutes && near(value.windowMinutes, limit.windowMinutes!));
     if (!window) return limit;
     // How much later the reported window ends; not a number when one end is not known, which compares as one period.
     const later = Date.parse(window.resetsAt ?? "") - Date.parse(limit.resetsAt ?? "");

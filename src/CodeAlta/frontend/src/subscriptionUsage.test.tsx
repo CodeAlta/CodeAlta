@@ -94,6 +94,22 @@ test("the limits a session reported are its two windows, which bring the answer 
   assert.deepEqual(withLiveWindows([], live), []);
 });
 
+test("a model-scoped Claude window is not the weekly limit of the account", () => {
+  const week = limit({ id: "seven_day", usedPercent: 37, windowMinutes: 10080, resetsAt: "2026-10-12T05:00:00Z" });
+  const opus = limit({ id: "seven_day:opus", name: "Opus", usedPercent: 66, windowMinutes: 10080, resetsAt: week.resetsAt });
+  // Without unified windows, the CLI reports only the model that limits the turn as the primary window.
+  const live = sessionLimits({ name: "seven_day_opus", planType: null,
+    primary: { usedPercent: 91, resetsAt: week.resetsAt, windowDurationMinutes: "10080" }, secondary: null });
+  assert.equal(live[0].name, "Opus", "The fallback also names the model whose window the CLI reported.");
+  assert.deepEqual(withLiveWindows([week, opus], live), [week, opus],
+    "The model's percentage must not overwrite the account's weekly percentage.");
+  // When the same event includes unified windows, its secondary window really is the account's week.
+  const unified = sessionLimits({ name: "seven_day_opus", planType: null,
+    primary: { usedPercent: 6, resetsAt: "2026-10-08T11:00:00Z", windowDurationMinutes: "300" },
+    secondary: { usedPercent: 52, resetsAt: week.resetsAt, windowDurationMinutes: "10080" } });
+  assert.deepEqual(withLiveWindows([week, opus], unified).map(value => value.usedPercent), [52, 66]);
+});
+
 test("the limits are meters with what is counted and when they start over, in every language", () => {
   const limits = [limit({ usedPercent: 6 }), limit({ id: "seven_day", usedPercent: 92, windowMinutes: 10080, resetsAt: "2026-10-12T05:00:00Z" }),
     limit({ id: "seven_day:opus", name: "Opus", usedPercent: 140, windowMinutes: 10080, resetsAt: null }),
