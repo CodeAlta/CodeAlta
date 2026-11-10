@@ -157,7 +157,8 @@ public sealed class MobileDevTunnelTests
         Assert.AreEqual(url, fixture.Plugin.Settings().Address);
         var status = await tab.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
         Assert.AreEqual("devtunnel", status.Provider.Id);
-        StringAssert.StartsWith(status.ConnectUrl, url + "/#k=", "the code holds the address of the tunnel and the pairing token");
+        // The sign-in of the tunnel loses the fragment of an address and keeps its query: the token is in the query.
+        Assert.AreEqual(url + "/?k=" + fixture.Plugin.PairingToken, status.ConnectUrl, "the code holds the address of the tunnel and the pairing token");
         var kept = await fixture.State.ReadJsonAsync<Dictionary<string, string>>(PluginStateScope.User, "mobile-networks.json");
         Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw"), (fixture.State.Read().Mode, kept?["devtunnel/" + DevTunnelNetwork.TunnelKey]), "the tunnel is kept for the next start");
 

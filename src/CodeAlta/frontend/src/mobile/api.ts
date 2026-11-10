@@ -5,7 +5,7 @@ export const signedOutMessage = "This phone is no longer connected: scan the QR 
 
 /**
  * What the page says when the server does not know this phone and it never kept a key: it was opened without the token of
- * the QR link, as after the sign-in a tunnel asks for first (that of a Dev Tunnel loses the `#k=` of the address).
+ * the QR link, as after the sign-in a network asks for first, when it lost the token of the address.
  */
 export const notConnectedMessage = "This phone is not connected yet: scan the QR code of the Mobile tab. If the phone asked you to sign in first, scan it again now.";
 
@@ -30,14 +30,21 @@ export function memoryStore(values: Record<string, string> = {}): KeyValueStore 
 }
 
 /**
- * Takes the token of the QR link out of the address: `#k=<token>` comes once and leaves the address (and so the
- * history) at once; `signIn` keeps it for the installed app. Returns the token, or null when the address has none.
+ * Takes the token of the QR link out of the address: `#k=<token>`, or `?k=<token>` behind a network whose sign-in loses
+ * the fragment (a Dev Tunnel), comes once and leaves the address (and so the history) at once; `signIn` keeps it for the
+ * installed app. `leave` is given what stays of the address after its path. Returns the token, or null when the address
+ * has none.
  */
-export function takeFragmentToken(hash: string, clearAddress: () => void): string | null {
-  const found = /^#k=([^&]*)/u.exec(hash);
-  if (!found) return null;
-  clearAddress();
-  try { return decodeURIComponent(found[1]) || null; } catch { return null; }
+export function takeAddressToken(address: Readonly<{ search: string; hash: string }>, leave: (rest: string) => void): string | null {
+  const inHash = /^#k=([^&]*)/u.exec(address.hash);
+  const query = new URLSearchParams(address.search);
+  const inQuery = query.get("k");
+  if (!inHash && inQuery === null) return null;
+  query.delete("k");
+  const others = query.toString();
+  leave((others ? `?${others}` : "") + (inHash ? "" : address.hash));
+  if (!inHash) return inQuery || null;
+  try { return decodeURIComponent(inHash[1]) || null; } catch { return null; }
 }
 
 /** The server answered with an error: its status and what it said. */

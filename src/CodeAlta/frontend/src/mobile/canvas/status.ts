@@ -212,7 +212,7 @@ export function mobileView(status: MobileStatus): MobileView {
       actions: problem.actions ?? (words ? [] : provider.actions.map((action, index) => ({ action: action.action, text: action.label, primary: index === 0 }))),
     });
   }
-  const code = status.connectUrl && status.qr ? { ...qrPath(status.qr), address: status.address ?? status.connectUrl.replace(/#.*$/u, "") } : null;
+  const code = status.connectUrl && status.qr ? { ...qrPath(status.qr), address: status.address ?? status.connectUrl.replace(/[?#].*$/u, "") } : null;
   const waiting: MobileText | null = code || problems.length > 0 ? null
     : server === "starting" ? "The phone page is starting."
     : words?.waiting[provider.state] ?? (provider.state === "pending" ? "The phone page is starting." : null);

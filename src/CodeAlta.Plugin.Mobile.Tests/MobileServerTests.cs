@@ -39,6 +39,10 @@ public sealed class MobileServerTests
         StringAssert.Contains(page.Headers.GetValues("Content-Security-Policy").Single(), "script-src 'self'");
         Assert.AreEqual("no-cache", page.Headers.CacheControl?.ToString());
         Assert.AreEqual("DENY", page.Headers.GetValues("X-Frame-Options").Single());
+        // The link of the QR code behind a network that signs in first: the token in the query, which the page reads. No page it loads is told.
+        using var linked = await fixture.Client.GetAsync("/?k=" + MobileToken.Create());
+        Assert.AreEqual("<!doctype html><p>Phone</p>", await linked.Content.ReadAsStringAsync());
+        Assert.AreEqual("no-referrer", linked.Headers.GetValues("Referrer-Policy").Single());
 
         using var script = await fixture.Client.GetAsync("/assets/mobile-abc.js");
         Assert.AreEqual("public, max-age=31536000, immutable", script.Headers.CacheControl?.ToString());

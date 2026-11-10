@@ -37,7 +37,7 @@ public sealed class MobilePrivateNetworkTests
 
         var acted = await tab.InvokeAsync<MobileAction, MobileStatus>("mobile.act", new MobileAction("acme-login"));
         Assert.AreEqual("serving", acted.Provider.State);
-        StringAssert.StartsWith(acted.ConnectUrl, $"https://desk.acme.example:{port}/#k=", "the code holds the address of the network");
+        StringAssert.StartsWith(acted.ConnectUrl, $"https://desk.acme.example:{port}/#k=", "the code holds the address of the network, and the token in its fragment: no sign-in loses it");
         Assert.AreEqual((port, (int?)null), (acme.Published!.LocalPort, acme.Published.PublicPort), "a network without a port of its own is given none");
 
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);

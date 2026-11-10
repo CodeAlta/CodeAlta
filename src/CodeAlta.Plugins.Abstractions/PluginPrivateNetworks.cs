@@ -24,6 +24,13 @@ public enum PrivateNetworkCapabilities
 
     /// <summary>A publication takes the port of the network it is published at (<see cref="PrivateNetworkPublication.PublicPort"/>).</summary>
     PublicPort = 4,
+
+    /// <summary>
+    /// A device signs in to the network in its browser before it reaches a page the network publishes, as with a Dev Tunnel. That
+    /// sign-in keeps the path and the query of the address the device opened and loses its fragment (what follows <c>#</c>): a link
+    /// that must carry something to the page through it, such as the pairing token of the Mobile plugin, carries it in the query.
+    /// </summary>
+    BrowserSignIn = 8,
 }
 
 /// <summary>

@@ -120,9 +120,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
         app.MapGet("/assets/{**file}", (HttpContext context, string file, CancellationToken ct) => FileAsync(context, "assets/" + file, null, ct));
         app.MapGet("/mobile/{**file}", (HttpContext context, string file, CancellationToken ct) => FileAsync(context, "mobile/" + file, null, ct));
 
-        // The phone signs in with the pairing token of the QR code, which it read from the fragment of the address (never a query,
-        // which proxies and histories keep), and gets a key of its own: its cookie, and what it keeps to sign in again (an
-        // installed app does not share the browser's cookies). It signs in again with that key.
+        // The phone signs in with the pairing token of the QR code, which it read from the address (its fragment, or its query
+        // behind a network whose sign-in loses the fragment: see MobilePlugin.Status), and gets a key of its own: its cookie, and
+        // what it keeps to sign in again (an installed app does not share the browser's cookies). It signs in again with that key.
         app.MapPost("/api/login", async (HttpContext context, CancellationToken ct) =>
         {
             var body = await BodyAsync(context.Request, ct).ConfigureAwait(false);

@@ -1,5 +1,5 @@
 import { hasImages, newSessionReadsImages } from "./attachments";
-import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
+import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeAddressToken } from "./api";
 import { applyAppearance, fontStepKey, fontSteps, readFontStep, readThemeChoice, steppedFont, themeKey, themeOf, type Theme, type ThemeChoice } from "./appearance";
 import { createBarMenu } from "./barMenu";
 import { coalesce, composerView } from "./composer";
@@ -1685,9 +1685,9 @@ export function startMobile(window: Window & typeof globalThis) {
   }
   $<HTMLButtonElement>("refresh").addEventListener("click", () => void refreshAll());
 
-  // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----
+  // ---- Sign-in: the token of the QR link (#k=, or ?k=) gets the cookie; without it, the cookie or the kept token is used ----
   async function signInFromAddress(): Promise<boolean> {
-    const token = takeFragmentToken(window.location.hash, () => window.history.replaceState(null, "", window.location.pathname + window.location.search));
+    const token = takeAddressToken(window.location, rest => window.history.replaceState(null, "", window.location.pathname + rest));
     if (!token) return true;
     try {
       if (!await api.signIn(token)) { showSignedOut(); return false; }

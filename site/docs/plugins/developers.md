@@ -183,6 +183,7 @@ A plugin brings a VPN or a tunnel that CodeAlta does not know, beside Tailscale 
 
 - `Presence`: `FindThisComputerAsync` gives the name and the addresses of this computer on the network. The pairing links of [Your Machines](../fleet/machines.md#pair-two-codealta-desktops) name it there first.
 - `Publish`: `CreatePublisher` publishes a page of this computer at an HTTPS address, such as the [phone page](mobile.md). The network is offered under **Phones connect through**, with its `DisplayName` and `Description`; the status it gives says what keeps the phones out, with a button for each of its `Actions` (a sign-in). `PublicPort` adds the port of the network to the settings.
+- `BrowserSignIn`: a device signs in to the network in its browser before it reaches the page, which loses what follows `#` in the address it opened. The QR code of the phone page then carries its pairing token in the query (`?k=`), which such a sign-in must keep.
 
 ```csharp
 public sealed class AcmePlugin : PluginBase, IPrivateNetworkSource

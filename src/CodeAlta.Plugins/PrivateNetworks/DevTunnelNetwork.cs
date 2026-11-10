@@ -424,7 +424,11 @@ internal sealed class DevTunnelNetwork(IDevTunnelCli cli) : IPrivateNetworkProvi
     public string Description => "Any device signed in with the GitHub account of the tunnel, through a Dev Tunnel of Microsoft.";
 
     /// <inheritdoc />
-    public PrivateNetworkCapabilities Capabilities => PrivateNetworkCapabilities.Publish;
+    /// <remarks>
+    /// The browser of a device is sent to the sign-in of GitHub, then comes back to the address it opened: the tunnel keeps the path
+    /// and the query of that address (the <c>rd</c> of its redirection), and the pages of the sign-in lose its fragment.
+    /// </remarks>
+    public PrivateNetworkCapabilities Capabilities => PrivateNetworkCapabilities.Publish | PrivateNetworkCapabilities.BrowserSignIn;
 
     /// <inheritdoc />
     public IPrivateNetworkPublisher CreatePublisher(IPrivateNetworkHost host)
