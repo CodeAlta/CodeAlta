@@ -148,9 +148,13 @@ public interface IAutomationStore
     /// <summary>Writes the runs a machine reported: new ones are added, known ones of that machine updated, those of another machine left alone.</summary>
     /// <param name="runs">The runs.</param>
     /// <param name="keep">How many runs are kept per automation; older ones are forgotten.</param>
+    /// <param name="claimsKeptAfter">
+    /// Beyond <paramref name="keep"/>, the runs that took a due time or an event and started after this time are kept still:
+    /// they say who took it, so that a machine that catches up later does not take it again.
+    /// </param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>How many were written.</returns>
-    ValueTask<int> RecordAutomationRunsAsync(IReadOnlyList<AutomationRunRecord> runs, int keep, CancellationToken cancellationToken = default);
+    ValueTask<int> RecordAutomationRunsAsync(IReadOnlyList<AutomationRunRecord> runs, int keep, DateTimeOffset claimsKeptAfter, CancellationToken cancellationToken = default);
 
     /// <summary>Records when the schedules of automations are next due on their machine, for the versions held for it.</summary>
     /// <param name="organizationId">The organization.</param>

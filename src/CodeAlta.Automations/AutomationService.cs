@@ -318,7 +318,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
             foreach (var trigger in entry.Definition.Triggers)
             {
                 if (Schedule(trigger) is not { } schedule) continue;
-                for (var (at, count) = (schedule.Next(now, _zone), 0); at is { } time && time <= until && count < 2000; (at, count) = (schedule.Next(time, _zone), count + 1))
+                var zone = ZoneOf(entry);
+                for (var (at, count) = (schedule.Next(now, zone), 0); at is { } time && time <= until && count < 2000; (at, count) = (schedule.Next(time, zone), count + 1))
                 {
                     var slot = Math.Min(slots - 1, (int)((time - now).Ticks * slots / window.Ticks));
                     if (!own.TryGetValue(slot, out var first) || time < first) own[slot] = time;
@@ -715,7 +716,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
                     {
                         // A time that passed long ago was missed: it runs only for an automation that catches up.
                         if (now - time <= Late || entry.Definition.CatchUp) fire ??= (trigger, time);
-                        _due[key] = time = Schedule(trigger)?.Next(now, _zone) ?? DateTimeOffset.MaxValue;
+                        _due[key] = time = Schedule(trigger)?.Next(now, ZoneOf(entry)) ?? DateTimeOffset.MaxValue;
                     }
 
                     if (next is null || time < next) next = time;
@@ -843,14 +844,15 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
         if (_state.Paused) return EventStart.Held;
         var occurrence = EventOccurrence(source, eventKey);
-        var runId = NewRunId();
-        AutomationPoolClaim claimed;
-        try { claimed = await claims.ClaimEventAsync(entry.Id, occurrence, runId, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false); }
-        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException) { claimed = AutomationPoolClaim.Later; }
-        if (claimed != AutomationPoolClaim.Granted) return claimed == AutomationPoolClaim.Taken ? EventStart.Taken : EventStart.Held;
-        if (Trigger(entry, trigger, detail, prompt, waits: true, occurrence, reply, null, null, claimedRunId: runId)) return EventStart.Started;
-        // Busy or paused meanwhile: the claim is given back, and the event is looked at again.
-        claims.GiveBack(runId);
+        // The run that claims is a new one, unless an earlier claim of this event waits for an answer the server did not give:
+        // that run claims again, so that a grant whose answer was lost is never refused as taken by another run.
+        AutomationEventClaim claimed;
+        try { claimed = await claims.ClaimEventAsync(entry.Id, occurrence, NewRunId(), _time.GetUtcNow(), cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException) { return EventStart.Held; }
+        if (claimed.Outcome != AutomationPoolClaim.Granted) return claimed.Outcome == AutomationPoolClaim.Taken ? EventStart.Taken : EventStart.Held;
+        if (Trigger(entry, trigger, detail, prompt, waits: true, occurrence, reply, null, null, claimedRunId: claimed.RunId)) return EventStart.Started;
+        // Busy or paused meanwhile: the claim is kept for this run, which claims the event again at the next look.
+        claims.Hold(claimed.RunId);
         return EventStart.Held;
     }
 
@@ -880,6 +882,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
             catch (Exception exception) when (exception is not OutOfMemoryException) { taken = "The server of its pool did not answer its claim: " + FirstLine(exception.Message); }
             if (taken == AutomationClaimAnswers.TakenInPool)
             {
+                // The claim of this machine ends, so that it is neither renewed nor kept unfinished; it still says the time was seen.
+                pool.Release(run.Id, _time.GetUtcNow());
                 lock (_gate)
                 {
                     var count = _running.GetValueOrDefault(entry.Id) - 1;
@@ -1080,6 +1084,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
         if (changed) Changed?.Invoke();
     }
 
+    // The time zone the schedules of an automation are read in: the one it names (every machine of a pool reads the same
+    // instants), else the one of this host.
+    private TimeZoneInfo ZoneOf(AutomationEntry entry) => entry.Definition.FindTimeZone() ?? _zone;
+
     // Under the gate. A schedule already waited for keeps its time; a new one starts from now, or, at the start of
     // the application and for an automation that catches up, from when the schedules were last looked at.
     private void Reschedule(DateTimeOffset now, bool first)
@@ -1094,7 +1102,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
                 keys.Add(key);
                 if (_due.ContainsKey(key)) continue;
                 var from = first && entry.Definition.CatchUp && _aliveBefore is { } alive && alive < now ? alive : now;
-                _due[key] = schedule.Next(from, _zone);
+                _due[key] = schedule.Next(from, ZoneOf(entry));
             }
         }
 

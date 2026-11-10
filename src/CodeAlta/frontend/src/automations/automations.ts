@@ -380,6 +380,13 @@ export const maximumPoolTags = 8;
 export const maximumRunsAtOnce = 16;
 /** Whether a text is a tag of a machine: letters, digits, -, _, . and :, at most 64. */
 export const isMachineTag = (tag: string): boolean => /^[A-Za-z0-9._:-]{1,64}$/.test(tag);
+/** The tags of a pool as typed: trimmed, those that are tags, once each whatever their case (as machines compare them), at most eight. */
+export function poolTags(tags: readonly string[]): readonly string[] {
+  const kept: string[] = [];
+  for (const tag of tags.map(item => item.trim()).filter(isMachineTag))
+    if (!kept.some(held => held.toLowerCase() === tag.toLowerCase())) kept.push(tag);
+  return kept.slice(0, maximumPoolTags);
+}
 
 /** What is sent to the host for a form. */
 export function inputOf(form: AutomationForm): AutomationInput {

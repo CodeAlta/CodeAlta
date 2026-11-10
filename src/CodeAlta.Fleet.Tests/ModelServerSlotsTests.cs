@@ -89,6 +89,24 @@ public sealed class ModelServerSlotsTests
     }
 
     [TestMethod]
+    public async Task WaitsThatFailWhileSlotsAreGivenBack_NeverLoseASlot()
+    {
+        // A callback that throws races the release that would admit its waiter: the slot is never left to nobody.
+        var token = TestContext.CancellationToken;
+        var gate = new ModelSlotGate();
+        gate.SetLimit(1);
+        for (var round = 0; round < 200; round++)
+        {
+            var held = await gate.AcquireAsync(null, token);
+            var failing = gate.AcquireAsync(async (_, _) => { await Task.Yield(); throw new OperationCanceledException(); }, token).AsTask();
+            held.Dispose();
+            try { (await failing.WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose(); }
+            catch (OperationCanceledException) { }
+            Assert.AreEqual((0, 0), (gate.ActiveCount, gate.WaitingCount), $"round {round}");
+        }
+    }
+
+    [TestMethod]
     public async Task TheHost_SizesTheSlotsOfAModelBySettings_AndListsTheRequestsThatWait()
     {
         var token = TestContext.CancellationToken;

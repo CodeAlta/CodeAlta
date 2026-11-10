@@ -51,6 +51,10 @@ internal sealed partial class NodeAutomations
             {
                 try { await Task.Delay(_options.PoolWait, _options.TimeProvider, cancellationToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return "The machine stopped before its run was claimed."; }
+                // The automation, or a tag, may have been taken away meanwhile: only a machine that still holds it with all its tags claims.
+                if (AssignmentOf(automationId) is not { Tags: not null } still) return "This automation was taken away from this machine before its run was claimed.";
+                if (PoolProblem(still) is { } lost) return lost;
+                held = still;
             }
         }
 
@@ -63,8 +67,8 @@ internal sealed partial class NodeAutomations
             // machine is given back, and the time recorded as skipped.
             if (assignment.Tags is not null)
             {
+                // The time is recorded as skipped; the claim of this machine ends with it and still says the time was seen here.
                 Log($"The server did not answer the claim of {occurrence} of the automation {automationId}: a machine of a pool does not run it without its claim.");
-                Claims?.GiveBack(runId);
                 return NoServerClaim;
             }
 
@@ -114,15 +118,16 @@ internal sealed partial class NodeAutomations
 
     /// <summary>
     /// Claims an event of a pooled automation before its run, here and at its server: refused while this machine lacks a tag
-    /// of the pool, let for a look to the others of the pool when this machine has no free seat, given back when the server
-    /// does not answer (it is looked at again later), and seen without running when another machine took it.
+    /// of the pool, let for a look to the others of the pool when this machine has no free seat, kept pending for the same run
+    /// when the server does not answer (it is looked at again later, and that run claims it again, which the server grants
+    /// again if its lost answer was a grant), and seen without running when another machine took it.
     /// </summary>
-    internal async ValueTask<AutomationPoolClaim> ClaimPoolEventAsync(AutomationClaimStore local, string automationId, string occurrence, string runId, DateTimeOffset now,
+    internal async ValueTask<AutomationEventClaim> ClaimPoolEventAsync(AutomationClaimStore local, string automationId, string occurrence, string runId, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         if (AssignmentOf(automationId) is not { Tags: not null } assignment)
-            return local.TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken;
-        if (PoolProblem(assignment) is not null || assignment.Via is not { } link) return AutomationPoolClaim.Later;
+            return new(local.TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken, runId);
+        if (PoolProblem(assignment) is not null || assignment.Via is not { } link) return new(AutomationPoolClaim.Later, runId);
         // The seats are read outside the gate of the automations: they have a lock of their own.
         var free = HasFreeSeat();
         lock (_gate)
@@ -131,24 +136,33 @@ internal sealed partial class NodeAutomations
             if (!free && _deferredEvents.Add((automationId, occurrence)))
             {
                 if (_deferredEvents.Count > MaximumDeferredEvents) _deferredEvents.Clear();
-                return AutomationPoolClaim.Later;
+                return new(AutomationPoolClaim.Later, runId);
             }
 
             _deferredEvents.Remove((automationId, occurrence));
         }
 
-        if (!local.TryClaim(automationId, occurrence, runId, now)) return AutomationPoolClaim.Taken;
+        // A claim of this event that waits for an answer is asked again by its own run; any other claim means it was taken here.
+        if (local.Find(automationId, occurrence) is { Pending: true, EndedAt: null } pending) runId = pending.RunId;
+        else if (!local.TryClaim(automationId, occurrence, runId, now)) return new(AutomationPoolClaim.Taken, runId);
         var result = await ClaimAtServerAsync(link, automationId, assignment, occurrence, runId, cancellationToken).ConfigureAwait(false);
         if (result is null)
         {
-            Log($"The server did not answer the claim of an event of the automation {automationId}: it is looked at again later.");
-            local.GiveBack(runId);
-            return AutomationPoolClaim.Later;
+            Log($"The server did not answer the claim of an event of the automation {automationId}: it is looked at again later, by the same run.");
+            local.MarkPending(runId, true);
+            return new(AutomationPoolClaim.Later, runId);
         }
 
-        if (!result.Granted) return AutomationPoolClaim.Taken;
+        if (!result.Granted)
+        {
+            // Another machine runs it: the claim of this one ends, and still says the event was seen.
+            local.Release(runId, _options.TimeProvider.GetUtcNow());
+            return new(AutomationPoolClaim.Taken, runId);
+        }
+
+        local.MarkPending(runId, false);
         lock (_gate) _serverClaims[runId] = (link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId, default));
-        return AutomationPoolClaim.Granted;
+        return new(AutomationPoolClaim.Granted, runId);
     }
 
     /// <summary>Gets whether an automation this node holds was given to a pool (<see cref="NodeAutomationAssignment.Tags"/>).</summary>
@@ -548,13 +562,13 @@ internal sealed class NodeAutomationClaims(AutomationClaimStore local, NodeAutom
     public bool IsPooled(string automationId) => automations.IsPooled(automationId);
 
     /// <inheritdoc />
-    public ValueTask<AutomationPoolClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
+    public ValueTask<AutomationEventClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
         => automations.ClaimPoolEventAsync(local, automationId, occurrence, runId, now, cancellationToken);
 
     /// <inheritdoc />
-    public void GiveBack(string runId)
+    public void Hold(string runId)
     {
-        local.GiveBack(runId);
+        local.Hold(runId);
         automations.ReleaseServerClaim(runId);
     }
 }

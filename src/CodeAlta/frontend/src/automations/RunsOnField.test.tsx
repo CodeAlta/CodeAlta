@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { MachineView } from "#neoastra";
 import { locales, translate } from "../localization";
 import { ShellLanguageContext } from "../shellLanguage";
-import { emptyForm, formProblem, inputOf, newTrigger, poolTakes, type AutomationForm } from "./automations";
+import { emptyForm, formProblem, inputOf, newTrigger, poolTags, poolTakes, type AutomationForm } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 import { poolChoice, RunsOnField } from "./RunsOnField";
 
@@ -61,4 +61,9 @@ test("a pool is saved with its tags and the runs it lets work at once, and refus
   const input = inputOf(named({ runsOn: "dgx", runsOnTags: ["gpu"], maxRuns: 3 }));
   assert.deepEqual([input.runsOn, input.runsOnTags, input.maxRuns], [null, ["gpu"], 3], "the tags take the place of a machine");
   assert.deepEqual([inputOf(named({ maxRuns: 1 })).maxRuns, inputOf(named({ runsOnTags: ["gpu"], projectId: "p", storeInProject: true })).runsOnTags], [null, null]);
+});
+
+test("the tags typed are kept once each whatever their case, as the machines compare them", () => {
+  assert.deepEqual(poolTags(["gpu", " GPU ", "linux", "two words", "Linux", "os:linux"]), ["gpu", "linux", "os:linux"]);
+  assert.equal(poolTags(Array.from({ length: 12 }, (_, index) => `t${index}`)).length, 8);
 });

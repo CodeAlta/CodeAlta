@@ -105,7 +105,13 @@ Every event has an id, so a run happens once even when two machines see the same
   arms and before it claims; one without a free seat lets the others claim first (30 seconds for a schedule, one look of
   its trigger for an event); one that cannot reach the server runs nothing, since at most once comes before
   availability. Triggers bound to one machine (a command, Slack, the hooks of a server, the events of a machine) keep an
-  automation off a pool. A pool needs a server: paired machines have no arbiter.
+  automation off a pool. A pool needs a server: paired machines have no arbiter. It has one arbiter at a time: its
+  members are given their copies only once the copies it left that another arbiter would judge (a direct copy, the copy
+  of one machine, which runs alone while its server is away, or the copies of a pool of another server) are taken away.
+  Its copies name one time zone, so that a due time is the same instant on every member; the server keeps the run that
+  took a due time or an event beyond the history it shows, and refuses a due time older than what it forgot. A member
+  whose claim got no answer claims again with the same run, so that a grant whose answer was lost is never taken for
+  another's.
 
 ## Who a run acts as
 

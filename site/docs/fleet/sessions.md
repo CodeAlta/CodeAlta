@@ -109,7 +109,9 @@ Each machine fires the triggers itself and asks the server before it runs one: o
 - A machine that gains the tags gets the automation, and one that loses a tag has its copy taken away. Also while this computer is closed, a machine that lost a tag runs nothing more of it.
 - A machine that cannot reach the server runs nothing of it: a due time is listed as skipped with why, and an event is looked at again later.
 - Machines with tags take schedules, cron, issues, pull requests and Jira. A command, Slack and the hooks of a server keep an automation on one machine; the editor says which trigger does.
-- **Run now** runs it on the machine with the most free seats. Its runs are listed together, each with its machine.
+- Its schedules are read in the time zone of this computer on every machine, so that 09:00 is the same moment for all; `time_zone = "Europe/Paris"` in the configuration file names another.
+- Moved from one machine to machines with tags, or to machines of another server, it waits until the machines it left took their copies away, as when it moves between machines.
+- **Run now** runs it, as it is now, on the machine with the most free seats that has its last change. Its runs are listed together, each with its machine.
 - A machine with an older CodeAlta refuses the automation, and its details say so: update it.
 
 Under **More options**, **Runs at once on a machine** lets several runs of the automation work at the same time on one machine (`max_runs` in the configuration file); with 1, a run waits for the previous one.

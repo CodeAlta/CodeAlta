@@ -187,13 +187,13 @@ Each phase ships alone, in this order.
 
 **Phase 4: runs on tags**
 
-- [ ] 17. `AutomationDefinition.RunsOn` becomes a target (a machine or tags) with `max_runs`; parse, validate, write and fingerprint both forms in `AutomationConfig`/`AutomationModel`. `Trigger` compares the runs in progress with `max_runs`.
-- [ ] 18. `FleetAutomationVersion` carries the signed tags, in a format an older node refuses (as `VersionFor` did for autonomy). The node checks its tags before it arms and before it claims, never runs a pooled time without the server's claim, gives back its local claim when the server did not answer, and waits before it claims while it has no free seat (`NodeAutomations.Server.cs`).
-- [ ] 19. `DesktopAutomationPlacement` keeps its records by automation and machine: resolves the members from the machines of the server and their tags, gives each its copy through the server, removes it from those that left, reads the runs of all. The wait for a machine to take its copy away stays for a single machine; among members the claim arbitrates.
-- [ ] 20. Editor: **Machines with tags…** with the tags the machines have and the members that match now; the triggers a pool does not take; `max_runs` under **More options**. The card and the runs name the machine of each run. **Run now** picks the member with the most free seats.
-- [ ] 21. `alta fleet automation place --tag`, `alta fleet automation list` with the members; skill text.
-- [ ] 22. **Runs on** always visible (part 6).
-- [ ] 23. Docs: `site/docs/automations.md`, `site/docs/fleet/sessions.md`, `doc/fleet/orchestration.md` (what exists: the pool by copies and claims, where it differs from the server that picks).
+- [x] 17. `AutomationDefinition.RunsOn` becomes a target (a machine or tags) with `max_runs`; parse, validate, write and fingerprint both forms in `AutomationConfig`/`AutomationModel`. `Trigger` compares the runs in progress with `max_runs`. Done with `RunsOnTags` beside `RunsOn`, rather than one target type.
+- [x] 18. `FleetAutomationVersion` carries the signed tags, in a format an older node refuses (as `VersionFor` did for autonomy). The node checks its tags before it arms and before it claims, never runs a pooled time without the server's claim, gives back its local claim when the server did not answer, and waits before it claims while it has no free seat (`NodeAutomations.Server.cs`). The pooled version is format 3 with signed `tags`; a member that loses the claim records nothing; members come from one server.
+- [x] 19. `DesktopAutomationPlacement` keeps its records by automation and machine: resolves the members from the machines of the server and their tags, gives each its copy through the server, removes it from those that left, reads the runs of all. The wait for a machine to take its copy away stays for a single machine; among members the claim arbitrates.
+- [x] 20. Editor: **Machines with tags…** with the tags the machines have and the members that match now; the triggers a pool does not take; `max_runs` under **More options**. The card and the runs name the machine of each run. **Run now** picks the member with the most free seats.
+- [x] 21. `alta fleet automation place --tag`, `alta fleet automation list` with the members; skill text.
+- [x] 22. **Runs on** always visible (part 6).
+- [x] 23. Docs: `site/docs/automations.md`, `site/docs/fleet/sessions.md`, `doc/fleet/orchestration.md` (what exists: the pool by copies and claims, where it differs from the server that picks).
 
 ## How it is verified
 

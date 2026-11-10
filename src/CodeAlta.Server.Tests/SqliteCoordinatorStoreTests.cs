@@ -33,6 +33,36 @@ public sealed class SqliteCoordinatorStoreTests
         return (organization, device);
     }
 
+    [TestMethod]
+    public async Task TheRunThatTookADueTime_OutlivesTheRunsShown_SoThatAMachineCatchingUpDoesNotTakeItAgain()
+    {
+        using var root = new TempDirectory();
+        await using var store = await OpenAsync(root);
+        var (organization, _) = await SetUpAsync(store);
+        AutomationRunRecord Run(string id, string machine, string? occurrence, DateTimeOffset at)
+            => new(organization.Id, id, "pool-1", machine, 1, "hourly", "completed", occurrence, at, at.AddMinutes(1), at.AddMinutes(5), null, null, at);
+
+        // Machine a takes the due time E; then 205 more runs are reported, more than the history keeps.
+        const string E = "hourly:0/1@2026-11-03T12:00:00Z";
+        Assert.IsTrue((await store.ClaimAutomationOccurrenceAsync(Run("run-e", "a", E, Start))).Granted);
+        for (var index = 0; index < 205; index++)
+            await store.RecordAutomationRunsAsync([Run($"run-{index}", "a", null, Start.AddMinutes(1 + index))], 200, Start.AddDays(-60));
+        Assert.AreEqual(200, (await store.ListAutomationRunsAsync(organization.Id, "pool-1", 200)).Count);
+
+        // Machine b catches E up: the record of who took it is still there, and b does not take it.
+        var again = await store.ClaimAutomationOccurrenceAsync(Run("run-b", "b", E, Start.AddHours(5)));
+        Assert.IsFalse(again.Granted, "a pruned history must not give a due time twice");
+        Assert.AreEqual(("a", "run-e"), (again.Holder!.MachineId, again.Holder.RunId));
+
+        // Once older than the claims kept, the record goes with the rest of the history, and what it covered is still not given:
+        // a due time at or before the latest one forgotten is refused, a later one is free.
+        await store.RecordAutomationRunsAsync([Run("run-late", "a", null, Start.AddDays(1))], 200, Start.AddMinutes(1));
+        Assert.AreEqual(0, (await store.ListAutomationRunsAsync(organization.Id, "pool-1", 500)).Count(static run => run.RunId == "run-e"), "the record itself is forgotten");
+        var forgotten = await store.ClaimAutomationOccurrenceAsync(Run("run-b2", "b", E, Start.AddDays(1)));
+        Assert.AreEqual((false, (AutomationRunRecord?)null), (forgotten.Granted, forgotten.Holder));
+        Assert.IsTrue((await store.ClaimAutomationOccurrenceAsync(Run("run-b3", "b", "hourly:0/1@2026-11-04T12:00:00Z", Start.AddDays(1)))).Granted);
+    }
+
     private static AuditEntry Audit(string action, string? target = null) => new(action, AuditEntry.Success, "alex", "desktop", target, "127.0.0.1", Guid.NewGuid().ToString("N"));
 
     private static SessionRecord Fact(string id, string machine, long epoch, long version, string state = "running")

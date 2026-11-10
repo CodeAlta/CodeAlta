@@ -213,6 +213,12 @@ public sealed class AutomationConfigTests
         // A pool takes schedules, cron, issues, pull requests and Jira; a command, Slack or a hook are bound to one machine.
         StringAssert.Contains(AutomationConfig.Validate(pooled with { Triggers = [new AutomationTrigger(AutomationTriggerKind.Command) { Command = "make check" }] }), "command");
         Assert.IsNull(AutomationConfig.Validate(pooled with { PublishTo = "team:infra" }), "a pool is published to a team as one machine is");
+        // The time zone its schedules are read in, which every copy given to a pool names.
+        var zoned = pooled with { TimeZone = "Europe/Paris" };
+        StringAssert.Contains(AutomationConfig.Write(string.Empty, zoned), "time_zone = \"Europe/Paris\"\n");
+        AssertSame(zoned, AutomationConfig.Read(AutomationConfig.Write(string.Empty, zoned), Global).Definitions.Single());
+        Assert.AreNotEqual(pooled.Fingerprint(), zoned.Fingerprint());
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { TimeZone = "Nowhere/Atlantis" }), "time zone");
         foreach (var bad in new[] { "runs_on = { tags = \"gpu\" }", "runs_on = { machine = \"x\" }", "runs_on = 3", "max_runs = 0", "max_runs = \"two\"" })
         {
             var (_, faults) = AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\n{bad}\n", Global);

@@ -445,7 +445,7 @@ public sealed class DesktopServerAutomationPlacementTests
             File.WriteAllText(global, $$"""
                 [automations.{{Id}}]
                 name = "Nightly on the GPUs"
-                runs_on = { tags = ["gpu"] }
+                runs_on = "{{miniKey.DeviceId}}"
                 max_runs = 2
                 prompt = "Summarize the day."
                 triggers = [{ type = "daily", at = ["23:00"] }]
@@ -454,7 +454,7 @@ public sealed class DesktopServerAutomationPlacementTests
             await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
                 new AutomationStateStore(Path.Combine(root, "desktop-state", "automations.json"), false), runner, TimeProvider.System, TimeZoneInfo.Utc);
             await automations.RefreshAsync();
-            CollectionAssert.AreEqual(new[] { "gpu" }, automations.Snapshot.Find(Id)!.Definition.RunsOnTags!.ToArray());
+            Assert.AreEqual(miniKey.DeviceId, automations.Snapshot.Find(Id)!.Definition.RunsOn);
 
             // The machines of the server and their tags, as its directory lists them.
             var tags = new Dictionary<string, IReadOnlyList<string>> { [miniKey.DeviceId] = ["gpu"], [boxKey.DeviceId] = ["GPU", "linux"] };
@@ -466,9 +466,23 @@ public sealed class DesktopServerAutomationPlacementTests
                 : null;
             await using var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation)
             {
-                ServerRoute = Route, PoolMachines = Listed, RunsReadInterval = TimeSpan.Zero,
+                ServerRoute = Route, PoolMachines = Listed, RunsReadInterval = TimeSpan.Zero, PoolTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo"),
             };
             automations.Placement = placement;
+
+            // First on the mini alone, through the server: a copy of one machine, which runs alone while its server is away.
+            await placement.SyncAsync(token);
+            var single = (await desktop.ListAutomationsAsync(token)).Automations.Single(item => item.Id == Id);
+            Assert.IsTrue(FleetAutomationVersionDocuments.TryParse(single.Version.Payload, out var alone) && !alone.IsPooled && alone.MachineId == miniKey.DeviceId);
+
+            // Then on the machines with the tag: no member is given it before the mini took that copy away, so that the copy of
+            // one machine and the pool never both run a due time; a person may start it anyway.
+            Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = null, RunsOnTags = ["gpu"] }, null, token));
+            await placement.SyncAsync(token);
+            Assert.IsTrue(placement.Status(automations.Snapshot.Find(Id)!)!.Members!.All(static member => member.State == "waiting"), "the pool waits for the machine it left");
+            Assert.IsFalse((await desktop.ListAutomationsAsync(token)).Automations.Any(static item => FleetAutomationVersionDocuments.TryParse(item.Version.Payload, out var version)
+                && version.IsPooled), "no copy of the pool is given meanwhile");
+            Assert.IsTrue(placement.ForceHandoff(Id));
 
             // Every machine with the tag gets its copy, signed and sealed for it, of the format of a pool, with the tags.
             await placement.SyncAsync(token);
@@ -479,6 +493,11 @@ public sealed class DesktopServerAutomationPlacementTests
                 Assert.IsTrue(FleetAutomationVersionDocuments.TryParse(item.Version.Payload, out var version));
                 Assert.AreEqual((FleetAutomationVersion.PoolVersion, false), (version.Version, version.Removed));
                 CollectionAssert.AreEqual(new[] { "gpu" }, version.Tags!.ToArray());
+                // Every member reads its schedule in the same zone, the one of this computer, so that each due time is one instant.
+                var list = await desktop.ReadVerifiedDeviceListAsync(null, token);
+                Assert.IsTrue(FleetAutomationSigning.TryOpen(version.Sealed, Id, version.Number, version.MachineId, version.MachineId == miniKey.DeviceId ? miniKey : boxKey, list,
+                    out var content, out var reason), reason);
+                StringAssert.Contains(content.Definition, "time_zone = \"Asia/Tokyo\"");
             }
 
             var status = placement.Status(automations.Snapshot.Find(Id)!)!;

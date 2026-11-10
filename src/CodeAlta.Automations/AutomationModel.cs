@@ -635,6 +635,22 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>How many runs of the automation work at once on a machine (<c>max_runs</c>); null for one.</summary>
     public int? MaxRuns { get; init; }
 
+    /// <summary>
+    /// The time zone its schedules are read in (<c>time_zone</c>, an IANA or Windows id); null for the zone of the machine that
+    /// runs it. The copies given to a pool always name one, so that every machine of the pool fires the same instants.
+    /// </summary>
+    public string? TimeZone { get; init; }
+
+    /// <summary>Finds the time zone of <see cref="TimeZone"/> on this machine; null for none, or one this machine does not know.</summary>
+    internal TimeZoneInfo? FindTimeZone() => TimeZone is { } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? zone : null;
+
+    /// <summary>The id a time zone is written with: its IANA id when it has one, which every system reads.</summary>
+    internal static string ZoneId(TimeZoneInfo zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+        return zone.HasIanaId ? zone.Id : TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out var iana) ? iana : zone.Id;
+    }
+
     /// <summary>Whether it runs elsewhere than here: on a machine (<see cref="RunsOn"/>) or a pool (<see cref="RunsOnTags"/>).</summary>
     internal bool IsPlaced => RunsOn is not null || RunsOnTags is not null;
 
@@ -707,6 +723,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         // Nor without a pool, nor without runs at once of their own.
         if (RunsOnTags is not null) text += "\nruns_on_tags\n" + string.Join(',', RunsOnTags);
         if (MaxRuns is { } runs) text += "\nmax_runs\n" + runs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // Nor without a time zone of their own.
+        if (TimeZone is not null) text += "\ntime_zone\n" + TimeZone;
         // Nor without a scope of its own.
         if (PublishTo is not null) text += "\npublish_to\n" + PublishTo;
         // Nor without an environment.

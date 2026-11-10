@@ -180,6 +180,65 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task AnEventOfAPool_WhoseGrantWasLost_IsClaimedAgainByTheSameRun_AClaimLostToAnotherMachineEnds_AndALostTagStopsARunByHand()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var clock = new NodeClock { Now = Noon };
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = clock, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account, PoolWait = TimeSpan.Zero,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        automations.ServerDevices = _ => list;
+        IReadOnlyList<string> tags = ["gpu"];
+        automations.OwnTags = () => tags;
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", SignPooled(laptop, list, "org", self.DeviceId, 1, ["gpu"]),
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+
+        // The server keeps one run per event; its answer to the first claim is lost on the way back.
+        var held = new System.Collections.Concurrent.ConcurrentDictionary<string, (string Machine, string Run)>(StringComparer.Ordinal);
+        var lose = 1;
+        automations.ServerClaim = (_, request, _) =>
+        {
+            var holder = held.GetOrAdd(request.Occurrence, (self.DeviceId, request.RunId));
+            if (Interlocked.Exchange(ref lose, 0) == 1) return Task.FromResult<FleetAutomationClaimResult?>(null);
+            return Task.FromResult<FleetAutomationClaimResult?>(holder == (self.DeviceId, request.RunId) ? new(true, null)
+                : new(false, "taken") { TakenBy = holder.Machine });
+        };
+        var claims = automations.Claims!;
+        const string Event = "event:issue:0123456789abcdef#42";
+        Assert.AreEqual(AutomationPoolClaim.Later, (await claims.ClaimEventAsync(Id, Event, "run-1", clock.Now, token)).Outcome, "no answer: looked at again later");
+        var again = await claims.ClaimEventAsync(Id, Event, "run-2", clock.Now, token);
+        Assert.AreEqual((AutomationPoolClaim.Granted, "run-1"), (again.Outcome, again.RunId), "the grant whose answer was lost is asked again by the same run, and runs");
+
+        // Another machine runs an event: the claim of this one ends, and still says it was seen.
+        held["event:issue:0123456789abcdef#43"] = ("other-node", "run-x");
+        Assert.AreEqual(AutomationPoolClaim.Taken, (await claims.ClaimEventAsync(Id, "event:issue:0123456789abcdef#43", "run-3", clock.Now, token)).Outcome);
+        var file = new AutomationClaimStore(Path.Combine(node.Host.CatalogOptions.FleetRoot, NodeAutomations.ClaimsFileName), "test");
+        Assert.IsNotNull(file.Find(Id, "event:issue:0123456789abcdef#43")?.EndedAt, "a claim lost to another machine is not left unfinished");
+        Assert.AreEqual(AutomationPoolClaim.Taken, (await claims.ClaimEventAsync(Id, "event:issue:0123456789abcdef#43", "run-4", clock.Now, token)).Outcome);
+
+        // The machine loses its tag: Run now, through a stale list of machines, is refused at the last check before a run.
+        var entry = automations.Engine.Snapshot.Find(Id)!;
+        var provider = new CodeAlta.Agent.ModelProviderDescriptor(new("scripted"), "Scripted");
+        Assert.IsNull(automations.Check(entry, provider));
+        tags = [];
+        StringAssert.Contains(automations.Check(entry, provider), "no longer has the tag gpu");
+        Assert.AreEqual(AutomationPoolClaim.Later, (await claims.ClaimEventAsync(Id, "event:issue:0123456789abcdef#44", "run-5", clock.Now, token)).Outcome);
+    }
+
+    [TestMethod]
     public async Task APooledVersion_RunsWhileTheMachineHasItsTags_OnlyWithTheClaimOfItsServer_AndTwoMembersRunADueTimeOnce()
     {
         var token = TestContext.CancellationToken;
@@ -258,6 +317,9 @@ public sealed class NodeServerAutomationTests
         await Task.Delay(200, token);
         Assert.AreEqual(1, a.Engine.Runs(Id, 10).Concat(b.Engine.Runs(Id, 10)).Count(static run => run.StartedAt.Hour == 13), "two members, one due time: one run");
         Assert.AreEqual(0, loser.Engine.Runs(Id, 10).Count(static run => run.StartedAt.Hour == 13), "the machine that did not get it records nothing");
+        var loserRoot = (loser == a ? nodeA : nodeB).Host.CatalogOptions.FleetRoot;
+        Assert.IsNotNull(new AutomationClaimStore(Path.Combine(loserRoot, NodeAutomations.ClaimsFileName), "test").Find(Id, second)?.EndedAt,
+            "its own claim of the time ends: it is neither renewed nor kept unfinished");
 
         // The server is away: no member runs the due time, and each records why it skipped it.
         Volatile.Write(ref away, true);

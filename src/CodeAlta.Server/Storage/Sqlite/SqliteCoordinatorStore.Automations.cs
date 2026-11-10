@@ -1,8 +1,9 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Server.Storage.Sqlite;
 
-// The automations of the organization and their runs (migrations 0007 and 0008).
+// The automations of the organization and their runs (migrations 0007 and 0008), and the floors of the claims forgotten (0024).
 public sealed partial class SqliteCoordinatorStore
 {
     private const string AutomationColumns = "SELECT organization_id, automation_id, machine_id, owner_person_id, number, removed, enabled, triggers, payload, signature, " +
@@ -125,6 +126,11 @@ public sealed partial class SqliteCoordinatorStore
                         ("$org", claim.OrganizationId), ("$run", claim.RunId), ("$lease", ToNullableTime(claim.LeaseUntil)), ("$at", ToTime(claim.UpdatedAt)));
                 return new AutomationClaimOutcome(true, null);
             }
+            // A due time at or before what was forgotten of the claims may have run already: it is not given again.
+            if (DueTimeOf(claim.Occurrence) is { } due && QuerySingle(connection, transaction,
+                    "SELECT forgotten_before FROM automation_claim_floors WHERE organization_id = $org AND automation_id = $id", static reader => reader.GetInt64(0),
+                    ("$org", claim.OrganizationId), ("$id", claim.AutomationId)) is var floor && floor > 0 && ToTime(due) <= floor)
+                return new AutomationClaimOutcome(false, null);
             // A run id is the machine's: one reported already for this run, without its due time, takes it now.
             if (QuerySingle(connection, transaction, AutomationRunColumns + " WHERE organization_id = $org AND run_id = $run", ReadAutomationRun,
                     ("$org", claim.OrganizationId), ("$run", claim.RunId)) is { } known)
@@ -142,7 +148,7 @@ public sealed partial class SqliteCoordinatorStore
     }
 
     /// <inheritdoc />
-    public ValueTask<int> RecordAutomationRunsAsync(IReadOnlyList<AutomationRunRecord> runs, int keep, CancellationToken cancellationToken = default)
+    public ValueTask<int> RecordAutomationRunsAsync(IReadOnlyList<AutomationRunRecord> runs, int keep, DateTimeOffset claimsKeptAfter, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(runs);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(keep);
@@ -176,12 +182,21 @@ public sealed partial class SqliteCoordinatorStore
                 written++;
             }
 
+            // The history shown is the latest runs; a run that took a due time or an event is the record of who took it, which
+            // arbitrates the claims of the machines: it stays for as long as a machine may catch that time or event up.
+            const string Forgotten = "FROM automation_runs WHERE organization_id = $org AND automation_id = $id AND run_id NOT IN " +
+                "(SELECT run_id FROM automation_runs WHERE organization_id = $org AND automation_id = $id ORDER BY started_at DESC LIMIT $keep) " +
+                "AND (occurrence IS NULL OR started_at < $after)";
             foreach (var (organization, automation) in touched)
             {
+                (string, object?)[] parameters = [("$org", organization), ("$id", automation), ("$keep", keep), ("$after", ToTime(claimsKeptAfter))];
+                // What is forgotten of the claims is remembered as a floor: a due time at or before it is not claimed again.
                 Execute(connection, transaction,
-                    "DELETE FROM automation_runs WHERE organization_id = $org AND automation_id = $id AND run_id NOT IN " +
-                    "(SELECT run_id FROM automation_runs WHERE organization_id = $org AND automation_id = $id ORDER BY started_at DESC LIMIT $keep)",
-                    ("$org", organization), ("$id", automation), ("$keep", keep));
+                    "INSERT INTO automation_claim_floors (organization_id, automation_id, forgotten_before) " +
+                    "SELECT $org, $id, MAX(started_at) " + Forgotten + " AND occurrence IS NOT NULL HAVING MAX(started_at) IS NOT NULL " +
+                    "ON CONFLICT (organization_id, automation_id) DO UPDATE SET forgotten_before = MAX(forgotten_before, excluded.forgotten_before)",
+                    parameters);
+                Execute(connection, transaction, "DELETE " + Forgotten, parameters);
             }
 
             return written;
@@ -213,6 +228,15 @@ public sealed partial class SqliteCoordinatorStore
         return ReadAsync(connection => QueryList(connection, null,
             AutomationRunColumns + " WHERE organization_id = $org AND automation_id = $id ORDER BY started_at DESC, run_id DESC LIMIT $limit",
             ReadAutomationRun, ("$org", organizationId), ("$id", automationId), ("$limit", limit)), cancellationToken);
+    }
+
+    // The time of a due time a schedule claims (<trigger>@yyyy-MM-ddTHH:mm:ssZ); null for an event, which says no time.
+    private static DateTimeOffset? DueTimeOf(string occurrence)
+    {
+        if (occurrence.StartsWith("event:", StringComparison.Ordinal)) return null;
+        var at = occurrence.LastIndexOf('@');
+        return at >= 0 && DateTimeOffset.TryParseExact(occurrence[(at + 1)..], "yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var due) ? due : null;
     }
 
     private static void InsertRun(SqliteConnection connection, SqliteTransaction transaction, AutomationRunRecord run)

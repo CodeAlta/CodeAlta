@@ -80,6 +80,9 @@ internal sealed partial class DesktopAutomationPlacement
     /// </summary>
     internal Func<DesktopPoolDirectory>? PoolMachines { get; init; }
 
+    /// <summary>Gets the time zone the copies of a pool read their schedules in when the automation names none; tests set one.</summary>
+    internal TimeZoneInfo PoolTimeZone { get; init; } = TimeZoneInfo.Local;
+
     private string PoolPath => Path.Combine(Path.GetDirectoryName(_path)!, PoolFileName);
 
     // Under the gate.
@@ -139,6 +142,20 @@ internal sealed partial class DesktopAutomationPlacement
             var resolved = await PoolMembersAsync(entry.Definition.RunsOnTags!, entry.Definition.PublishTo, cancellationToken).ConfigureAwait(false);
             if (resolved.Unsure) kept.Add(entry.Id);
             var members = resolved.Members.Select(static member => member.LinkId).Distinct(StringComparer.Ordinal).Count() > 1 ? [] : resolved.Members;
+            // The server of its members is the arbiter of its runs: copies through another server (one the desktop no longer
+            // reaches, say) are taken away first, and the members wait until those machines answer, so that two servers never
+            // both grant its due times.
+            if (members.Count > 0 && members[0].LinkId is var link)
+            {
+                PooledCopy[] elsewhere;
+                lock (_gate) elsewhere = [.. Pool.Values.Where(copy => copy.AutomationId == entry.Id && copy.Via != link)];
+                foreach (var copy in elsewhere)
+                {
+                    QueuePoolRemoval(copy);
+                    changed = true;
+                }
+            }
+
             var statuses = new List<AutomationPlacementStatus>(members.Count);
             foreach (var member in members)
             {
@@ -188,7 +205,7 @@ internal sealed partial class DesktopAutomationPlacement
             var key = (copy.AutomationId, copy.MachineId);
             var name = _memberStatus.GetValueOrDefault(key)?.MachineName;
             var previous = _removals.GetValueOrDefault(key);
-            _removals[key] = new PendingAutomationRemoval(copy.AutomationId, copy.MachineId, DateTimeOffset.UtcNow) { Number = number, Via = copy.Via, MachineName = name };
+            _removals[key] = new PendingAutomationRemoval(copy.AutomationId, copy.MachineId, DateTimeOffset.UtcNow) { Number = number, Via = copy.Via, MachineName = name, Pooled = true };
             if (!SaveRemovals())
             {
                 if (previous is null) _removals.Remove(key);
@@ -216,7 +233,9 @@ internal sealed partial class DesktopAutomationPlacement
             if (repository is null) return SetMember(entry.Id, new(machineId, machineName, "failed", "Its project has no remote repository that the other machine could find.", null));
         }
 
-        var copy = Copy(entry);
+        // Every machine of a pool reads its schedules in the same time zone, so that each due time is the same instant on all:
+        // the one it names, else the one of this computer.
+        var copy = Copy(entry) with { TimeZone = entry.Definition.TimeZone ?? AutomationDefinition.ZoneId(PoolTimeZone) };
         var scope = entry.Definition.PublishTo;
         if (route.CheckScope(scope) is { } outOfScope) return SetMember(entry.Id, new(machineId, machineName, "failed", outOfScope, null));
         if (scope is not null && copy.Model.Provider is null)
@@ -232,8 +251,9 @@ internal sealed partial class DesktopAutomationPlacement
                     : SetMember(entry.Id, new(machineId, machineName, "pending", $"Given to the server: {machineName} takes it when it connects.", null));
         }
 
-        // A machine reached directly that held it before claims nothing at the server: the pool waits until it took its copy away.
-        if (copy.Enabled && PoolHandoff(entry.Id, machineId, machineName) is { } waiting) return SetMember(entry.Id, waiting);
+        // A copy that its server does not arbitrate as one of this pool (reached directly, given to one machine, or through another
+        // server) may run without this server's claim: the pool waits until its machine took it away.
+        if (copy.Enabled && PoolHandoff(entry.Id, machineId, machineName, route.LinkId) is { } waiting) return SetMember(entry.Id, waiting);
         var number = NextNumber(entry.Id);
         try
         {
@@ -277,15 +297,17 @@ internal sealed partial class DesktopAutomationPlacement
         return SetMember(entry.Id, new(machineId, machineName, "pending", $"Given to the server: {machineName} takes it when it connects.", null));
     }
 
-    // Why a pooled automation, enabled, is not given yet: a machine reached directly that held it before may still run its
-    // copy, without claiming anything at the server. Among the machines of the server, the claim decides.
-    private AutomationPlacementStatus? PoolHandoff(string id, string machineId, string machineName)
+    // Why a pooled automation, enabled, is not given yet: a copy that left a machine and may still run there without the claim
+    // of this pool's server (one reached directly, one given to that machine alone, which runs alone while its server is away,
+    // or one of a pool of another server). Among the machines of the pool's server, the claim decides: the removals of members
+    // that left it are not waited for.
+    private AutomationPlacementStatus? PoolHandoff(string id, string machineId, string machineName, string link)
     {
         PendingAutomationRemoval[] before;
         lock (_gate)
         {
             if (_removalsUnread is { } unread && !Pool.ContainsKey((id, machineId))) return new(machineId, machineName, "waiting", Unreadable(unread), null);
-            before = [.. _removals.Values.Where(removal => removal.AutomationId == id && removal.Via is null && !removal.Forced)];
+            before = [.. _removals.Values.Where(removal => removal.AutomationId == id && !removal.Forced && !(removal.Pooled && removal.Via == link))];
         }
 
         if (before.Length == 0) return null;
@@ -371,15 +393,18 @@ internal sealed partial class DesktopAutomationPlacement
     // Runs a pooled automation now on the member with the most free seats, through its server.
     private async Task<AutomationRun> RunInPoolAsync(AutomationEntry entry, bool dryRun, Func<string, AutomationRun> failed, CancellationToken cancellationToken)
     {
+        // The machines run the copy they hold: a change not given yet goes first, and only a machine that took the copy of
+        // this definition is chosen (a copy given again is pending until its machine takes it), so that an older one never runs.
+        await SyncAsync(cancellationToken).ConfigureAwait(false);
         var resolved = await PoolMembersAsync(entry.Definition.RunsOnTags!, entry.Definition.PublishTo, cancellationToken).ConfigureAwait(false);
         if (resolved.Members.Select(static member => member.LinkId).Distinct(StringComparer.Ordinal).Count() > 1) return failed(resolved.Problem!);
         DesktopPoolMachine? best;
         lock (_gate)
         {
-            best = ChooseMember(resolved.Members, member => _memberStatus.GetValueOrDefault((entry.Id, member.Id))?.State == "copied");
+            best = ChooseMember(resolved.Members, member => _memberStatus.GetValueOrDefault((entry.Id, member.Id))?.State == "copied" && Pool.ContainsKey((entry.Id, member.Id)));
         }
 
-        if (best is null) return failed(resolved.Problem ?? "No machine of its pool holds it yet: it runs once one took its copy.");
+        if (best is null) return failed(resolved.Problem ?? "No machine of its pool holds it as it is now: it runs once one took its last change.");
         if (ServerRoute?.Invoke(best.Id) is not { } route) return failed($"The server of {best.Name} is not connected.");
         using (route)
         {

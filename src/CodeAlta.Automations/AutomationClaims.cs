@@ -54,19 +54,27 @@ internal interface IAutomationClaims
     /// </summary>
     /// <param name="automationId">The automation.</param>
     /// <param name="occurrence">The event, as <c>EventOccurrence</c> names it.</param>
-    /// <param name="runId">The run that would take it.</param>
+    /// <param name="runId">The run that would take it, unless an earlier claim of it waits for an answer: that run claims again.</param>
     /// <param name="now">The time of the claim.</param>
     /// <param name="cancellationToken">Cancels the claim.</param>
-    /// <returns>Whether the run starts, another machine runs the event, or it is looked at again later.</returns>
-    ValueTask<AutomationPoolClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
-        => ValueTask.FromResult(TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken);
+    /// <returns>Whether the run starts, another machine runs the event, or it is looked at again later; and the run that claimed.</returns>
+    ValueTask<AutomationEventClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
+        => ValueTask.FromResult(new AutomationEventClaim(TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken, runId));
 
-    /// <summary>Gives back the claim of a run that did not start, so that its occurrence can be claimed again.</summary>
+    /// <summary>
+    /// Keeps the claim of a run granted for an event that did not start after all (its automation became busy, or the service
+    /// paused): the event is looked at again, and the same run claims it again, which the server grants again to it.
+    /// </summary>
     /// <param name="runId">The run.</param>
-    void GiveBack(string runId)
+    void Hold(string runId)
     {
     }
 }
+
+/// <summary>What the claim of an event of a pooled automation gave, and the run that claimed it.</summary>
+/// <param name="Outcome">Whether the run starts, another machine runs the event, or it is looked at again later.</param>
+/// <param name="RunId">The run that claimed: the one asked, or the one of an earlier claim whose answer was lost.</param>
+internal readonly record struct AutomationEventClaim(AutomationPoolClaim Outcome, string RunId);
 
 /// <summary>What the claim of an event of a pooled automation gave.</summary>
 internal enum AutomationPoolClaim
@@ -185,14 +193,22 @@ internal sealed class AutomationClaimStore : IAutomationClaims
     }
 
     /// <inheritdoc />
-    public void GiveBack(string runId)
+    public void Hold(string runId) => MarkPending(runId, true);
+
+    /// <summary>
+    /// Marks the claim of a run as waiting for an answer, or no longer: a pending claim is the one its occurrence is claimed again
+    /// with (<see cref="Find"/>), so that a grant whose answer was lost is asked again by the same run, never by another.
+    /// </summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="pending">Whether it waits.</param>
+    internal void MarkPending(string runId, bool pending)
     {
         lock (_gate)
         {
             foreach (var (key, claim) in _file.Claims.ToArray())
             {
-                if (claim.RunId != runId) continue;
-                _file.Claims.Remove(key);
+                if (claim.RunId != runId || claim.Pending == pending) continue;
+                _file.Claims[key] = claim with { Pending = pending };
                 Save();
                 return;
             }
@@ -265,6 +281,9 @@ internal sealed record AutomationClaim(string AutomationId, string Occurrence, s
 {
     /// <summary>When the run ended; null while it is in progress (or its host stopped before it ended).</summary>
     public DateTimeOffset? EndedAt { get; init; }
+
+    /// <summary>Whether the claim waits for an answer of a server that did not give one: its occurrence is claimed again by this run.</summary>
+    public bool Pending { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

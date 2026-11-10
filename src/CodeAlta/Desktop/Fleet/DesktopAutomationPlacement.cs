@@ -1342,6 +1342,9 @@ internal sealed record PendingAutomationRemoval(string AutomationId, string Mach
 
     /// <summary>Gets why the machine last refused to take the copy away (it may still hold it); null when it did not.</summary>
     public string? Refusal { get; init; }
+
+    /// <summary>Gets whether the copy was one of a pool, which its server arbitrated: a pool of that server does not wait for its removal.</summary>
+    public bool Pooled { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

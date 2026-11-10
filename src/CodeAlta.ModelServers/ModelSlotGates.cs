@@ -201,14 +201,29 @@ public sealed class ModelSlotGate
     private void Abandon(Waiter waiter)
     {
         bool release;
+        List<TaskCompletionSource> signals = [];
         lock (_gate)
         {
             release = waiter.Node is null && !waiter.Gone;
+            // Still queued: it leaves now, under this lock, so that no release admits it after.
+            if (waiter.Node is { } node)
+            {
+                _waiters.Remove(node);
+                waiter.Node = null;
+                signals = [waiter.SwapChanged(), .. _waiters.Select(static other => other.SwapChanged())];
+            }
+
             waiter.Gone = true;
         }
 
-        if (release) Release();
-        else Leave(waiter);
+        if (release)
+        {
+            Release();
+            return;
+        }
+
+        waiter.Admitted.TrySetCanceled();
+        Raise(signals);
     }
 
     private void Release()

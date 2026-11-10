@@ -1264,6 +1264,30 @@ public sealed class AutomationServiceTests
     private static GitFeedItem Item(int number, DateTimeOffset created, bool? trusted = true, string? head = null)
         => new(number, "Title " + number, $"https://github.com/org/repo/{(head is null ? "issues" : "pull")}/{number}", "octo", created) { Trusted = trusted, Head = head };
 
+    [TestMethod]
+    public async Task AScheduleThatNamesItsTimeZone_IsDueAtTheSameInstantWhateverTheZoneOfTheMachine()
+    {
+        // The fixture reads schedules in UTC; the automation names Tokyo (UTC+9), as every copy given to a pool names one zone.
+        await using var fixture = new Fixture();
+        fixture.WriteGlobal($$"""
+            [automations.{{First}}]
+            name = "At nine in Tokyo"
+            prompt = "daily prompt"
+            time_zone = "Asia/Tokyo"
+            triggers = [{ type = "daily", at = ["09:00"] }]
+
+            [automations.{{Second}}]
+            name = "At nine here"
+            prompt = "daily prompt"
+            triggers = [{ type = "daily", at = ["09:00"] }]
+            """);
+        await fixture.Service.RefreshAsync();
+        Assert.AreEqual(new DateTimeOffset(2026, 10, 7, 0, 0, 0, TimeSpan.Zero), fixture.Service.NextDue(First), "09:00 in Tokyo is midnight UTC");
+        Assert.AreEqual(new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero), fixture.Service.NextDue(Second), "without one, the zone of the machine");
+        var (_, faults) = AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\ntime_zone = \"Nowhere/Atlantis\"\n", new AutomationSource("config.toml", null, null));
+        StringAssert.Contains(faults.Single().Message, "time zone");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly AutomationTempRoot _root = new();

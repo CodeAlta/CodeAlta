@@ -343,6 +343,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         // The kill switch of an organization stops every run of this machine until a signed version lifts it.
         if (Policy?.Halt is { } halt) return halt.Describe("this machine");
         if (entry.Source.IsAssigned && CheckAssignment(entry) is { } refused) return refused;
+        // A machine of a pool that lost one of its tags runs nothing more of it, by hand neither, whatever a stale directory said.
+        if (entry.Source.IsAssigned && PoolProblem(entry.Id) is { } untagged) return untagged;
 
         // Who a run acts as (doc/fleet/orchestration.md): an automation of a team runs on a machine of that team, as one of the
         // service identities the signed access document says the team turned on; a machine of a team runs no personal plan.

@@ -110,6 +110,9 @@ internal static class AutomationConfig
                 return $"The machines with some tags take schedules, cron, issues, pull requests and Jira, not a {kept.KindName} trigger: {AutomationPools.Why(kept)}";
         }
 
+        if (definition.TimeZone is { } zone && (zone.Length is 0 or > 64 || zone.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))
+                || definition.FindTimeZone() is null))
+            return "The time zone of an automation is the id of a time zone this machine knows, such as Europe/Paris.";
         if (definition.MaxRuns is { } maxRuns && maxRuns is < 1 or > AutomationDefinition.MaximumRuns)
             return $"max_runs is how many runs of the automation work at once on a machine: 1 to {AutomationDefinition.MaximumRuns}.";
         if (definition.PublishTo is { } scope && (scope != "organization" && !(scope.StartsWith("team:", StringComparison.Ordinal) && scope.Length is > 5 and <= 133
@@ -275,7 +278,7 @@ internal static class AutomationConfig
             || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)
             || !TryRunsOn(table, out var runsOn, out var runsOnTags, out problem) || !TryText(table, "environment", out var environment, out problem)
             || !TryText(table, "publish_to", out var publishTo, out problem) || !TryText(table, "script_mode", out var scriptMode, out problem)
-            || !TryText(table, "script_access", out var scriptAccess, out problem)) return false;
+            || !TryText(table, "script_access", out var scriptAccess, out problem) || !TryText(table, "time_zone", out var timeZone, out problem)) return false;
         int? maxRuns = null;
         if (table.TryGetValue("max_runs", out var maxRunsValue))
         {
@@ -348,6 +351,7 @@ internal static class AutomationConfig
             RunsOnTags = source.IsGlobal && !source.IsAssigned ? runsOnTags : null,
             PublishTo = source.IsGlobal && !source.IsAssigned ? Blank(publishTo) : null,
             MaxRuns = maxRuns,
+            TimeZone = Blank(timeZone),
             Model = reference,
             Agent = Blank(agent),
             PermissionMode = Blank(permissionMode),
@@ -603,6 +607,7 @@ internal static class AutomationConfig
         if (definition.RunsOn is { } machine) builder.Append("runs_on = ").Append(Quote(machine)).Append(newline);
         if (definition.RunsOnTags is { } tags) builder.Append("runs_on = { tags = [").Append(string.Join(", ", tags.Select(Quote))).Append("] }").Append(newline);
         if (definition.MaxRuns is { } maxRuns) builder.Append("max_runs = ").Append(maxRuns.ToString(CultureInfo.InvariantCulture)).Append(newline);
+        if (definition.TimeZone is { } zone) builder.Append("time_zone = ").Append(Quote(zone)).Append(newline);
         if (definition.PublishTo is { } scope) builder.Append("publish_to = ").Append(Quote(scope)).Append(newline);
         if (definition.Model.Format() is { } model) builder.Append("model = ").Append(Quote(model)).Append(newline);
         if (definition.Agent is { } agent) builder.Append("agent = ").Append(Quote(agent)).Append(newline);

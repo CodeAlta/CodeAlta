@@ -5,7 +5,7 @@ import { machineState } from "../machines/machines";
 import type { MachineView } from "#neoastra";
 import { settingsNavigation } from "../settingsNavigation";
 import { useShellLanguage } from "../shellLanguage";
-import { isMachineTag, maximumPoolTags, poolTakes, triggerLabel, type AutomationForm } from "./automations";
+import { poolTags, poolTakes, triggerLabel, type AutomationForm } from "./automations";
 import type { AutomationsHub, PoolMachines } from "./automationsHub";
 
 /** The value of the choice of Runs on that runs it on the machines with some tags. */
@@ -39,10 +39,7 @@ export function RunsOnField({ hub, form, reachable, disabled, edit }: {
   const choose = (next: string) => next === poolChoice
     ? edit({ runsOn: null, runsOnTags: tags ?? [], publishTo: null })
     : edit({ runsOn: next || null, runsOnTags: null, publishTo: null });
-  const setTags = (next: readonly string[]) => {
-    const kept = [...new Set(next.map(tag => tag.trim()).filter(isMachineTag))].slice(0, maximumPoolTags);
-    edit({ runsOnTags: kept });
-  };
+  const setTags = (next: readonly string[]) => edit({ runsOnTags: poolTags(next) });
   const suggested = (pool?.tags ?? []).filter(tag => !(tags ?? []).some(held => held.toLowerCase() === tag.toLowerCase()));
   const refused = pooled ? [...new Set(form.triggers.filter(trigger => !poolTakes(trigger.type)).map(trigger => trigger.type))] : [];
   return <>

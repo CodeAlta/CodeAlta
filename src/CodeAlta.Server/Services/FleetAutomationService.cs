@@ -38,6 +38,13 @@ internal sealed class FleetAutomationService
     /// <summary>The most runs kept per automation.</summary>
     internal const int RunsKept = 200;
 
+    /// <summary>
+    /// How long the run that took a due time or an event is kept, beyond the runs shown: what arbitrates the claims of the
+    /// machines (one run per occurrence), longer than a machine keeps its own claims and than a schedule catches up. A due
+    /// time at or before the latest one forgotten is not claimed any more: it can no longer be told whether a run took it.
+    /// </summary>
+    internal static readonly TimeSpan ClaimsKeptFor = TimeSpan.FromDays(60);
+
     /// <summary>The status of a run that waits for a person.</summary>
     internal const string WaitingStatus = "waiting";
 
@@ -540,7 +547,9 @@ internal sealed class FleetAutomationService
         var outcome = await _automations.ClaimAutomationOccurrenceAsync(new AutomationRunRecord(device.OrganizationId, request.RunId, request.AutomationId, device.Id,
             request.Number, request.Occurrence.StartsWith("event:", StringComparison.Ordinal) ? "event" : "schedule", AutomationRunRecord.Claimed, request.Occurrence, now, null, lease, null, null, now), cancellationToken).ConfigureAwait(false);
         if (outcome.Granted) return new FleetAutomationClaimResult(true, null);
-        var holder = outcome.Holder!;
+        // A due time at or before what the server forgot of its claims: it may have run, and is not given again.
+        if (outcome.Holder is not { } holder)
+            return new FleetAutomationClaimResult(false, "This due time is older than the claims the server keeps: whether a run took it can no longer be told.");
         // The machines of a pool each claim every due time and event: the one that took it is named, so that the others record nothing.
         return new FleetAutomationClaimResult(false, holder.MachineId == device.Id
             ? "This due time was already taken by another run of this machine."
@@ -594,7 +603,7 @@ internal sealed class FleetAutomationService
             audited.AddRange(group.Where(run => !seen.Contains(run.RunId)));
         }
 
-        if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, cancellationToken).ConfigureAwait(false);
+        if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, now - ClaimsKeptFor, cancellationToken).ConfigureAwait(false);
         foreach (var run in audited)
         {
             await _store.AppendAuditAsync(new AuditEntry("automation.run_as", AuditEntry.Success, null, device.Id, run.AutomationId, null, null,
