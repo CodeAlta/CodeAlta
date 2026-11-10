@@ -370,7 +370,9 @@ public sealed class CliRunTests
             request.Conversation[^1].Parts.OfType<AgentMessagePart.Text>().Any(static part => part.Value.Contains("timed out", StringComparison.Ordinal))
                 ? "The tests did not end in time." : "No result of the job.")));
 
-        var run = await root.RunAsync(provider, ["run", Plain, "--no-mcp", "--format", "jsonl", "--timeout", "12", "run the tests"]);
+        // The job ends a quarter of the time left before the deadline: long enough, on a busy machine too, to end its shell
+        // and bring its result back before the run ends.
+        var run = await root.RunAsync(provider, ["run", Plain, "--no-mcp", "--format", "jsonl", "--timeout", "30", "run the tests"]);
 
         var result = Result(run);
         Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, $"{result.GetRawText()}\n{run.Stderr}");
