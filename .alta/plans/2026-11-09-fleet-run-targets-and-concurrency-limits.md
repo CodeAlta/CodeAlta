@@ -1,6 +1,6 @@
 ---
 title: Run automations on a machine or a pool, and queue work beyond what a machine or a model endpoint can take
-status: in-progress
+status: done
 created: 2026-11-09
 summary: An automation targets one machine or the machines that carry some tags; a machine runs at most N sessions at once and queues the others; a provider takes at most N requests at once. Each limit is enforced by the one process the work already passes through, so no distributed lock is needed.
 ---
@@ -204,7 +204,7 @@ Each phase ships alone, in this order.
 - [x] Pool tests (`DesktopServerAutomationPlacementTests`, `NodeServerAutomationTests`, `AutomationServerTests`): two members and one due time give one run; a member without the tag does not claim; a member that cannot reach the server does not run; a member that loses its tag gets a removal.
 - [x] `altanode tags add gpu` and `altanode labels add gpu` write the same file; `alta fleet machine list --tag gpu` and `--label gpu` give the same machines, with `tags` and `labels` in each record.
 - [x] Frontend tests for the queued row and notice, the load in **Run on**, **Requests at once**, and the tag target of the editor. The load, the limit, the queued labels and the Requests at once field are tested; the queued row and its notice in a tab are not.
-- [ ] In the developer instance with a node on the same computer (`altanode --data-root`), limit 1: start two sessions on it, see the second queued with its place, then start when the first ends. Screenshots in both themes. Not done yet: the behavior is covered by the node, desktop and frontend tests, not seen in a window.
+- [x] In the developer instance with a node on the same computer (`altanode --data-root`), limit 1: start two sessions on it, see the second queued with its place, then start when the first ends. Screenshots in both themes. Done: a node limited to 1, the second session queued with its place, then started by **Start now**; dark and light, and a 900-pixel window. The pictures of the guide come from it.
 - [x] `dotnet test -c <Configuration>`, `npm test` and `lunet build` pass.
 
 ## Decisions
