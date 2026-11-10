@@ -107,11 +107,15 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
       await until(find, `${selector} with the text "${text}"`);
       await pressElement(command, find, `${selector} with the text "${text}"`);
     };
+    // The page handles the keys it was sent on its next frames, which a busy machine can draw after the call that sent
+    // them returned: two frames, and every key sent is handled before the test reads the page.
+    const handled = () => evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
     const key = async (name: string, code: number, text?: string) => {
       await command("Input.dispatchKeyEvent", { type: "keyDown", key: name, code: name, windowsVirtualKeyCode: code, ...(text ? { text } : {}) });
       await command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code: name, windowsVirtualKeyCode: code });
+      await handled();
     };
-    const type = async (text: string) => { for (const char of text) await command("Input.dispatchKeyEvent", { type: "char", text: char }); };
+    const type = async (text: string) => { for (const char of text) await command("Input.dispatchKeyEvent", { type: "char", text: char }); await handled(); };
     const resize = (width: number, height: number, ratio = 1) => command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: ratio, mobile: false }).then(async () => { await evaluate(`window.dispatchEvent(new Event('resize'))`); });
     await command("Page.enable"); await command("Runtime.enable"); await command("Log.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: options.width ?? 1280, height: options.height ?? 800, deviceScaleFactor: options.ratio ?? 1, mobile: false });

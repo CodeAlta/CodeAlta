@@ -50,9 +50,11 @@ test("Settings search shows editable results, opens a setting with a glow, and C
     };
     const until = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{
       if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true, condition);
-    const type = async (text: string) => { for (const character of text) await command("Input.dispatchKeyEvent", { type: "char", text: character }); };
+    // The page handles the keys it was sent on its next frames, which a busy machine can draw after the call returned.
+    const handled = () => evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    const type = async (text: string) => { for (const character of text) await command("Input.dispatchKeyEvent", { type: "char", text: character }); await handled(); };
     const key = (name: string, code: string, keyCode: number, modifiers = 0) => command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, code, windowsVirtualKeyCode: keyCode, modifiers })
-      .then(() => command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: keyCode, modifiers }));
+      .then(() => command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: keyCode, modifiers })).then(handled);
 
     await command("Page.enable"); await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1400, height: 950, deviceScaleFactor: 1, mobile: false });
