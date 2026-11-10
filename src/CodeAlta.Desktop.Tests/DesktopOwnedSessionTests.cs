@@ -882,8 +882,19 @@ public sealed class DesktopOwnedSessionTests
             try { await task.ConfigureAwait(false); }
             catch (Exception ex) { lock (_gate) _failures.Add(ex); }
         }
-        internal Task Wait(Task task) => Keep(task.WaitAsync(Patience));
-        internal Task<T> Wait<T>(Task<T> task) => Keep(task.WaitAsync(Patience));
+        // A wait that runs out says what it waited for: the failure of a fixture lists every task it kept.
+        internal Task Wait(Task task, [CallerArgumentExpression(nameof(task))] string what = "") => Keep(Named(task.WaitAsync(Patience), what));
+        internal Task<T> Wait<T>(Task<T> task, [CallerArgumentExpression(nameof(task))] string what = "") => Keep(Named(task.WaitAsync(Patience), what));
+        private static async Task<T> Named<T>(Task<T> wait, string what)
+        {
+            try { return await wait.ConfigureAwait(false); }
+            catch (TimeoutException) { throw new TimeoutException($"{Patience.TotalSeconds:0} s without the end of {what}"); }
+        }
+        private static async Task Named(Task wait, string what)
+        {
+            try { await wait.ConfigureAwait(false); }
+            catch (TimeoutException) { throw new TimeoutException($"{Patience.TotalSeconds:0} s without the end of {what}"); }
+        }
         internal OwnedSessionCommandReceipt Retain(OwnedSessionCommandAdmission admission)
         {
             if (admission.Receipt is not null) Keep(admission.Receipt.Completion);
