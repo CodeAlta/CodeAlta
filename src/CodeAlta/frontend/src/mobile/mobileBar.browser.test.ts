@@ -3,12 +3,13 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { session } from "./fixtureServer";
 import { openPhone, tapMenuItem } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
 const longTitle = "Refactor the parser into modules, one per stage of the pipeline, and keep every test of the grammar passing while it moves";
 
-test("the top bar holds the commands of each page, its menu the others, and a session's title opens whole on a tap", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the top bar holds the commands of each page, its menu the others, and a session's title opens whole on a tap", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const phone = await openPhone(server => {
     server.state.sessions = [session("s1", longTitle, "p1", 1), session("s2", "Write the docs", "p1", 5)];
   }, shots);

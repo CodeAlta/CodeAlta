@@ -88,7 +88,7 @@ internal sealed class OtlpReceiver : IAsyncDisposable
     /// <exception cref="TimeoutException">None came in time.</exception>
     public async Task<OtlpRequest> WaitAsync(Func<OtlpRequest, bool> match, TimeSpan? timeout = null)
     {
-        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(30));
+        var deadline = DateTime.UtcNow + (timeout ?? TestTime.Seconds(30));
         while (true)
         {
             if (_requests.FirstOrDefault(match) is { } found) return found;
@@ -99,7 +99,7 @@ internal sealed class OtlpReceiver : IAsyncDisposable
                 throw new TimeoutException($"No OTLP request matched in time; received: {(seen.Length == 0 ? "none" : seen)}.");
             }
 
-            await _arrived.WaitAsync(left < TimeSpan.FromMilliseconds(250) ? left : TimeSpan.FromMilliseconds(250));
+            await _arrived.WaitAsync(left < TimeSpan.FromMilliseconds(250) ? left : TimeSpan.FromMilliseconds(250)); // not a Task: a slice of the deadline above, which names what it waited for
         }
     }
 

@@ -124,9 +124,15 @@ public sealed class ModelHostUpdateTests
         Assert.IsEmpty(second.GetStatus().History, "it is not its time yet");
         Assert.AreEqual(planned.Id, second.GetStatus().Planned?.Id);
 
+        // The loop reads the clock, then makes its timer, which this clock dates from the moment it is made: a move of the
+        // clock in between leaves it waiting from the later time. The clock goes on a minute at a time until the update ran.
         time.Advance(TimeSpan.FromMinutes(31));
-        var ended = await machine.WaitForAsync(second, () => second.GetStatus().Tasks.FirstOrDefault(static task => task.Kind == "update" && task.EndedAt is not null),
-            "the planned update ran");
+        var ended = await machine.WaitForAsync(second, () =>
+        {
+            var task = second.GetStatus().Tasks.FirstOrDefault(static task => task.Kind == "update" && task.EndedAt is not null);
+            if (task is null) time.Advance(TimeSpan.FromMinutes(1));
+            return task;
+        }, "the planned update ran");
         Assert.AreEqual("done", ended.State, ended.Message);
         Assert.AreEqual("Planned switch to b12100", ended.Title);
         Assert.AreEqual("test", ended.RequestedBy);
@@ -215,7 +221,7 @@ public sealed class ModelHostUpdateTests
     {
         private const string Alpha = "fake-org/Alpha-GGUF:Q4_K_M";
         private const string Beta = "fake-org/Beta-GGUF:Q8_0";
-        private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan Deadline = TestTime.Seconds(30);
         private readonly TestTempDirectory _temp;
         private readonly int _firstPort = Random.Shared.Next(20000, 40000);
 
@@ -349,7 +355,7 @@ public sealed class ModelHostUpdateTests
                         if (process.MainModule?.FileName is not { } path || !path.StartsWith(_temp.Path, StringComparison.OrdinalIgnoreCase)) continue;
                         left.Add($"{process.Id} {path}");
                         process.Kill(entireProcessTree: true);
-                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                        await process.WaitForExitAsync().WithinAsync(TestTime.Seconds(10));
                     }
                     catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
                     {
@@ -523,7 +529,7 @@ public sealed class ModelHostUpdateTests
         /// <summary>Waits until a timer was made after the count given: the loop of the host waits on the clock again.</summary>
         public async Task WaitForTimerAsync(int after)
         {
-            var end = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            var end = DateTime.UtcNow + TestTime.Seconds(30);
             while (Created <= after)
             {
                 if (DateTime.UtcNow > end) Assert.Fail("The model host did not wait on its clock.");

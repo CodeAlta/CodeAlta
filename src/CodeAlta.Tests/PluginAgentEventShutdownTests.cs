@@ -35,13 +35,13 @@ public sealed class PluginAgentEventShutdownTests
         Exception? primary = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreSame(original, owner.Value);
             Assert.AreEqual(0, stages.Count);
         }
         catch (Exception ex) { primary = ex; }
         finally { release.TrySetResult(); }
-        try { await original.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await original.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception cleanup) { throw new RetainedFailure(owner, primary, cleanup); }
         if (primary is not null) throw new RetainedFailure(owner, primary, null);
         Assert.IsNull(await outcome);
@@ -64,7 +64,7 @@ public sealed class PluginAgentEventShutdownTests
         // Own the wrapper and outcome observer before entering the synthetic barrier.
         operation.Launch();
         Exception? error;
-        try { error = await operation.Outcome.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { error = await operation.Outcome.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception waitFailure)
         {
             // This is an observation deadline, not a cleanup or cancellation signal. Keep the same owner/original.
@@ -152,23 +152,23 @@ public sealed class PluginAgentEventShutdownTests
         Exception? primary = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             var close = owner.Value;
             _ = Keep(() => close);
             check.TrySetResult();
-            await delivery.Work.WaitAsync(TimeSpan.FromSeconds(10));
+            await delivery.Work.WithinAsync(TestTime.Seconds(10));
             // Check the returned command result outside the plugin callback so an assertion failure
             // does not itself invoke the production callback-failure logging path.
             Assert.IsNotNull(commandResult);
             Assert.AreEqual(AltaExitCodes.Success, commandResult.ExitCode);
-            await close.WaitAsync(TimeSpan.FromSeconds(10));
+            await close.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(1, commandCalls);
             Assert.AreEqual(1, releases);
         }
         catch (Exception ex) { primary = ex; }
         finally { check.TrySetResult(); }
         _ = Keep(() => manager.DisposeAsync().AsTask());
-        try { await Task.WhenAll(originals.Select(operation => operation.Outcome)).WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await Task.WhenAll(originals.Select(operation => operation.Outcome)).WithinAsync(TestTime.Seconds(10)); }
         catch (Exception cleanup) { throw new RetainedFailure(new object[] { manager, active, owner, originals }, primary, cleanup); }
         var failures = originals.Select(operation => operation.Outcome.Result).OfType<Exception>().ToArray();
         if (primary is not null || failures.Length != 0)
@@ -186,7 +186,7 @@ public sealed class PluginAgentEventShutdownTests
         var operation = new PluginOwnedOperation(() => PluginEventDependencyBarrier.BeforeRollbackAsync(null, failure, outerDependencies));
         operation.Launch();
         Exception? caught;
-        try { caught = await operation.Outcome.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { caught = await operation.Outcome.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception waitFailure)
         {
             // Preserve creation/control failure identities and both dependency sets while the original is uncertain.

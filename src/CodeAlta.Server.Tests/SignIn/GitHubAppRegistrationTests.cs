@@ -141,11 +141,11 @@ public sealed class GitHubAppRegistrationTests
             process.EnableRaisingEvents = true;
         }
 
-        public async Task<Uri> AddressAsync(CancellationToken cancellationToken) => await _address.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+        public async Task<Uri> AddressAsync(CancellationToken cancellationToken) => await _address.Task.WithinAsync(TestTime.Seconds(60), cancellationToken);
 
         public async Task<string> ExitAsync(int expected, CancellationToken cancellationToken)
         {
-            await _process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+            await _process.WaitForExitAsync(cancellationToken).WithinAsync(TestTime.Seconds(60), cancellationToken);
             _process.WaitForExit();
             var output = string.Join('\n', _lines);
             Assert.AreEqual(expected, _process.ExitCode, output);

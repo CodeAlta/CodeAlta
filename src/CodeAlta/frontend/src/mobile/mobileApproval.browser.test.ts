@@ -10,6 +10,7 @@ import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } fr
 import { approvalArmDelay } from "./approvalPanel";
 import type { ApprovalRequest } from "./contract";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
@@ -25,7 +26,7 @@ const files: ApprovalRequest = {
 };
 const mark = (requests: readonly ApprovalRequest[]) => ({ id: requests[0].id, count: requests.length });
 
-test("the phone page shows what sessions ask permission for, and answers it", { skip: !edge, timeout: 120_000 }, async () => {
+test("the phone page shows what sessions ask permission for, and answers it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-approval-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   const bundle = await build({ entryPoints: [fileURLToPath(new URL("./main.ts", import.meta.url))], bundle: true, format: "esm", platform: "browser",
@@ -43,7 +44,7 @@ test("the phone page shows what sessions ask permission for, and answers it", { 
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"],
       { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(directory, "profile"), browser);
-    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json() as { type: string; url: string; webSocketDebuggerUrl: string }[];
+    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(5000)) })).json() as { type: string; url: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(pages.find(p => p.type === "page")!.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
     let sequence = 0;
@@ -58,7 +59,7 @@ test("the phone page shows what sessions ask permission for, and answers it", { 
     });
     const send = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout`)); }, 10_000);
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(10_000), `the answer to ${method}`))); }, testLimit(10_000));
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -67,7 +68,7 @@ test("the phone page shows what sessions ask permission for, and answers it", { 
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails));
       return reply.result?.value as T;
     };
-    const waitFor = async (expression: string, what: string, timeout = 8000) => {
+    const waitFor = async (expression: string, what: string, timeout = testLimit(8000)) => {
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await evaluate<boolean>(`!!(${expression})`)) return;

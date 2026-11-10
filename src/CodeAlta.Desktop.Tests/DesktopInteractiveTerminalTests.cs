@@ -11,7 +11,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopInteractiveTerminalTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     private sealed class Fixture : IDisposable
     {
@@ -52,10 +52,10 @@ public sealed class DesktopInteractiveTerminalTests
         using var fixture = new Fixture();
         var shown = 0;
         var run = new DesktopInteractiveTerminal(fixture.Terminals, "project").RunAsync(fixture.Program(), static _ => false, () => shown++, CancellationToken.None);
-        var program = await fixture.Started.Task.WaitAsync(Patience);
+        var program = await fixture.Started.Task.WithinAsync(Patience);
         program.Show("Created cloud session: Fix it\r\nView: https://claude.ai/code/session_01ABCDEFGHJK\r\n");
         program.End(0);
-        var outcome = await run.WaitAsync(Patience);
+        var outcome = await run.WithinAsync(Patience);
 
         Assert.AreEqual((0, false, (string?)null, false), (outcome.ExitCode, outcome.Canceled, outcome.TerminalId, outcome.Shown));
         Assert.IsTrue(outcome.Rows.Any(static row => row.StartsWith("Created cloud session: Fix it", StringComparison.Ordinal)));
@@ -75,12 +75,12 @@ public sealed class DesktopInteractiveTerminalTests
         var shown = 0;
         var run = new DesktopInteractiveTerminal(fixture.Terminals, "project").RunAsync(fixture.Program(),
             static rows => rows.Any(static row => row.Contains("Enter to confirm", StringComparison.Ordinal)), () => shown++, CancellationToken.None);
-        var program = await fixture.Started.Task.WaitAsync(Patience);
+        var program = await fixture.Started.Task.WithinAsync(Patience);
         program.Show("Do you trust this folder?\r\n Enter to confirm\r\n");
         await Until(() => shown == 1, "The tab is shown when the program asks");
         program.Show("Error: Cloud sessions need a claude.ai sign-in.\r\n");
         program.End(1);
-        var outcome = await run.WaitAsync(Patience);
+        var outcome = await run.WithinAsync(Patience);
 
         Assert.AreEqual((1, true), (outcome.ExitCode, outcome.Shown));
         Assert.AreEqual(1, shown, "Shown once.");
@@ -96,12 +96,12 @@ public sealed class DesktopInteractiveTerminalTests
         using var cancel = new CancellationTokenSource();
         var run = new DesktopInteractiveTerminal(fixture.Terminals, "project", quietBeforeShown: TimeSpan.FromMilliseconds(200))
             .RunAsync(fixture.Program(), static _ => false, () => shown.TrySetResult(), cancel.Token);
-        var program = await fixture.Started.Task.WaitAsync(Patience);
+        var program = await fixture.Started.Task.WithinAsync(Patience);
         program.Show("Waiting…\r\n");
-        await shown.Task.WaitAsync(Patience);
+        await shown.Task.WithinAsync(Patience);
 
         cancel.Cancel();
-        var outcome = await run.WaitAsync(Patience);
+        var outcome = await run.WithinAsync(Patience);
         Assert.IsTrue(outcome.Canceled);
         Assert.IsNull(outcome.ExitCode);
         Assert.IsNull(outcome.TerminalId, "A canceled program is ended, and its terminal with it.");

@@ -56,14 +56,14 @@ public sealed class UpdateSwitchTests
         start.Set();
         try
         {
-            await Task.WhenAll(writers).WaitAsync(TimeSpan.FromSeconds(60));
+            await Task.WhenAll(writers).WithinAsync(TestTime.Seconds(60));
         }
         finally
         {
             await stop.CancelAsync();
         }
 
-        await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(60));
+        await Task.WhenAll(readers).WithinAsync(TestTime.Seconds(60));
         Assert.IsFalse(Directory.EnumerateFiles(store.Root, "*.tmp").Any(), "No staged state is left behind.");
     }
 
@@ -115,7 +115,7 @@ public sealed class UpdateSwitchTests
             await reader.DisposeAsync();
         }
 
-        await confirmed.WaitAsync(TimeSpan.FromSeconds(30));
+        await confirmed.WithinAsync(TestTime.Seconds(30));
 
         Assert.AreEqual("4.0.1", store.Read().Current);
         Assert.IsNull(store.Read().Trial, "the version confirmed");

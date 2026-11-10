@@ -229,7 +229,7 @@ public sealed class CodeAltaShellControllerTests
         controller.StartInitialization(CancellationToken.None);
         await dispatcher.WaitForInvokeAsync().ConfigureAwait(false);
 
-        await controller.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+        await controller.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(3)).ConfigureAwait(false);
 
         Assert.IsTrue(dispatcher.InvokeCallCount > 0);
     }
@@ -1155,6 +1155,6 @@ public sealed class CodeAltaShellControllerTests
         }
 
         public Task WaitForInvokeAsync()
-            => _invokeStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            => _invokeStarted.Task.WithinAsync(TestTime.Seconds(3));
     }
 }

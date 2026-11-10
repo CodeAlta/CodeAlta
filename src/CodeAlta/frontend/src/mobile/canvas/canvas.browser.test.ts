@@ -9,6 +9,7 @@ import { build } from "esbuild";
 import { blueprintPaletteVariables } from "../../blueprintPalette";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../../browserTarget";
 import type { MobileStatus } from "./status";
+import { testLimit, testLimitRanOut } from "../../testTime";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
@@ -23,7 +24,7 @@ const status = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileS
 });
 const unreachable = { connectUrl: null, address: null, qr: null };
 
-test("the Mobile tab shows the code of the phone page, and what keeps a phone out with what fixes it", { skip: !edge, timeout: 120_000 }, async () => {
+test("the Mobile tab shows the code of the phone page, and what keeps a phone out with what fixes it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-mobile-tab-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -40,7 +41,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root" style="height:100vh"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
@@ -54,7 +55,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
     });
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(Error(`${method} timed out`)); }, 30_000);
+      const timer = setTimeout(() => { pending.delete(id); reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
       pending.set(id, message => { pending.delete(id); clearTimeout(timer); if (message.error) reject(Error(JSON.stringify(message.error))); else resolve(message.result); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -63,7 +64,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = async (expression: string, what: string, milliseconds = 8_000) => assert.equal(await evaluate<boolean>(
+    const wait = async (expression: string, what: string, milliseconds = testLimit(8_000)) => assert.equal(await evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`), true, what);
     const text = (selector: string) => evaluate<string[]>(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(e=>e.textContent)`);
     const press = (selector: string, label: string) => evaluate<boolean>(

@@ -751,7 +751,7 @@ public sealed class CodeAltaUpdateServiceLifetimeTests
     {
         try
         {
-            await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
             return null;
         }
         catch (TimeoutException)
@@ -925,7 +925,7 @@ public sealed class CodeAltaUpdateServiceLifetimeTests
         public void CompleteWithoutPost() => _posted.TrySetResult((static _ => { }, null));
         public async Task InvokePostedAsync()
         {
-            var posted = await _posted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var posted = await _posted.Task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
             var previous = Current;
             try
             {

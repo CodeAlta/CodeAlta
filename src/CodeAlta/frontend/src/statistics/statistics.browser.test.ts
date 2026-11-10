@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./browserHarness";
+import { testLimit } from "../testTime";
 
 // The canvas, mounted under React StrictMode over the fixture API in headless Edge, under the production content security policy.
 // Every test ends by checking that the page raised no exception, no console error and no request outside itself.
@@ -11,14 +12,14 @@ const tabTitles = ["Overview", "Activity", "Models", "Cost", "Tools", "Prompts",
 const settled = `document.querySelector('.statistics-canvas') && !document.querySelector('.stats-block[data-state="loading"]') && !document.querySelector('.stats-tile-skeleton') && document.querySelectorAll('.stats-block').length > 0`;
 const questions = (calls: Call[]) => calls.filter(call => !["status", "chooseHistory", "pause", "resume", "stopHere", "forgetDeleted", "resetStatistics"].includes(call.method));
 const calls = (page: Page) => page.evaluate<Call[]>(`statsFixture.calls()`);
-const idle = (milliseconds = 250) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const idle = (milliseconds = 250) => new Promise(resolve => setTimeout(resolve, milliseconds)); // not a limit: a pause
 const render = (page: Page, options: object = {}) => page.evaluate(`statsFixture.render(${JSON.stringify(options)})`);
 const openPage = async (page: Page, title: string) => {
   await page.clickText('[role="tab"]', title);
   await page.until(`document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim() === ${JSON.stringify(title)} && ${settled}`, `the ${title} page`);
 };
 
-test("every page draws without a console error, in both themes, narrow and wide, and at 125% zoom: the pictures are in tmp/statistics", { skip: !edge, timeout: 600_000 }, async () => {
+test("every page draws without a console error, in both themes, narrow and wide, and at 125% zoom: the pictures are in tmp/statistics", { skip: !edge, timeout: testLimit(600_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -53,7 +54,7 @@ test("every page draws without a console error, in both themes, narrow and wide,
   });
 });
 
-test("every page loads its blocks, with a table behind each chart and a name on each", { skip: !edge, timeout: 300_000 }, async () => {
+test("every page loads its blocks, with a table behind each chart and a name on each", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -76,7 +77,7 @@ test("every page loads its blocks, with a table behind each chart and a name on 
   });
 });
 
-test("the frame sets what the page asks: period, frequency, comparison and filters, and a reload keeps them", { skip: !edge, timeout: 300_000 }, async () => {
+test("the frame sets what the page asks: period, frequency, comparison and filters, and a reload keeps them", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -152,7 +153,7 @@ test("the frame sets what the page asks: period, frequency, comparison and filte
   });
 });
 
-test("a click on a bar, a row, a day or a session drills down", { skip: !edge, timeout: 300_000 }, async () => {
+test("a click on a bar, a row, a day or a session drills down", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -182,7 +183,7 @@ test("a click on a bar, a row, a day or a session drills down", { skip: !edge, t
   });
 });
 
-test("the Scripts page tells the runs of scripts by name, the other pages count them, and a recent run opens its session", { skip: !edge, timeout: 300_000 }, async () => {
+test("the Scripts page tells the runs of scripts by name, the other pages count them, and a recent run opens its session", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
     const texts = (title: string, selector: string) => page.evaluate<string[]>(`[...(${block(title)}?.querySelectorAll(${JSON.stringify(selector)}) ?? [])].map(item => item.textContent.trim())`);
@@ -216,7 +217,7 @@ test("the Scripts page tells the runs of scripts by name, the other pages count 
   });
 });
 
-test("the lines of a chart cut by a kind of tool, by who sent a prompt or by how it came are named", { skip: !edge, timeout: 300_000 }, async () => {
+test("the lines of a chart cut by a kind of tool, by who sent a prompt or by how it came are named", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     const legend = `[...document.querySelectorAll('.chart-legend-item')].map(item => item.textContent.trim())`;
     const named = async (title: string, expected: readonly string[]) => {
@@ -236,7 +237,7 @@ test("the lines of a chart cut by a kind of tool, by who sent a prompt or by how
   });
 });
 
-test("tools and providers are named as people know them, the MCP servers are listed, and the Models chart says what it counts", { skip: !edge, timeout: 300_000 }, async () => {
+test("tools and providers are named as people know them, the MCP servers are listed, and the Models chart says what it counts", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
     const texts = (title: string, selector: string) => page.evaluate<string[]>(`[...(${block(title)}?.querySelectorAll(${JSON.stringify(selector)}) ?? [])].map(item => item.textContent.trim())`);
@@ -326,7 +327,7 @@ test("tools and providers are named as people know them, the MCP servers are lis
   });
 });
 
-test("one tool is one row whatever keys it has, a model of two providers is told apart, and the chip of a provider follows its name", { skip: !edge, timeout: 300_000 }, async () => {
+test("one tool is one row whatever keys it has, a model of two providers is told apart, and the chip of a provider follows its name", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
     const texts = (title: string, selector: string) => page.evaluate<string[]>(`[...(${block(title)}?.querySelectorAll(${JSON.stringify(selector)}) ?? [])].map(item => item.textContent.trim())`);
@@ -395,7 +396,7 @@ test("one tool is one row whatever keys it has, a model of two providers is told
   });
 });
 
-test("the sessions at once, the average fill of the context and the depth of the sub-agents each have their block", { skip: !edge, timeout: 300_000 }, async () => {
+test("the sessions at once, the average fill of the context and the depth of the sub-agents each have their block", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3, .stats-block-title')?.textContent.trim() === ${JSON.stringify(title)})`;
     await render(page, { scenario: "ready" });
@@ -420,7 +421,7 @@ test("the sessions at once, the average fill of the context and the depth of the
   });
 });
 
-for (const samples of [0, 2]) test(`context fill distinguishes ${samples} samples from the measured zero percent value`, { skip: !edge, timeout: 90_000 }, async () => {
+for (const samples of [0, 2]) test(`context fill distinguishes ${samples} samples from the measured zero percent value`, { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const block = `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === 'Context fill')`;
     await render(page, { contextSamples: samples });
@@ -438,7 +439,7 @@ for (const samples of [0, 2]) test(`context fill distinguishes ${samples} sample
   });
 });
 
-for (const title of ["Activity", "Agents"]) for (const notes of [false, true]) test(`derived metrics show their own qualification captions only when noted (${title}, ${notes})`, { skip: !edge, timeout: 90_000 }, async () => {
+for (const title of ["Activity", "Agents"]) for (const notes of [false, true]) test(`derived metrics show their own qualification captions only when noted (${title}, ${notes})`, { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
     await render(page, { derivedNotes: notes });
@@ -459,7 +460,7 @@ for (const title of ["Activity", "Agents"]) for (const notes of [false, true]) t
   });
 });
 
-test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: 300_000 }, async () => {
+test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });
     await page.until(`document.querySelector('.stats-first')`, "the choice");
@@ -530,7 +531,7 @@ test("the first time asks how much history to read, then shows the progress, the
   });
 });
 
-test("saved Statistics stay visible while surviving history awaits a choice", { skip: !edge, timeout: 300_000 }, async () => {
+test("saved Statistics stay visible while surviving history awaits a choice", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });
     await page.until(`document.querySelector('.stats-first') && !document.querySelector('.stats-tabs')`, "initial history choice");
@@ -541,7 +542,7 @@ test("saved Statistics stay visible while surviving history awaits a choice", { 
   });
 });
 
-test("two Statistics tabs in one window share no element id, and each names its own parts", { skip: !edge, timeout: 300_000 }, async () => {
+test("two Statistics tabs in one window share no element id, and each names its own parts", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     const repeated = `(() => { const ids = [...document.querySelectorAll('.statistics-canvas [id]')].map(element => element.id); return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]; })()`;
     // The application canvas and the canvas of a project stay mounted together: the card of the first time, twice.
@@ -557,7 +558,7 @@ test("two Statistics tabs in one window share no element id, and each names its 
   });
 });
 
-test("one session is one session, in the card of the first time and in the notification of the end", { skip: !edge, timeout: 300_000 }, async () => {
+test("one session is one session, in the card of the first time and in the notification of the end", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time", sessionCount: 1 });
     await page.until(`document.querySelector('.stats-first')`, "the choice");
@@ -570,7 +571,7 @@ test("one session is one session, in the card of the first time and in the notif
   });
 });
 
-test("the states of the history: the sessions that could not be read, a reading that failed, and a choice to start from today", { skip: !edge, timeout: 300_000 }, async () => {
+test("the states of the history: the sessions that could not be read, a reading that failed, and a choice to start from today", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "skipped" });
     await page.until(`document.querySelector('.stats-history[data-view="skipped"]')`, "the skipped sessions");
@@ -609,7 +610,7 @@ test("the states of the history: the sessions that could not be read, a reading 
   });
 });
 
-test("a hidden canvas asks nothing, and shows what it missed when it is shown again", { skip: !edge, timeout: 300_000 }, async () => {
+test("a hidden canvas asks nothing, and shows what it missed when it is shown again", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready", visible: false });
     await idle(600);
@@ -633,7 +634,7 @@ test("a hidden canvas asks nothing, and shows what it missed when it is shown ag
   });
 });
 
-test("a change announced by the plugin makes the page ask again for those days only, once for a burst", { skip: !edge, timeout: 300_000 }, async () => {
+test("a change announced by the plugin makes the page ask again for those days only, once for a burst", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -664,7 +665,7 @@ test("a change announced by the plugin makes the page ask again for those days o
   });
 });
 
-test("a change that arrives while a question is in flight is not lost: the block asks again when its answer comes back stale", { skip: !edge, timeout: 300_000 }, async () => {
+test("a change that arrives while a question is in flight is not lost: the block asks again when its answer comes back stale", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -686,7 +687,7 @@ test("a change that arrives while a question is in flight is not lost: the block
   });
 });
 
-test("a question that fails is told with a way to try again, and an empty period says so", { skip: !edge, timeout: 300_000 }, async () => {
+test("a question that fails is told with a way to try again, and an empty period says so", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     // The first summary fails.
     await page.evaluate(`window.__failFirst = true`);
@@ -716,7 +717,7 @@ test("a question that fails is told with a way to try again, and an empty period
   });
 });
 
-test("switching pages a few hundred times neither asks again nor grows the page", { skip: !edge, timeout: 600_000 }, async () => {
+test("switching pages a few hundred times neither asks again nor grows the page", { skip: !edge, timeout: testLimit(600_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -739,7 +740,7 @@ test("switching pages a few hundred times neither asks again nor grows the page"
   }, { exposeGc: true });
 });
 
-test("the canvas is used with the keyboard: tabs, menus, the table of a chart, the legend", { skip: !edge, timeout: 300_000 }, async () => {
+test("the canvas is used with the keyboard: tabs, menus, the table of a chart, the legend", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -780,7 +781,7 @@ test("the canvas is used with the keyboard: tabs, menus, the table of a chart, t
   });
 });
 
-test("the canvas speaks the language of the window and writes numbers in it", { skip: !edge, timeout: 300_000 }, async () => {
+test("the canvas speaks the language of the window and writes numbers in it", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     for (const [locale, overview, health] of [["fr", "Vue d’ensemble", "Santé"], ["de", "Übersicht", "Zustand"], ["ja", "概要", "状態"], ["es", "Resumen", "Salud"], ["zh-CN", "概览", "健康"]] as const) {
       await render(page, { scenario: "ready", locale });
@@ -795,7 +796,7 @@ test("the canvas speaks the language of the window and writes numbers in it", { 
   });
 });
 
-test("the canvas is calm for people who ask for less motion, and keeps working at 200% zoom and in a narrow tab", { skip: !edge, timeout: 300_000 }, async () => {
+test("the canvas is calm for people who ask for less motion, and keeps working at 200% zoom and in a narrow tab", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -835,7 +836,7 @@ test("the canvas is calm for people who ask for less motion, and keeps working a
   }, { reducedMotion: true });
 });
 
-test("the spaces and the project of a canvas open filtered, and a color scheme restyles its charts", { skip: !edge, timeout: 300_000 }, async () => {
+test("the spaces and the project of a canvas open filtered, and a color scheme restyles its charts", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready", spaceId: "space-work", instanceId: "canvas-space" });
     await page.until(settled, "the space");
@@ -852,7 +853,7 @@ test("the spaces and the project of a canvas open filtered, and a color scheme r
   });
 });
 
-test("the canvas of the application offers My fleet once a server is linked, with the machines, projects and models of the fleet", { skip: !edge, timeout: 300_000 }, async () => {
+test("the canvas of the application offers My fleet once a server is linked, with the machines, projects and models of the fleet", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     // Without a server, or for one project, the canvas is the one of this machine alone: no scope to choose.
     for (const options of [{}, { fleet: "unlinked" }, { fleet: true, projectId: "proj-tomlyn", instanceId: "canvas-project" }]) {

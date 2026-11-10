@@ -139,7 +139,7 @@ internal sealed class CodexFakeConnection
         var pending = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingRequests[id] = pending;
         await WriteAsync(new JsonObject { ["id"] = id, ["method"] = method, ["params"] = parameters });
-        return await pending.Task.WaitAsync(TimeSpan.FromSeconds(30), _lifetime.Token);
+        return await pending.Task.WithinAsync(TestTime.Seconds(30), _lifetime.Token);
     }
 
     private async Task RunAsync()

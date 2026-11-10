@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../automations/automationsPanel.mount.tsx", fixture: "automationsFixture", rpcFixture: "../demo-api.ts", styles: ["../automations/automations.css"],
   width: 1600, height: 1000, reducedMotion: true } as const;
@@ -17,7 +18,7 @@ async function picture(page: Page, name: string) {
 }
 
 test("a run that waits for the person is taken over from the list, a try lists its calls, and the page holds in both themes and narrow",
-  { skip: !edge, timeout: 120_000 }, async () => {
+  { skip: !edge, timeout: testLimit(120_000) }, async () => {
     await withCanvas(async page => {
       await page.until(`document.querySelectorAll('.automation-runs > li').length === 3`, "the runs");
       const rows = await page.evaluate(`[...document.querySelectorAll('.automation-runs > li')].map(li => [li.dataset.tone, li.querySelector('.automation-run-text span').textContent,

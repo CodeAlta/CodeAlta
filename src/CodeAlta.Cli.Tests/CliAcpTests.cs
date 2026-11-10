@@ -14,7 +14,7 @@ namespace CodeAlta.Cli.Tests;
 [TestClass]
 public sealed class CliAcpTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(60);
 
     private static readonly AgentModelInfo[] Models =
     [
@@ -52,7 +52,7 @@ public sealed class CliAcpTests
         {
             ProtocolVersion = ProtocolVersion.From(7),
             ClientCapabilities = new ClientCapabilities(),
-        }).WaitAsync(Timeout);
+        }).WithinAsync(Timeout);
         Assert.AreEqual(1, later.ProtocolVersion.Value.GetInt32());
     }
 
@@ -62,7 +62,7 @@ public sealed class CliAcpTests
         using var root = new CliTestRoot();
         await using var acp = await AcpHarness.StartAsync(root, new FakeProvider(models: Models), "--model", "fake:fake-model@high");
 
-        var session = await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        var session = await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout);
 
         Assert.IsTrue(Guid.TryParse(session.SessionId.Value, out _));
         Assert.AreEqual("default", session.Modes!.CurrentModeId.Value);
@@ -80,9 +80,9 @@ public sealed class CliAcpTests
         CollectionAssert.AreEqual(new[] { "low", "high" }, Values(Option(options, "thought_level")));
 
         var missing = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = Path.Combine(root.Root, "missing") }).WaitAsync(Timeout));
+            acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = Path.Combine(root.Root, "missing") }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.InvalidParams, missing.Code);
-        var relative = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = "project" }).WaitAsync(Timeout));
+        var relative = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = "project" }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.InvalidParams, relative.Code);
     }
 
@@ -95,7 +95,7 @@ public sealed class CliAcpTests
         provider.Turns.Enqueue(FakeProvider.CallTool("read_file", """{"path":"a.txt"}"""));
         provider.Turns.Enqueue(FakeProvider.Stream("All done.", "Let me think."));
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
 
         var response = await acp.PromptAsync(sessionId, "read a.txt");
 
@@ -133,7 +133,7 @@ public sealed class CliAcpTests
         using var root = new CliTestRoot();
         var provider = new FakeProvider();
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
 
         Assert.AreEqual("end_turn", (await acp.PromptAsync(sessionId, "hello")).StopReason.Value.GetString());
 
@@ -159,7 +159,7 @@ public sealed class CliAcpTests
         File.WriteAllText(file, "linked");
         var provider = new FakeProvider();
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
         var image = ContentBlock.FromImage(Convert.ToBase64String([0x89, 0x50, 0x4E, 0x47, 1, 2, 3]), "image/png");
         var resource = ContentBlock.FromJsonElement(AcpJson.Parse("""{"type":"resource","resource":{"uri":"file:///notes.md","text":"The notes."}}"""));
 
@@ -167,7 +167,7 @@ public sealed class CliAcpTests
         {
             SessionId = sessionId,
             Prompt = [ContentBlock.FromText("Look at "), ContentBlock.FromResourceLink(new Uri(file).AbsoluteUri, "linked.txt"), image, resource],
-        }).WaitAsync(Timeout);
+        }).WithinAsync(Timeout);
 
         Assert.AreEqual("end_turn", response.StopReason.Value.GetString());
         var user = provider.Requests.Last().Conversation.First(static message => message.Role == AgentConversationRole.User);
@@ -179,7 +179,7 @@ public sealed class CliAcpTests
 
         var audio = ContentBlock.FromJsonElement(AcpJson.Parse("""{"type":"audio","data":"AAAA","mimeType":"audio/wav"}"""));
         var refused = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionPromptAsync(new PromptRequest { SessionId = sessionId, Prompt = [audio] }).WaitAsync(Timeout));
+            acp.Client.SessionPromptAsync(new PromptRequest { SessionId = sessionId, Prompt = [audio] }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.InvalidParams, refused.Code);
     }
 
@@ -191,10 +191,10 @@ public sealed class CliAcpTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.Turns.Enqueue(FakeProvider.WaitThenReply(new TaskCompletionSource().Task, "never", started));
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
 
         var prompt = acp.PromptAsync(sessionId, "work");
-        await started.Task.WaitAsync(Timeout);
+        await started.Task.WithinAsync(Timeout);
         var busy = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.PromptAsync(sessionId, "more"));
         Assert.AreEqual("session_busy", busy.ErrorData!.Value.GetProperty("kind").GetString(), "One prompt at a time.");
         await acp.Client.CancelSessionAsync(sessionId);
@@ -221,13 +221,13 @@ public sealed class CliAcpTests
             },
         };
         await using var acp = await AcpHarness.StartAsync(root, environment);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
 
         var prompt = acp.PromptAsync(sessionId, "work");
-        await reading.Task.WaitAsync(Timeout);
+        await reading.Task.WithinAsync(Timeout);
         await acp.Client.CancelSessionAsync(sessionId);
         // Answered after the cancel was handled: the server reads the messages in order.
-        await acp.Client.SessionListAsync(new ListSessionsRequest()).WaitAsync(Timeout);
+        await acp.Client.SessionListAsync(new ListSessionsRequest()).WithinAsync(Timeout);
         gate.SetResult();
         var response = await prompt;
 
@@ -236,7 +236,7 @@ public sealed class CliAcpTests
 
         // A cancel with no prompt in flight cancels nothing, not even the next prompt.
         await acp.Client.CancelSessionAsync(sessionId);
-        await acp.Client.SessionListAsync(new ListSessionsRequest()).WaitAsync(Timeout);
+        await acp.Client.SessionListAsync(new ListSessionsRequest()).WithinAsync(Timeout);
         provider.Turns.Enqueue(FakeProvider.Reply("Back."));
         Assert.AreEqual("end_turn", (await acp.PromptAsync(sessionId, "again")).StopReason.Value.GetString());
     }
@@ -256,9 +256,9 @@ public sealed class CliAcpTests
             },
         };
         await using var acp = await AcpHarness.StartAsync(root, environment, "--model", "fake:fake-model@high");
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
 
-        await acp.Client.SessionSetModeAsync(new SetSessionModeRequest { SessionId = sessionId, ModeId = "plan" }).WaitAsync(Timeout);
+        await acp.Client.SessionSetModeAsync(new SetSessionModeRequest { SessionId = sessionId, ModeId = "plan" }).WithinAsync(Timeout);
         var update = acp.Updates(sessionId).Last(static update => Kind(update) == "config_option_update");
         Assert.AreEqual("plan", update.GetProperty("configOptions").EnumerateArray().Single(static option => option.GetProperty("id").GetString() == "mode")
             .GetProperty("currentValue").GetString(), "A client of the options learns the mode.");
@@ -297,7 +297,7 @@ public sealed class CliAcpTests
         string sessionId;
         await using (var first = await AcpHarness.StartAsync(root, provider))
         {
-            sessionId = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+            sessionId = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
             provider.Turns.Enqueue(FakeProvider.CallTool("read_file", """{"path":"a.txt"}"""));
             provider.Turns.Enqueue(FakeProvider.Stream("All done.", "Let me think."));
             await first.PromptAsync(sessionId, "read a.txt");
@@ -305,7 +305,7 @@ public sealed class CliAcpTests
         }
 
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var loaded = await acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        var loaded = await acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WithinAsync(Timeout);
 
         Assert.AreEqual("default", loaded.Modes!.CurrentModeId.Value);
         var replay = acp.Updates(sessionId);
@@ -322,20 +322,20 @@ public sealed class CliAcpTests
         Assert.IsTrue(provider.Requests.Last().Conversation.Count > 2, "The loaded session goes on with its history.");
 
         var inUse = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WaitAsync(Timeout));
+            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WithinAsync(Timeout));
         Assert.AreEqual("session_in_use", inUse.ErrorData!.Value.GetProperty("kind").GetString());
 
-        await acp.Client.SessionCloseAsync(new CloseSessionRequest { SessionId = sessionId }).WaitAsync(Timeout);
+        await acp.Client.SessionCloseAsync(new CloseSessionRequest { SessionId = sessionId }).WithinAsync(Timeout);
         var count = acp.Updates(sessionId).Count;
-        await acp.Client.SessionResumeAsync(new ResumeSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        await acp.Client.SessionResumeAsync(new ResumeSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WithinAsync(Timeout);
         Assert.AreEqual(count, acp.Updates(sessionId).Count, "A resume replays nothing.");
         Assert.AreEqual("end_turn", (await acp.PromptAsync(sessionId, "resumed")).StopReason.Value.GetString());
 
         var unknown = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = Guid.NewGuid().ToString(), Cwd = root.ProjectRoot }).WaitAsync(Timeout));
+            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = Guid.NewGuid().ToString(), Cwd = root.ProjectRoot }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.ResourceNotFound, unknown.Code);
         var closed = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionCloseAsync(new CloseSessionRequest { SessionId = Guid.NewGuid().ToString() }).WaitAsync(Timeout));
+            acp.Client.SessionCloseAsync(new CloseSessionRequest { SessionId = Guid.NewGuid().ToString() }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.ResourceNotFound, closed.Code);
     }
 
@@ -348,14 +348,14 @@ public sealed class CliAcpTests
         string sessionId;
         await using (var first = await AcpHarness.StartAsync(root, provider))
         {
-            sessionId = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+            sessionId = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
             await first.PromptAsync(sessionId, "hello");
             Assert.AreEqual(0, await first.CloseInputAsync());
         }
 
         Assert.IsTrue(markers.Delete(sessionId), "Desktop lists it and deletes the marker.");
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        await acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        await acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WithinAsync(Timeout);
         await acp.PromptAsync(sessionId, "again");
 
         Assert.IsNotNull(markers.TryRead(sessionId), "A loaded session is announced again.");
@@ -369,23 +369,23 @@ public sealed class CliAcpTests
         Directory.CreateDirectory(elsewhere);
         var provider = new FakeProvider();
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var here = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var here = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
         await acp.PromptAsync(here, "first");
-        var there = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = elsewhere }).WaitAsync(Timeout)).SessionId.Value;
+        var there = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = elsewhere }).WithinAsync(Timeout)).SessionId.Value;
         await acp.PromptAsync(there, "second");
 
-        var inFolder = await acp.Client.SessionListAsync(new ListSessionsRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout);
-        var all = await acp.Client.SessionListAsync(new ListSessionsRequest()).WaitAsync(Timeout);
+        var inFolder = await acp.Client.SessionListAsync(new ListSessionsRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout);
+        var all = await acp.Client.SessionListAsync(new ListSessionsRequest()).WithinAsync(Timeout);
 
         CollectionAssert.AreEqual(new[] { here }, inFolder.Sessions.Select(static session => session.SessionId.Value).ToArray());
         Assert.AreEqual(root.ProjectRoot, inFolder.Sessions[0].Cwd);
         Assert.IsTrue(DateTimeOffset.TryParse(inFolder.Sessions[0].UpdatedAt, out _));
         CollectionAssert.AreEqual(new[] { there, here }, all.Sessions.Select(static session => session.SessionId.Value).ToArray(), "The newest first.");
         Assert.IsNull(all.NextCursor);
-        var cursor = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionListAsync(new ListSessionsRequest { Cursor = "nope" }).WaitAsync(Timeout));
+        var cursor = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionListAsync(new ListSessionsRequest { Cursor = "nope" }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.InvalidParams, cursor.Code);
 
-        var fork = await acp.Client.SessionForkAsync(new ForkSessionRequest { SessionId = here, Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        var fork = await acp.Client.SessionForkAsync(new ForkSessionRequest { SessionId = here, Cwd = root.ProjectRoot }).WithinAsync(Timeout);
         Assert.AreNotEqual(here, fork.SessionId.Value);
         Assert.IsNotNull(fork.ConfigOptions);
         await acp.PromptAsync(fork.SessionId.Value, "in the fork");
@@ -415,7 +415,7 @@ public sealed class CliAcpTests
             Env = [new EnvVariable { Name = "MCP_TEST_LOG", Value = log }],
         };
 
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WithinAsync(Timeout)).SessionId.Value;
         var response = await acp.PromptAsync(sessionId, "echo hi");
 
         Assert.AreEqual("end_turn", response.StopReason.Value.GetString());
@@ -431,14 +431,14 @@ public sealed class CliAcpTests
         {
             Cwd = root.ProjectRoot,
             McpServers = [new McpServerHttp { Name = "remote", Url = "not an address" }],
-        }).WaitAsync(Timeout));
+        }).WithinAsync(Timeout));
         Assert.AreEqual(AcpErrorCodes.InvalidParams, invalid.Code);
 
         // A run that starts no MCP server refuses the servers rather than ignoring them.
         await using var off = await AcpHarness.StartAsync(root, provider);
         Assert.AreNotEqual(true, off.Client.InitializeResponse.AgentCapabilities.McpCapabilities.Http);
         var refused = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            off.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WaitAsync(Timeout));
+            off.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WithinAsync(Timeout));
         Assert.AreEqual("mcp_off", refused.ErrorData!.Value.GetProperty("kind").GetString());
     }
 
@@ -452,7 +452,7 @@ public sealed class CliAcpTests
         string existing;
         await using (var first = await AcpHarness.StartAsync(root, provider))
         {
-            existing = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = other }).WaitAsync(Timeout)).SessionId.Value;
+            existing = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = other }).WithinAsync(Timeout)).SessionId.Value;
             await first.PromptAsync(existing, "hello");
         }
 
@@ -461,15 +461,15 @@ public sealed class CliAcpTests
         File.WriteAllText(Path.Combine(other, ".alta", "config.toml"), "[plugins.mcp.servers.ghost]\nrequired = true\n");
         await using var acp = await AcpHarness.StartAsync(root, root.Environment(provider) with { PluginEnvironment = null }, plugins: true);
 
-        await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout);
-        var created = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = other }).WaitAsync(Timeout));
+        await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout);
+        var created = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = other }).WithinAsync(Timeout));
         Assert.AreEqual("required_unavailable", created.ErrorData!.Value.GetProperty("kind").GetString());
         StringAssert.Contains(created.Message, "'ghost'");
         var loaded = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = existing, Cwd = other }).WaitAsync(Timeout));
+            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = existing, Cwd = other }).WithinAsync(Timeout));
         Assert.AreEqual("required_unavailable", loaded.ErrorData!.Value.GetProperty("kind").GetString());
         var resumed = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-            acp.Client.SessionResumeAsync(new ResumeSessionRequest { SessionId = existing, Cwd = other }).WaitAsync(Timeout));
+            acp.Client.SessionResumeAsync(new ResumeSessionRequest { SessionId = existing, Cwd = other }).WithinAsync(Timeout));
         Assert.AreEqual("required_unavailable", resumed.ErrorData!.Value.GetProperty("kind").GetString(), "The refused load left the session closed.");
     }
 
@@ -480,14 +480,14 @@ public sealed class CliAcpTests
         await using (var notReady = await AcpHarness.StartAsync(root, new FakeProvider(availability: ModelProviderAvailability.Failed)))
         {
             var refused = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
-                notReady.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout));
+                notReady.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout));
             Assert.AreEqual(AcpErrorCodes.AuthRequired, refused.Code);
             StringAssert.Contains(refused.Message, "altacli auth check");
         }
 
         var provider = new FakeProvider();
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
         provider.Turns.Enqueue(FakeProvider.Fail(AgentFailureKind.Auth, "Sign in again."));
         var signIn = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.PromptAsync(sessionId, "work"));
         Assert.AreEqual(AcpErrorCodes.AuthRequired, signIn.Code);
@@ -511,14 +511,14 @@ public sealed class CliAcpTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.Turns.Enqueue(FakeProvider.WaitThenReply(new TaskCompletionSource().Task, "never", started));
         await using var acp = await AcpHarness.StartAsync(root, provider);
-        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WithinAsync(Timeout)).SessionId.Value;
         var prompt = acp.PromptAsync(sessionId, "work");
-        await started.Task.WaitAsync(Timeout);
+        await started.Task.WithinAsync(Timeout);
 
         var stopwatch = Stopwatch.StartNew();
         Assert.AreEqual(CliExitCodes.Completed, await acp.CloseInputAsync(), acp.Stderr);
 
-        Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(30), "The run is aborted, not waited for.");
+        Assert.IsTrue(stopwatch.Elapsed < TestTime.Seconds(30), "The run is aborted, not waited for.");
         _ = await Task.WhenAny(prompt, Task.Delay(TimeSpan.FromSeconds(1)));
         var events = await new CodeAlta.Agent.Runtime.FileSystemAgentSessionStore(new CodeAlta.Agent.Runtime.AgentRuntimePathLayout(root.Profile)).ReadEventsAsync(sessionId);
         Assert.AreEqual("cancelled", CodeAlta.Orchestration.Runtime.SessionOutcome.From(events, isRunning: false).AbortReason, "The journal records the abort of the run.");
@@ -560,11 +560,11 @@ public sealed class CliAcpTests
                 ProtocolVersion = ProtocolVersion.From(1),
                 ClientInfo = new Implementation { Name = "test", Version = "1.0.0" },
                 ClientCapabilities = new ClientCapabilities(),
-            }).WaitAsync(Timeout);
+            }).WithinAsync(Timeout);
             Assert.AreEqual("altacli", client.InitializeResponse.AgentInfo!.Name);
             Assert.IsTrue(client.InitializeResponse.AgentCapabilities.LoadSession);
             process.StandardInput.Close();
-            await process.WaitForExitAsync().WaitAsync(Timeout);
+            await process.WaitForExitAsync().WithinAsync(Timeout);
         }
         finally
         {
@@ -641,12 +641,12 @@ public sealed class CliAcpTests
                 ProtocolVersion = ProtocolVersion.From(1),
                 ClientInfo = new Implementation { Name = "test", Version = "1.0.0" },
                 ClientCapabilities = new ClientCapabilities(),
-            }, messages.Enqueue).WaitAsync(Timeout);
+            }, messages.Enqueue).WithinAsync(Timeout);
             return new AcpHarness(toAgent, run, stderr, messages, client);
         }
 
         public Task<PromptResponse> PromptAsync(string sessionId, string text)
-            => Client.SessionPromptAsync(new PromptRequest { SessionId = sessionId, Prompt = [ContentBlock.FromText(text)] }).WaitAsync(Timeout);
+            => Client.SessionPromptAsync(new PromptRequest { SessionId = sessionId, Prompt = [ContentBlock.FromText(text)] }).WithinAsync(Timeout);
 
         public Task<SetSessionConfigOptionResponse> SetOptionAsync(string sessionId, string id, string value)
             => Client.SessionSetConfigOptionAsync(SetSessionConfigOptionRequest.FromJsonElement(AcpJson.Build(writer =>
@@ -656,7 +656,7 @@ public sealed class CliAcpTests
                 writer.WriteString("configId", id);
                 writer.WriteString("value", value);
                 writer.WriteEndObject();
-            }))).WaitAsync(Timeout);
+            }))).WithinAsync(Timeout);
 
         /// <summary>The updates of a session the agent sent so far, in order.</summary>
         public List<JsonElement> Updates(string sessionId)
@@ -667,7 +667,7 @@ public sealed class CliAcpTests
         public async Task<int> CloseInputAsync()
         {
             await _toAgent.Writer.CompleteAsync();
-            return await _run.WaitAsync(Timeout);
+            return await _run.WithinAsync(Timeout);
         }
 
         public async ValueTask DisposeAsync()
@@ -675,7 +675,7 @@ public sealed class CliAcpTests
             await _toAgent.Writer.CompleteAsync();
             try
             {
-                await _run.WaitAsync(Timeout);
+                await _run.WithinAsync(Timeout);
             }
             finally
             {

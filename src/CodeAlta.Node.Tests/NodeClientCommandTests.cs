@@ -10,7 +10,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed partial class NodeClientCommandTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -31,7 +31,7 @@ public sealed partial class NodeClientCommandTests
             Started = (_, stop) => started.TrySetResult(stop),
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var pairOutput = new CapturingWriter();
@@ -42,7 +42,7 @@ public sealed partial class NodeClientCommandTests
             var (code, output, error) = await RunAsync(["connect", link, "--data-root", viewerRoot, "--name", "viewer"]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
             StringAssert.Contains(output, "Paired with test-node");
-            Assert.AreEqual(NodeExitCodes.Success, await pairing.WaitAsync(Patience, token), pairError.Text);
+            Assert.AreEqual(NodeExitCodes.Success, await pairing.WithinAsync(Patience, token), pairError.Text);
             StringAssert.Contains(pairOutput.Text, "Paired with viewer");
 
             (code, output, error) = await RunAsync(["machines", "--data-root", viewerRoot]);
@@ -84,7 +84,7 @@ public sealed partial class NodeClientCommandTests
             stop();
         }
 
-        Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token), runError.Text);
+        Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, token), runError.Text);
         StringAssert.Contains(runOutput.Text, "test-node (");
         Assert.IsFalse(File.Exists(Path.Combine(root.DataRoot, "fleet", NodeFleet.ListenerFileName)), "The listener file goes with the node.");
     }
@@ -118,7 +118,7 @@ public sealed partial class NodeClientCommandTests
     {
         var output = new CapturingWriter();
         var error = new CapturingWriter();
-        var code = await Client(output, error).RunAsync(args).WaitAsync(Patience, TestContext.CancellationToken);
+        var code = await Client(output, error).RunAsync(args).WithinAsync(Patience, TestContext.CancellationToken);
         return (code, output.Text, error.Text);
     }
 

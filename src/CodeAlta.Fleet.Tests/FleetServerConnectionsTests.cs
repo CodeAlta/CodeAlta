@@ -47,14 +47,14 @@ public sealed class FleetServerConnectionsTests
             },
         });
         connections.Start();
-        await failed.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+        await failed.Task.WithinAsync(TestTime.Seconds(10), token);
         // Several reloads while the spaces do not read: the links are not loaded, and nothing counts them as such.
         await Task.Delay(TimeSpan.FromMilliseconds(500), token);
         Assert.IsFalse(connections.Loaded.IsCompleted, "the links are not loaded while the spaces linked to them do not read");
         Assert.IsNotNull(connections.LoadProblem);
 
         Volatile.Write(ref failing, 0);
-        await connections.Loaded.WaitAsync(TimeSpan.FromSeconds(10), token);
+        await connections.Loaded.WithinAsync(TestTime.Seconds(10), token);
         Assert.IsNull(connections.LoadProblem);
         Assert.IsTrue(connections.Connections.Single().Connector!.LinksSpace(null), "the spaces linked to the server are read once loaded");
     }

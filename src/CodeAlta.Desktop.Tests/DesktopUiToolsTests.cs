@@ -547,9 +547,9 @@ public sealed class DesktopUiToolsTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, text)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(20));
+        var result = await receipt.Completion.WithinAsync(TestTime.Seconds(20));
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
         // The next send may attach the session again, which the runtime only does for an idle session.
         while (await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
     }

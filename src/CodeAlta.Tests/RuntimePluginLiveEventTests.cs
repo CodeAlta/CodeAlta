@@ -32,9 +32,9 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(join);
         var launchedAll = enumerated == 2 && !join.IsCompleted;
         first.SetException([selected, sibling, shared, shared]);
-        var failure = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(selected, await firstOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.AreSame(shared, await secondOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var failure = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(selected, await firstOutcome.WithinAsync(TestTime.Seconds(10)));
+        Assert.AreSame(shared, await secondOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsTrue(launchedAll);
         Assert.IsInstanceOfType<AggregateException>(failure);
         Assert.AreEqual(retained, OwnedProviderEventForwarding.HasRetention(failure));
@@ -68,8 +68,8 @@ public sealed class RuntimePluginLiveEventTests
         var aborts = 0;
         var token = new CancellationToken(canceled: true);
         var actual = await ObserveAsync(owner.RunAsync(() => stage == 0 ? Invoke() : Task.CompletedTask,
-            execution => { aborts++; Assert.IsTrue(execution.IsCancellationRequested); return Invoke(); }, token, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
-        if (originalOutcome is not null) Assert.AreSame(selected, await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+            execution => { aborts++; Assert.IsTrue(execution.IsCancellationRequested); return Invoke(); }, token, CancellationToken.None)).WithinAsync(TestTime.Seconds(10));
+        if (originalOutcome is not null) Assert.AreSame(selected, await originalOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsNotNull(actual);
         Assert.AreEqual(kind != 0, OwnedProviderEventForwarding.HasRetention(actual));
         Assert.AreEqual(stage, aborts);
@@ -100,13 +100,13 @@ public sealed class RuntimePluginLiveEventTests
         var pending = false;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             pending = !operation.IsCompleted && !owner.SourceReleased;
         }
         catch (Exception failure) { deadline = failure; }
         finally { original.TrySetException([shared, shared]); }
-        var actual = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await outcome.WithinAsync(TestTime.Seconds(10));
+        await originalOutcome.WithinAsync(TestTime.Seconds(10));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsTrue(pending);
         Assert.IsInstanceOfType<AggregateException>(actual);
@@ -131,7 +131,7 @@ public sealed class RuntimePluginLiveEventTests
             () => { hostCalls.Add("registry"); return ValueTask.CompletedTask; },
             () => { hostCalls.Add("plugins"); return ValueTask.CompletedTask; }, () => hostCalls.Add("logging"), true, true);
         var hostOutcome = ObserveAsync(host.Value);
-        var hostFailure = await hostOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var hostFailure = await hostOutcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(hostFailure);
         Assert.IsFalse(OwnedProviderEventForwarding.HasRetention(hostFailure));
         CollectionAssert.AreEqual(new[] { "hub", "registry", "plugins", "logging" }, hostCalls);
@@ -139,13 +139,13 @@ public sealed class RuntimePluginLiveEventTests
         var outer = CodeAltaOwnedServices.CreateOwnedServicesDisposal(Cleanup,
             () => { outerCalls.Add("metadata"); return ValueTask.CompletedTask; }, () => outerCalls.Add("logging"), true);
         var outerOutcome = ObserveAsync(outer.Value);
-        var outerFailure = await outerOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var outerFailure = await outerOutcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(outerFailure);
         Assert.IsFalse(OwnedProviderEventForwarding.HasRetention(outerFailure));
         CollectionAssert.AreEqual(new[] { "metadata", "logging" }, outerCalls);
         Assert.AreSame(error, hostFailure);
         Assert.AreSame(error, outerFailure);
-        if (originalOutcome is not null) Assert.AreSame(error, await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        if (originalOutcome is not null) Assert.AreSame(error, await originalOutcome.WithinAsync(TestTime.Seconds(10)));
     }
 
     [TestMethod]
@@ -157,8 +157,8 @@ public sealed class RuntimePluginLiveEventTests
             () => ValueTask.CompletedTask, () => ValueTask.CompletedTask, () => throw logging, true, true);
         var outer = CodeAltaOwnedServices.CreateOwnedServicesDisposal(() => ValueTask.CompletedTask,
             () => ValueTask.CompletedTask, () => throw logging, true);
-        Assert.AreSame(logging, await ObserveAsync(host.Value).WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.AreSame(logging, await ObserveAsync(outer.Value).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(logging, await ObserveAsync(host.Value).WithinAsync(TestTime.Seconds(10)));
+        Assert.AreSame(logging, await ObserveAsync(outer.Value).WithinAsync(TestTime.Seconds(10)));
         var reads = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var readsOutcome = ObserveAsync(reads.Task);
         var commandsEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,11 +172,11 @@ public sealed class RuntimePluginLiveEventTests
             () => { calls.Add("plugins"); return Task.CompletedTask; }).AsTask();
         var outcome = ObserveAsync(operation);
         Exception? deadline = null;
-        try { await commandsEntered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await commandsEntered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception error) { deadline = error; }
         finally { reads.TrySetResult(); }
-        var actual = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        await readsOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await outcome.WithinAsync(TestTime.Seconds(10));
+        await readsOutcome.WithinAsync(TestTime.Seconds(10));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsNotNull(actual);
         Assert.IsFalse(OwnedProviderEventForwarding.HasRetention(actual));
@@ -205,14 +205,14 @@ public sealed class RuntimePluginLiveEventTests
             1 => owner.AbortAsync(invocation, () => Invoke()),
             _ => owner.DisposeAsync(() => new ValueTask(Invoke()), () => gates++),
         };
-        var actual = await ObserveAsync(operation).WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await ObserveAsync(operation).WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(actual);
         Assert.AreSame(selected, invocation.AwaitedFailure);
         if (source is null) Assert.IsNull(invocation.Original);
         else
         {
             Assert.AreSame(source.Task, invocation.Original);
-            Assert.AreSame(selected, await sourceOutcome!.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.AreSame(selected, await sourceOutcome!.WithinAsync(TestTime.Seconds(10)));
             CollectionAssert.AreEqual(new Exception[] { selected, sibling, shared, shared }, invocation.OriginalFaults!.InnerExceptions.ToArray());
         }
         var retained = kind >= 2 || kind == 0 && stage != 0;
@@ -225,7 +225,7 @@ public sealed class RuntimePluginLiveEventTests
         {
             var newInvocation = new OwnedSessionCommandService.OriginalInvocation();
             var next = ObserveAsync(owner.RunAsync<int>(newInvocation, () => throw new InvalidOperationException("must not enter")));
-            Assert.IsTrue(OwnedProviderEventForwarding.HasRetention((await next.WaitAsync(TimeSpan.FromSeconds(10)))!));
+            Assert.IsTrue(OwnedProviderEventForwarding.HasRetention((await next.WithinAsync(TestTime.Seconds(10)))!));
             Assert.IsNull(newInvocation.Original);
         }
         if (stage == 2)
@@ -255,13 +255,13 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(disposal);
         Assert.IsFalse(disposal.IsCompleted, "An actual active reference must drain first.");
         entry.CompleteReference(null, null);
-        var failure = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var failure = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(failure);
         Assert.AreEqual(synchronous, OwnedProviderEventForwarding.HasRetention(failure));
         Assert.AreEqual(!synchronous, entry.DependenciesReleased);
         Assert.AreEqual(0, entry.ActiveReferences);
         CollectionAssert.AreEqual(synchronous ? new[] { "abort", "session", "provider" }[..(stage + 1)] : new[] { "abort", "session", "provider" }, calls);
-        if (originalOutcome is not null) Assert.AreSame(error, await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        if (originalOutcome is not null) Assert.AreSame(error, await originalOutcome.WithinAsync(TestTime.Seconds(10)));
         var receipt = stage switch { 0 => entry.Abort, 1 => entry.SessionDisposal, _ => entry.ProviderDisposal };
         if (synchronous) Assert.IsNull(receipt!.Original); else Assert.AreSame(original, receipt!.Original);
         Assert.AreSame(disposal, entry.DisposeAsync().AsTask());
@@ -279,12 +279,12 @@ public sealed class RuntimePluginLiveEventTests
         var owner = new OwnedProviderEventForwarding();
         var close = owner.CloseAsync(() => { if (source is null) throw shared; return source.Task; },
             () => { calls.Add("actors"); return Task.CompletedTask; }, () => calls.Add("events"));
-        var failure = await ObserveAsync(close).WaitAsync(TimeSpan.FromSeconds(10));
+        var failure = await ObserveAsync(close).WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(failure);
         Assert.AreEqual(kind != 1, OwnedProviderEventForwarding.HasRetention(failure));
         CollectionAssert.AreEqual(kind == 1 ? new[] { "actors", "events" } : Array.Empty<string>(), calls);
         Assert.AreEqual(0, owner.ActiveWorkCount);
-        if (sourceOutcome is not null) Assert.AreSame(shared, await sourceOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        if (sourceOutcome is not null) Assert.AreSame(shared, await sourceOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreSame(close, owner.CloseAsync(() => throw new InvalidOperationException("retry"), () => Task.CompletedTask, () => { }));
     }
 
@@ -305,9 +305,9 @@ public sealed class RuntimePluginLiveEventTests
             () => ValueTask.CompletedTask, () => { }, true, true);
         var outer = CodeAltaOwnedServices.CreateOwnedServicesDisposal(() => new ValueTask(original.Task),
             () => { outerReleases++; return ValueTask.CompletedTask; }, () => { }, true);
-        var hostFailure = await ObserveAsync(host.Value).WaitAsync(TimeSpan.FromSeconds(10));
-        var outerFailure = await ObserveAsync(outer.Value).WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(selected, await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var hostFailure = await ObserveAsync(host.Value).WithinAsync(TestTime.Seconds(10));
+        var outerFailure = await ObserveAsync(outer.Value).WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(selected, await originalOutcome.WithinAsync(TestTime.Seconds(10)));
         foreach (var failure in new[] { hostFailure, outerFailure })
         {
             Assert.IsNotNull(failure);
@@ -325,13 +325,13 @@ public sealed class RuntimePluginLiveEventTests
     {
         var stage = new CodeAltaHost.HostDisposalStage(() => null!);
         stage.Launch();
-        var hostFailure = await stage.ReportedOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var hostFailure = await stage.ReportedOutcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNull(stage.Original);
         Assert.IsNotNull(stage.InvocationFailure);
         Assert.IsFalse(OwnedProviderEventForwarding.HasRetention(hostFailure!));
         var owner = new AgentHub.CoordinatorFailureOwner(new object());
         var abort = new OwnedSessionCommandService.OriginalInvocation();
-        var abortFailure = await ObserveAsync(owner.AbortAsync(abort, () => null!)).WaitAsync(TimeSpan.FromSeconds(10));
+        var abortFailure = await ObserveAsync(owner.AbortAsync(abort, () => null!)).WithinAsync(TestTime.Seconds(10));
         Assert.IsNull(abort.Original);
         Assert.IsTrue(owner.Retained);
         Assert.IsTrue(OwnedProviderEventForwarding.HasRetention(abortFailure!));
@@ -341,12 +341,12 @@ public sealed class RuntimePluginLiveEventTests
         Assert.IsTrue(entry.TryAddReference());
         var entryOutcome = ObserveAsync(entry.DisposeAsync().AsTask());
         entry.CompleteReference(null, null);
-        Assert.IsTrue(OwnedProviderEventForwarding.HasRetention((await entryOutcome.WaitAsync(TimeSpan.FromSeconds(10)))!));
+        Assert.IsTrue(OwnedProviderEventForwarding.HasRetention((await entryOutcome.WithinAsync(TestTime.Seconds(10)))!));
         Assert.IsNull(entry.Abort!.Original);
         Assert.IsFalse(entry.DependenciesReleased);
         var forwarding = new OwnedProviderEventForwarding();
         var close = forwarding.CloseAsync(() => null!, () => { releases++; return Task.CompletedTask; }, () => releases++);
-        Assert.IsTrue(OwnedProviderEventForwarding.HasRetention((await ObserveAsync(close).WaitAsync(TimeSpan.FromSeconds(10)))!));
+        Assert.IsTrue(OwnedProviderEventForwarding.HasRetention((await ObserveAsync(close).WithinAsync(TestTime.Seconds(10)))!));
         Assert.AreEqual(0, releases);
     }
 
@@ -369,8 +369,8 @@ public sealed class RuntimePluginLiveEventTests
             1 => owner.AbortAsync(invocation, () => original),
             _ => owner.DisposeAsync(() => new ValueTask(original), () => gates++),
         };
-        var actual = await ObserveAsync(operation).WaitAsync(TimeSpan.FromSeconds(10));
-        await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await ObserveAsync(operation).WithinAsync(TestTime.Seconds(10));
+        await originalOutcome.WithinAsync(TestTime.Seconds(10));
         Assert.AreSame(original, invocation.Original);
         Assert.AreSame(invocation.AwaitedFailure, actual);
         Assert.IsInstanceOfType<OperationCanceledException>(actual);
@@ -417,10 +417,10 @@ public sealed class RuntimePluginLiveEventTests
         var closing = lifecycle.ClosingAsync(new AgentRunId("inert"));
         var outcome = ObserveAsync(closing);
         Exception? deadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception error) { deadline = error; }
         finally { other.TrySetResult(); }
-        var actual = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await outcome.WithinAsync(TestTime.Seconds(10));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsNotNull(actual);
         var retained = synchronous || route == 3;
@@ -441,7 +441,7 @@ public sealed class RuntimePluginLiveEventTests
         var release = new AgentSession.RunReleaseDecision(lifecycle);
         var finish = ObserveAsync(release.FinishAsync(() => closing, () => ValueTask.CompletedTask,
             _ => Task.CompletedTask, () => { }, () => Task.CompletedTask, null));
-        var finishFailure = await finish.WaitAsync(TimeSpan.FromSeconds(10));
+        var finishFailure = await finish.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(finishFailure);
         if (retained) Assert.IsTrue(AgentDependencyRetentionException.Contains(finishFailure));
         else Assert.AreSame(failure, finishFailure);
@@ -463,11 +463,11 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(pair.Completion);
         pair.Launch();
         Exception? deadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception error) { deadline = error; }
         finally { second.TrySetException([shared, first, shared]); }
-        var failure = (AgentDependencyRetentionException)(await outcome.WaitAsync(TimeSpan.FromSeconds(10)))!;
-        Assert.AreSame(shared, await secondOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var failure = (AgentDependencyRetentionException)(await outcome.WithinAsync(TestTime.Seconds(10)))!;
+        Assert.AreSame(shared, await secondOutcome.WithinAsync(TestTime.Seconds(10)));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsNull(pair.First.Original);
         Assert.AreSame(second.Task, pair.Second.Original);
@@ -519,11 +519,11 @@ public sealed class RuntimePluginLiveEventTests
         var completion = invocation.RunAsync(lifecycle, new AgentRunId("inert"), CancellationToken.None);
         var outcome = ObserveAsync(completion);
         Exception? deadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception error) { deadline = error; }
         finally { start.TrySetException([selected, sibling, shared, shared]); }
-        var actual = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(selected, await startOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var actual = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(selected, await startOutcome.WithinAsync(TestTime.Seconds(10)));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsNotNull(actual);
         Assert.AreSame(selected, invocation.PublicationFailure);
@@ -537,7 +537,7 @@ public sealed class RuntimePluginLiveEventTests
         var release = new AgentSession.RunReleaseDecision(invocation);
         var finish = ObserveAsync(release.FinishAsync(() => lifecycle.ClosingAsync(new AgentRunId("inert")),
             () => ValueTask.CompletedTask, _ => Task.CompletedTask, () => { }, () => Task.CompletedTask, actual));
-        var cleanup = await finish.WaitAsync(TimeSpan.FromSeconds(10));
+        var cleanup = await finish.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(retained, cleanup is not null);
         Assert.AreEqual(retained, release.Retained);
         Assert.AreEqual(!retained, release.SourceReleased);
@@ -560,8 +560,8 @@ public sealed class RuntimePluginLiveEventTests
         var lifecycle = new OwnedSessionAskExecution.Lifecycle(ask, OwnedSessionAskExecution.Combine(first, second));
         var invocation = new AgentSession.RunStartInvocation();
         var outcome = ObserveAsync(invocation.RunAsync(lifecycle, new AgentRunId("inert"), CancellationToken.None));
-        Assert.AreSame(selected, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        if (originalOutcome is not null) Assert.AreSame(selected, await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(selected, await outcome.WithinAsync(TestTime.Seconds(10)));
+        if (originalOutcome is not null) Assert.AreSame(selected, await originalOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreSame(selected, invocation.PublicationFailure);
         var leaf = invocation;
         while (leaf.Invocation is AgentSession.IRunStartEvidence evidence && evidence.FailedStart is { } nested) leaf = nested;
@@ -571,7 +571,7 @@ public sealed class RuntimePluginLiveEventTests
         var release = new AgentSession.RunReleaseDecision(invocation);
         var finish = ObserveAsync(release.FinishAsync(() => lifecycle.ClosingAsync(new AgentRunId("inert")),
             () => ValueTask.CompletedTask, _ => Task.CompletedTask, () => { }, () => Task.CompletedTask, selected));
-        Assert.IsNull(await finish.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await finish.WithinAsync(TestTime.Seconds(10)));
         Assert.IsTrue(release.SourceReleased);
         Assert.IsTrue(release.SlotReleased);
     }
@@ -594,7 +594,7 @@ public sealed class RuntimePluginLiveEventTests
             ? new OwnedSessionAskExecution.Lifecycle(independent, invalid)
             : OwnedSessionAskExecution.Combine(independent, invalid);
         var outcome = ObserveAsync(lifecycle.ClosingAsync(new AgentRunId("inert")));
-        var failure = (AgentDependencyRetentionException)(await outcome.WaitAsync(TimeSpan.FromSeconds(10)))!;
+        var failure = (AgentDependencyRetentionException)(await outcome.WithinAsync(TestTime.Seconds(10)))!;
         var pair = (OwnedSessionAskExecution.ClosingPair)failure.Dependencies;
         Assert.IsNotNull(pair.First.Original);
         Assert.IsNull(pair.Second.Original);
@@ -612,7 +612,7 @@ public sealed class RuntimePluginLiveEventTests
         var invocation = new AgentSession.RunStartInvocation();
         var completion = invocation.RunAsync(lifecycle, new AgentRunId("inert"), CancellationToken.None);
         var outcome = ObserveAsync(completion);
-        Assert.IsNull(await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await outcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreSame(completion, invocation.Completion);
         Assert.AreSame(lifecycle, invocation.Invocation);
         Assert.IsNotNull(invocation.Original);
@@ -629,7 +629,7 @@ public sealed class RuntimePluginLiveEventTests
         var lifecycle = new OwnedSessionAskExecution.Lifecycle(skipped, inner);
         var invocation = new AgentSession.RunStartInvocation();
         var outcome = ObserveAsync(invocation.RunAsync(lifecycle, new AgentRunId("inert"), CancellationToken.None));
-        var actual = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsInstanceOfType<OperationCanceledException>(actual);
         var leaf = ((AgentSession.IRunStartEvidence)lifecycle).FailedStart!;
         Assert.AreSame(canceled, leaf.Original);
@@ -639,7 +639,7 @@ public sealed class RuntimePluginLiveEventTests
         var release = new AgentSession.RunReleaseDecision(invocation);
         var finish = ObserveAsync(release.FinishAsync(() => lifecycle.ClosingAsync(new AgentRunId("inert")),
             () => ValueTask.CompletedTask, _ => Task.CompletedTask, () => { }, () => Task.CompletedTask, actual));
-        Assert.IsNull(await finish.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await finish.WithinAsync(TestTime.Seconds(10)));
         Assert.IsTrue(release.SourceReleased);
         Assert.IsTrue(release.SlotReleased);
     }
@@ -681,14 +681,14 @@ public sealed class RuntimePluginLiveEventTests
         });
         var outcome = ObserveAsync(work);
         Exception? deadlineFailure = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception failure) { deadlineFailure = failure; }
         finally { source.TrySetException([shared, marker, shared]); }
-        var failureResult = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var failureResult = await outcome.WithinAsync(TestTime.Seconds(10));
         var close = owner.CloseAsync(() => Task.CompletedTask,
             () => { calls.Add("actors"); return Task.CompletedTask; }, () => calls.Add("events"));
         var closeOutcome = ObserveAsync(close);
-        var closeFailure = await closeOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var closeFailure = await closeOutcome.WithinAsync(TestTime.Seconds(10));
         if (deadlineFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadlineFailure);
         Assert.IsNotNull(failureResult);
         Assert.IsNotNull(closeFailure);
@@ -717,7 +717,7 @@ public sealed class RuntimePluginLiveEventTests
         var completion = receipt.CompleteAsync(_ => { published = true; return Task.CompletedTask; },
             () => { }, _ => Task.CompletedTask, () => Task.CompletedTask, (_, _) => { });
         Assert.IsTrue(published);
-        await completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await completion.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]
@@ -735,7 +735,7 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(receipt.CompleteAsync(mark => { mark(CorrectionEnvelope(shared)); throw marker; },
             () => releases++, _ => { observations++; return Task.CompletedTask; }, () => Task.CompletedTask,
             (_, _) => { controls++; throw control; }));
-        var failure = (AgentDependencyRetentionException)(await outcome.WaitAsync(TimeSpan.FromSeconds(10)))!;
+        var failure = (AgentDependencyRetentionException)(await outcome.WithinAsync(TestTime.Seconds(10)))!;
         Assert.IsNull(receipt.PublicationOriginal);
         Assert.AreSame(marker, receipt.PublicationFailure);
         CollectionAssert.AreEqual(new Exception[] { marker, control }, failure.InnerExceptions.ToArray());
@@ -762,7 +762,7 @@ public sealed class RuntimePluginLiveEventTests
         var use = attachment.TryAcquireHandleUse()!;
         var evidence = retainedFailure ? new AggregateException(original, CreateDeferredMarker(pluginMarker, original)) : (Exception)original;
         cleanup.SetException(evidence);
-        Assert.AreSame(evidence, await cleanupOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(evidence, await cleanupOutcome.WithinAsync(TestTime.Seconds(10)));
         if (released) use.Dispose(); else if (retainedFailure) use.Retain(evidence);
         var prerequisite = new SessionRuntimeService.LiveEventObservationPrerequisite(
             new { Original = cleanup.Task, Outcome = cleanupOutcome, Use = use }, use.IsReleased, evidence);
@@ -773,7 +773,7 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(receipt.CompleteAsync(mark => { calls.Add("publish"); mark(envelope); return Task.CompletedTask; },
             () => { }, value => { calls.Add("observe"); observed = value; return Task.CompletedTask; },
             () => { calls.Add("lifecycle"); return Task.CompletedTask; }, owner.RetainDependencies));
-        Assert.IsNull(await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await outcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreSame(envelope, receipt.Published);
         Assert.AreSame(original, ((AgentErrorEvent)receipt.Published!.Event).Exception);
         var mayObserve = released && !retainedFailure;
@@ -783,7 +783,7 @@ public sealed class RuntimePluginLiveEventTests
         // then completes that fixture-owned use; it is not a retained release retry.
         if (!released && !retainedFailure) use.Dispose();
         var closeOutcome = ObserveAsync(owner.CloseAsync(() => Task.CompletedTask, () => Task.CompletedTask, () => { }));
-        var closeFailure = await closeOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var closeFailure = await closeOutcome.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(retainedFailure, closeFailure is not null);
     }
 
@@ -808,7 +808,7 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(receipt.CompleteAsync(mark => { mark(CorrectionEnvelope(shared)); return Task.CompletedTask; },
             () => { }, _ => { calls.Add("observe"); return observerFails ? Task.FromException(observer) : Task.CompletedTask; },
             effects.RunAsync, (_, _) => { }));
-        var failure = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var failure = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(failure);
         Assert.IsFalse(receipt.CanToleratePrepublicationFailure);
         var independent = (AggregateException)receipt.IndependentFailure!;
@@ -838,7 +838,7 @@ public sealed class RuntimePluginLiveEventTests
             if (published) mark(CorrectionEnvelope(actorFailure));
             return Task.FromException(actorFailure);
         }, () => { }, _ => { observations++; return Task.CompletedTask; }, () => Task.CompletedTask, (_, _) => { }));
-        Assert.AreSame(actorFailure, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(actorFailure, await outcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(!published, receipt.CanToleratePrepublicationFailure);
         Assert.AreEqual(published ? 1 : 0, observations);
     }
@@ -859,10 +859,10 @@ public sealed class RuntimePluginLiveEventTests
             () => { calls.Add("actors"); entered.TrySetResult(); return actor.Task; }, () => calls.Add("events"));
         var outcome = ObserveAsync(close);
         Exception? deadlineFailure = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception failure) { deadlineFailure = failure; }
         finally { actor.TrySetException(ordinary ? [shared, shared] : [shared, marker, shared]); }
-        var failureResult = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var failureResult = await outcome.WithinAsync(TestTime.Seconds(10));
         if (deadlineFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadlineFailure);
         Assert.IsNotNull(failureResult);
         Assert.AreEqual(!ordinary, OwnedProviderEventForwarding.HasRetention(failureResult));
@@ -886,7 +886,7 @@ public sealed class RuntimePluginLiveEventTests
         var events = 0;
         var close = owner.CloseAsync(() => Task.CompletedTask, () => { actorCalls++; throw invocationFailure; }, () => events++);
         var outcome = ObserveAsync(close);
-        var failure = (AgentDependencyRetentionException)(await outcome.WaitAsync(TimeSpan.FromSeconds(10)))!;
+        var failure = (AgentDependencyRetentionException)(await outcome.WithinAsync(TestTime.Seconds(10)))!;
         Assert.AreSame(invocationFailure, failure.InnerExceptions.Single());
         Assert.AreSame(close, owner.CloseAsync(() => Task.CompletedTask, () => Task.CompletedTask, () => events++));
         Assert.AreEqual(1, actorCalls);
@@ -910,7 +910,7 @@ public sealed class RuntimePluginLiveEventTests
             return Task.CompletedTask;
         }, static () => { }, value => { observed = value; return Task.CompletedTask; }, static () => Task.CompletedTask, (_, _) => { });
         var outcome = ObserveAsync(original);
-        Assert.IsNull(await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await outcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsFalse(admitted);
         Assert.AreSame(published, observed!.Event);
         Assert.AreEqual("origin", observed.SessionId);
@@ -929,13 +929,13 @@ public sealed class RuntimePluginLiveEventTests
         var success = RuntimePluginAgentEventFailurePolicy.ReportAsync("origin", original,
             (message, _) => messages.Add(message), (_, failure) => reports.Add(failure)).AsTask();
         var successOutcome = ObserveAsync(success);
-        Assert.IsNull(await successOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await successOutcome.WithinAsync(TestTime.Seconds(10)));
         CollectionAssert.AreEqual(new[] { "Plugin agent event observer failed for session origin" }, messages);
         Assert.AreEqual(0, reports.Count);
         var failed = RuntimePluginAgentEventFailurePolicy.ReportAsync("origin", original,
             (_, _) => throw reportingFailure, (_, failure) => reports.Add(failure)).AsTask();
         var failedOutcome = ObserveAsync(failed);
-        Assert.AreSame(reportingFailure, await failedOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(reportingFailure, await failedOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(1, reports.Count);
         Assert.AreSame(reportingFailure.InnerExceptions[0], reports[0].InnerExceptions.Single());
     }
@@ -948,7 +948,7 @@ public sealed class RuntimePluginLiveEventTests
         var globalOriginal = SessionRuntimeService.ResolveRecoveredPluginEventContextAsync("session", " provider ", "global", "ignored", "global",
             Normalize, () => { loads++; return Task.FromResult<IEnumerable<(string, string)>>([("first", "project"), ("later", "invalid")]); });
         var globalOutcome = ObserveAsync(globalOriginal);
-        Assert.IsNull(await globalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await globalOutcome.WithinAsync(TestTime.Seconds(10)));
         var global = await globalOriginal;
         Assert.AreEqual(0, loads);
         Assert.IsNull(global.ProjectId);
@@ -957,7 +957,7 @@ public sealed class RuntimePluginLiveEventTests
         var projectOriginal = SessionRuntimeService.ResolveRecoveredPluginEventContextAsync("session", " provider ", null, "PROJECT", "global",
             Normalize, () => { loads++; return Task.FromResult<IEnumerable<(string, string)>>([("first", "project"), ("later", "invalid")]); });
         var projectOutcome = ObserveAsync(projectOriginal);
-        Assert.IsNull(await projectOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await projectOutcome.WithinAsync(TestTime.Seconds(10)));
         var project = await projectOriginal;
         Assert.AreEqual("first", project.ProjectId);
         Assert.AreEqual("project", project.WorkingDirectory);
@@ -965,7 +965,7 @@ public sealed class RuntimePluginLiveEventTests
         var blank = SessionRuntimeService.ResolveRecoveredPluginEventContextAsync("session", "provider", " ", "project", "global", Normalize,
             () => throw new InvalidOperationException("blank cwd must not load projects"));
         var blankOutcome = ObserveAsync(blank);
-        Assert.IsInstanceOfType<SessionNotesSessionNotFoundException>(await blankOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsInstanceOfType<SessionNotesSessionNotFoundException>(await blankOutcome.WithinAsync(TestTime.Seconds(10)));
 
         string Normalize(string path)
         {
@@ -982,7 +982,7 @@ public sealed class RuntimePluginLiveEventTests
         var owner = new SessionRuntimeService.RuntimeCommandLifetime(new object());
         var original = owner.RunAsync<int>(_ => Task.FromException<int>(marker), CancellationToken.None, CancellationToken.None);
         var outcome = ObserveAsync(original);
-        var failure = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var failure = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(failure);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(failure));
         Assert.IsFalse(owner.SourceReleased);
@@ -1001,7 +1001,7 @@ public sealed class RuntimePluginLiveEventTests
         var invocation = new OwnedSessionCommandService.OriginalInvocation();
         invocation.Launch(() => source.Task);
         source.TrySetException([primary, marker]);
-        var failure = await invocation.Outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var failure = await invocation.Outcome.WithinAsync(TestTime.Seconds(10));
         Assert.AreSame(source.Task, invocation.Original);
         Assert.AreSame(primary, invocation.AwaitedFailure);
         Assert.IsInstanceOfType<AggregateException>(failure);
@@ -1106,7 +1106,7 @@ public sealed class RuntimePluginLiveEventTests
             (_, failure) => { Assert.AreSame(original, failure); throw logging; },
             (_, _) => reports++).AsTask();
         var outcome = ObserveAsync(operation);
-        Assert.AreSame(logging, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(logging, await outcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(0, reports);
     }
 
@@ -1125,7 +1125,7 @@ public sealed class RuntimePluginLiveEventTests
                 throw fatal;
             }).AsTask();
         var outcome = ObserveAsync(operation);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsInstanceOfType<AggregateException>(result);
         var aggregate = (AggregateException)result!;
         Assert.AreSame(logging, aggregate.InnerExceptions[0]);
@@ -1167,12 +1167,12 @@ public sealed class RuntimePluginLiveEventTests
             }, () => { calls.Add("independent"); return Task.CompletedTask; }, (_, _) => { });
         var outcome = ObserveAsync(original);
         Exception? entryDeadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception deadline) { entryDeadline = deadline; }
         finally { store.TrySetException(storeFailure); }
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(storeFailure, await storeOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.AreSame(observerFailure, await observerOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(storeFailure, await storeOutcome.WithinAsync(TestTime.Seconds(10)));
+        Assert.AreSame(observerFailure, await observerOutcome.WithinAsync(TestTime.Seconds(10)));
         if (entryDeadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(entryDeadline);
         Assert.AreSame(envelope, observed);
         Assert.AreSame(published, observed!.Event);
@@ -1195,7 +1195,7 @@ public sealed class RuntimePluginLiveEventTests
         var original = receipt.CompleteAsync(_ => store, () => { },
             _ => { observations++; return Task.CompletedTask; }, () => Task.CompletedTask, (_, _) => { });
         var outcome = ObserveAsync(original);
-        Assert.AreSame(failure, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(failure, await outcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(0, observations);
         Assert.IsNull(receipt.ObservationOriginal);
     }
@@ -1295,8 +1295,8 @@ public sealed class RuntimePluginLiveEventTests
         catch (Exception actual) { failure = actual; }
         finally { original.TrySetResult(); }
 
-        Assert.IsNull(await originalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.IsNull(await completionOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await originalOutcome.WithinAsync(TestTime.Seconds(10)));
+        Assert.IsNull(await completionOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreSame(original.Task, operation.Original);
         Assert.IsNotNull(failure);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(failure));
@@ -1344,14 +1344,14 @@ public sealed class RuntimePluginLiveEventTests
         var work = owner.RunAsync(() => { entered.TrySetResult(); return body.Task; });
         var workOutcome = ObserveAsync(work);
         Exception? entryDeadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception deadline) { entryDeadline = deadline; }
         finally { body.TrySetException(failure); }
-        var actual = await workOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var actual = await workOutcome.WithinAsync(TestTime.Seconds(10));
         var close = owner.CloseAsync(() => { calls.Add("permissions"); return Task.CompletedTask; },
             () => { calls.Add("actors"); return Task.CompletedTask; }, () => calls.Add("events"));
         var closeOutcome = ObserveAsync(close);
-        var closeFailure = await closeOutcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var closeFailure = await closeOutcome.WithinAsync(TestTime.Seconds(10));
         if (entryDeadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(entryDeadline);
         Assert.AreSame(failure, actual);
         Assert.IsNotNull(closeFailure);
@@ -1371,11 +1371,11 @@ public sealed class RuntimePluginLiveEventTests
         var calls = new List<string>();
         var original = owner.RunAsync(() => body);
         var outcome = ObserveAsync(original);
-        Assert.AreSame(failure, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(failure, await outcome.WithinAsync(TestTime.Seconds(10)));
         var close = owner.CloseAsync(() => { calls.Add("permissions"); return Task.CompletedTask; },
             () => { calls.Add("actors"); return Task.CompletedTask; }, () => calls.Add("events"));
         var closeOutcome = ObserveAsync(close);
-        Assert.IsNull(await closeOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await closeOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(0, owner.RetainedWorkCount);
         CollectionAssert.AreEqual(new[] { "permissions", "actors", "events" }, calls);
     }
@@ -1397,8 +1397,8 @@ public sealed class RuntimePluginLiveEventTests
         var original = DeferredCodeAltaApp.DisposeDeferredStartupAsync<InertAsyncLease>(null, startup, canceled, token,
             () => { }, () => { releases++; return ValueTask.CompletedTask; }, () => releases++, () => releases++);
         var outcome = ObserveAsync(original);
-        var failure = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(canceled, await startupOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var failure = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(canceled, await startupOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsNotNull(failure);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(failure));
         Assert.AreEqual(0, releases);
@@ -1419,11 +1419,11 @@ public sealed class RuntimePluginLiveEventTests
             () => calls.Add("presenter"), () => calls.Add("source"), () => calls.Add("owned-controls"));
         var outcome = ObserveAsync(original);
         Exception? entryDeadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception deadline) { entryDeadline = deadline; }
         finally { appDisposal.TrySetResult(); }
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.IsNull(await appOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.IsNull(await appOutcome.WithinAsync(TestTime.Seconds(10)));
         if (entryDeadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(entryDeadline);
         Assert.IsNull(result);
         CollectionAssert.AreEqual(new[] { "cancel", "owned-controls", "app", "update", "presenter", "source" }, calls);
@@ -1448,8 +1448,8 @@ public sealed class RuntimePluginLiveEventTests
             () => { }, () => { releases++; return ValueTask.CompletedTask; }, () => releases++, () => releases++);
         var outcome = ObserveAsync(original);
         startup.SetException([primary, marker, primary]);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(primary, await startupOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(primary, await startupOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
         AssertDeferredOriginal(result, startup.Task, primary, marker);
@@ -1475,12 +1475,12 @@ public sealed class RuntimePluginLiveEventTests
             () => { }, () => { releases++; return ValueTask.CompletedTask; }, () => releases++, () => releases++);
         var outcome = ObserveAsync(original);
         disposal.SetException([primary, marker, primary]);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(primary, await disposalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(primary, await disposalOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
         AssertDeferredOriginal(result, disposal.Task, primary, marker);
-        if (startupOutcome is not null) Assert.IsNull(await startupOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        if (startupOutcome is not null) Assert.IsNull(await startupOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(0, releases);
     }
 
@@ -1515,8 +1515,8 @@ public sealed class RuntimePluginLiveEventTests
             () => { }, () => { releases++; return ValueTask.CompletedTask; }, () => releases++, () => releases++);
         var outcome = ObserveAsync(original);
         startup.SetException([primary, new OperationCanceledException("ordinary sibling")]);
-        Assert.IsNull(await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.AreSame(primary, await startupOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsNull(await outcome.WithinAsync(TestTime.Seconds(10)));
+        Assert.AreSame(primary, await startupOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(3, releases);
     }
 
@@ -1537,9 +1537,9 @@ public sealed class RuntimePluginLiveEventTests
         var original = DeferredCodeAltaApp.DisposeDeferredStartupAsync<InertAsyncLease>(returnedServices ? null : lease, startup, null, CancellationToken.None,
             () => { }, () => { releases++; return ValueTask.CompletedTask; }, () => releases++, () => releases++);
         var outcome = ObserveAsync(original);
-        Assert.AreSame(failure, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.AreSame(failure, await disposalOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        if (startupOutcome is not null) Assert.IsNull(await startupOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(failure, await outcome.WithinAsync(TestTime.Seconds(10)));
+        Assert.AreSame(failure, await disposalOutcome.WithinAsync(TestTime.Seconds(10)));
+        if (startupOutcome is not null) Assert.IsNull(await startupOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(3, releases);
     }
 
@@ -1555,7 +1555,7 @@ public sealed class RuntimePluginLiveEventTests
         var original = DeferredCodeAltaApp.DisposeDeferredStartupAsync<InertAsyncLease>(lease, null, null, CancellationToken.None,
             () => { }, () => { releases++; return ValueTask.CompletedTask; }, () => releases++, () => releases++);
         var outcome = ObserveAsync(original);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsInstanceOfType<AgentDependencyRetentionException>(result);
         var retained = (AgentDependencyRetentionException)result!;
         var evidence = ((DeferredCodeAltaApp.DeferredRetainedDependencies)retained.Dependencies).OriginalFailures.Single();
@@ -1580,8 +1580,8 @@ public sealed class RuntimePluginLiveEventTests
             () => calls.Add("presenter"), () => calls.Add("source"), () => calls.Add("owned-controls"),
             () => { calls.Add("plugin-drain"); return barrier; });
         var outcome = ObserveAsync(original);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(failure, await barrierOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(failure, await barrierOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
         CollectionAssert.AreEqual(new[] { "cancel", "owned-controls", "plugin-drain" }, calls);
@@ -1602,8 +1602,8 @@ public sealed class RuntimePluginLiveEventTests
             () => Invoke(3), () => calls.Add(4), true, true);
         var original = disposal.Value;
         var outcome = ObserveAsync(original);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(retained, await failureOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(retained, await failureOutcome.WithinAsync(TestTime.Seconds(10)));
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
         CollectionAssert.AreEqual(Enumerable.Range(0, retainedStage + 1).ToArray(), calls);
@@ -1632,12 +1632,12 @@ public sealed class RuntimePluginLiveEventTests
             _ => { calls.Add("drain-runtime"); return ValueTask.CompletedTask; }, () => Task.CompletedTask).AsTask();
         var outcome = ObserveAsync(original);
         Exception? entryDeadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception deadline) { entryDeadline = deadline; }
         finally { reads.TrySetResult(); }
-        var failure = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(retained, await commandOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.IsNull(await readsOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var failure = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(retained, await commandOutcome.WithinAsync(TestTime.Seconds(10)));
+        Assert.IsNull(await readsOutcome.WithinAsync(TestTime.Seconds(10)));
         if (entryDeadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(entryDeadline);
         Assert.IsNotNull(failure);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(failure));
@@ -1661,10 +1661,10 @@ public sealed class RuntimePluginLiveEventTests
             () => releases++, () => { releases++; return Task.CompletedTask; }, null);
         var outcome = ObserveAsync(original);
         Exception? deadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception failureAtEntry) { deadline = failureAtEntry; }
         finally { closing.TrySetException(retained); }
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
@@ -1687,7 +1687,7 @@ public sealed class RuntimePluginLiveEventTests
             () => ValueTask.CompletedTask, retain => { Assert.IsFalse(retain); return Task.CompletedTask; },
             () => releases.Add("source"), () => { releases.Add("slot"); return Task.CompletedTask; }, null);
         var outcome = ObserveAsync(original);
-        Assert.AreSame(failure, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(failure, await outcome.WithinAsync(TestTime.Seconds(10)));
         CollectionAssert.AreEqual(new[] { "source", "slot" }, releases);
         Assert.IsFalse(decision.Retained);
         Assert.IsTrue(decision.SourceReleased);
@@ -1702,7 +1702,7 @@ public sealed class RuntimePluginLiveEventTests
         var original = lifetime.RunAsync(_ => Task.FromResult(7), () => Task.CompletedTask,
             () => Task.FromException(failure), []);
         var outcome = ObserveAsync(original);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
         Assert.AreSame(failure, await lifetime.IndexCleanup!.Outcome);
@@ -1724,7 +1724,7 @@ public sealed class RuntimePluginLiveEventTests
             _ => closingLaunch ? Task.CompletedTask : throw failure,
             () => releases++, () => { releases++; return Task.CompletedTask; }, null);
         var outcome = ObserveAsync(original);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsInstanceOfType<AgentDependencyRetentionException>(result);
         var marker = (AgentDependencyRetentionException)result!;
         Assert.AreSame(failure, marker.InnerExceptions.Single());
@@ -1743,7 +1743,7 @@ public sealed class RuntimePluginLiveEventTests
             () => { controls.Add("cancel"); return Task.CompletedTask; },
             () => { controls.Add("index"); return Task.CompletedTask; }, []);
         var outcome = ObserveAsync(original);
-        Assert.AreSame(failure, await outcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(failure, await outcome.WithinAsync(TestTime.Seconds(10)));
         CollectionAssert.AreEqual(new[] { "cancel", "index" }, controls);
         Assert.IsTrue(lifetime.SourceReleased);
         Assert.IsTrue(lifetime.IndexReleased);
@@ -1764,11 +1764,11 @@ public sealed class RuntimePluginLiveEventTests
         var outcome = ObserveAsync(pair.Completion);
         pair.Launch();
         Exception? deadline = null;
-        try { await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        try { await entered.Task.WithinAsync(TestTime.Seconds(10)); }
         catch (Exception failure) { deadline = failure; }
         finally { gate.TrySetResult(); }
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.AreSame(canceled, await secondOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
+        Assert.AreSame(canceled, await secondOutcome.WithinAsync(TestTime.Seconds(10)));
         if (deadline is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(deadline);
         Assert.IsInstanceOfType<AgentDependencyRetentionException>(result);
         var graph = (AgentDependencyRetentionException)result!;
@@ -1798,13 +1798,13 @@ public sealed class RuntimePluginLiveEventTests
         owner.BeginShutdown();
         var original = owner.DisposeAsync().AsTask();
         var outcome = ObserveAsync(original);
-        var result = await outcome.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await outcome.WithinAsync(TestTime.Seconds(10));
         Assert.IsNotNull(result);
         Assert.IsTrue(AgentDependencyRetentionException.Contains(result));
         CollectionAssert.AreEqual(new[] { "abort" }, calls);
         Assert.IsFalse(owner.DependenciesReleased);
         var repeated = owner.DisposeAsync().AsTask();
         var repeatedOutcome = ObserveAsync(repeated);
-        Assert.AreSame(result, await repeatedOutcome.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(result, await repeatedOutcome.WithinAsync(TestTime.Seconds(10)));
     }
 }

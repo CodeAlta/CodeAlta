@@ -53,14 +53,14 @@ public sealed class SessionJournalCacheUpsertTests
             last = cache.UpsertSessionAsync(projections["session-last"]);
             await WaitUntilAsync(() => cache.PendingUpsertCount == 2);
             removal = cache.RemoveSessionAsync("session-removed");
-            await removed.WaitAsync(TimeSpan.FromSeconds(10));
+            await removed.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(1, cache.PendingUpsertCount, "The upsert of the removed session no longer waits.");
             Assert.IsFalse(first.IsCompleted, "The lock holds the first write.");
 
             await ExecuteAsync(holder, "ROLLBACK;");
         }
 
-        await Task.WhenAll(first, last, removal).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(first, last, removal).WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual("pending", ReadTitle(options.ApplicationDatabasePath, "session-first"));
         Assert.AreEqual("pending", ReadTitle(options.ApplicationDatabasePath, "session-last"));
         Assert.IsNull(ReadTitle(options.ApplicationDatabasePath, "session-removed"), "The removed session is not written again.");
@@ -111,7 +111,7 @@ public sealed class SessionJournalCacheUpsertTests
             await ExecuteAsync(holder, "ROLLBACK;");
         }
 
-        await Task.WhenAll(blocking, older, newer).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(blocking, older, newer).WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual("newer", ReadTitle(options.ApplicationDatabasePath, summary.SessionId), "Both callers are answered by the write of the last one.");
     }
 
@@ -124,7 +124,7 @@ public sealed class SessionJournalCacheUpsertTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(20);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("The condition was not met in time.");

@@ -693,7 +693,7 @@ public sealed class CatalogInfrastructureTests
 
         await catalog.JournalStore.EnsureHeaderAsync(session).ConfigureAwait(false);
         var path = new AgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource(TestTime.Seconds(5));
         await using var exclusiveHandle = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
         var appendTask = catalog.JournalStore.AppendStateAsync(

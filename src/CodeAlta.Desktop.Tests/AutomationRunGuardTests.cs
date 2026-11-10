@@ -261,7 +261,7 @@ public sealed class AutomationRunGuardTests
         var held = guard.BeforeToolCallAsync(Call("k8s_scale"), default).AsTask();
         Assert.IsTrue(guard.Waiting);
         clock.Advance(TimeSpan.FromMinutes(31));
-        var decision = await held.WaitAsync(TimeSpan.FromSeconds(10));
+        var decision = await held.WithinAsync(TestTime.Seconds(10));
         StringAssert.Contains(decision.BlockMessage, "within 30 minutes: the run stopped");
         Assert.AreEqual(1, stopped.Count);
         CollectionAssert.AreEqual(new[] { "s1" }, stoppedIn);
@@ -275,7 +275,7 @@ public sealed class AutomationRunGuardTests
         await Task.Delay(50);
         Assert.IsFalse(next.IsCompleted);
         asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
-        Assert.IsNull((await next.WaitAsync(TimeSpan.FromSeconds(10))).BlockMessage);
+        Assert.IsNull((await next.WithinAsync(TestTime.Seconds(10))).BlockMessage);
         Assert.AreEqual(1, stopped.Count);
     }
 

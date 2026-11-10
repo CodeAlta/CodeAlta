@@ -27,7 +27,7 @@ public sealed class FleetConnectionTests
         var calls = Enumerable.Range(0, 300)
             .Select(async n => (n, result: await pair.Client.SendRequestAsync("echo", Json.Parse($$"""{"n":{{n}}}"""))))
             .ToArray();
-        var results = await Task.WhenAll(calls).WaitAsync(Json.Hang);
+        var results = await Task.WhenAll(calls).WithinAsync(Json.Hang);
 
         foreach (var (n, result) in results) Assert.AreEqual(n, result!.Value.GetProperty("n").GetInt32());
     }
@@ -40,8 +40,8 @@ public sealed class FleetConnectionTests
             client => client.RegisterRequestHandler("node.info", (_, _) => ValueTask.FromResult<JsonElement?>(Json.Parse("""{"side":"client"}"""))),
             Quiet, Quiet);
 
-        var fromServer = await pair.Client.SendRequestAsync("node.info").WaitAsync(Json.Hang);
-        var fromClient = await pair.Server.SendRequestAsync("node.info").WaitAsync(Json.Hang);
+        var fromServer = await pair.Client.SendRequestAsync("node.info").WithinAsync(Json.Hang);
+        var fromClient = await pair.Server.SendRequestAsync("node.info").WithinAsync(Json.Hang);
 
         Assert.AreEqual("server", fromServer!.Value.GetProperty("side").GetString());
         Assert.AreEqual("client", fromClient!.Value.GetProperty("side").GetString());
@@ -58,14 +58,14 @@ public sealed class FleetConnectionTests
                 ValueTask.FromResult<JsonElement?>(JsonSerializer.SerializeToElement(context.Params!.Value.GetProperty("missing").GetInt32())));
         }, clientOptions: Quiet, serverOptions: Quiet);
 
-        var stale = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("sessions.send").WaitAsync(Json.Hang));
+        var stale = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("sessions.send").WithinAsync(Json.Hang));
         Assert.AreEqual(new FleetError("session.stale_run", FleetErrorHints.Refresh, "The run ended."), stale.Error);
 
-        var crash = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("sessions.crash").WaitAsync(Json.Hang));
+        var crash = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("sessions.crash").WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.InternalError, crash.Error.Code);
         Assert.IsFalse(crash.Message.Contains("secret", StringComparison.Ordinal), "The message of a handler's exception stays on its side.");
 
-        var unknown = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("sessions.fly").WaitAsync(Json.Hang));
+        var unknown = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("sessions.fly").WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.MethodNotFound, unknown.Error.Code);
 
         // A failed request does not harm the connection.
@@ -92,8 +92,8 @@ public sealed class FleetConnectionTests
             }),
             Quiet, Quiet);
 
-        Assert.IsNull(await pair.Client.SendRequestAsync("sessions.watch").WaitAsync(Json.Hang));
-        await done.Task.WaitAsync(Json.Hang);
+        Assert.IsNull(await pair.Client.SendRequestAsync("sessions.watch").WithinAsync(Json.Hang));
+        await done.Task.WithinAsync(Json.Hang);
 
         CollectionAssert.AreEqual(Enumerable.Range(1, 100).Select(n => (long)n).ToArray(), received.ToArray());
     }
@@ -123,14 +123,14 @@ public sealed class FleetConnectionTests
         Assert.AreEqual(1, Volatile.Read(ref started));
 
         // The reader of the server is not held by the requests that wait: it reads the answer of its own request.
-        var answer = await pair.Server.SendRequestAsync("client.info", null).WaitAsync(Json.Hang);
+        var answer = await pair.Server.SendRequestAsync("client.info", null).WithinAsync(Json.Hang);
         Assert.AreEqual("client", answer!.Value.GetProperty("side").GetString());
-        var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("block", null).WaitAsync(Json.Hang));
+        var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("block", null).WithinAsync(Json.Hang));
         Assert.AreEqual((FleetErrorCodes.ServerBusy, FleetErrorHints.Retry), (refused.Error.Code, refused.Error.Hint));
 
         // Once the handler is free, those that waited run, each in turn.
         release.SetResult();
-        await Task.WhenAll(waiting).WaitAsync(Json.Hang);
+        await Task.WhenAll(waiting).WithinAsync(Json.Hang);
         Assert.AreEqual(5, Volatile.Read(ref started));
     }
 
@@ -144,12 +144,12 @@ public sealed class FleetConnectionTests
         }), clientOptions: Quiet, serverOptions: Quiet);
 
         await Assert.ThrowsExactlyAsync<TimeoutException>(() =>
-            pair.Client.SendRequestAsync("slow", null, new FleetRequestOptions { Timeout = TimeSpan.FromMilliseconds(50) }).WaitAsync(Json.Hang));
+            pair.Client.SendRequestAsync("slow", null, new FleetRequestOptions { Timeout = TimeSpan.FromMilliseconds(50) }).WithinAsync(Json.Hang));
 
         using var cancellation = new CancellationTokenSource();
         var call = pair.Client.SendRequestAsync("slow", null, null, cancellation.Token);
         cancellation.Cancel();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => call.WaitAsync(Json.Hang));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => call.WithinAsync(Json.Hang));
         Assert.AreEqual(FleetConnectionState.Open, pair.Client.State);
     }
 
@@ -165,15 +165,15 @@ public sealed class FleetConnectionTests
         }), clientOptions: Quiet, serverOptions: Quiet);
 
         var pending = pair.Client.SendRequestAsync("slow");
-        await started.Task.WaitAsync(Json.Hang);
-        await pair.Client.CloseAsync("bye").WaitAsync(Json.Hang);
+        await started.Task.WithinAsync(Json.Hang);
+        await pair.Client.CloseAsync("bye").WithinAsync(Json.Hang);
 
-        var failure = await Assert.ThrowsExactlyAsync<FleetConnectionClosedException>(() => pending.WaitAsync(Json.Hang));
+        var failure = await Assert.ThrowsExactlyAsync<FleetConnectionClosedException>(() => pending.WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.ConnectionClosed, failure.Error.Code);
         Assert.AreEqual(FleetErrorHints.Reconnect, failure.Error.Hint);
 
-        var clientClose = await pair.Client.Completion.WaitAsync(Json.Hang);
-        var serverClose = await pair.Server.Completion.WaitAsync(Json.Hang);
+        var clientClose = await pair.Client.Completion.WithinAsync(Json.Hang);
+        var serverClose = await pair.Server.Completion.WithinAsync(Json.Hang);
         Assert.IsTrue(clientClose.IsClean);
         Assert.IsTrue(clientClose.ClosedLocally);
         Assert.IsTrue(serverClose.IsClean);
@@ -197,12 +197,12 @@ public sealed class FleetConnectionTests
         }), clientOptions: Quiet, serverOptions: Quiet);
 
         var pending = pair.Client.SendRequestAsync("slow");
-        await started.Task.WaitAsync(Json.Hang);
-        await pair.Server.CloseAsync().WaitAsync(Json.Hang);
+        await started.Task.WithinAsync(Json.Hang);
+        await pair.Server.CloseAsync().WithinAsync(Json.Hang);
 
-        var failure = await Assert.ThrowsExactlyAsync<FleetConnectionClosedException>(() => pending.WaitAsync(Json.Hang));
+        var failure = await Assert.ThrowsExactlyAsync<FleetConnectionClosedException>(() => pending.WithinAsync(Json.Hang));
         Assert.IsFalse(failure.CloseInfo.ClosedLocally);
-        Assert.IsTrue((await pair.Client.Completion.WaitAsync(Json.Hang)).IsClean);
+        Assert.IsTrue((await pair.Client.Completion.WithinAsync(Json.Hang)).IsClean);
     }
 
     [TestMethod]
@@ -218,11 +218,11 @@ public sealed class FleetConnectionTests
         connection.Start();
         var pending = connection.SendRequestAsync("node.info");
 
-        var close = await connection.Completion.WaitAsync(Json.Hang);
+        var close = await connection.Completion.WithinAsync(Json.Hang);
 
         Assert.AreEqual(FleetErrorCodes.PeerTimeout, close.Code);
         Assert.IsTrue(close.ClosedLocally);
-        var failure = await Assert.ThrowsExactlyAsync<FleetConnectionClosedException>(() => pending.WaitAsync(Json.Hang));
+        var failure = await Assert.ThrowsExactlyAsync<FleetConnectionClosedException>(() => pending.WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.PeerTimeout, failure.Error.Code);
 
         // The connection pinged the silent peer before giving up on it.
@@ -275,7 +275,7 @@ public sealed class FleetConnectionTests
 
         // The server's limit is larger: what it sends is too large for the client, which closes.
         await pair.Server.SendEventAsync(new FleetEvent("big", payload));
-        var close = await pair.Client.Completion.WaitAsync(Json.Hang);
+        var close = await pair.Client.Completion.WithinAsync(Json.Hang);
         Assert.AreEqual(FleetErrorCodes.FrameTooLarge, close.Code);
     }
 
@@ -290,18 +290,18 @@ public sealed class FleetConnectionTests
         await raw.SendAsync("""{"t":"stream.credit","ch":1,"n":4}""".Utf8(), FleetFrameType.Text, CancellationToken.None);
         await raw.SendAsync("""{"t":"req","id":"r1","m":"node.info"}""".Utf8(), FleetFrameType.Text, CancellationToken.None);
         var buffer = new ArrayBufferWriter<byte>();
-        Assert.AreEqual(FleetFrameType.Text, await raw.ReceiveAsync(buffer, 1 << 16, CancellationToken.None).AsTask().WaitAsync(Json.Hang));
+        Assert.AreEqual(FleetFrameType.Text, await raw.ReceiveAsync(buffer, 1 << 16, CancellationToken.None).AsTask().WithinAsync(Json.Hang));
         var response = (FleetResponse)FleetMessageSerializer.Deserialize(buffer.WrittenSpan)!;
         Assert.AreEqual("r1", response.Id);
         Assert.IsTrue(response.Ok);
 
         await raw.SendAsync("""{"t":"req","id":"r2"}""".Utf8(), FleetFrameType.Text, CancellationToken.None);
         buffer.ResetWrittenCount();
-        Assert.AreEqual(FleetFrameType.Text, await raw.ReceiveAsync(buffer, 1 << 16, CancellationToken.None).AsTask().WaitAsync(Json.Hang));
+        Assert.AreEqual(FleetFrameType.Text, await raw.ReceiveAsync(buffer, 1 << 16, CancellationToken.None).AsTask().WithinAsync(Json.Hang));
         Assert.AreEqual(FleetErrorCodes.InvalidRequest, ((FleetResponse)FleetMessageSerializer.Deserialize(buffer.WrittenSpan)!).Error!.Code);
 
         await raw.SendAsync("not json"u8.ToArray(), FleetFrameType.Text, CancellationToken.None);
-        var close = await connection.Completion.WaitAsync(Json.Hang);
+        var close = await connection.Completion.WithinAsync(Json.Hang);
         Assert.AreEqual(FleetErrorCodes.ProtocolError, close.Code);
     }
 
@@ -314,7 +314,7 @@ public sealed class FleetConnectionTests
             return ValueTask.FromResult<JsonElement?>(JsonSerializer.SerializeToElement(numbers.Sum(), TestJsonContext.Default.Int32));
         }), clientOptions: Quiet, serverOptions: Quiet);
 
-        var sum = await pair.Client.SendRequestAsync("math.add", new[] { 1, 2, 3 }, TestJsonContext.Default.Int32Array, TestJsonContext.Default.Int32).WaitAsync(Json.Hang);
+        var sum = await pair.Client.SendRequestAsync("math.add", new[] { 1, 2, 3 }, TestJsonContext.Default.Int32Array, TestJsonContext.Default.Int32).WithinAsync(Json.Hang);
         Assert.AreEqual(6, sum);
     }
 

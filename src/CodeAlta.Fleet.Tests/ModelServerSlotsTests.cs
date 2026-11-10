@@ -30,11 +30,11 @@ public sealed class ModelServerSlotsTests
         Assert.IsFalse(gotSecond.IsCompleted || gotThird.IsCompleted);
 
         first.Dispose();
-        var second = await gotSecond.WaitAsync(TimeSpan.FromSeconds(10), token);
+        var second = await gotSecond.WithinAsync(TestTime.Seconds(10), token);
         Assert.IsFalse(gotThird.IsCompleted, "one slot: the third waits for the second");
         await WaitUntilAsync(() => places.Contains(("third", 0)), token);
         second.Dispose();
-        (await gotThird.WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose();
+        (await gotThird.WithinAsync(TestTime.Seconds(10), token)).Dispose();
 
         CollectionAssert.AreEqual(new[] { ("second", 0), ("third", 1), ("third", 0) }, places.ToArray());
         Assert.AreEqual((0, 0), (gate.ActiveCount, gate.WaitingCount));
@@ -60,7 +60,7 @@ public sealed class ModelServerSlotsTests
 
         // A higher limit (the server reports more slots) admits it at once.
         gate.SetLimit(2);
-        (await staying.WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose();
+        (await staying.WithinAsync(TestTime.Seconds(10), token)).Dispose();
     }
 
     [TestMethod]
@@ -79,13 +79,13 @@ public sealed class ModelServerSlotsTests
             await release.Task;
             throw new OperationCanceledException();
         }, token).AsTask();
-        await reported.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+        await reported.Task.WithinAsync(TestTime.Seconds(10), token);
         held.Dispose();
         release.SetResult();
         await Assert.ThrowsAsync<OperationCanceledException>(() => failing);
 
         Assert.AreEqual((0, 0), (gate.ActiveCount, gate.WaitingCount), "the slot it was given is not lost");
-        (await gate.AcquireAsync(null, token).AsTask().WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose();
+        (await gate.AcquireAsync(null, token).AsTask().WithinAsync(TestTime.Seconds(10), token)).Dispose();
     }
 
     [TestMethod]
@@ -100,7 +100,7 @@ public sealed class ModelServerSlotsTests
             var held = await gate.AcquireAsync(null, token);
             var failing = gate.AcquireAsync(async (_, _) => { await Task.Yield(); throw new OperationCanceledException(); }, token).AsTask();
             held.Dispose();
-            try { (await failing.WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose(); }
+            try { (await failing.WithinAsync(TestTime.Seconds(10), token)).Dispose(); }
             catch (OperationCanceledException) { }
             Assert.AreEqual((0, 0), (gate.ActiveCount, gate.WaitingCount), $"round {round}");
         }
@@ -135,7 +135,7 @@ public sealed class ModelServerSlotsTests
             Assert.AreEqual(0, listed.Status.Models.Count, "a server that does not run lists no model");
             Assert.AreEqual(1, host.Slots.Waiting("coder", "a/b:Q4_K_M"));
             busy.Dispose();
-            (await waiting.WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose();
+            (await waiting.WithinAsync(TestTime.Seconds(10), token)).Dispose();
             Assert.AreEqual(0, host.Slots.Waiting("coder", "a/b:Q4_K_M"));
         }
         finally
@@ -176,7 +176,7 @@ public sealed class ModelServerSlotsTests
         Assert.AreEqual("Waits for a free slot of pc-ai/coder (next in line)", updates[0].Message);
 
         Assert.AreEqual("data: done", await response.Content.ReadAsStringAsync(token));
-        (await next.WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose();
+        (await next.WithinAsync(TestTime.Seconds(10), token)).Dispose();
         await WaitUntilAsync(() => updates.Count == 2, token);
         Assert.IsTrue(AgentWaitNotice.IsEnded(updates[1].Details), "the notice is removed once the request has its slot");
     }
@@ -200,7 +200,7 @@ public sealed class ModelServerSlotsTests
 
     private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken token)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("It did not get there in time.");

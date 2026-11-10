@@ -16,7 +16,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ClaudeCodeImportTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(20);
     private const string Conversation = "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e01";
 
     [TestMethod]
@@ -34,13 +34,13 @@ public sealed class ClaudeCodeImportTests
         var entry = listed.Conversations.Single();
         Assert.AreEqual((Conversation, "Fix the parser", "vscode", false), (entry.ConversationId, entry.Title, entry.Origin, entry.IsHeld));
         // Before it is imported, the conversation opens in VS Code or a terminal from the folder of the project.
-        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout);
         Assert.AreEqual(("ok", $"claude --resume {Conversation}", project.ProjectPath, $"vscode://anthropic.claude-code/open?session={Conversation}"),
             (described.Status, described.Conversation!.ResumeCommand, described.Conversation.WorkingDirectory, described.Conversation.EditorUri));
         Assert.IsNull(described.Conversation.ConfigDirectory, "A provider without an account folder of its own resumes it in the folder of Claude Code.");
-        Assert.AreEqual("not_found", (await host.Commands.DescribeExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WaitAsync(Timeout)).Status);
+        Assert.AreEqual("not_found", (await host.Commands.DescribeExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WithinAsync(Timeout)).Status);
 
-        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout);
         Assert.AreEqual("imported", imported.Status);
         Assert.AreEqual(("existing", null), await DescribedAsync(host, project, provider, Conversation), "A session continues it: it is opened from that session.");
         var sessionId = imported.Session!.SessionId;
@@ -74,7 +74,7 @@ public sealed class ClaudeCodeImportTests
         Assert.IsNull(recorded.Instructions);
 
         // Imported twice: the session there is, and the listing no longer gives it.
-        var again = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        var again = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout);
         Assert.AreEqual(("existing", sessionId), (again.Status, again.Session!.SessionId));
         Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50)).Total);
 
@@ -82,7 +82,7 @@ public sealed class ClaudeCodeImportTests
         // CodeAlta given as new, without the conversation told again as text.
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Run the tests.")).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(Timeout);
+        var result = await receipt.Completion.WithinAsync(Timeout);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
         var process = cli.Processes.Last(static candidate => candidate.Launch.Arguments.Contains("--mcp-config"));
         Assert.AreEqual(Conversation, process.ResumedSessionId);
@@ -112,7 +112,7 @@ public sealed class ClaudeCodeImportTests
         var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
 
         Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(project, Provider(host), 0, 50)).Total);
-        var imported = await host.Commands.ImportExternalConversationAsync(project, Provider(host), Conversation).WaitAsync(Timeout);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, Provider(host), Conversation).WithinAsync(Timeout);
         Assert.AreEqual(("not_found", null), (imported.Status, imported.Session));
         await foreach (var session in host.RuntimeService.ListRecoverableSessionsAsync())
             Assert.Fail($"No session is written; found {session.SessionId}.");
@@ -131,12 +131,12 @@ public sealed class ClaudeCodeImportTests
         // The provider is assigned to that space only: a session of another space cannot use it.
         File.WriteAllText(host.CatalogOptions.ConfigPath, $"[providers.{provider.ProviderId.Value}]\ntype = \"claude-code\"\nspaces = [\"{business}\"]\n");
 
-        var refused = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation, SpaceDescriptor.DefaultId).WaitAsync(Timeout);
+        var refused = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation, SpaceDescriptor.DefaultId).WithinAsync(Timeout);
         Assert.AreEqual((SessionRuntimeService.ProviderOutsideSpace, null), (refused.Status, refused.Session));
         await foreach (var written in host.RuntimeService.ListRecoverableSessionsAsync())
             Assert.Fail($"No session is written; found {written.SessionId}.");
 
-        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation, business).WaitAsync(Timeout);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation, business).WithinAsync(Timeout);
         Assert.AreEqual("imported", imported.Status);
         var session = await ListedAsync(host, imported.Session!.SessionId);
         Assert.AreEqual(business, session.SpaceId, "The session belongs to the space the page shows, as a new session does.");
@@ -154,7 +154,7 @@ public sealed class ClaudeCodeImportTests
         var transcript = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(cli.ConfigRoot, projectRoot), Conversation + ".jsonl");
         var written = File.ReadAllBytes(transcript);
 
-        var shown = await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        var shown = await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout);
         Assert.AreEqual(("ok", null), (shown.Status, shown.SessionId));
         var preview = shown.Preview!;
         Assert.AreEqual(("Fix the parser", new FileInfo(transcript).Length), (preview.Title, preview.Length));
@@ -172,21 +172,21 @@ public sealed class ClaudeCodeImportTests
         await foreach (var session in host.RuntimeService.ListRecoverableSessionsAsync())
             Assert.Fail($"No session is written; found {session.SessionId}.");
         CollectionAssert.AreEqual(written, File.ReadAllBytes(transcript));
-        Assert.AreSame(preview, (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout)).Preview);
+        Assert.AreSame(preview, (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout)).Preview);
         Assert.AreEqual(1, (await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50)).Total, "It is still to import.");
 
         // A turn added in VS Code: the preview reads it.
         var appended = new Transcript(transcript, Conversation, projectRoot);
         appended.Append(appended.User("u3", "a3", "And the docs."), appended.Assistant("a4", "u3", "m4", ClaudeCodeExternalTurnsTests.Text("Docs updated.")));
         File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddSeconds(5));
-        var grown = (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout)).Preview!;
+        var grown = (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout)).Preview!;
         Assert.AreNotSame(preview, grown);
         Assert.IsTrue(grown.Length > preview.Length);
         Assert.AreEqual("And the docs.", grown.Events.OfType<AgentContentCompletedEvent>().Last(static record => record.Kind == AgentContentKind.User).Content);
 
-        Assert.AreEqual("not_found", (await host.Commands.PreviewExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WaitAsync(Timeout)).Status);
-        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
-        var continued = await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        Assert.AreEqual("not_found", (await host.Commands.PreviewExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WithinAsync(Timeout)).Status);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout);
+        var continued = await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout);
         Assert.AreEqual(("existing", imported.Session!.SessionId, null), (continued.Status, continued.SessionId, continued.Preview),
             "A session continues it: the preview opens that session.");
     }
@@ -228,15 +228,15 @@ public sealed class ClaudeCodeImportTests
             everyOne.Conversations.Select(static entry => (entry.ConversationId, entry.ProjectId)).ToArray(), "The newest first, as many as asked.");
 
         // Opened and imported where it ended: the worktree of the project.
-        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Moved).WaitAsync(Timeout);
+        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Moved).WithinAsync(Timeout);
         Assert.AreEqual(("ok", worktree), (described.Status, described.Conversation!.WorkingDirectory));
-        Assert.AreEqual(elsewhere, (await host.Commands.DescribeExternalConversationAsync(null, provider, Homeless).WaitAsync(Timeout)).Conversation!.WorkingDirectory);
-        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Moved).WaitAsync(Timeout);
+        Assert.AreEqual(elsewhere, (await host.Commands.DescribeExternalConversationAsync(null, provider, Homeless).WithinAsync(Timeout)).Conversation!.WorkingDirectory);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Moved).WithinAsync(Timeout);
         var session = await ListedAsync(host, imported.Session!.SessionId);
         Assert.AreEqual((project.ProjectPath, worktree), (session.WorkingDirectory, session.WorktreeDirectory));
 
         // A conversation of no project imported into a project works in the folder of the project.
-        var adopted = await host.Commands.ImportExternalConversationAsync(project, provider, Homeless).WaitAsync(Timeout);
+        var adopted = await host.Commands.ImportExternalConversationAsync(project, provider, Homeless).WithinAsync(Timeout);
         var adoptedSession = await ListedAsync(host, adopted.Session!.SessionId);
         Assert.AreEqual((project.Id, project.ProjectPath, (string?)null), (adoptedSession.ProjectRef, adoptedSession.WorkingDirectory, adoptedSession.WorktreeDirectory));
         Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(null, provider, 0, 50)).Total);
@@ -309,7 +309,7 @@ public sealed class ClaudeCodeImportTests
         await using var host = await CreateHostAsync(directory, cli, projectRoot, configDirectory: cli.ConfigRoot);
         var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
 
-        var described = await host.Commands.DescribeExternalConversationAsync(project, Provider(host), Conversation).WaitAsync(Timeout);
+        var described = await host.Commands.DescribeExternalConversationAsync(project, Provider(host), Conversation).WithinAsync(Timeout);
         Assert.AreEqual("ok", described.Status);
         Assert.AreEqual(cli.ConfigRoot, described.Conversation!.ConfigDirectory, "Claude Code finds the conversation in the account folder of the provider.");
         Assert.AreEqual($"claude --resume {Conversation}", described.Conversation.ResumeCommand);
@@ -339,7 +339,7 @@ public sealed class ClaudeCodeImportTests
     private static async Task<(string Status, OwnedSharedConversation? Conversation)> DescribedAsync(CodeAltaHost host, ProjectDescriptor project,
         ModelProviderDescriptor provider, string conversation)
     {
-        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, conversation).WaitAsync(Timeout);
+        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, conversation).WithinAsync(Timeout);
         return (described.Status, described.Conversation);
     }
 

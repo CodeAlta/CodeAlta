@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const options = { entry: "../sessionLinks.mount.tsx", fixture: "sessionLinkFixture", rpcFixture: "../demo-api.ts", width: 900, height: 650 } as const;
 const chips = `Array.from(document.querySelectorAll('#live .markdown-content a[data-session-link]'))`;
 
-test("a link to a session is a chip that says what the session is doing and opens it", { skip: !edge, timeout: 90_000 }, async () => {
+test("a link to a session is a chip that says what the session is doing and opens it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${chips}.length === 4`, "the chips of the four sessions");
     assert.deepEqual(await page.evaluate(`${chips}.map(link => [link.textContent, link.getAttribute('data-session-link'), link.getAttribute('data-session-state'),

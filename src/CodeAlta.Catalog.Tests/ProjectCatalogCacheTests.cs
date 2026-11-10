@@ -52,6 +52,46 @@ public sealed class ProjectCatalogCacheTests
     }
 
     [TestMethod]
+    public async Task AProjectReadWhileAnotherCatalogSavesIt_IsAlwaysWhole()
+    {
+        // The search index reads the projects while a session saves one: a file read half written fails to parse.
+        using var fixture = await Fixture.CreateAsync(1);
+        var writer = new ProjectCatalog(fixture.Options);
+        var project = (await writer.LoadAsync()).Single();
+        using var stop = new CancellationTokenSource();
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var reads = 0;
+        var readers = Enumerable.Range(0, 3).Select(_ => Task.Run(async () =>
+        {
+            var reader = new ProjectCatalog(fixture.Options);
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    var read = await reader.GetByIdAsync(project.Id);
+                    if (read is null) failures.Enqueue("missing");
+                    else if (read.Description is { } description && !description.StartsWith("Version ", StringComparison.Ordinal)) failures.Enqueue("another description");
+                    Interlocked.Increment(ref reads);
+                }
+                catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+                {
+                    failures.Enqueue($"{exception.GetType().Name}: {exception.Message}");
+                }
+            }
+        })).ToArray();
+
+        for (var version = 0; version < 150; version++)
+        {
+            project.Description = "Version " + version + new string('.', version * 40);
+            await writer.SaveAsync(project);
+        }
+
+        await stop.CancelAsync();
+        await Task.WhenAll(readers);
+        Assert.IsEmpty(failures, $"{failures.Count} failed reads of {reads + failures.Count}: {string.Join(" | ", failures.Distinct().Take(3))}");
+    }
+
+    [TestMethod]
     public async Task FilesAddedChangedAndDeletedByAnotherWriter_AreSeenAtTheNextLoad()
     {
         using var fixture = await Fixture.CreateAsync(3);

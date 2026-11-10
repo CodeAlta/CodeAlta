@@ -110,11 +110,11 @@ public sealed partial class McpRuntimeServiceTests
             using (var process = Process.GetProcessById(session))
             {
                 process.Kill(entireProcessTree: true);
-                Assert.IsTrue(process.WaitForExit(TimeSpan.FromSeconds(30)));
+                Assert.IsTrue(process.WaitForExit(TestTime.Seconds(30)));
             }
 
             // The connection sees its process end; until it does, a run is offered the tools it listed, and starts nothing.
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(30);
             var tools = await RunToolsAsync(plugin, project.Path, "session");
             while (StartedProcesses(starts).Count < 2 && DateTime.UtcNow < deadline)
             {
@@ -333,7 +333,7 @@ public sealed partial class McpRuntimeServiceTests
             catch (ArgumentException) { continue; }
             using (process)
             {
-                Assert.IsTrue(process.WaitForExit(TimeSpan.FromSeconds(30)), $"The MCP server process {id} is still running.");
+                Assert.IsTrue(process.WaitForExit(TestTime.Seconds(30)), $"The MCP server process {id} is still running.");
             }
         }
     }

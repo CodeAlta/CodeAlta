@@ -34,7 +34,7 @@ public sealed class OwnedSessionAskServiceTests
             Assert.AreSame(first, duplicate);
             Assert.AreEqual("submitting", owner.Observe(action.ActionId, handle)!.Status);
             // The launch gate is released by AnswerAsync, but readiness must not assume a scheduling race.
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsNotNull(submission);
             Assert.AreEqual(handle.AskId, submission.AskId);
             Assert.AreEqual("session", sent!.SessionId);
@@ -42,7 +42,7 @@ public sealed class OwnedSessionAskServiceTests
             Assert.AreEqual(AgentPromptProvenance.UserAnswer, sent.Provenance);
             submission.RecordRunReturned(new("real-run"));
             receipt.Complete(new(OwnedSessionCommandOutcome.Failed, Code: "publication_failed"));
-            var result = await first.WaitAsync(TimeSpan.FromSeconds(5));
+            var result = await first.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual("admitted", result.Status);
             Assert.AreEqual("real-run", result.RunId);
             Assert.IsNull(owner.List("session").Head);
@@ -75,14 +75,14 @@ public sealed class OwnedSessionAskServiceTests
         OwnedSessionAskExecution? send = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual("submitting", owner.Observe(action.ActionId, handle)!.Status);
             // The send of the answer starts the run that carries it: the session has the answer, and its run
             // can go on for minutes. The answer is settled then, not when that run ends.
             send = owner.CreateExecution(Guid.NewGuid(), "session", default, submission);
             send.Bind(Guid.NewGuid(), 1, new("fixture"));
             await send.StartedAsync(new("run-answer"), default);
-            var result = await answer.WaitAsync(TimeSpan.FromSeconds(5));
+            var result = await answer.WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual("admitted", result.Status);
             Assert.AreEqual("run-answer", result.RunId);
             Assert.AreEqual("admitted", owner.Observe(action.ActionId, handle)!.Status);
@@ -110,15 +110,15 @@ public sealed class OwnedSessionAskServiceTests
             var old = owner.List("session").Head!.Handle;
             var pending = owner.AnswerAsync(new(Guid.NewGuid(), old, [new() { QuestionIndex = 0, FreeformText = "a" }]), default);
             answer = pending;
-            Assert.AreEqual("not_admitted", (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+            Assert.AreEqual("not_admitted", (await pending.WithinAsync(TestTime.Seconds(5))).Status);
             var fresh = owner.List("session").Head!.Handle;
             Assert.AreEqual(old.ResponseGeneration + 1, fresh.ResponseGeneration);
             var rejected = owner.CancelAsync(new(Guid.NewGuid(), old, []), default);
             cancel = rejected;
-            Assert.AreEqual("rejected", (await rejected.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+            Assert.AreEqual("rejected", (await rejected.WithinAsync(TestTime.Seconds(5))).Status);
             var accepted = owner.CancelAsync(new(Guid.NewGuid(), fresh, []), default);
             cancel = accepted;
-            Assert.AreEqual("cancelled", (await accepted.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+            Assert.AreEqual("cancelled", (await accepted.WithinAsync(TestTime.Seconds(5))).Status);
         }
         finally { execution.Close(); owner.CloseAdmission(); await Join(owner, answer ?? Task.CompletedTask, cancel ?? Task.CompletedTask); }
     }
@@ -223,9 +223,9 @@ public sealed class OwnedSessionAskServiceTests
             var action = new OwnedAskAction(Guid.NewGuid(), head.Handle, answers, "# Review of `.alta/plans/plan.md`: changes requested\n\n### c1 · line 4\nSplit this step.");
             var pending = owner.AnswerAsync(action, default);
             answer = pending;
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             receipt.Complete(new(OwnedSessionCommandOutcome.Completed, new AgentRunId("run-answer")));
-            Assert.AreEqual("admitted", (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+            Assert.AreEqual("admitted", (await pending.WithinAsync(TestTime.Seconds(5))).Status);
 
             // The prompt the agent receives is the round, then the answers to the questions.
             var text = sent!.Text.ReplaceLineEndings("\n");
@@ -292,7 +292,7 @@ public sealed class OwnedSessionAskServiceTests
                 first ??= action;
                 var original = owner.AnswerAsync(action, default);
                 originals.Add(original);
-                Assert.AreEqual("not_admitted", (await original.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+                Assert.AreEqual("not_admitted", (await original.WithinAsync(TestTime.Seconds(5))).Status);
             }
             var retained = owner.AnswerAsync(first!, default);
             Assert.AreSame(originals[0], retained);
@@ -325,14 +325,14 @@ public sealed class OwnedSessionAskServiceTests
             var action = new OwnedAskAction(Guid.NewGuid(), handle, [new() { QuestionIndex = 0, FreeformText = "answer" }]);
             var answer = owner.AnswerAsync(action, default);
             originals.Add(answer);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             var cancel = owner.CancelAsync(new(Guid.NewGuid(), handle, []), default);
             originals.Add(cancel);
-            Assert.AreEqual("rejected", (await cancel.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+            Assert.AreEqual("rejected", (await cancel.WithinAsync(TestTime.Seconds(5))).Status);
             owner.CloseAdmission(); // Must not wait for this answer's dependent receipt.
             Assert.IsFalse(answer.IsCompleted);
             receipt.Complete(new(OwnedSessionCommandOutcome.Failed));
-            Assert.AreEqual("indeterminate", (await answer.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+            Assert.AreEqual("indeterminate", (await answer.WithinAsync(TestTime.Seconds(5))).Status);
             Assert.AreEqual("indeterminate", owner.List("session").Head!.State);
             Assert.AreSame(answer, owner.AnswerAsync(action, default));
         }
@@ -386,7 +386,7 @@ public sealed class OwnedSessionAskServiceTests
     {
         var drain = owner.DrainAsync();
         var all = Task.WhenAll(originals.Append(drain));
-        try { await all.WaitAsync(TimeSpan.FromSeconds(5)); }
+        try { await all.WithinAsync(TestTime.Seconds(5)); }
         catch (Exception ex) { ex.Data["RetainedAskOwner"] = owner; ex.Data["OriginalJoin"] = all; throw; }
     }
 }

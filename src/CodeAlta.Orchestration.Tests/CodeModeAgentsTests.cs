@@ -22,7 +22,7 @@ public sealed class CodeModeAgentsTests
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
         var parent = opened.Session!;
         provider.Script(parent.SessionId, ScriptedTurnProvider.Reply("Parent ready."));
-        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(parent, new HeadlessPrompt("start")).WaitAsync(Hang)).Status);
+        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(parent, new HeadlessPrompt("start")).WithinAsync(Hang)).Status);
         return (root, provider, host, driver, parent);
     }
 
@@ -36,8 +36,8 @@ public sealed class CodeModeAgentsTests
         var parentRequests = provider.RequestsOf(parent.SessionId).Length;
 
         var result = await host.CodeModeAgents.RunAsync(parent.SessionId,
-            new CodeModeAgentRequest("Review the parser.") { RunId = "run-1", StepId = "review", Title = "Review" }, CancellationToken.None).WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WaitAsync(Hang);
+            new CodeModeAgentRequest("Review the parser.") { RunId = "run-1", StepId = "review", Title = "Review" }, CancellationToken.None).WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
 
         Assert.IsTrue(result.Succeeded, result.Failure);
         Assert.AreEqual("Child answer.", result.Answer);
@@ -63,8 +63,8 @@ public sealed class CodeModeAgentsTests
             return new CodeModeRunResult(CodeModeRunStatus.Completed, TimeSpan.FromMilliseconds(5));
         }, out var refusal);
         Assert.IsNotNull(run, refusal);
-        await run!.Completion.WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WaitAsync(Hang);
+        await run!.Completion.WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
 
         var descriptor = await host.RuntimeService.TryGetResumableSessionAsync(parent.SessionId, CancellationToken.None);
         var history = await host.RuntimeService.TryReadStoredHistoryAsync(descriptor!, CancellationToken.None);
@@ -97,7 +97,7 @@ public sealed class CodeModeAgentsTests
         // Two children that change files at the same time, each in a worktree of its own.
         var results = await Task.WhenAll(
             host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Try one way.") { RunId = "run-w", Worktree = true }, CancellationToken.None),
-            host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Try another.") { RunId = "run-w", Worktree = true }, CancellationToken.None)).WaitAsync(Hang);
+            host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Try another.") { RunId = "run-w", Worktree = true }, CancellationToken.None)).WithinAsync(Hang);
 
         foreach (var result in results)
         {
@@ -125,7 +125,7 @@ public sealed class CodeModeAgentsTests
         // A session of `altacli run --disable-tools web`: its children do without the web tools too.
         var narrow = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model", DisabledToolPatterns = ["web"] })).Session!;
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Child answer."));
-        var child = await host.CodeModeAgents.RunAsync(narrow.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-t" }, CancellationToken.None).WaitAsync(Hang);
+        var child = await host.CodeModeAgents.RunAsync(narrow.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-t" }, CancellationToken.None).WithinAsync(Hang);
         Assert.IsTrue(child.Succeeded, child.Failure);
         var disabled = await host.RuntimeService.GetDisabledToolsAsync(child.SessionId!);
         foreach (var tool in new[] { "webget", "web_search", "web_fetch" }) Assert.IsTrue(disabled.Contains(tool), tool);
@@ -133,14 +133,14 @@ public sealed class CodeModeAgentsTests
         // A session whose agent prompt does without the shell gives it to no child under another prompt.
         var reader = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model", AgentPromptId = "reader" })).Session!;
         provider.Script(reader.SessionId, ScriptedTurnProvider.Reply("Reader ready."));
-        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(reader, new HeadlessPrompt("start")).WaitAsync(Hang)).Status);
+        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(reader, new HeadlessPrompt("start")).WithinAsync(Hang)).Status);
         Assert.IsTrue((await host.RuntimeService.GetDisabledToolsAsync(reader.SessionId)).Contains("shell_command"), "the reader does without the shell");
-        var wider = await host.CodeModeAgents.RunAsync(reader.SessionId, new CodeModeAgentRequest("Run it.") { RunId = "run-t" }, CancellationToken.None).WaitAsync(Hang);
+        var wider = await host.CodeModeAgents.RunAsync(reader.SessionId, new CodeModeAgentRequest("Run it.") { RunId = "run-t" }, CancellationToken.None).WithinAsync(Hang);
         Assert.AreEqual("refused", wider.Status);
         Assert.IsNull(wider.SessionId, "no session is created");
         StringAssert.Contains(wider.Failure, "`shell_command`");
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Read."));
-        var same = await host.CodeModeAgents.RunAsync(reader.SessionId, new CodeModeAgentRequest("Read it.") { RunId = "run-t", AgentPromptId = "reader" }, CancellationToken.None).WaitAsync(Hang);
+        var same = await host.CodeModeAgents.RunAsync(reader.SessionId, new CodeModeAgentRequest("Read it.") { RunId = "run-t", AgentPromptId = "reader" }, CancellationToken.None).WithinAsync(Hang);
         Assert.IsTrue(same.Succeeded, same.Failure);
     }
 
@@ -151,8 +151,8 @@ public sealed class CodeModeAgentsTests
         await using var scope = root;
         await using var closing = driver;
 
-        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Change it.") { RunId = "run-nw", Worktree = true }, CancellationToken.None).WaitAsync(Hang);
-        var badBase = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Change it.") { RunId = "run-nw", Worktree = true, WorktreeBase = "--force" }, CancellationToken.None).WaitAsync(Hang);
+        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Change it.") { RunId = "run-nw", Worktree = true }, CancellationToken.None).WithinAsync(Hang);
+        var badBase = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Change it.") { RunId = "run-nw", Worktree = true, WorktreeBase = "--force" }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.AreEqual("refused", result.Status);
         StringAssert.Contains(result.Failure, "worktree");
@@ -190,8 +190,8 @@ public sealed class CodeModeAgentsTests
         provider.Turns.Enqueue(ScriptedTurnProvider.Fail(AgentFailureKind.Other, "the child broke"));
         var parentRequests = provider.RequestsOf(parent.SessionId).Length;
 
-        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Do it.") { RunId = "run-2" }, CancellationToken.None).WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WaitAsync(Hang);
+        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Do it.") { RunId = "run-2" }, CancellationToken.None).WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
 
         Assert.IsFalse(result.Succeeded);
         StringAssert.Contains(result.Failure, "the child broke");
@@ -209,7 +209,7 @@ public sealed class CodeModeAgentsTests
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("""{"count": 3}"""));
 
         var corrected = await host.CodeModeAgents.RunAsync(parent.SessionId,
-            new CodeModeAgentRequest("Count them.") { RunId = "run-s", Schema = schema.RootElement.Clone() }, CancellationToken.None).WaitAsync(Hang);
+            new CodeModeAgentRequest("Count them.") { RunId = "run-s", Schema = schema.RootElement.Clone() }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsTrue(corrected.Succeeded, corrected.Failure);
         Assert.AreEqual("""{"count": 3}""", corrected.Value);
@@ -220,7 +220,7 @@ public sealed class CodeModeAgentsTests
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Three."));
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Still three."));
         var missed = await host.CodeModeAgents.RunAsync(parent.SessionId,
-            new CodeModeAgentRequest("Count them.") { RunId = "run-s", Schema = schema.RootElement.Clone() }, CancellationToken.None).WaitAsync(Hang);
+            new CodeModeAgentRequest("Count them.") { RunId = "run-s", Schema = schema.RootElement.Clone() }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsFalse(missed.Succeeded);
         StringAssert.Contains(missed.Failure, "does not match the schema");
@@ -236,9 +236,9 @@ public sealed class CodeModeAgentsTests
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Second."));
         var agents = (CodeModeAgents)host.CodeModeAgents;
 
-        var opened = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-k", Title = "Kept" }, CancellationToken.None).WaitAsync(Hang);
-        var first = await agents.AskAsync("run-k", opened.SessionId!, "one", null, null, CancellationToken.None).WaitAsync(Hang);
-        var second = await agents.AskAsync("run-k", opened.SessionId!, "two", null, null, CancellationToken.None).WaitAsync(Hang);
+        var opened = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-k", Title = "Kept" }, CancellationToken.None).WithinAsync(Hang);
+        var first = await agents.AskAsync("run-k", opened.SessionId!, "one", null, null, CancellationToken.None).WithinAsync(Hang);
+        var second = await agents.AskAsync("run-k", opened.SessionId!, "two", null, null, CancellationToken.None).WithinAsync(Hang);
         await agents.CloseAsync("run-k", opened.SessionId!);
         var after = await agents.AskAsync("run-k", opened.SessionId!, "three", null, null, CancellationToken.None);
 
@@ -257,8 +257,8 @@ public sealed class CodeModeAgentsTests
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Done once."));
 
         // A scripted turn reports 100 input and 20 output tokens.
-        var first = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("one") { RunId = "run-b", BudgetTokens = 100 }, CancellationToken.None).WaitAsync(Hang);
-        var second = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("two") { RunId = "run-b", BudgetTokens = 100 }, CancellationToken.None).WaitAsync(Hang);
+        var first = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("one") { RunId = "run-b", BudgetTokens = 100 }, CancellationToken.None).WithinAsync(Hang);
+        var second = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("two") { RunId = "run-b", BudgetTokens = 100 }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsTrue(first.Succeeded, first.Failure);
         Assert.AreEqual("refused", second.Status);
@@ -301,9 +301,9 @@ public sealed class CodeModeAgentsTests
         CollectionAssert.Contains(host.CodeModeRuns.ListSessionsWithRunningScripts().ToArray(), parent.SessionId);
         Assert.AreEqual(1, host.RuntimeService.CountSessionsAtWork(), "a script is work CodeAlta asks about before exiting");
 
-        await host.RuntimeService.AbortTreeAsync(parent.SessionId, "test").WaitAsync(Hang);
-        var result = await run!.Completion.WaitAsync(Hang);
-        await settled.WaitAsync(Hang);
+        await host.RuntimeService.AbortTreeAsync(parent.SessionId, "test").WithinAsync(Hang);
+        var result = await run!.Completion.WithinAsync(Hang);
+        await settled.WithinAsync(Hang);
 
         Assert.AreEqual(CodeModeRunStatus.Cancelled, result.Status, "the abort of its tree stops the script");
     }

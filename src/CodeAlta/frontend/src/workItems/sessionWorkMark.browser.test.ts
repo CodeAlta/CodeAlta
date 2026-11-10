@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../workItems/sessionWorkMark.mount.tsx", fixture: "markFixture", rpcFixture: "../demo-api.ts", width: 900, height: 650,
   styles: ["../workItems/workItems.css"] } as const;
@@ -13,7 +14,7 @@ async function point(page: Page, element: string) {
   await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x + box.width / 2, y: box.y + box.height / 2 });
 }
 
-test("the work mark of a session row shows its items, short id or count, and opens them without selecting the row", { skip: !edge, timeout: 90_000 }, async () => {
+test("the work mark of a session row shows its items, short id or count, and opens them without selecting the row", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.session-work-mark').length === 3`, "the marks of the three rows");
     // A wide row says the short id of its item, or the count of its items; a narrow one keeps the glyph.

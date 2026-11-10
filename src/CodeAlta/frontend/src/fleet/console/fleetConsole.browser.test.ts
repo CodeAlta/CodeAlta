@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
+import { testLimit } from "../../testTime";
 
 const options = { entry: "../fleet/console/fleetConsole.mount.tsx", fixture: "fleetConsoleFixture", rpcFixture: "../demo-api.ts",
   styles: ["../machines/machines.css", "../fleet/fleet.css", "../spaces/spaces.css", "../fleet/console/fleetConsole.css"], width: 1600, height: 1000, ratio: 1.5,
   reducedMotion: true } as const;
 const rows = `[...document.querySelectorAll('.fleet-table tbody tr[data-row-key]')]`;
 
-test("the Overview of a fleet that runs says how it stands, what needs the person, and the server of each space", { skip: !edge, timeout: 90_000 }, async () => {
+test("the Overview of a fleet that runs says how it stands, what needs the person, and the server of each space", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-tiles')`, "the figures of the fleet");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-tile')].map(tile => tile.querySelector('.fleet-tile-value').textContent)`),
@@ -21,7 +22,7 @@ test("the Overview of a fleet that runs says how it stands, what needs the perso
   }, options);
 });
 
-test("with nothing set up, the Overview starts with a machine and a server, and what a server adds waits for it", { skip: !edge, timeout: 90_000 }, async () => {
+test("with nothing set up, the Overview starts with a machine and a server, and what a server adds waits for it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-tiles')`, "the fleet");
     await page.evaluate(`window.fleetConsoleFixture.start()`);
@@ -35,7 +36,7 @@ test("with nothing set up, the Overview starts with a machine and a server, and 
   }, options);
 });
 
-test("a fleet that cannot be read says so, instead of offering to start one", { skip: !edge, timeout: 90_000 }, async () => {
+test("a fleet that cannot be read says so, instead of offering to start one", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-tiles')`, "the fleet");
     await page.evaluate(`window.fleetConsoleFixture.fail()`);
@@ -45,7 +46,7 @@ test("a fleet that cannot be read says so, instead of offering to start one", { 
   }, options);
 });
 
-test("a narrow window keeps the name and the state of each machine, and the header of the table in view", { skip: !edge, timeout: 90_000 }, async () => {
+test("a narrow window keeps the name and the state of each machine, and the header of the table in view", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 22`, "the table of machines");
@@ -62,7 +63,7 @@ test("a narrow window keeps the name and the state of each machine, and the head
   }, options);
 });
 
-test("the machines are filtered, sorted, and a row opens its details in place", { skip: !edge, timeout: 90_000 }, async () => {
+test("the machines are filtered, sorted, and a row opens its details in place", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 22`, "the table of machines");
@@ -76,6 +77,9 @@ test("the machines are filtered, sorted, and a row opens its details in place", 
     await page.until(`${rows}.length === 4`, "the macs");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-filters-total').textContent`), "4 of 22");
     await page.key("Escape", 27);
+    // The menu gives the focus back to its button once it has faded out: a busy machine does it after a later click,
+    // which then loses the focus (the row below would not hear Escape).
+    await page.until(`!document.querySelector('.fleet-filters-menu')`, "the menu of the systems closed");
     await page.clickText(".fleet-filters .bp6-button", "Clear");
     await page.until(`${rows}.length === 22`, "every machine again");
 
@@ -91,13 +95,14 @@ test("the machines are filtered, sorted, and a row opens its details in place", 
     await page.until(`document.querySelector('.fleet-table-details .machine-row-details')`, "the details");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-table-details').previousElementSibling.getAttribute('aria-selected')`), "true");
     assert.ok(await page.evaluate(`[...document.querySelectorAll('.machine-details-actions .bp6-button')].some(button => button.textContent === 'Open its page')`));
+    await page.until(`document.activeElement === document.querySelector('.fleet-table-details')?.previousElementSibling`, "the focus on the row opened");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.fleet-table-details')`, "the details closed");
     assert.deepEqual(page.problems, []);
   }, options);
 });
 
-test("a large fleet shows its machines a page at a time, and the arrows and the details go past a page", { skip: !edge, timeout: 90_000 }, async () => {
+test("a large fleet shows its machines a page at a time, and the arrows and the details go past a page", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.many(250); window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 100`, "the first page");
@@ -121,7 +126,7 @@ test("a large fleet shows its machines a page at a time, and the arrows and the 
   }, options);
 });
 
-test("back from the page of a machine, the table is as it was left, at that machine", { skip: !edge, timeout: 90_000 }, async () => {
+test("back from the page of a machine, the table is as it was left, at that machine", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 22`, "the table of machines");
@@ -142,7 +147,7 @@ test("back from the page of a machine, the table is as it was left, at that mach
   }, options);
 });
 
-test("the help opens the guide, and says first when the page has edits that are not saved", { skip: !edge, timeout: 90_000 }, async () => {
+test("the help opens the guide, and says first when the page has edits that are not saved", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 22`, "the table of machines");
@@ -170,7 +175,7 @@ test("the help opens the guide, and says first when the page has edits that are 
   }, options);
 });
 
-test("the machines table is taken whole, with a row open, for the guide", { skip: !edge, timeout: 90_000 }, async () => {
+test("the machines table is taken whole, with a row open, for the guide", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 22`, "the table of machines");

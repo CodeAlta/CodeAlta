@@ -92,7 +92,7 @@ public sealed class WorkspaceRenameSessionTests
             var request = new WorkspaceRenameSessionRequest(Epoch, "global", null, global, "exact", "New");
             using var cancel = new CancellationTokenSource();
             var pending = rpc.RenameSessionAsync(request, cancel.Token);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual("busy", (await rpc.RenameSessionAsync(request, CancellationToken.None)).Status);
             cancel.Cancel();
             await Assert.ThrowsExactlyAsync<TaskCanceledException>(async () => await pending);

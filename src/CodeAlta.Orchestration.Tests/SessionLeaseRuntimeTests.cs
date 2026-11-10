@@ -25,7 +25,7 @@ public sealed class SessionLeaseRuntimeTests
 
         var session = await desktop.RuntimeService.CreateProjectSessionAsync(desktop.CurrentProject, options, "Leased");
         await desktop.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("hello") });
-        await desktop.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await desktop.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
 
         var holder = leases.TryReadHolder(session.SessionId);
         Assert.AreEqual(SessionLeaseOwner.DesktopKind, holder?.OwnerKind, "The attached session holds its lease.");
@@ -46,7 +46,7 @@ public sealed class SessionLeaseRuntimeTests
 
         // Once released, the other side continues the session.
         await cli.RuntimeService.SendAsync(resumed, options, new AgentSendOptions { Input = AgentInput.Text("continued") });
-        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         Assert.AreEqual(SessionLeaseOwner.CliKind, leases.TryReadHolder(session.SessionId)?.OwnerKind);
         Assert.AreEqual(2, provider.RequestsOf(session.SessionId).Length);
     }
@@ -61,7 +61,7 @@ public sealed class SessionLeaseRuntimeTests
         var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
         var session = await runtime.CreateProjectSessionAsync(host.CurrentProject, options, "Held elsewhere");
         var run = await runtime.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("first") });
-        await runtime.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await runtime.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(session.SessionId));
         var journal = Directory.EnumerateFiles(Path.Combine(host.CatalogOptions.StateRoot, "sessions"), session.SessionId + ".jsonl", SearchOption.AllDirectories).Single();
         var leases = new SessionLeaseStore(host.CatalogOptions);
@@ -97,7 +97,7 @@ public sealed class SessionLeaseRuntimeTests
         var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
         var session = await runtime.CreateProjectSessionAsync(host.CurrentProject, options, "Unusable leases");
         await runtime.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("first") });
-        await runtime.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await runtime.WhenSettledAsync(session.SessionId).WithinAsync(Hang);
         Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(session.SessionId));
         var journal = Directory.EnumerateFiles(Path.Combine(host.CatalogOptions.StateRoot, "sessions"), session.SessionId + ".jsonl", SearchOption.AllDirectories).Single();
 

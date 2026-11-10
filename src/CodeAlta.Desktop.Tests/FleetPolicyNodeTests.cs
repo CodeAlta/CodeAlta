@@ -15,7 +15,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class FleetPolicyNodeTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Patience = TestTime.Seconds(20);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -36,7 +36,7 @@ public sealed class FleetPolicyNodeTests
         var started = new TaskCompletionSource();
         fixture.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(running.Task, "Never.", started));
         Assert.AreEqual("accepted", (await client.SendAsync(created.SessionId, "work", retryKey: "send-1", cancellationToken: token)).Status);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
         policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
         var stopped = await fixture.Service.ApplyPolicyAsync(token);
         CollectionAssert.AreEqual(new[] { created.SessionId }, stopped.ToArray(), "the session of the fleet at work is stopped");
@@ -116,7 +116,7 @@ public sealed class FleetPolicyNodeTests
         await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Work"), "create-1", token);
         Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "held work", retryKey: "send-1", cancellationToken: token)).Status);
-        await waiting.Task.WaitAsync(Patience, token);
+        await waiting.Task.WithinAsync(Patience, token);
 
         // The owner stops the fleet while it waits; then its budget lets it go.
         policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
@@ -140,7 +140,7 @@ public sealed class FleetPolicyNodeTests
         var started = new TaskCompletionSource();
         fixture.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(running.Task, "Never.", started));
         await client.SendAsync(created.SessionId, "work", retryKey: "send-1", cancellationToken: token);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
 
         // The guard now reads a stop, as a node does that kept one and read it while this turn was starting: no event is raised.
         policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
@@ -162,7 +162,7 @@ public sealed class FleetPolicyNodeTests
         var started = new TaskCompletionSource();
         fixture.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(running.Task, "Never.", started));
         await client.SendAsync(created.SessionId, "work", retryKey: "send-1", cancellationToken: token);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
 
         Assert.AreEqual(0, (await fixture.Service.EnforceSessionLengthAsync(token)).Count, "within its time it goes on");
         clock.Advance(TimeSpan.FromMinutes(2));

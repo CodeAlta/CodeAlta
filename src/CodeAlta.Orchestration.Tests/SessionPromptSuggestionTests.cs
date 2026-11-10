@@ -74,7 +74,7 @@ public sealed class SessionPromptSuggestionTests
         var parentId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Parent")).SessionId;
         var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, Options(provider, temp), "Child", parentId, null, CancellationToken.None);
 
-        await host.RuntimeService.SendAsync(child, Options(provider, temp), new AgentSendOptions { Input = AgentInput.Text("one") }).WaitAsync(TestDeadlines.Hang);
+        await host.RuntimeService.SendAsync(child, Options(provider, temp), new AgentSendOptions { Input = AgentInput.Text("one") }).WithinAsync(TestDeadlines.Hang);
 
         Assert.AreEqual(1, provider.Instructions.Count);
         Assert.IsFalse(provider.Instructions[^1]!.Contains(Instruction, StringComparison.Ordinal));
@@ -109,13 +109,13 @@ public sealed class SessionPromptSuggestionTests
     };
 
     private static async Task<string?> SuggestionAsync(CodeAltaHost host, string sessionId)
-        => (await host.RuntimeService.GetCurrentStateAsync(sessionId).WaitAsync(TestDeadlines.Hang)).Entry?.PromptSuggestion;
+        => (await host.RuntimeService.GetCurrentStateAsync(sessionId).WithinAsync(TestDeadlines.Hang)).Entry?.PromptSuggestion;
 
     private static async Task SendAsync(CodeAltaHost host, string sessionId, string prompt = "one")
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        var result = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
         if (result.Outcome == OwnedSessionCommandOutcome.Completed) return;
         var errors = (await host.RuntimeService.GetHistoryAsync(sessionId, CancellationToken.None)).OfType<AgentErrorEvent>().Select(static error => error.Message);
         Assert.Fail($"{result.Outcome} {result.Code}: {string.Join(" | ", errors)}");

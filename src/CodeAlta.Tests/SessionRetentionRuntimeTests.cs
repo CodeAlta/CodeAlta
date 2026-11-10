@@ -89,11 +89,11 @@ public sealed class SessionRetentionRuntimeTests
         var archive = new FakeArchive { WaitDuringPrepare = async () => { entered.SetResult(); await release.Task; } };
         using var cancellation = new CancellationTokenSource();
         var retirement = fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1), cancellation.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         try
         {
             await cancellation.CancelAsync();
-            await Assert.ThrowsAsync<TimeoutException>(async () => await retirement.WaitAsync(TimeSpan.FromMilliseconds(100)));
+            await Assert.ThrowsAsync<TimeoutException>(async () => await retirement.WithinAsync(TestTime.Milliseconds(100)));
             Assert.IsFalse(fixture.Protection.Publish("window", ["old"], true), "Original work still owns the claim.");
             Assert.IsNull(fixture.Runtime.Jobs.TryReserveRetirement("old"));
         }
@@ -113,7 +113,7 @@ public sealed class SessionRetentionRuntimeTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var archive = new FakeArchive { WaitDuringPrepare = async () => { entered.SetResult(); await release.Task; } };
         var retirement = fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         var descriptor = new SessionViewDescriptor { SessionId = "old", CreatedAt = Now.AddYears(-1), WorkingDirectory = fixture.Root };
         var queue = fixture.Runtime.QueuePromptAsync(descriptor, "must not recreate", "send", null);
         var options = new SessionExecutionOptions
@@ -172,7 +172,7 @@ public sealed class SessionRetentionRuntimeTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var archive = new FakeArchive { WaitDuringPrepare = async () => { entered.SetResult(); await release.Task; } };
         var retirement = fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await entered.Task.WithinAsync(TestTime.Seconds(10));
         OwnedSessionCommandAdmission other;
         try
         {
@@ -181,7 +181,7 @@ public sealed class SessionRetentionRuntimeTests
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, other.Kind, "A cleanup must not hold back prompts to other sessions.");
         }
         finally { release.TrySetResult(); }
-        await other.Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await other.Receipt!.Completion.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(1, (await retirement).Deleted);
     }
 
@@ -320,7 +320,7 @@ public sealed class SessionRetentionRuntimeTests
         await Task.Delay(200);
         Assert.IsFalse(pass.IsCompleted, "The pass waits for the work to end instead of keeping every session.");
         claim.Dispose();
-        var result = await pass.WaitAsync(TimeSpan.FromSeconds(30));
+        var result = await pass.WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual("completed", result.State, result.Reason);
         Assert.AreEqual(1, result.Deleted);
         Assert.IsFalse(File.Exists(fixture.Journal("old")));
@@ -334,7 +334,7 @@ public sealed class SessionRetentionRuntimeTests
         await fixture.SeedAsync("older");
         using var claim = fixture.Protection.TryProtectAll();
         var service = new SessionRetentionService(fixture.Commands, fixture.Runtime, fixture.Protection, null) { ProtectionWait = TimeSpan.FromMilliseconds(200) };
-        var result = await service.RunOnceAsync(Now, Now.AddMonths(-1)).WaitAsync(TimeSpan.FromSeconds(30));
+        var result = await service.RunOnceAsync(Now, Now.AddMonths(-1)).WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual("partial", result.State);
         Assert.AreEqual("all_sessions_protected", result.Reason);
         Assert.AreEqual(0, result.Deleted);

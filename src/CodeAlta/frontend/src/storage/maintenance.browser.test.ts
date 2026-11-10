@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
-test("App-owned maintenance survives Settings navigation, replaces keyed toasts and detaches by epoch", { skip: !edge, timeout: 120_000 }, async () => {
+test("App-owned maintenance survives Settings navigation, replaces keyed toasts and detaches by epoch", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const f = "window.maintenanceFixture";
     const snapshot = "document.querySelector('#maintenance-snapshot').textContent";

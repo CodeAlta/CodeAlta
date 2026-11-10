@@ -133,7 +133,7 @@ public sealed class SessionNotesServiceTests
         using var input = new ControlledReader();
         var caller = explicitSource ? Caller("first") : AltaCallerIdentity.Host;
         var pending = fixture.InvokeWithReaderAsync(service, ["notes", "set", "--stdin"], input, caller);
-        await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await input.Entered.Task.WithinAsync(TestTime.Seconds(5));
         selected = "second";
         // Closing the old view and then losing all selection cannot disable the captured operation.
         selected = null;
@@ -215,7 +215,7 @@ public sealed class SessionNotesServiceTests
         using var input = new ControlledReader();
         using var cancellation = new CancellationTokenSource();
         var pending = fixture.InvokeWithReaderAsync(service, ["notes", "set"], input, AltaCallerIdentity.Host, cancellation.Token);
-        await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await input.Entered.Task.WithinAsync(TestTime.Seconds(5));
         cancellation.Cancel();
         var result = await pending;
         Assert.AreEqual(AltaExitCodes.TimeoutOrCancellation, result.ExitCode);
@@ -237,17 +237,17 @@ public sealed class SessionNotesServiceTests
         a.Changed += (_, args) => changes.Add(args.Markdown);
         b.Changed += (_, args) => changes.Add(args.Markdown);
         var first = a.SetMarkdownAsync("one", Caller("first")).AsTask();
-        await catalog.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await catalog.Entered.Task.WithinAsync(TestTime.Seconds(5));
         var second = b.SetMarkdownAsync("two", Caller("first")).AsTask();
         try
         {
             Assert.IsFalse(first.IsCompleted);
             Assert.IsFalse(second.IsCompleted);
             Assert.AreEqual(0, changes.Count, "No Changed before acknowledged feedback.");
-            await b.SetMarkdownAsync("other", Caller("other")).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            await b.SetMarkdownAsync("other", Caller("other")).AsTask().WithinAsync(TestTime.Seconds(5));
         }
         finally { catalog.Release.TrySetResult(); }
-        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, second).WithinAsync(TestTime.Seconds(5));
         CollectionAssert.AreEqual(new[] { "other", "one", "two" }, changes);
         Assert.AreEqual("two", await a.GetMarkdownAsync(Caller("first")));
         var history = await fixture.Catalog.JournalStore.CreateSessionStore().ReadEventsAsync("first");
@@ -265,7 +265,7 @@ public sealed class SessionNotesServiceTests
         service.Changed += (_, args) => changes.Add(args.Markdown);
         using var committedCancellation = new CancellationTokenSource();
         var committed = service.SetMarkdownAsync("retained", Caller("first"), committedCancellation.Token).AsTask();
-        await catalog.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await catalog.Entered.Task.WithinAsync(TestTime.Seconds(5));
         using var cancellation = new CancellationTokenSource();
         var read = service.GetMarkdownAsync(Caller("first"), cancellation.Token).AsTask();
         var clear = service.ClearAsync(Caller("first"), cancellation.Token).AsTask();
@@ -279,7 +279,7 @@ public sealed class SessionNotesServiceTests
             await Assert.ThrowsAsync<OperationCanceledException>(() => clear);
         }
         finally { catalog.Release.TrySetResult(); }
-        await committed.WaitAsync(TimeSpan.FromSeconds(5));
+        await committed.WithinAsync(TestTime.Seconds(5));
         Assert.AreEqual("retained", await service.GetMarkdownAsync(Caller("first")));
         CollectionAssert.AreEqual(new[] { "retained" }, changes);
     }

@@ -28,7 +28,8 @@ internal interface ITailscaleCli
 /// Publishes the page on the tailnet with Tailscale Serve, on an HTTPS port of its own, and takes it off again. It
 /// never changes what is served on the other ports, and takes off only the handler that points at the page's server. Its states:
 /// <c>not-installed</c>, <c>not-running</c> (not signed in, or stopped), <c>serve-disabled</c> (Serve or HTTPS certificates are not
-/// enabled on the tailnet), <c>port-taken</c> (the HTTPS port serves something else), <c>serving</c> and <c>failed</c>.
+/// enabled on the tailnet), <c>port-taken</c> (the HTTPS port serves something else), <c>serving</c> and <c>failed</c>; a check
+/// that changes nothing (<see cref="CheckAsync"/>) also says <c>not-serving</c>.
 /// </summary>
 internal sealed class TailscaleServe(ITailscaleCli cli)
 {
@@ -40,7 +41,21 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
     /// <param name="httpsPort">The HTTPS port of this computer on the tailnet.</param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <returns>What Tailscale did.</returns>
-    internal async Task<PrivateNetworkStatus> PublishAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
+    internal Task<PrivateNetworkStatus> PublishAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
+        => ServeAsync(localPort, httpsPort, publish: true, cancellationToken);
+
+    /// <summary>
+    /// Says what Tailscale does with the HTTPS port, changing nothing: the states of <see cref="PublishAsync"/>, and
+    /// <c>not-serving</c> when the port is free, with the address <see cref="PublishAsync"/> would publish at.
+    /// </summary>
+    /// <param name="localPort">The port of the page's server on the loopback address.</param>
+    /// <param name="httpsPort">The HTTPS port of this computer on the tailnet.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <returns>What Tailscale serves there.</returns>
+    internal Task<PrivateNetworkStatus> CheckAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
+        => ServeAsync(localPort, httpsPort, publish: false, cancellationToken);
+
+    private async Task<PrivateNetworkStatus> ServeAsync(int localPort, int httpsPort, bool publish, CancellationToken cancellationToken)
     {
         if (!cli.IsInstalled) return new("not-installed", null, "Install it on this computer and on the phone, and sign in to the same tailnet on both.", DownloadUrl);
         var (dnsName, notRunning) = await NodeAsync(cancellationToken).ConfigureAwait(false);
@@ -51,6 +66,11 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
         if (unread is not null) return unread;
         if (served.Ours) return Serving(dnsName!, httpsPort);
         if (served.Taken) return new("port-taken", null, $"Port {httpsPort} of this computer on the tailnet already serves something else.");
+        if (!publish)
+        {
+            var free = Serving(dnsName!, httpsPort).Url;
+            return new("not-serving", free, $"Tailscale serves nothing at {free}");
+        }
 
         // Published under an older name of this computer (it was renamed): that rule answers no one, since Tailscale only has a
         // certificate for the current name. The command line takes off only the rules of the current name, so the old one is

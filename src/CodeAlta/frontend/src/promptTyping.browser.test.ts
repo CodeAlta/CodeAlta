@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host (#307): a click on a row of the Explorer hands the keyboard to the
 // prompt, as a click on a tab does, and a character typed where typing goes nowhere lands in the prompt.
-test("a click on a row of the Explorer and a character typed outside text give the keyboard to the prompt", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("a click on a row of the Explorer and a character typed outside text give the keyboard to the prompt", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, press, session, scope, exceptions }) => {
     const inPrompt = (id = "session-prompt") => `!!document.activeElement?.closest('#${id}')`;
     const text = (id = "session-prompt") => `(document.querySelector('#${id} .view-lines')?.textContent ?? '').replaceAll('\\u00a0', ' ')`;

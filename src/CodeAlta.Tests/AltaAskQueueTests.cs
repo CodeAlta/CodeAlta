@@ -167,7 +167,7 @@ public sealed class AltaAskQueueTests
         service.QueueChanged += (_, args) =>
         {
             var query = Task.Run(() => service.GetPending(args.SessionId));
-            Assert.IsTrue(query.Wait(TimeSpan.FromSeconds(5)), "Observer must run outside the queue lock.");
+            Assert.IsTrue(query.Wait(TestTime.Seconds(5)), "Observer must run outside the queue lock.");
             if (query.Result.Count > 0)
             {
                 reentered = service.TryRemoveHead(args.SessionId, query.Result[0].AskId).Accepted;

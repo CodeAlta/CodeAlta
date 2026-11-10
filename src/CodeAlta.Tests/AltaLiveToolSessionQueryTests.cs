@@ -636,14 +636,14 @@ public sealed partial class AltaLiveToolTests
             await cancellation.CancelAsync().ConfigureAwait(false);
             try
             {
-                await sendTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                await sendTask.WithinAsync(TestTime.Seconds(3)).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
             }
 
             Assert.IsTrue(sendTask.IsCompleted, "The canceled command ends without waiting for the time limit of the acknowledgement.");
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(4.5), $"The command took {watch.Elapsed}.");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(4.5), $"The command took {watch.Elapsed}.");
         }
         finally
         {

@@ -126,12 +126,12 @@ public sealed class SessionNotesStoreTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var initial = a.AppendNotesAsync(Note("retained"), async () => { entered.SetResult(); await release.Task; });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WithinAsync(TestTime.Seconds(5));
         var before = await File.ReadAllBytesAsync(fixture.Path);
         using var cancellation = new CancellationTokenSource();
         var feedback = false;
         // A read takes the notes from the session index: it does not wait for the journal's gate.
-        var read = await b.ReadLatestNotesAsync("notes", cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5));
+        var read = await b.ReadLatestNotesAsync("notes", cancellation.Token).WithinAsync(TestTime.Seconds(5));
         Assert.AreEqual("retained", read?.Markdown);
         var write = b.AppendNotesAsync(Note("wrong"), () => { feedback = true; return Task.CompletedTask; }, cancellation.Token);
         try
@@ -141,7 +141,7 @@ public sealed class SessionNotesStoreTests
             await Assert.ThrowsAsync<OperationCanceledException>(() => write);
         }
         finally { release.TrySetResult(); }
-        await initial.WaitAsync(TimeSpan.FromSeconds(5));
+        await initial.WithinAsync(TestTime.Seconds(5));
         Assert.IsFalse(feedback);
         CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(fixture.Path));
     }
@@ -155,13 +155,13 @@ public sealed class SessionNotesStoreTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var first = store.AppendNotesAsync(Note("first"), async () => { entered.SetResult(); await release.Task; });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WithinAsync(TestTime.Seconds(5));
         var feedback = false;
         var pending = store.AppendNotesAsync(Note("wrong"), () => { feedback = true; return Task.CompletedTask; });
         Assert.IsFalse(pending.IsCompleted);
         File.Delete(fixture.Path);
         release.SetResult();
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        await first.WithinAsync(TestTime.Seconds(5));
         await Assert.ThrowsAsync<IOException>(() => pending);
         Assert.IsFalse(feedback);
         Assert.IsFalse(File.Exists(fixture.Path));
@@ -192,7 +192,7 @@ public sealed class SessionNotesStoreTests
         using (var locked = new FileStream(fixture.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
             // The notes are read from the session index: a journal another process holds does not delay them.
-            Assert.AreEqual("retained", (await store.ReadLatestNotesAsync("notes").WaitAsync(TimeSpan.FromSeconds(5)))?.Markdown);
+            Assert.AreEqual("retained", (await store.ReadLatestNotesAsync("notes").WithinAsync(TestTime.Seconds(5)))?.Markdown);
             using var writeCancellation = new CancellationTokenSource();
             var write = store.AppendNotesAsync(Note("wrong"), () => { feedback = true; return Task.CompletedTask; }, writeCancellation.Token);
             Assert.IsFalse(write.IsCompleted, "The owned file lock should delay write admission.");

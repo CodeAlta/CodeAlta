@@ -59,6 +59,10 @@
   --code-font: var(--code-font-builtin);
   --prompt-font: var(--code-font);
   --bp-typography-family-mono: var(--code-font);
+  /* The size of the text of the code editors, the diffs and the prompt, and the height of their lines (fonts/codeFonts.ts,
+     codeLineHeight). The rest of the text follows the interface text size instead (fonts/textScale.ts). */
+  --code-font-size: 13px;
+  --code-line-height: round(calc(var(--code-font-size) * 20 / 13), 1px);
 }
 
 :root[data-theme="light"] {
@@ -1014,7 +1018,7 @@ button.mcp-app-heading:focus-visible { outline: 2px solid var(--accent); outline
 .prompt-editor .monaco-editor, .prompt-editor .monaco-editor-background, .prompt-editor .monaco-editor .margin { background-color: var(--panel); }
 .prompt-editor-surface { width: 100%; height: 100%; }
 .prompt-editor.expanded { height: 100%; min-height: 0; }
-.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); white-space: pre-line; position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
+.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); white-space: pre-line; position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: var(--code-font-size); line-height: var(--code-line-height); }
 /* A suggested prompt, which a key takes, is slanted: it does not read as the usual hint, nor as what was written. */
 .prompt-editor[data-suggested]::after { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
@@ -3172,7 +3176,7 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 /* Settings → Appearance → Fonts: the list of the code font is as wide as a select, and each preview is written in the font of its row. */
 .font-settings-families.bp6-input-group { width: 260px; max-width: 100%; }
 .font-settings .settings-field-wide { display: grid; gap: 6px; }
-.font-settings-preview { margin: 0; padding: 8px 10px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font: 13px/20px var(--code-font); white-space: pre; }
+.font-settings-preview { margin: 0; padding: 8px 10px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font: var(--code-font-size)/var(--code-line-height) var(--code-font); white-space: pre; }
 .font-settings-preview.prompt { font-family: var(--prompt-font); }
 @container (max-width: 480px) { .font-settings-families.bp6-input-group { width: 100%; } }
 

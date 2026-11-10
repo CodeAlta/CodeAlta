@@ -1720,7 +1720,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var executeTask = executor.ExecuteTurnAsync(
             CreateCodexTurnRequest(),
             static (_, _) => ValueTask.CompletedTask);
-        var response = await executeTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        var response = await executeTask.WithinAsync(TestTime.Seconds(2)).ConfigureAwait(false);
 
         Assert.AreEqual("Completed promptly.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
@@ -1789,7 +1789,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var response = await CreateCodexExecutor(responsesClient).ExecuteTurnAsync(
                 CreateCodexTurnRequest(),
                 static (_, _) => ValueTask.CompletedTask)
-            .WaitAsync(TimeSpan.FromSeconds(2))
+            .WithinAsync(TestTime.Seconds(2))
             .ConfigureAwait(false);
 
         Assert.AreEqual(2, responsesClient.RequestCount);

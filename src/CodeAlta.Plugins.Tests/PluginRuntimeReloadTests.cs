@@ -36,11 +36,11 @@ public sealed class PluginRuntimeReloadTests
         try
         {
             reading = runtime.Adapter.GetLandingCardEntriesAsync(runtime.ActivePlugins, null, null, TimeSpan.FromMilliseconds(50)).AsTask();
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.IsTrue((await reading.WaitAsync(TimeSpan.FromSeconds(5))).Single().Failed);
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
+            Assert.IsTrue((await reading.WithinAsync(TestTime.Seconds(5))).Single().Failed);
 
             change = (reload ? runtime.ReloadPackageAsync(package.Package) : runtime.StopPackageAsync(package.Package)).AsTask();
-            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await cancelled.Task.WithinAsync(TestTime.Seconds(30));
             // This is the same original deactivation that stop/reload started, not a second disposal.
             var diagnostics = await previous.DeactivateAsync(TimeSpan.FromMilliseconds(50));
             StringAssert.Contains(diagnostics.Single().Message, "remain retained");
@@ -49,10 +49,10 @@ public sealed class PluginRuntimeReloadTests
             Assert.IsFalse(callback.Task.IsCompleted);
 
             callback.TrySetResult(PluginLandingCard.Of("<p>late</p>"));
-            var result = await change.WaitAsync(TimeSpan.FromSeconds(30));
+            var result = await change.WithinAsync(TestTime.Seconds(30));
             Assert.AreEqual(reload ? PluginPackageChange.Reloaded : PluginPackageChange.Stopped, result.Change, Describe(result.Status));
             disposal = previous.DisposeAsync().AsTask();
-            await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+            await disposal.WithinAsync(TestTime.Seconds(5));
             Assert.IsNull(previous.Instance);
         }
         finally
@@ -63,7 +63,7 @@ public sealed class PluginRuntimeReloadTests
             if (reading is not null) originals.Add(reading);
             if (change is not null) originals.Add(change);
             if (disposal is not null) originals.Add(disposal);
-            await Task.WhenAll(originals.Select(task => task.WaitAsync(TimeSpan.FromSeconds(30))));
+            await Task.WhenAll(originals.Select(task => task.WithinAsync(TestTime.Seconds(30))));
         }
     }
 

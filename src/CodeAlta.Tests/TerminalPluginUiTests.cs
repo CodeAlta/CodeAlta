@@ -128,7 +128,7 @@ public sealed class TerminalPluginUiTests
         // The terminal belongs to this thread: the test waits for each answer without leaving it.
         static T Answer<T>(Task<T> task)
         {
-            Assert.IsTrue(task.Wait(TimeSpan.FromSeconds(30)), "the question was not answered");
+            Assert.IsTrue(task.Wait(TestTime.Seconds(30)), "the question was not answered");
             return task.Result;
         }
 
@@ -157,7 +157,7 @@ public sealed class TerminalPluginUiTests
         var withdrawn = ui.EditTextAsync("Note", "text", cancellation.Token).AsTask();
         terminal.Tick();
         cancellation.Cancel();
-        Assert.IsTrue(SpinWait.SpinUntil(() => withdrawn.IsCompleted, TimeSpan.FromSeconds(30)));
+        Assert.IsTrue(SpinWait.SpinUntil(() => withdrawn.IsCompleted, TestTime.Seconds(30)));
         Assert.IsTrue(withdrawn.IsCanceled);
 
         ui.Detach();

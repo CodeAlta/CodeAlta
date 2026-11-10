@@ -149,7 +149,7 @@ public sealed class ProjectFileSearchServiceTests
         };
 
         await session.RefreshAsync().ConfigureAwait(false);
-        await updateSignal.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await updateSignal.Task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
 
         Assert.IsFalse(session.Current.IsRefreshing);
         Assert.AreEqual(2, session.Current.CandidateCount);

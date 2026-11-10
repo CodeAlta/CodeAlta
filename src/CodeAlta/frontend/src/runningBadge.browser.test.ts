@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The badge of a project or a label where sessions run, at the end of the row of that scope, with the classes
 // RunningSessionBadge gives it (its store cannot be rendered on a server).
@@ -16,7 +17,7 @@ function badge(running: number) {
 
 // In a row of a project of the Explorer, with the styles of the window: the count of the sessions that run is on the
 // right of the spinner, on its line, as the counts of the other marks are, and the row keeps its height.
-test("the count of the sessions that run is beside the spinner, and the row of its project keeps its height", { skip: !browserExecutable, timeout: 90_000 }, async () => {
+test("the count of the sessions that run is beside the spinner, and the row of its project keeps its height", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   await withSessionWindow({}, async ({ evaluate, until, exceptions }) => {
     const row = `document.querySelector('.project-list .project-action-row > button')`;
     await until(`!!${row}`, "the row of a project in the Explorer");

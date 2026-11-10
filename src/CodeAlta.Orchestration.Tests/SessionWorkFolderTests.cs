@@ -97,7 +97,7 @@ public sealed class SessionWorkFolderTests
         var gate = provider.Block();
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "A long turn.")).Receipt;
         Assert.IsNotNull(receipt);
-        await gate.Started.WaitAsync(TestDeadlines.Hang);
+        await gate.Started.WithinAsync(TestDeadlines.Hang);
 
         Assert.AreEqual("busy", (await host.Commands.SwitchWorkFolderAsync(sessionId, project.Id, temp.ProjectRoot, tree)).Status,
             "A session at work keeps its folder.");
@@ -112,9 +112,9 @@ public sealed class SessionWorkFolderTests
         await host.RuntimeService.QueuePromptAsync(session, "Queued meanwhile.", "send", submittedBy: null);
 
         gate.Release();
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TestDeadlines.Hang)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestDeadlines.Hang)).Outcome);
         // The change is work of the session: it has settled once the change is made and the queue ran.
-        await host.RuntimeService.WhenSettledAsync(sessionId).WaitAsync(TestDeadlines.Hang);
+        await host.RuntimeService.WhenSettledAsync(sessionId).WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(tree, await host.RuntimeService.GetSessionWorktreeAsync(sessionId));
         Assert.AreEqual(tree, provider.LastWorkingDirectory, "The queued prompt ran in the new folder.");
         StringAssert.Contains(provider.LastUserText, "Queued meanwhile.");
@@ -219,7 +219,7 @@ public sealed class SessionWorkFolderTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        var result = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 

@@ -3,6 +3,7 @@ import type { SettingsEvent } from "#neoastra";
 import { useChangesPreferences } from "../changes/changesPreferences";
 import { colorSchemes, customSchemeSelection, type CustomColorScheme } from "../colorSchemes";
 import type { ProjectSort } from "../explorer/projectRail";
+import { maximumCodeFontSize, maximumInterfaceTextSize, minimumCodeFontSize, minimumInterfaceTextSize, validCodeFontSize, validInterfaceTextSize } from "../fonts/codeFonts";
 import { useFontPreferences } from "../fonts/fontPreferences";
 import { landingPreferences, useLandingPreferences } from "../landing/landingPreferences";
 import { validLanguage } from "../localization";
@@ -14,7 +15,8 @@ import { writeExpired } from "./settingValues";
 
 /** The settings the page keeps: those `builtInSettings.json` declares with the owner `window`. */
 export const windowSettingIds = Object.freeze(["appearance.theme", "appearance.darker", "appearance.color_scheme", "appearance.code_font", "appearance.prompt_font",
-  "appearance.project_sort", "appearance.recent_sessions", "appearance.sub_agents", "appearance.collapse_rail", "appearance.focused_timeline", "appearance.folded_images",
+  "appearance.code_font_size", "appearance.interface_text_size", "appearance.project_sort", "appearance.recent_sessions", "appearance.sub_agents",
+  "appearance.collapse_rail", "appearance.focused_timeline", "appearance.folded_images",
   "appearance.entry_appearance", "appearance.changes_view", "general.language", "general.welcome_at_startup", "general.animate_welcome",
   "permissions.confirm_session_delete", "permissions.confirm_project_archive", "permissions.confirm_plugin_stop", "sessions.single_tab", "models.picker_rows",
   "speech.microphone"] as const);
@@ -66,6 +68,10 @@ export function useWindowSettingBindings(sources: WindowSettingSources): Readonl
       "appearance.code_font": { value: [...fonts.code],
         set: value => Array.isArray(value) && value.every(item => typeof item === "string") ? (setFonts({ code: value.map(item => item.trim()).filter(Boolean) }), null) : "The code font is a list of font names." },
       "appearance.prompt_font": { value: fonts.prompt, set: value => value === "code" || value === "interface" ? (setFonts({ prompt: value }), null) : "The prompt font is code or interface." },
+      "appearance.code_font_size": { value: fonts.codeSize,
+        set: value => validCodeFontSize(value) ? (setFonts({ codeSize: value }), null) : `A size from ${minimumCodeFontSize} to ${maximumCodeFontSize} pixels.` },
+      "appearance.interface_text_size": { value: fonts.interfaceSize,
+        set: value => validInterfaceTextSize(value) ? (setFonts({ interfaceSize: value }), null) : `A size from ${minimumInterfaceTextSize} to ${maximumInterfaceTextSize} percent.` },
       "appearance.project_sort": { value: projectSort, set: value => value === "name" || value === "recent" ? (now().setProjectSort(value), null) : "Projects sort by name or recent." },
       "appearance.recent_sessions": { value: recentSessionCount, set: value => integer(value, 1, 50) ? (now().setRecentSessionCount(value as number), null) : "A count from 1 to 50." },
       "appearance.sub_agents": { value: subAgentCount, set: value => integer(value, 1, 50) ? (now().setSubAgentCount(value as number), null) : "A count from 1 to 50." },

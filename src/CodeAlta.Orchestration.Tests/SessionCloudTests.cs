@@ -16,7 +16,7 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class SessionCloudTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task ACloudSession_HasNoTurn_RefusesLocalPrompts_AndOnceBroughtBackGoesOnWithTheTurnsOfTheCloud()
@@ -26,7 +26,7 @@ public sealed class SessionCloudTests
         await using var host = await CreateHostAsync(temp, provider);
 
         var started = await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix the flaky test", new NoTerminal(), null)
-            .WaitAsync(Timeout);
+            .WithinAsync(Timeout);
         Assert.AreEqual("created", started.Status);
         Assert.AreEqual(CloudProvider.CloudId, started.CloudSessionId);
         var sessionId = started.Session!.SessionId;
@@ -40,19 +40,19 @@ public sealed class SessionCloudTests
         Assert.AreEqual(0, (await store.ReadTurnsAsync(sessionId)).Turns.Count, "Its prompts are not turns: the cloud has them.");
 
         // Nothing starts a local conversation of it: a prompt is refused with what to do, and its provider is not called.
-        var refused = await host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "local prompt")).Receipt!.Completion.WaitAsync(Timeout);
+        var refused = await host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "local prompt")).Receipt!.Completion.WithinAsync(Timeout);
         Assert.AreEqual((OwnedSessionCommandOutcome.Failed, SessionRuntimeService.InCloudCode), (refused.Outcome, refused.Code));
         Assert.AreEqual(0, provider.Turns);
         Assert.IsNull(await host.RuntimeService.TryGetActiveSessionDescriptorAsync(sessionId), "It is never attached.");
 
-        Assert.AreEqual(new CloudSessionSendResult("ok"), await host.Commands.SendToCloudSessionAsync(sessionId, "Also add a test.").WaitAsync(Timeout));
+        Assert.AreEqual(new CloudSessionSendResult("ok"), await host.Commands.SendToCloudSessionAsync(sessionId, "Also add a test.").WithinAsync(Timeout));
         Assert.AreEqual((CloudProvider.CloudId, "Also add a test."), provider.LastSent);
-        var details = (await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!;
+        var details = (await host.Commands.GetCloudSessionAsync(sessionId).WithinAsync(Timeout))!;
         Assert.AreEqual("Fix the flaky test", details.Task);
         Assert.AreEqual("Also add a test.", details.Sent.Single().Text);
         Assert.IsNull(details.ContinuedAt);
 
-        var continued = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: false).WaitAsync(Timeout);
+        var continued = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: false).WithinAsync(Timeout);
         Assert.AreEqual("ok", continued.Status, continued.Message);
         Assert.AreEqual(temp.ProjectRoot, provider.BroughtInto, "Into the folder of the session.");
 
@@ -63,16 +63,16 @@ public sealed class SessionCloudTests
         var state = (await store.GetStateAsync(sessionId))!;
         Assert.AreEqual(provider.Conversation, state.ProviderSessionId, "The session names the conversation the cloud session was brought into.");
         Assert.AreEqual("""{"kind":"fake","users":2,"assistants":2}""", state.ProviderState!.Value.GetRawText());
-        var back = (await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!;
+        var back = (await host.Commands.GetCloudSessionAsync(sessionId).WithinAsync(Timeout))!;
         Assert.IsNotNull(back.ContinuedAt);
         Assert.IsFalse(back.Continuing);
         Assert.IsTrue((await ListedAsync(host, sessionId)).Cloud!.Continued);
 
         // It goes on as any session: the next prompt follows the turns of the cloud.
-        var sent = await host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "next")).Receipt!.Completion.WaitAsync(Timeout);
+        var sent = await host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "next")).Receipt!.Completion.WithinAsync(Timeout);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
         CollectionAssert.AreEqual(new[] { "Fix the flaky test", "Fixed.", "Also add a test.", "Added.", "next" }, provider.LastConversation());
-        Assert.AreEqual(new CloudSessionSendResult("not_cloud"), await host.Commands.SendToCloudSessionAsync(sessionId, "late").WaitAsync(Timeout));
+        Assert.AreEqual(new CloudSessionSendResult("not_cloud"), await host.Commands.SendToCloudSessionAsync(sessionId, "late").WithinAsync(Timeout));
     }
 
     [TestMethod]
@@ -82,7 +82,7 @@ public sealed class SessionCloudTests
         var provider = new CloudProvider { Start = new AgentCloudStart("failed", Message: "Error: Cloud sessions need a claude.ai sign-in.", TerminalId: "t1") };
         await using var host = await CreateHostAsync(temp, provider);
 
-        var failed = await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix it", new NoTerminal(), null).WaitAsync(Timeout);
+        var failed = await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix it", new NoTerminal(), null).WithinAsync(Timeout);
         Assert.AreEqual(("needs_claude_ai", "t1"), (failed.Status, failed.TerminalId), "Claude Code said why: the account needs claude.ai.");
         Assert.IsNull(failed.Session);
         await foreach (var session in host.RuntimeService.ListRecoverableSessionsAsync(cancellationToken: CancellationToken.None))
@@ -90,18 +90,18 @@ public sealed class SessionCloudTests
 
         provider.Start = null;
         var sessionId = (await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, "Named", "Fix it", new NoTerminal(), null)
-            .WaitAsync(Timeout)).Session!.SessionId;
+            .WithinAsync(Timeout)).Session!.SessionId;
         provider.Send = new AgentCloudSendResult("archived", "cloud session is archived and cannot accept new messages");
-        Assert.AreEqual("archived", (await host.Commands.SendToCloudSessionAsync(sessionId, "more").WaitAsync(Timeout)).Status);
-        Assert.AreEqual(0, (await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!.Sent.Count, "What did not reach the cloud is not recorded as sent.");
+        Assert.AreEqual("archived", (await host.Commands.SendToCloudSessionAsync(sessionId, "more").WithinAsync(Timeout)).Status);
+        Assert.AreEqual(0, (await host.Commands.GetCloudSessionAsync(sessionId).WithinAsync(Timeout))!.Sent.Count, "What did not reach the cloud is not recorded as sent.");
 
         provider.Return = new AgentCloudReturn("failed", "Error: branch claude/x was not found on the remote.");
-        var refused = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, false).WaitAsync(Timeout);
+        var refused = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, false).WithinAsync(Timeout);
         Assert.AreEqual(("failed", "Error: branch claude/x was not found on the remote."), (refused.Status, refused.Message));
-        var details = (await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!;
+        var details = (await host.Commands.GetCloudSessionAsync(sessionId).WithinAsync(Timeout))!;
         Assert.IsFalse(details.Continuing, "The reservation is cleared.");
         Assert.IsNull(details.ContinuedAt, "It is still in the cloud.");
-        var sent = await host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "local")).Receipt!.Completion.WaitAsync(Timeout);
+        var sent = await host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "local")).Receipt!.Completion.WithinAsync(Timeout);
         Assert.AreEqual(SessionRuntimeService.InCloudCode, sent.Code);
     }
 
@@ -112,20 +112,20 @@ public sealed class SessionCloudTests
         var provider = new CloudProvider();
         await using var host = await CreateHostAsync(temp, provider);
         var sessionId = (await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix it", new NoTerminal(), null)
-            .WaitAsync(Timeout)).Session!.SessionId;
+            .WithinAsync(Timeout)).Session!.SessionId;
         SessionViewDescriptor? session = null;
         await foreach (var listed in host.RuntimeService.ListRecoverableSessionsAsync(cancellationToken: CancellationToken.None))
             if (listed.SessionId == sessionId) session = listed;
 
         // Nothing makes a local conversation of it: a fork, nor a prompt queued for later.
         Assert.AreEqual(SessionRuntimeService.InCloudCode,
-            (await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = sessionId }).WaitAsync(Timeout)).Status);
-        await Assert.ThrowsExactlyAsync<SessionInCloudException>(() => host.RuntimeService.QueuePromptAsync(session!, "later", "queue", null).WaitAsync(Timeout));
+            (await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = sessionId }).WithinAsync(Timeout)).Status);
+        await Assert.ThrowsExactlyAsync<SessionInCloudException>(() => host.RuntimeService.QueuePromptAsync(session!, "later", "queue", null).WithinAsync(Timeout));
 
         // A return begun in a terminal, then asked without it before the terminal wrote anything: the same conversation.
-        var command = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WaitAsync(Timeout);
+        var command = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WithinAsync(Timeout);
         var reserved = command.Command!.Split(' ')[^1];
-        var continued = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: false).WaitAsync(Timeout);
+        var continued = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: false).WithinAsync(Timeout);
         Assert.AreEqual("ok", continued.Status, continued.Message);
         Assert.AreEqual(reserved, provider.Conversation, "The conversation the terminal was given: it is not lost for another one.");
     }
@@ -139,7 +139,7 @@ public sealed class SessionCloudTests
         var link = CloudProvider.CloudId;
         var both = await Task.WhenAll(
             host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, link),
-            host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, link)).WaitAsync(Timeout);
+            host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, link)).WithinAsync(Timeout);
         CollectionAssert.AreEquivalent(new[] { "created", "existing" }, both.Select(static result => result.Status).ToArray(),
             string.Join(", ", both.Select(static result => $"{result.Status} {result.Message}")));
         Assert.AreEqual(both[0].Session!.SessionId, both[1].Session!.SessionId, "The same session for both.");
@@ -152,20 +152,20 @@ public sealed class SessionCloudTests
         var provider = new CloudProvider();
         await using var host = await CreateHostAsync(temp, provider);
         var sessionId = (await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix it", new NoTerminal(), null)
-            .WaitAsync(Timeout)).Session!.SessionId;
+            .WithinAsync(Timeout)).Session!.SessionId;
 
-        var command = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WaitAsync(Timeout);
+        var command = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WithinAsync(Timeout);
         Assert.AreEqual("terminal", command.Status);
-        var waiting = (await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!;
+        var waiting = (await host.Commands.GetCloudSessionAsync(sessionId).WithinAsync(Timeout))!;
         Assert.IsTrue(waiting.Continuing, "Reserved: the conversation and its folder are kept.");
         Assert.IsTrue(waiting.InTerminal, "and the card knows it waits on the terminal.");
         Assert.AreEqual(0, provider.Returns, "Nothing is run for the user: the user runs it.");
         var reserved = command.Command!.Split(' ')[^1];
 
-        var again = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, true).WaitAsync(Timeout);
+        var again = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, true).WithinAsync(Timeout);
         Assert.AreEqual(("terminal", command.Command), (again.Status, again.Command), "Asked again before it ran: the same command, into the same conversation.");
         provider.Written = reserved;
-        var read = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WaitAsync(Timeout);
+        var read = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WithinAsync(Timeout);
         Assert.AreEqual("ok", read.Status, read.Message);
         Assert.AreEqual(reserved, (await host.SessionViewCatalog.JournalStore.CreateSessionStore().GetStateAsync(sessionId))!.ProviderSessionId,
             "The conversation the command named.");
@@ -177,12 +177,12 @@ public sealed class SessionCloudTests
         using var temp = TempDirectory.Create();
         var provider = new CloudProvider();
         await using var host = await CreateHostAsync(temp, provider);
-        Assert.AreEqual("invalid_link", (await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "not a link").WaitAsync(Timeout)).Status);
-        var adopted = await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, CloudProvider.CloudId).WaitAsync(Timeout);
+        Assert.AreEqual("invalid_link", (await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "not a link").WithinAsync(Timeout)).Status);
+        var adopted = await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, CloudProvider.CloudId).WithinAsync(Timeout);
         Assert.AreEqual("created", adopted.Status);
-        var details = (await host.Commands.GetCloudSessionAsync(adopted.Session!.SessionId).WaitAsync(Timeout))!;
+        var details = (await host.Commands.GetCloudSessionAsync(adopted.Session!.SessionId).WithinAsync(Timeout))!;
         Assert.AreEqual((CloudProvider.CloudId, (string?)null), (details.Id, details.Task), "Nothing is read from the cloud session: no task is known.");
-        var again = await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, CloudProvider.CloudId).WaitAsync(Timeout);
+        var again = await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, CloudProvider.CloudId).WithinAsync(Timeout);
         Assert.AreEqual(("existing", adopted.Session.SessionId), (again.Status, again.Session!.SessionId), "A cloud session is held by one session.");
     }
 
@@ -198,12 +198,12 @@ public sealed class SessionCloudTests
         var provider = new CloudProvider();
         await using var host = await CreateHostAsync(temp, provider);
         var sessionId = (await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix it", new NoTerminal(), null)
-            .WaitAsync(Timeout)).Session!.SessionId;
-        Assert.IsNotNull((await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!.Branch, "The branch it started from is kept.");
+            .WithinAsync(Timeout)).Session!.SessionId;
+        Assert.IsNotNull((await host.Commands.GetCloudSessionAsync(sessionId).WithinAsync(Timeout))!.Branch, "The branch it started from is kept.");
 
         await File.WriteAllTextAsync(Path.Combine(temp.ProjectRoot, "a.txt"), "changed");
         await File.WriteAllTextAsync(Path.Combine(temp.ProjectRoot, "untracked.txt"), "new");
-        var refused = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, false).WaitAsync(Timeout);
+        var refused = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, false).WithinAsync(Timeout);
         Assert.AreEqual(("uncommitted_changes", 1), (refused.Status, refused.ChangedFiles), "Only the tracked file counts: Claude Code refuses for it alone.");
         Assert.AreEqual(0, provider.Returns, "Claude Code is not run: it would fail without a word.");
     }

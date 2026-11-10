@@ -9,8 +9,9 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
 import { tapMenuItem } from "./phoneBrowser";
+import { testLimit, testLimitRanOut } from "../testTime";
 
-test("the phone shows background jobs after the turn ends, follows output and stops a job", { skip: !browserExecutable, timeout: 90_000 }, async () => {
+test("the phone shows background jobs after the turn ends, follows output and stops a job", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-jobs-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   const bundle = await build({ entryPoints: [fileURLToPath(new URL("./main.ts", import.meta.url))], bundle: true, format: "esm", platform: "browser",
@@ -28,7 +29,7 @@ test("the phone shows background jobs after the turn ends, follows output and st
   try {
     browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(directory, "profile"), browser);
-    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json() as { type: string; webSocketDebuggerUrl: string }[];
+    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(5000)) })).json() as { type: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(pages.find(page => page.type === "page")!.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
     let seq = 0;
@@ -40,7 +41,7 @@ test("the phone shows background jobs after the turn ends, follows output and st
       if (message.method === "Runtime.exceptionThrown") failures.push(JSON.stringify(message.params.exceptionDetails));
     });
     const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
-      const id = ++seq, timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout`)); }, 10_000);
+      const id = ++seq, timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(10_000), `the answer to ${method}`))); }, testLimit(10_000));
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -49,7 +50,7 @@ test("the phone shows background jobs after the turn ends, follows output and st
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
     const waitFor = async (expression: string) => {
-      const deadline = Date.now() + 10_000;
+      const deadline = Date.now() + testLimit(10_000);
       while (Date.now() < deadline) { if (await evaluate<boolean>(`!!(${expression})`)) return; await new Promise(resolve => setTimeout(resolve, 50)); }
       assert.fail(`Not seen: ${expression}`);
     };

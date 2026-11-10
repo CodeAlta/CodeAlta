@@ -10,7 +10,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class TerminalsRpcTests
 {
     private const string Epoch = "epoch-1";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     // A real project catalog over temporary folders; the programs of the terminals are fakes.
     private sealed class Fixture : IAsyncDisposable

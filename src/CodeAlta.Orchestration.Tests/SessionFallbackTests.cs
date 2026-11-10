@@ -694,7 +694,7 @@ public sealed class SessionFallbackTests
         /// <summary>Closes the host and starts another one on the same profile, as CodeAlta does when it starts again.</summary>
         internal async Task RestartAsync()
         {
-            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WaitAsync(Timeout);
+            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WithinAsync(Timeout);
             _receipts.Clear();
             await _closing.CancelAsync();
             await Host.DisposeAsync();
@@ -879,7 +879,7 @@ public sealed class SessionFallbackTests
 
         public async ValueTask DisposeAsync()
         {
-            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WaitAsync(Timeout);
+            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WithinAsync(Timeout);
             await _closing.CancelAsync();
             await Host.DisposeAsync();
             await _collector;
@@ -982,7 +982,7 @@ public sealed class SessionFallbackTests
         internal ConcurrentQueue<Outcome> Outcomes { get; } = new();
         internal int SendCount => Volatile.Read(ref _sendCount);
 
-        internal async Task<SendRecord> NextSendAsync() => await _sends.Reader.ReadAsync().AsTask().WaitAsync(Timeout);
+        internal async Task<SendRecord> NextSendAsync() => await _sends.Reader.ReadAsync().AsTask().WithinAsync(Timeout);
 
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);
 

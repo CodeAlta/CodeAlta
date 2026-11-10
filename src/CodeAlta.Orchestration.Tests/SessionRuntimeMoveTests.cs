@@ -122,7 +122,7 @@ public sealed class SessionRuntimeMoveTests
         var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Fix the login error")).SessionId;
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
         Assert.IsNotNull(receipt);
-        var sent = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        var sent = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(fails ? OwnedSessionCommandOutcome.Failed : OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
 
         var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
@@ -221,7 +221,7 @@ public sealed class SessionRuntimeMoveTests
         }, CancellationToken.None);
         var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Review the docs")).SessionId;
         host.FollowMovedProjectFolders();
-        await host.MovedProjectFoldersPass.WaitAsync(TestDeadlines.Hang);
+        await host.MovedProjectFoldersPass.WithinAsync(TestDeadlines.Hang);
 
         // The folder is moved, and the project file is written by hand: no change of the catalog is told.
         var target = Path.Combine(temp.Path, "docs");
@@ -232,7 +232,7 @@ public sealed class SessionRuntimeMoveTests
 
         // The session list finds the session of the project in the folder that is gone, and the host binds it to the new one.
         _ = await host.WorkspaceReads.ReadSnapshotAsync(CancellationToken.None);
-        await host.MovedProjectFoldersPass.WaitAsync(TestDeadlines.Hang);
+        await host.MovedProjectFoldersPass.WithinAsync(TestDeadlines.Hang);
         var snapshot = await host.WorkspaceReads.ReadSnapshotAsync(CancellationToken.None);
         var listed = snapshot.Sessions.Single(session => session.SessionId == sessionId);
         Assert.AreEqual(target, listed.WorkspacePath);
@@ -298,23 +298,23 @@ public sealed class SessionRuntimeMoveTests
 
         follower.Follow();
         // Requested once the pass reads the sessions: a request made before it starts is that very pass.
-        await entered.Task.WaitAsync(TestDeadlines.Hang);
+        await entered.Task.WithinAsync(TestDeadlines.Hang);
         follower.Follow();
         follower.Found(["a|/old"]);
         gate.SetResult();
-        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        await follower.Current.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(2, runs, "The requests made while a pass ran give one more pass.");
 
         follower.Found(["a|/old"]);
-        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        await follower.Current.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(2, runs, "A session already looked at starts no pass by itself.");
         follower.Found(["a|/old", "b|/old"]);
-        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        await follower.Current.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(3, runs);
         follower.ProjectChanged();
-        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        await follower.Current.WithinAsync(TestDeadlines.Hang);
         follower.Found(["a|/old"]);
-        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        await follower.Current.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(5, runs, "A change of a project looks at every session again.");
     }
 
@@ -324,7 +324,7 @@ public sealed class SessionRuntimeMoveTests
         var statuses = new Queue<string>(["busy", "busy", "ok"]);
         var follower = new MovedProjectFolders(() => Task.FromResult(new OwnedSessionMoveResult(statuses.Dequeue(), [], [])), static _ => Task.CompletedTask);
         follower.Follow();
-        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        await follower.Current.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(0, statuses.Count);
     }
 

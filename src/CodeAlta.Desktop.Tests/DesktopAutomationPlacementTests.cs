@@ -20,7 +20,7 @@ public sealed class DesktopAutomationPlacementTests
 {
     private const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f11";
     private const string Epoch = "epoch";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     private static readonly RemoteSessionHostOptions Quick = new()
     {
@@ -509,7 +509,7 @@ public sealed class DesktopAutomationPlacementTests
             // next look of the loop, half a minute later, or until Run now.
             await host.ManageAsync((client, cancellation) => client.SetDevicePermissionsAsync(new FleetDevicePermissionsParams(fleet.DeviceId, ["automate"], []), cancellation),
                 changes: true, token);
-            await WaitForAsync(() => placement.Status(automations.Snapshot.Find(Id)!)!.State == "copied", "the copy once allowed", token, TimeSpan.FromSeconds(10));
+            await WaitForAsync(() => placement.Status(automations.Snapshot.Find(Id)!)!.State == "copied", "the copy once allowed", token, TestTime.Seconds(10));
             Assert.AreEqual(1, node.Puts.Count);
             CollectionAssert.Contains(host.Listing.Info!.Permissions.ToArray(), "automate", "The listing says what this computer may do now.");
         }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const options = { entry: "../appToaster.mount.tsx", fixture: "toasterFixture" };
 const f = "window.toasterFixture";
 const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-test("A keyed toast said again before the first one is on screen replaces it", { skip: !edge, timeout: 120_000 }, async () => {
+test("A keyed toast said again before the first one is on screen replaces it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     // A session cleanup reports "running" and, a few microtasks later, its outcome: both reach the toaster before it has
     // rendered the first. The second must replace the first, not stand beside it: a "running" notice never expires.
@@ -17,14 +18,14 @@ test("A keyed toast said again before the first one is on screen replaces it", {
   }, options);
 });
 
-test("A keyed toast replaced by its outcome expires with it", { skip: !edge, timeout: 120_000 }, async () => {
+test("A keyed toast replaced by its outcome expires with it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
-    await page.evaluate(`${f}.show({ message: "running", timeout: 0 }, "job"); ${f}.show({ message: "done", timeout: 300 }, "job")`);
+    await page.evaluate(`${f}.show({ message: "running", timeout: 0 }, "job"); ${f}.show({ message: "done", timeout: 300 }, "job")`); // not a limit: the time of the toast
     await page.until(`${f}.messages().length === 0`, "the outcome to expire and nothing else of the key to stay");
   }, options);
 });
 
-test("Keyed toasts replace in place, stay apart by key, and a dismissed key shows again", { skip: !edge, timeout: 120_000 }, async () => {
+test("Keyed toasts replace in place, stay apart by key, and a dismissed key shows again", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`${f}.show({ message: "a 1", timeout: 0 }, "a"); ${f}.show({ message: "b 1", timeout: 0 }, "b")`);
     await page.until(`${f}.messages().length === 2`, "both toasts");
@@ -42,7 +43,7 @@ test("Keyed toasts replace in place, stay apart by key, and a dismissed key show
   }, options);
 });
 
-test("A toast is above a window of the app and can be clicked there, and goes back to the page once it closes", { skip: !edge, timeout: 120_000 }, async () => {
+test("A toast is above a window of the app and can be clicked there, and goes back to the page once it closes", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     // A window of the app is a modal <dialog>: above any z-index, and the rest of the page is inert under it.
     await page.evaluate(`(() => { const d = document.createElement("dialog"); d.id = "window"; d.style.cssText = "width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0";
@@ -73,7 +74,7 @@ test("A toast is above a window of the app and can be clicked there, and goes ba
   }, options);
 });
 
-test("A toast without a key is a toast of its own", { skip: !edge, timeout: 120_000 }, async () => {
+test("A toast without a key is a toast of its own", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`${f}.show({ message: "one", timeout: 0 }); ${f}.show({ message: "one", timeout: 0 })`);
     await page.until(`${f}.messages().length === 2`, "two toasts");

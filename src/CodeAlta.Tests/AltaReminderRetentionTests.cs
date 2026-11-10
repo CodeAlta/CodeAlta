@@ -66,7 +66,7 @@ public sealed partial class AltaReminderServiceTests
             Assert.IsNotNull(unrelated, "Known reminder targets must not blanket-protect unrelated sessions.");
             await clock.NextTimerAsync();
             clock.Advance(TimeSpan.FromSeconds(60));
-            await delivery.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await delivery.Started.Task.WithinAsync(TestTime.Seconds(10));
             Assert.IsTrue(reminders.TryDelete(created.ReminderId, out _));
             Assert.IsEmpty(reminders.List(null, true));
             var originalDispose = reminders.DisposeAsync().AsTask();
@@ -101,7 +101,7 @@ public sealed partial class AltaReminderServiceTests
         var creation = Task.Run(() => reminders.Create(RetentionRequest()));
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             await reminders.DisposeAsync();
             Assert.IsFalse(creation.IsCompleted);
             Assert.IsNull(protection.TryReserveRetirement("target"), "Creation is still executing its original observer pass.");
@@ -110,7 +110,7 @@ public sealed partial class AltaReminderServiceTests
         {
             release.TrySetResult();
         }
-        await creation.WaitAsync(TimeSpan.FromSeconds(10));
+        await creation.WithinAsync(TestTime.Seconds(10));
         using var reservation = protection.TryReserveRetirement("target");
         Assert.IsNotNull(reservation);
     }
@@ -184,7 +184,7 @@ public sealed partial class AltaReminderServiceTests
         reminders.Create(RetentionRequest() with { RepeatCount = 1 });
         await clock.NextTimerAsync();
         clock.Advance(TimeSpan.FromSeconds(60));
-        await completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.Task.WithinAsync(TestTime.Seconds(10));
         Exception? disposalFailure = null;
         try { await reminders.DisposeAsync(); }
         catch (Exception failure) { disposalFailure = failure; }

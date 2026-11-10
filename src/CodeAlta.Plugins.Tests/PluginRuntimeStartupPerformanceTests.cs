@@ -37,12 +37,12 @@ enabled = true
 
         Assert.IsTrue(stale.Result.BuildResults.All(static result => result.Succeeded), FormatDiagnostics(stale.Result));
         Assert.IsTrue(stale.Result.ActivePlugins.Any(static plugin => plugin.Descriptor.RuntimeKey.Contains("hello-command", StringComparison.OrdinalIgnoreCase)), FormatDiagnostics(stale.Result));
-        Assert.IsTrue(stale.Elapsed < TimeSpan.FromMinutes(2), $"Stale plugin startup took {stale.Elapsed}.");
+        Assert.IsTrue(stale.Elapsed < TestTime.Minutes(2), $"Stale plugin startup took {stale.Elapsed}.");
 
         var upToDate = await MeasureStartupAsync(globalRoot, projectRoot);
         Assert.IsTrue(upToDate.Result.BuildResults.All(static result => result.Succeeded), FormatDiagnostics(upToDate.Result));
         Assert.IsTrue(upToDate.Result.BuildResults.Any(static result => result.IsUpToDate), FormatDiagnostics(upToDate.Result));
-        Assert.IsTrue(upToDate.Elapsed < TimeSpan.FromSeconds(20), $"Up-to-date plugin startup took {upToDate.Elapsed}.");
+        Assert.IsTrue(upToDate.Elapsed < TestTime.Seconds(20), $"Up-to-date plugin startup took {upToDate.Elapsed}.");
     }
 
     private static async Task<(PluginRuntimeManagerStartResult Result, TimeSpan Elapsed)> MeasureStartupAsync(string globalRoot, string projectRoot)

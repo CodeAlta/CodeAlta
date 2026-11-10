@@ -205,7 +205,7 @@ public sealed class HookServerTests
         for (var round = 0; ; round++)
         {
             Assert.IsLessThan(30, round, "the event behind them was never handed");
-            using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var wait = new CancellationTokenSource(TestTime.Seconds(5));
             var batch = new List<string>();
             try { batch.Add((await events.Reader.ReadAsync(wait.Token)).DeliveryId); }
             catch (OperationCanceledException) { Assert.Fail($"Nothing more was handed after {round} rounds: the event behind the retried ones waits."); }

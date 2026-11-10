@@ -99,7 +99,7 @@ public sealed class SessionForkRewindTests
         var running = host.RuntimeService.SendAsync(source, options, new AgentSendOptions { Input = AgentInput.Text("two") }, CancellationToken.None);
         try
         {
-            await provider.Started.Task.WaitAsync(TestDeadlines.Hang);
+            await provider.Started.Task.WithinAsync(TestDeadlines.Hang);
 
             var turns = await host.RuntimeService.ReadSessionTurnsAsync(source.SessionId);
             Assert.AreEqual(2, turns!.Turns.Turns.Count);
@@ -339,7 +339,7 @@ public sealed class SessionForkRewindTests
         // A session at work stays where it is.
         provider.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var running = host.RuntimeService.SendAsync(other, chatOptions, new AgentSendOptions { Input = AgentInput.Text("busy") }, CancellationToken.None);
-        await provider.Started.Task.WaitAsync(TestDeadlines.Hang);
+        await provider.Started.Task.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual("session_in_use", (await host.Commands.MoveSessionToSpaceAsync(other.SessionId, "personal")).Status);
         provider.Hold.TrySetResult();
         await running;
@@ -392,7 +392,7 @@ public sealed class SessionForkRewindTests
         // A session at work stays, with the session that started it: they work together, in one space.
         provider.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var running = host.RuntimeService.SendAsync(busy, options, new AgentSendOptions { Input = AgentInput.Text("busy") }, CancellationToken.None);
-        await provider.Started.Task.WaitAsync(TestDeadlines.Hang);
+        await provider.Started.Task.WithinAsync(TestDeadlines.Hang);
         var moved = await host.Commands.MoveProjectSessionsAsync(project.Id, "default", "business");
         provider.Hold.TrySetResult();
         await running;

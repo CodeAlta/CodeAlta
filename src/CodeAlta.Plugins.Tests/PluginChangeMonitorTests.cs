@@ -28,7 +28,7 @@ public sealed class PluginChangeMonitorTests
         monitor.Start();
         File.WriteAllText(Path.Combine(packageDirectory, "plugin.cs"), "// changed");
 
-        Assert.IsTrue(signal.Wait(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
         PluginSourceChange[] snapshot;
         lock (changes)
         {
@@ -55,21 +55,21 @@ public sealed class PluginChangeMonitorTests
         monitor.Start();
         File.Move(source, Path.Combine(packageDirectory, "plugin2.cs"));
 
-        Assert.IsTrue(signal.Wait(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
         Assert.IsTrue(monitor.PendingChanges.Any(change => change.PackageId == "hello"));
         monitor.MarkProcessed("hello");
         Assert.IsFalse(monitor.PendingChanges.Any(change => change.PackageId == "hello"));
         signal.Reset();
 
         File.WriteAllText(Path.Combine(temp.Path, "Directory.Build.props"), "<Project />");
-        Assert.IsTrue(signal.Wait(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
         Assert.IsTrue(monitor.PendingChanges.Any(change => change.Kind == PluginSourceChangeKind.BuildFilesChanged));
         monitor.MarkProcessed(null, root);
         Assert.AreEqual(0, monitor.PendingChanges.Count);
         signal.Reset();
 
         File.WriteAllText(Path.Combine(packageDirectory, "plugin3.cs"), "// changed");
-        Assert.IsTrue(signal.Wait(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
         monitor.ClearPending();
         Assert.AreEqual(0, monitor.PendingChanges.Count);
     }

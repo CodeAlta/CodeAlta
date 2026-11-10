@@ -36,14 +36,14 @@ public sealed partial class AgentSessionTests
         Task? rename = null;
         try
         {
-            await cache.SummaryWritten.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await cache.SummaryWritten.Task.WithinAsync(TestTime.Seconds(5));
             rename = session.RenameAsync("Renamed task");
             Assert.IsFalse(rename.IsCompleted, "Rename must join the original summary write, not race its cache update.");
         }
         finally { cache.ReleaseWrite.TrySetResult(); }
-        await send.WaitAsync(TimeSpan.FromSeconds(5));
+        await send.WithinAsync(TestTime.Seconds(5));
         Assert.IsNotNull(rename);
-        await rename.WaitAsync(TimeSpan.FromSeconds(5));
+        await rename.WithinAsync(TestTime.Seconds(5));
         Assert.AreEqual("Renamed task", (await new FileSystemAgentSessionStore(layout).GetSessionSummaryAsync(summary.SessionId))?.Title);
     }
 
@@ -474,7 +474,7 @@ public sealed partial class AgentSessionTests
             });
 
         var send = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Stream") });
-        await streamed.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        await streamed.Task.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
 
         // The content still streams: the history holds its delta.
         var during = await session.GetHistoryAsync().ConfigureAwait(false);
@@ -484,8 +484,8 @@ public sealed partial class AgentSessionTests
         await using var reader = session.StreamEventsAsync().GetAsyncEnumerator();
         var next = reader.MoveNextAsync().AsTask();
         release.TrySetResult();
-        await send.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false));
+        await send.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
+        Assert.IsTrue(await next.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false));
         Assert.AreEqual(" and two", Assert.IsInstanceOfType<AgentContentDeltaEvent>(reader.Current).Delta);
 
         var after = await session.GetHistoryAsync().ConfigureAwait(false);
@@ -2159,7 +2159,7 @@ public sealed partial class AgentSessionTests
             CreateOptions(provider, temp.Path));
 
         var send = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") });
-        await firstTurnStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await firstTurnStarted.Task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
         await session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("Forget this."), WithdrawalId = "first" }).ConfigureAwait(false);
         await session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("Keep this."), WithdrawalId = "second" }).ConfigureAwait(false);
 
@@ -2234,7 +2234,7 @@ public sealed partial class AgentSessionTests
             Input = AgentInput.Text("Initial prompt"),
         });
 
-        var activeRunId = await firstTurnStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        var activeRunId = await firstTurnStarted.Task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
         var steerRunId = await session.SteerAsync(
                 new AgentSteerOptions
                 {
@@ -2314,7 +2314,7 @@ public sealed partial class AgentSessionTests
             }).ConfigureAwait(false);
         };
 
-        var completedRunId = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        var completedRunId = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
 
         Assert.AreEqual(completedRunId, steeredInto, "The steer was taken by the run in progress.");
         Assert.AreEqual(0, handedBack, "A steer the run took is not handed back.");
@@ -2361,7 +2361,7 @@ public sealed partial class AgentSessionTests
         steered = session;
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WaitAsync(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WithinAsync(TestTime.Seconds(30))).ConfigureAwait(false);
 
         Assert.IsNotNull(steeredInto, "The failing run accepted the steer.");
         Assert.AreEqual(1, handedBack, "The steer the failed run did not take is handed back to its sender.");
@@ -2410,9 +2410,9 @@ public sealed partial class AgentSessionTests
         steered = session;
 
         var sendTask = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") });
-        await steeredTurn.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        await steeredTurn.Task.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
         await session.AbortAsync().ConfigureAwait(false);
-        await Assert.ThrowsAsync<OperationCanceledException>(() => sendTask.WaitAsync(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => sendTask.WithinAsync(TestTime.Seconds(30))).ConfigureAwait(false);
 
         Assert.AreEqual(1, handedBack, "The steer the aborted run did not take is handed back to its sender.");
         var history = await session.GetHistoryAsync().ConfigureAwait(false);
@@ -3159,7 +3159,7 @@ public sealed partial class AgentSessionTests
         liveEvents.Clear();
 
         var compactTask = ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync();
-        await summaryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await summaryStarted.Task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
 
         Assert.IsTrue(liveEvents.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionStarted));
         Assert.IsFalse(liveEvents.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionCompleted));
@@ -3168,7 +3168,7 @@ public sealed partial class AgentSessionTests
         {
             // Manual compaction holds the state gate. Rename must still complete, and both the summary-request
             // usage callback and the completed compaction snapshot must retain the new title.
-            await session.RenameAsync("Continue the coding task").WaitAsync(TimeSpan.FromSeconds(5));
+            await session.RenameAsync("Continue the coding task").WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual("Continue the coding task", (await store.GetSessionSummaryAsync(summary.SessionId))?.Title);
         }
         finally { releaseSummary.TrySetResult(); }

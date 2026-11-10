@@ -22,18 +22,18 @@ public sealed class CliJsonlWriterTests
             {
                 if (method != "session/update") return;
                 admitted.Set();
-                release.Wait(TimeSpan.FromSeconds(30));
+                release.Wait(TestTime.Seconds(30));
             },
         };
         var update = SessionUpdate.FromJsonElement(JsonDocument.Parse("""{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"late"}}""").RootElement.Clone());
 
         var updating = Task.Run(() => writer.SessionUpdateAsync("session-1", update, CancellationToken.None).AsTask());
-        Assert.IsTrue(admitted.Wait(TimeSpan.FromSeconds(30)), "The event was admitted.");
+        Assert.IsTrue(admitted.Wait(TestTime.Seconds(30)), "The event was admitted.");
         var closing = Task.Run(() => writer.WriteResult(new CliRunReport("completed", CliExitCodes.Completed) { SessionId = "session-1" }));
         // The result waits for the event admitted before it; it would have been written at once otherwise.
         await Task.WhenAny(closing, Task.Delay(TimeSpan.FromMilliseconds(300)));
         release.Set();
-        await Task.WhenAll(updating, closing).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(updating, closing).WithinAsync(TestTime.Seconds(30));
         // Nothing is admitted after the result.
         await writer.SessionUpdateAsync("session-1", update, CancellationToken.None);
 

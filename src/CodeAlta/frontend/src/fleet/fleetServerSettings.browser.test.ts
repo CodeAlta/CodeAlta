@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../fleet/fleetServerSettings.mount.tsx", fixture: "fleetFixture", rpcFixture: "../demo-api.ts", styles: ["../fleet/fleet.css", "../fleet/console/fleetConsole.css"], width: 1100,
   height: 800, reducedMotion: true } as const;
@@ -17,7 +18,7 @@ const type = (selector: string, value: string) => `(() => { const input = docume
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
   input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
 
-test("Invite a computer… shows the address and the code alone, each with Copy; Add a machine… shows the command of a node", { skip: !edge, timeout: 90_000 }, async () => {
+test("Invite a computer… shows the address and the code alone, each with Copy; Add a machine… shows the command of a node", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-server-card')`, "the server");
     await page.clickText(".fleet-server-card .bp6-button", "Invite a computer…");
@@ -35,7 +36,7 @@ test("Invite a computer… shows the address and the code alone, each with Copy;
   }, options);
 });
 
-test("the devices say when entries of the device list come from a newer version of CodeAlta, which this one skipped", { skip: !edge, timeout: 90_000 }, async () => {
+test("the devices say when entries of the device list come from a newer version of CodeAlta, which this one skipped", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-device-row')`, "the devices");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped')`), null, "nothing to say while none is skipped");
@@ -50,7 +51,7 @@ test("the devices say when entries of the device list come from a newer version 
   }, options);
 });
 
-test("another computer of the owner asks to change the company sign-in: this one shows the change and approves it", { skip: !edge, timeout: 90_000 }, async () => {
+test("another computer of the owner asks to change the company sign-in: this one shows the change and approves it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
     await page.evaluate(`window.fleetFixture.ask()`);
@@ -70,7 +71,7 @@ test("another computer of the owner asks to change the company sign-in: this one
   }, options);
 });
 
-test("the owner's computer updates the fleet at a time it chooses, follows the campaign, cancels it and sets the policy", { skip: !edge, timeout: 90_000 }, async () => {
+test("the owner's computer updates the fleet at a time it chooses, follows the campaign, cancels it and sets the policy", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     // The card of the server says its version and its policy.
     await page.until(`document.querySelector('.fleet-updates-summary')`, "the updates of the server");
@@ -119,7 +120,7 @@ test("the owner's computer updates the fleet at a time it chooses, follows the c
   }, options);
 });
 
-test("a new device of the person is approved in a popover beside its row, once its words are the ones the device shows", { skip: !edge, timeout: 90_000 }, async () => {
+test("a new device of the person is approved in a popover beside its row, once its words are the ones the device shows", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-device-row[data-status=pending]')`, "the new device");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-device-row[data-status=pending] .fleet-device-title').textContent`), "Laptop");
@@ -145,7 +146,7 @@ test("a new device of the person is approved in a popover beside its row, once i
   }, options);
 });
 
-test("the owner makes a recovery key, sees its words once with Copy, and closes them only after typing two of them back", { skip: !edge, timeout: 90_000 }, async () => {
+test("the owner makes a recovery key, sees its words once with Copy, and closes them only after typing two of them back", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-server-recovery')`, "the recovery key of the server");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-server-recovery-row .bp6-tag').textContent`), "None");
@@ -203,7 +204,7 @@ const typeArea = (selector: string, value: string) => `(() => { const area = doc
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, ${JSON.stringify(value)});
   area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
 
-test("a computer without a server recovers with the 32 words of the recovery key from the empty page", { skip: !edge, timeout: 90_000 }, async () => {
+test("a computer without a server recovers with the 32 words of the recovery key from the empty page", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     // Leaving the only server empties the page, where Recover with the recovery key… is offered.
     await page.until(`document.querySelector('button[aria-label="Leave https://fleet.example"]')`, "the card of the server");
@@ -249,7 +250,7 @@ test("a computer without a server recovers with the 32 words of the recovery key
   }, options);
 });
 
-test("another computer of the person asks to add a way to sign in: this one approves it; and a link asks another computer instead of a sign-in again", { skip: !edge, timeout: 90_000 }, async () => {
+test("another computer of the person asks to add a way to sign in: this one approves it; and a link asks another computer instead of a sign-in again", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
     await page.evaluate(`window.fleetFixture.askLink()`);
@@ -289,7 +290,7 @@ test("another computer of the person asks to add a way to sign in: this one appr
   }, options);
 });
 
-test("each linked account has its mark and a remove button asking beside the row; a company account has none, and Link… still offers an account already linked", { skip: !edge, timeout: 90_000 }, async () => {
+test("each linked account has its mark and a remove button asking beside the row; a company account has none, and Link… still offers an account already linked", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
     await page.evaluate(`window.fleetFixture.logins()`);
@@ -330,7 +331,7 @@ test("each linked account has its mark and a remove button asking beside the row
   }, options);
 });
 
-test("the owner links a passkey, turns company sign-in on and requires it, and the page never holds the secret", { skip: !edge, timeout: 90_000 }, async () => {
+test("the owner links a passkey, turns company sign-in on and requires it, and the page never holds the secret", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-summary').textContent`), "Sign in with Passkey, Microsoft, GitHub",
@@ -405,7 +406,7 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
   }, options);
 });
 
-test("confirming a change with an account that is not theirs names the ways in that are, not that no one linked the account", { skip: !edge, timeout: 90_000 }, async () => {
+test("confirming a change with an account that is not theirs names the ways in that are, not that no one linked the account", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
     for (const item of ["Add a passkey", "Link Microsoft"]) {
@@ -438,7 +439,7 @@ test("confirming a change with an account that is not theirs names the ways in t
   }, options);
 });
 
-test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret",{ skip: !edge, timeout: 90_000 }, async () => {
+test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret",{ skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     // The card of the server says where the machines send, in one line.
     await page.until(`document.querySelector('.fleet-telemetry-summary')`, "the telemetry of the server");
@@ -471,7 +472,7 @@ test("the owner's computer sees the telemetry of the fleet and changes it withou
     assert.deepEqual(page.problems, []);
   }, options);
 });
-test("a change the host announces is read again without the page blinking; Reload still shows that it reads", { skip: !edge, timeout: 90_000 }, async () => {
+test("a change the host announces is read again without the page blinking; Reload still shows that it reads", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     // A computer without a server whose paired machines try to connect: the host says something changed every second or so.
     await page.evaluate(`window.fleetFixture.unlink()`);

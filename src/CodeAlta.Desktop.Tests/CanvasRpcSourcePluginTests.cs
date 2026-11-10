@@ -55,7 +55,7 @@ public sealed class CanvasRpcSourcePluginTests
             var kept = new List<CanvasEvent>();
             async Task<CanvasEvent> NextAsync(Func<CanvasEvent, bool> wanted)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
                 foreach (var value in kept.ToArray())
                 {
                     if (!wanted(value)) continue;

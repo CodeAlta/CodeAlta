@@ -68,8 +68,8 @@ public sealed class ProjectFileReferencePopupControllerTests
             app.Focus(editor);
             InvokeTerminalApp(app, "DispatchTextInput", "@");
 
-            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TimeSpan.FromSeconds(1)));
-            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 2, TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TestTime.Seconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 2, TestTime.Seconds(1)));
             Assert.AreEqual(1, session.RefreshCount);
             Assert.AreEqual("@", editor.Text);
             Assert.AreEqual(string.Empty, editor.ProjectFileReferenceQueryText);
@@ -125,7 +125,7 @@ public sealed class ProjectFileReferencePopupControllerTests
             app.Focus(editor);
             InvokeTerminalApp(app, "DispatchTextInput", "@");
 
-            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 1, TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 1, TestTime.Seconds(1)));
             TickTerminalApp(app);
 
             var backend = (InMemoryTerminalBackend)terminalSession.Instance.Backend;
@@ -177,7 +177,7 @@ public sealed class ProjectFileReferencePopupControllerTests
             editor.CaretIndex = editor.Text.Length;
             editor.RefreshProjectFileReferencePopup();
 
-            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TestTime.Seconds(1)));
             Assert.AreEqual("Program", editor.ProjectFileReferenceQueryText);
         }
         finally
@@ -219,7 +219,7 @@ public sealed class ProjectFileReferencePopupControllerTests
         {
             app.Focus(editor);
             InvokeTerminalApp(app, "DispatchTextInput", "@");
-            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TestTime.Seconds(1)));
 
             var elapsed = Stopwatch.StartNew();
             InvokeTerminalApp(app, "DispatchTextInput", "a");
@@ -227,8 +227,8 @@ public sealed class ProjectFileReferencePopupControllerTests
             InvokeTerminalApp(app, "DispatchTextInput", "c");
             elapsed.Stop();
 
-            Assert.IsTrue(elapsed.Elapsed < TimeSpan.FromMilliseconds(200), $"Typing while dialog updates were flooding took {elapsed.Elapsed}.");
-            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceQueryText == "abc", TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(elapsed.Elapsed < TestTime.Milliseconds(200), $"Typing while dialog updates were flooding took {elapsed.Elapsed}.");
+            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceQueryText == "abc", TestTime.Seconds(1)));
             Assert.AreEqual("@", editor.Text);
             Assert.AreEqual(1, editor.CaretIndex);
             Assert.IsTrue(editor.HasProjectFileReferencePopup);
@@ -272,7 +272,7 @@ public sealed class ProjectFileReferencePopupControllerTests
         {
             app.Focus(editor);
             InvokeTerminalApp(app, "DispatchTextInput", "@");
-            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TimeSpan.FromSeconds(1)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TestTime.Seconds(1)));
 
             InvokeKeyEvent(app, TerminalKey.Escape);
 
@@ -319,15 +319,15 @@ public sealed class ProjectFileReferencePopupControllerTests
             app.Focus(editor);
             InvokeTerminalApp(app, "DispatchTextInput", "@");
 
-            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TimeSpan.FromMilliseconds(200)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.HasProjectFileReferencePopup, TestTime.Milliseconds(200)));
 
             var elapsed = Stopwatch.StartNew();
             InvokeTerminalApp(app, "DispatchTextInput", "P");
             elapsed.Stop();
 
-            Assert.IsTrue(elapsed.Elapsed < TimeSpan.FromMilliseconds(200), $"Typing while the session was still opening took {elapsed.Elapsed}.");
+            Assert.IsTrue(elapsed.Elapsed < TestTime.Milliseconds(200), $"Typing while the session was still opening took {elapsed.Elapsed}.");
             Assert.AreEqual("P", editor.ProjectFileReferenceQueryText);
-            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 1, TimeSpan.FromSeconds(2)));
+            Assert.IsTrue(WaitForCondition(app, () => editor.ProjectFileReferenceItems.Count == 1, TestTime.Seconds(2)));
             Assert.AreEqual(1, service.CreateSessionCallCount);
         }
         finally

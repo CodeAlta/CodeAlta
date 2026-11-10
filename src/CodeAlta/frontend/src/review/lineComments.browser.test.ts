@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { ctrl, openReviewPage, shift, type Point } from "./reviewBrowserHarness";
+import { testLimit } from "../testTime";
 
 const edge = browserExecutable;
 
 // The comments of a code editor, as the window draws them: a real Monaco editor, its comment layer and a reviews hub
 // over a host in memory, driven with the mouse and the keys of the page. The card of a thread is checked alone after.
-test("line comments are written, edited and deleted in the view zones of the code editor", { skip: !edge, timeout: 180_000 }, async t => {
+test("line comments are written, edited and deleted in the view zones of the code editor", { skip: !edge, timeout: testLimit(180_000) }, async t => {
   const page = await openReviewPage(new URL("./lineComments.mount.tsx", import.meta.url), "window.lineCommentsFixture && lineCommentsFixture.state.editor");
   const { evaluate, value, until, frames, mouse, click, clickOn, key, type } = page;
   const f = "lineCommentsFixture";
@@ -79,7 +80,7 @@ test("line comments are written, edited and deleted in the view zones of the cod
         await until(composerFocused, focusShown);
         await click(await glyph(17), shift);
         await until(`${composer}?.getAttribute("aria-label") === "Comment on lines 15 to 17 of file.md"`);
-        await until(composerFocused, focusShown, 2000);
+        await until(composerFocused, focusShown, testLimit(2000));
       } finally {
         await clickOn(`[...document.querySelectorAll("#editor .review-zone .review-editor button")].find(button => button.textContent === "Cancel")`);
         await until(`!document.querySelector("#editor .review-zone .review-editor")`);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The worktree button of the header of the files of a project, in headless Edge under React StrictMode, with the real
 // pointer: it shows only where the repository has more than one checkout, lists them with their branch, opens another
@@ -16,7 +17,7 @@ const escape = async (page: { until(expression: string, what: string): Promise<v
   await page.key("Escape", 27);
 };
 
-test("the worktree button shows for a repository with several checkouts, and opens the one that is chosen", { skip: !edge, timeout: 120_000 }, async () => {
+test("the worktree button shows for a repository with several checkouts, and opens the one that is chosen", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     // A tab that is not shown reads nothing.
     await page.evaluate("worktreesFixture.show(false)");

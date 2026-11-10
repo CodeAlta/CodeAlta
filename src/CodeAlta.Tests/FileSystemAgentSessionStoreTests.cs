@@ -167,7 +167,7 @@ public sealed class FileSystemAgentSessionStoreTests
                 await releaseLock.Task.ConfigureAwait(false);
             },
             CancellationToken.None);
-        await lockEntered.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await lockEntered.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
 
         var upsertTask = store.UpsertStateAsync(CreateState(session, "resp_after_lock"));
 
@@ -175,7 +175,7 @@ public sealed class FileSystemAgentSessionStoreTests
         Assert.IsFalse(upsertTask.IsCompleted);
 
         releaseLock.SetResult();
-        await Task.WhenAll(lockTask, upsertTask).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await Task.WhenAll(lockTask, upsertTask).WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         var persistedState = await store.GetStateAsync(session.ProtocolFamily, session.ProviderKey, session.SessionId).ConfigureAwait(false);
         Assert.IsNotNull(persistedState);
         Assert.AreEqual("resp_after_lock", persistedState.ProviderSessionId);
@@ -204,7 +204,7 @@ public sealed class FileSystemAgentSessionStoreTests
                 await releaseLock.Task.ConfigureAwait(false);
             },
             CancellationToken.None);
-        await lockEntered.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await lockEntered.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
 
         await store.AppendEventsAsync(
                 otherSession.ProtocolFamily,
@@ -219,11 +219,11 @@ public sealed class FileSystemAgentSessionStoreTests
                         AgentSessionUpdateKind.Started,
                         "Session started"),
                 ])
-            .WaitAsync(TimeSpan.FromSeconds(1))
+            .WithinAsync(TestTime.Seconds(1))
             .ConfigureAwait(false);
 
         releaseLock.SetResult();
-        await lockTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await lockTask.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         var persistedEvents = await store.ReadEventsAsync(otherSession.ProtocolFamily, otherSession.ProviderKey, otherSession.SessionId).ConfigureAwait(false);
 
         Assert.AreEqual(1, persistedEvents.Count);
@@ -246,7 +246,7 @@ public sealed class FileSystemAgentSessionStoreTests
         Assert.IsFalse(upsertTask.IsCompleted);
 
         await exclusiveStream.DisposeAsync().ConfigureAwait(false);
-        await upsertTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await upsertTask.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         var persistedState = await store.GetStateAsync(session.ProtocolFamily, session.ProviderKey, session.SessionId).ConfigureAwait(false);
         Assert.IsNotNull(persistedState);
         Assert.AreEqual("resp_after_retry", persistedState.ProviderSessionId);

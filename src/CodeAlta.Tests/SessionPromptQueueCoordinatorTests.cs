@@ -87,7 +87,7 @@ public sealed class SessionPromptQueueCoordinatorTests
         coordinator.EnqueuePrompt(tab, "queued once");
 
         var firstDrain = coordinator.DrainNextQueuedPromptAsync(tab);
-        var dispatchedPrompt = await dispatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        var dispatchedPrompt = await dispatchStarted.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         var secondDrain = coordinator.DrainNextQueuedPromptAsync(tab);
         var secondDispatchResult = await Task.WhenAny(secondDispatchStarted.Task, Task.Delay(TimeSpan.FromMilliseconds(100))).ConfigureAwait(false);
 
@@ -97,7 +97,7 @@ public sealed class SessionPromptQueueCoordinatorTests
         Assert.AreNotSame(secondDispatchStarted.Task, secondDispatchResult);
 
         releaseDispatch.SetResult();
-        await Task.WhenAll(firstDrain, secondDrain).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await Task.WhenAll(firstDrain, secondDrain).WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         Assert.AreEqual(0, tab.QueuedPrompts.Count);
         Assert.AreEqual(1, dispatchCount);
     }
@@ -112,7 +112,7 @@ public sealed class SessionPromptQueueCoordinatorTests
             static (_, _, _) => throw new InvalidOperationException("dispatch failed"));
         coordinator.EnqueuePrompt(tab, "retry me");
 
-        await coordinator.DrainNextQueuedPromptAsync(tab).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await coordinator.DrainNextQueuedPromptAsync(tab).WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
 
         Assert.AreEqual(1, tab.QueuedPrompts.Count);
         Assert.AreEqual("retry me", tab.QueuedPrompts[0].Text);

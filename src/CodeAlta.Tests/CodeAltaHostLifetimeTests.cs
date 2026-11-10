@@ -215,14 +215,14 @@ public sealed class CodeAltaHostLifetimeTests
             var callers = new[] { ReadAsync(0), ReadAsync(1), ReadAsync(2) };
             joined = Task.WhenAll(callers);
             launch.TrySetResult();
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            await allAcquired.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
+            await allAcquired.WithinAsync(TestTime.Seconds(5));
             Assert.AreSame(sharedTasks[0], sharedTasks[1]);
             Assert.AreSame(sharedTasks[0], sharedTasks[2]);
             Assert.IsFalse(sharedTasks[0]!.IsCompleted);
             CollectionAssert.AreEqual(new[] { "runtime" }, recording.Events);
             release.TrySetResult();
-            await joined.WaitAsync(TimeSpan.FromSeconds(5));
+            await joined.WithinAsync(TestTime.Seconds(5));
             foreach (var failure in failures)
             {
                 Assert.AreSame(expected, failure);
@@ -540,7 +540,7 @@ public sealed class CodeAltaHostLifetimeTests
                 return new ValueTask(operationTask);
             };
             rollbackTask = RunRollbackAsync(recording, creationFailure);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(rollbackTask.IsCompleted);
             CollectionAssert.AreEqual(new[] { "runtime", "hub", "registry", "plugin" }, recording.Events);
             release.TrySetResult();
@@ -648,7 +648,7 @@ public sealed class CodeAltaHostLifetimeTests
     {
         try
         {
-            await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
             return null;
         }
         catch (Exception failure) when (task.IsCompleted)

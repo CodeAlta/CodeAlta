@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 const preferencesKey = "codealta.desktop.newSessionPreferences.v1";
@@ -16,7 +17,7 @@ const chatsRow = '.project-root-list button[data-scope=""]', chatsPlus = ".proje
 const form = ".new-session-form", create = `${form} button[type=submit]`, chip = `${form} .composer-selection`, placeChip = `${form} .project-context-place`;
 
 // The whole window, as the application renders it (under StrictMode), with a host that only records what it is asked.
-test("a new session is created from a form beside the row of its project or of the chats", { skip: !browserExecutable, timeout: 180_000 }, async () => {
+test("a new session is created from a form beside the row of its project or of the chats", { skip: !browserExecutable, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-new-session-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -59,7 +60,7 @@ test("a new session is created from a form beside the row of its project or of t
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -67,7 +68,7 @@ test("a new session is created from a form beside the row of its project or of t
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
     const until = async (condition: string, what: string) => {
-      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true,
+      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true,
         `${what}; ${exceptions.join("\n")}; form: ${await evaluate(`document.querySelector(${JSON.stringify(form)})?.textContent`)}`);
     };
     const text = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`) as Promise<string | null>;
@@ -79,7 +80,7 @@ test("a new session is created from a form beside the row of its project or of t
     const pressAt = async (x: number, y: number) => { for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await pointer(type, x, y); };
     const over = async (selector: string) => { const at = await box(selector); assert.ok(at && at.width > 0, `${selector} is shown`); await pointer("mouseMoved", at.left + 40, at.top + at.height / 2); };
     // A popover grows into its place: what is pressed is pressed where it ends up.
-    const settled = (selector: string) => evaluate(`new Promise(resolve => { let last = ""; const end = Date.now() + 3000; (function check() {
+    const settled = (selector: string) => evaluate(`new Promise(resolve => { let last = ""; const end = Date.now() + ${testLimit(3000)}; (function check() {
       const at = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(), now = at ? [at.left, at.top, at.width, at.height].join() : "";
       if (now && now === last || Date.now() > end) resolve(true); else { last = now; requestAnimationFrame(() => requestAnimationFrame(check)); } })(); })`);
     const press = async (selector: string, across = 0.5) => {

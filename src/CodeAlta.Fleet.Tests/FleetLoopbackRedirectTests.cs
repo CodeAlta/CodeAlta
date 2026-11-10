@@ -70,6 +70,6 @@ public sealed class FleetLoopbackRedirectTests
         await client.ConnectAsync(address, port, token);
         var stream = client.GetStream();
         await stream.WriteAsync("GET /callback?code=the-code&state=the-state HTTP/1.1\r\nHost: localhost\r\n\r\n"u8.ToArray(), token);
-        return await waiting.WaitAsync(TimeSpan.FromSeconds(10), token);
+        return await waiting.WithinAsync(TestTime.Seconds(10), token);
     }
 }

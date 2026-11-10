@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
+import { testLimit } from "../../testTime";
 
 const options = { entry: "../fleet/audit/fleetAudit.mount.tsx", fixture: "fleetAuditFixture", rpcFixture: "../demo-api.ts",
   styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/console/fleetConsole.css", "../fleet/audit/fleetAudit.css"], width: 1300, height: 1000, reducedMotion: true } as const;
@@ -15,7 +16,7 @@ const calls = `[...window.fleetAuditFixture.calls].map(call => JSON.parse(call))
 const rows = `[...document.querySelectorAll('.fleet-audit-row')].map(row => row.dataset.action)`;
 const overflow = `[...document.querySelectorAll('.fleet-filters, .fleet-audit-head, .fleet-audit-card')].filter(element => element.scrollWidth > element.clientWidth + 1).length`;
 
-test("the log is a table by day that filters by kind, person and result, sorts, pages older records, verifies its chain and exports", { skip: !edge, timeout: 90_000 }, async () => {
+test("the log is a table by day that filters by kind, person and result, sorts, pages older records, verifies its chain and exports", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-audit-row').length === 6`, "the newest records");
     await page.shot("fleet-audit");
@@ -71,7 +72,7 @@ test("the log is a table by day that filters by kind, person and result, sorts, 
   }, options);
 });
 
-test("older records asked before the filters changed never join the records of the new filters", { skip: !edge, timeout: 90_000 }, async () => {
+test("older records asked before the filters changed never join the records of the new filters", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-audit-row').length === 6`, "the newest records");
     await page.evaluate(`window.fleetAuditFixture.holdOlder()`);
@@ -90,7 +91,7 @@ test("older records asked before the filters changed never join the records of t
   }, options);
 });
 
-test("a broken chain is said plainly, and a person who may not read the log is told who may", { skip: !edge, timeout: 90_000 }, async () => {
+test("a broken chain is said plainly, and a person who may not read the log is told who may", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-audit-row').length === 6`, "the log");
     await page.evaluate(`window.fleetAuditFixture.broken()`);

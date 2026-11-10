@@ -19,7 +19,7 @@ public sealed partial class NodeClientCommandTests
             Started = (_, stop) => started.TrySetResult(stop),
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var options = new NodeProfileOptions { DataRoot = root.DataRoot };
@@ -61,7 +61,7 @@ public sealed partial class NodeClientCommandTests
         finally
         {
             stop();
-            await running.WaitAsync(Patience, token);
+            await running.WithinAsync(Patience, token);
             new LocalSecretStore(root.DataRoot).Delete();
         }
     }

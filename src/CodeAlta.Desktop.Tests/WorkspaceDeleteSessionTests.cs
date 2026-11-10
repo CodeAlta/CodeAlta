@@ -101,7 +101,7 @@ public sealed class WorkspaceDeleteSessionTests
             var request = new WorkspaceDeleteSessionRequest(Epoch, "global", null, global, "exact", "Exact");
             using var cancel = new CancellationTokenSource();
             var pending = rpc.DeleteSessionAsync(request, cancel.Token);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual("busy", (await rpc.DeleteSessionAsync(request, CancellationToken.None)).Status);
             cancel.Cancel();
             await Assert.ThrowsExactlyAsync<TaskCanceledException>(async () => await pending);
@@ -142,7 +142,7 @@ public sealed class WorkspaceDeleteSessionTests
             var sessionId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, null)).SessionId;
             var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
             Assert.IsNotNull(receipt);
-            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestTime.Seconds(10))).Outcome);
 
             // Nobody named the session: its title is the first line of what it last said, 80 characters at most.
             var rpc = new WorkspaceService(host, Epoch);

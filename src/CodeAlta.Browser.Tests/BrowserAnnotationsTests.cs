@@ -32,7 +32,7 @@ public sealed class BrowserAnnotationsTests
     public async Task AUserAnnotatesElementsAndTheBrowserTellsWhereTheyComeFrom()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -97,7 +97,7 @@ public sealed class BrowserAnnotationsTests
     public async Task SeveralElementsGetOneNote_AndAnAreaGetsTheElementsInIt()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -150,7 +150,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheBarTellsNoSecretOfThePage_AndBoundsWhatItReads()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -242,7 +242,7 @@ public sealed class BrowserAnnotationsTests
         var script = string.Join('\n', "() => {", Part("const REDACTED = ", "\n"), Part("const SECRET_VALUE = ", "\n"), Part("const URL_IN_TEXT = ", "\n"), Part("const USER_INFO = ", "\n"),
             Part("function safeText(", "\n  }"), $"return {System.Text.Json.JsonSerializer.Serialize(texts)}.map(safeText);", "}");
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var json = await session.Pages[0].Page.EvaluateAsync(script, isFunction: true, [], timeout.Token);
         var redacted = System.Text.Json.JsonSerializer.Deserialize<string[]>(json!)!;
@@ -253,7 +253,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheSendPopupSwitchesTheDetailsOfThePage_AndTheHostShowsTheChoiceEverywhere()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -300,7 +300,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheBarMovesOutOfTheWayByItsHandle_AndComesBackToItsPlace()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -389,7 +389,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheAnnotationsAPromptTook_LeaveThePage_AndOneSavedMeanwhileKeepsItsMark()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -413,7 +413,7 @@ public sealed class BrowserAnnotationsTests
     public async Task ThePageCannotReportAnAnnotation()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var page = (IAnnotatablePage)session.Pages[0].Page;
         var messages = new BlockingCollection<ToolbarMessage>();
@@ -431,7 +431,7 @@ public sealed class BrowserAnnotationsTests
     public async Task ThePageCannotReachTheBar_NorChooseWithEventsItMakesUp()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var page = (IAnnotatablePage)session.Pages[0].Page;
         var messages = new BlockingCollection<ToolbarMessage>();
@@ -458,7 +458,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheSelectorOfAnElement_SkipsTheNamesABuildOrARenderMakesUp()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -495,7 +495,7 @@ public sealed class BrowserAnnotationsTests
     public async Task ANoteIsAChangeOrAQuestion_ChosenWithTheKeyboard()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -537,7 +537,7 @@ public sealed class BrowserAnnotationsTests
     public async Task ImagesDroppedOnTheNote_GoWithTheAnnotation_TheLargeOnesMadeSmaller()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         using var folder = new BrowserPluginTests.TempFolder();
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
@@ -583,7 +583,7 @@ public sealed class BrowserAnnotationsTests
     public async Task ANoteCancelledWhileItsImageIsRead_IsNotSaved_AndTheNextNoteStaysOpen()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         using var folder = new BrowserPluginTests.TempFolder();
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
@@ -595,7 +595,7 @@ public sealed class BrowserAnnotationsTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
         var large = Path.Combine(folder.Path, "photo.png");
-        await File.WriteAllBytesAsync(large, Png(1100, 1100, noise: true), timeout.Token);
+        await File.WriteAllBytesAsync(large, Png(2400, 2400, noise: true), timeout.Token);
 
         // A large image takes a while to be made smaller: the note is saved, and cancelled, while it is read.
         var center = await CenterAsync(session, "#c1");
@@ -630,7 +630,7 @@ public sealed class BrowserAnnotationsTests
     public async Task WhatIsTypedPastedOrDroppedInTheBar_NeverReachesThePage()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         using var folder = new BrowserPluginTests.TempFolder();
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
@@ -793,7 +793,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheOutlineSaysWhatIsUnderThePointer_ItsTagRoleTextAndSize()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -825,7 +825,7 @@ public sealed class BrowserAnnotationsTests
     public async Task TheBarStaysAboveTheTopLayerOfThePage_ItsPopoversAndItsModalDialogs()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;
@@ -873,7 +873,7 @@ public sealed class BrowserAnnotationsTests
     public async Task AModalDialogOpenBeforeTheToolbar_HoldsTheBar()
     {
         await using var session = Host.NewSession();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
         await session.ContextAsync(timeout.Token);
         var state = session.Pages[0];
         var page = (IAnnotatablePage)state.Page;

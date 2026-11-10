@@ -36,8 +36,8 @@ public sealed class MobileLiveTests
         var late = live.Subscribe();
         Assert.IsTrue(late.Reader.TryRead(out _));
         live.CloseListeners();
-        await phone.Reader.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-        await late.Reader.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+        await phone.Reader.Completion.WithinAsync(TestTime.Seconds(5));
+        await late.Reader.Completion.WithinAsync(TestTime.Seconds(5));
     }
 
     [TestMethod]
