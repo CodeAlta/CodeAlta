@@ -15,8 +15,6 @@ export type WindowsState = Readonly<{
   restoreAtStartup: boolean;
   /** Whether a tab can be dragged out of a window: the platform tells where the windows are. */
   canDrag: boolean;
-  /** The window that holds each tab, by the reference of the tab. */
-  owners: ReadonlyMap<string, string>;
 }>;
 
 /** What the host asks of this window. */
@@ -57,8 +55,12 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
   const current = initial?.status === "ok" && initial.window ? initial.window : null;
   // The windows the host knew when the page started, with the ones that come back at this start: their tabs are theirs.
   const known = current ? initial?.windows?.length ? initial.windows : [current] : [];
-  let state: WindowsState = { current, windows: known, restoreAtStartup: initial?.restoreAtStartup ?? true, canDrag: !!initial?.canDrag,
-    owners: ownersOf(known) };
+  let state: WindowsState = { current, windows: known, restoreAtStartup: initial?.restoreAtStartup ?? true, canDrag: !!initial?.canDrag };
+  // The window that holds each tab, by the reference of the tab. Apart from `state`: the page never draws it, and the host
+  // lists it again after each report of this window (a tab switch), which must not render the window again.
+  let owners = ownersOf(known);
+  // What `state` was made of, without what the page does not draw: the host lists the windows again after each report.
+  let shown = shownKey(state.windows, state.restoreAtStartup);
   const listeners = new Set<() => void>();
   let request: (value: WindowsRequest) => void = () => { };
   let reported = "";
@@ -66,6 +68,14 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
   let pending: Readonly<{ tabs: readonly string[]; active: string | null; pageState: string | null }> | null = null;
   let listing = 0;
   const notify = () => { for (const listener of [...listeners]) listener(); };
+
+  /**
+   * What the page draws of the windows: not the tabs they hold (only `owners` reads them), nor which one is in front or
+   * minimized, that the host tells at each change of focus and no component reads.
+   */
+  function shownKey(windows: readonly WindowsWindow[], restoreAtStartup: boolean) {
+    return JSON.stringify([restoreAtStartup, windows.map(({ tabs: _tabs, activeTab: _activeTab, focused: _focused, state: _state, ...window }) => window)]);
+  }
 
   function ownersOf(windows: readonly WindowsWindow[]): ReadonlyMap<string, string> {
     if (!windows.some(window => window.tabs.length)) return noOwners;
@@ -80,8 +90,12 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
     try {
       const reply = await api.list({}, { timeoutMilliseconds: 15_000 });
       if (turn !== listing || reply.status !== "ok") return;
+      owners = ownersOf(reply.windows);
+      const key = shownKey(reply.windows, reply.restoreAtStartup);
+      if (key === shown) return;
+      shown = key;
       const self = reply.windows.find(window => window.id === current.id) ?? state.current;
-      state = { ...state, current: self, windows: reply.windows, restoreAtStartup: reply.restoreAtStartup, owners: ownersOf(reply.windows) };
+      state = { ...state, current: self, windows: reply.windows, restoreAtStartup: reply.restoreAtStartup };
       notify();
     } catch { /* The windows are read again when the host says they changed. */ }
   }
@@ -116,10 +130,10 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       return () => abort.abort();
     },
     /** The window that holds a tab; null when none does. */
-    ownerOf(ref: string): string | null { return state.owners.get(ref) ?? null; },
+    ownerOf(ref: string): string | null { return owners.get(ref) ?? null; },
     /** Whether another window than this one holds a tab. */
     heldElsewhere(ref: string): boolean {
-      const owner = state.owners.get(ref);
+      const owner = owners.get(ref);
       return !!current && !!owner && owner !== current.id && state.windows.some(window => window.id === owner && window.open);
     },
     /**
@@ -128,14 +142,13 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
      */
     handles(ref: string): boolean {
       if (!current) return true;
-      const owner = state.owners.get(ref);
+      const owner = owners.get(ref);
       return owner ? owner === current.id || !state.windows.some(window => window.id === owner && window.open) : current.main;
     },
     /** A tab that moved into this window is its own from now on, before the host lists the windows again. */
     claim(ref: string) {
-      if (!current || state.owners.get(ref) === current.id) return;
-      state = { ...state, owners: new Map(state.owners).set(ref, current.id) };
-      notify();
+      if (!current || owners.get(ref) === current.id) return;
+      owners = new Map(owners).set(ref, current.id);
     },
     /** Says which tabs this window holds, and what its page keeps of them; written a moment later, once. */
     report(tabs: readonly string[], active: string | null, pageState: string | null) {
@@ -145,10 +158,10 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       reported = key;
       pending = { tabs, active, pageState };
       // The tabs this window holds are its own at once: a link that follows does not open them twice.
-      const owners = new Map(state.owners);
-      for (const [tab, owner] of owners) if (owner === current.id && !tabs.includes(tab)) owners.delete(tab);
-      for (const tab of tabs) owners.set(tab, current.id);
-      state = { ...state, owners };
+      const held = new Map(owners);
+      for (const [tab, owner] of held) if (owner === current.id && !tabs.includes(tab)) held.delete(tab);
+      for (const tab of tabs) held.set(tab, current.id);
+      owners = held;
       if (reportTimer === null) reportTimer = setTimeout(() => {
         reportTimer = null;
         const value = pending;
@@ -188,6 +201,7 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
     },
     async setRestoreAtStartup(restore: boolean) {
       state = { ...state, restoreAtStartup: restore };
+      shown = shownKey(state.windows, restore);
       notify();
       try { await api.setRestoreAtStartup({ restore }, { timeoutMilliseconds: 15_000 }); } catch { /* Read again with the windows. */ }
       void refresh();

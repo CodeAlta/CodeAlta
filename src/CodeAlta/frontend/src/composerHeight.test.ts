@@ -53,3 +53,11 @@ test("composer preferences are bounded, selection- and owner-scoped and reset to
   for (let i = 0; i < 70; i++) sizes = rememberComposerHeight(sizes, composerSizeKey("epoch", "project", String(i)), 150);
   assert.equal(sizes.size, 64);
 });
+
+test("a composer that tells the height already kept leaves the sizes as they are", () => {
+  const key = composerSizeKey("epoch", "project", "one");
+  const sizes = rememberComposerHeight(new Map(), key, 320);
+  assert.equal(rememberComposerHeight(sizes, key, 320), sizes, "a pane shown again does not render the window again");
+  assert.equal(rememberComposerHeight(sizes, composerSizeKey("epoch", "project", "two"), undefined), sizes);
+  assert.notEqual(rememberComposerHeight(sizes, key, 321), sizes);
+});
