@@ -145,6 +145,15 @@ test("a Markdown file is reviewed block by block, and a review request is answer
       assert.deepEqual(await value(`${f}.host.cancels.length`), 0);
     });
 
+    await t.test("a worktree-only ignored plan is read from the request's checkout, without asking git for a diff", async () => {
+      await evaluate(`${f}.state.show("worktree")`);
+      await until(`!!document.querySelector("#worktree-file .markdown-content h1") || !!document.querySelector("#worktree-file .bp6-non-ideal-state")`);
+      assert.equal(await value(`document.querySelector("#worktree-file .markdown-content h1")?.textContent`), "Worktree-only ignored plan");
+      assert.deepEqual(await value(`${f}.worktreeReads.map(request => ({ projectId: request.projectId, worktree: request.worktree, path: request.path }))`),
+        [{ projectId: "p", worktree: "C:/worktrees/outside-project", path: ".alta/plans/worktree-only.md" }]);
+      assert.equal(await value(`[...document.querySelectorAll("#worktree-file button")].some(button => button.textContent === "Save")`), false);
+    });
+
     assert.deepEqual(page.errors, []);
   } finally {
     await page.close();

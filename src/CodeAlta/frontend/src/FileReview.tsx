@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Button, Callout, NonIdealState, SegmentedControl } from "@blueprintjs/core";
-import { projectFiles, projectGit } from "#neoastra";
+import { projectFiles } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { showToast } from "./appToaster";
@@ -39,9 +39,9 @@ export const readableFile = (path: string) => /\.(md|markdown)$/iu.test(path);
  * click away; any other text file in the source, with comments on its lines. Both views show the same threads,
  * those of the review store, which follow their text when the file changes. The file of the project folder can be
  * edited and saved (Ctrl+S); while it has unsaved edits nothing is commented, since a comment is placed on the
- * text on disk. A file of a worktree is shown as git reads it, without editing.
+ * text on disk. A file of a worktree is read from that checkout, including ignored files, without editing.
  */
-export function FileReview({ epoch, scope, path, disabled = false, handle, onLeave, submit, api = projectFiles, git = projectGit, hub: given }: {
+export function FileReview({ epoch, scope, path, disabled = false, handle, onLeave, submit, api = projectFiles, hub: given }: {
   epoch: string;
   /** The checkout of the file; null where the session has no project. */
   scope: ReviewScope | null;
@@ -55,7 +55,6 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
   /** **Submit review ▾**, or nothing when the review is submitted elsewhere (the form of a request). */
   submit?: ReactNode;
   api?: Pick<typeof projectFiles, "read" | "write">;
-  git?: Pick<typeof projectGit, "file">;
   /** The reviews hub; the page's by default. */
   hub?: ReviewsHub | null;
 }) {
@@ -73,8 +72,7 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
   const writing = useRef(false);
   const alive = useRef(true);
   const checkout = scope?.checkout ?? null;
-  // A worktree's file is read through git: the files of the window name the project folder only.
-  const fromGit = checkout !== null;
+  const inWorktree = checkout !== null;
   const latest = useRef({ state, epoch, disabled, onLeave });
   latest.current = { state, epoch, disabled, onLeave };
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -91,18 +89,16 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
     if (!scope) { setState(fileLoaded({ status: "unknown_project", content: null, revision: null, readOnly: false })); return; }
     const controller = new AbortController();
     setState(fileLoading);
-    const read = fromGit
-      ? git.file({ expectedEpoch: epoch, projectId: scope.projectId, worktree: checkout, path, comparison: null, commit: null }, { signal: controller.signal, timeoutMilliseconds: 15000 })
-        .then(value => ({ status: value.status === "ok" && value.modified === null ? "not_found" : value.status, content: value.modified, revision: value.revision ?? "git", readOnly: true }))
-      : api.read({ expectedEpoch: epoch, projectId: scope.projectId, path, reload: false }, { signal: controller.signal, timeoutMilliseconds: 15000 });
+    const read = api.read({ expectedEpoch: epoch, projectId: scope.projectId, worktree: checkout, path, reload: false },
+      { signal: controller.signal, timeoutMilliseconds: 15000 });
     void read.then(value => { if (!controller.signal.aborted) setState(fileLoaded(value)); })
       .catch(() => { if (!controller.signal.aborted) setState(fileLoaded({ status: "read_failed", content: null, revision: null, readOnly: false })); });
     return () => controller.abort();
-  }, [api, git, epoch, scope?.projectId, checkout, path, generation, fromGit]);
+  }, [api, epoch, scope?.projectId, checkout, path, generation]);
 
   async function save(overwrite = false): Promise<boolean> {
     const { state: current, epoch: hostEpoch } = latest.current;
-    if (writing.current || !scope || fromGit || !current.baseline) return false;
+    if (writing.current || !scope || inWorktree || !current.baseline) return false;
     if (current.content.length > maximumFileLength) { setState(value => fileSaved(value, "", { status: "too_large", revision: null })); return false; }
     if (!canSaveFile(current, overwrite)) return false;
     const submitted = current.content;
@@ -125,7 +121,7 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
   const saveLatest = useRef(save); saveLatest.current = save;
 
   const ready = state.phase === "ready";
-  const editable = !fromGit && !disabled && !state.readOnly && !state.saving && !state.loading;
+  const editable = !inWorktree && !disabled && !state.readOnly && !state.saving && !state.loading;
   const blocked = !scope || !hub ? t("Comments need the review service of the host.") : list.readOnly ? list.readOnly
     : state.dirty ? t("Save the file to comment on it.") : disabled ? t("The review cannot be changed right now.") : null;
   async function add(lines: { startLine: number; endLine: number }, body: string, suggestion: string | null) {
@@ -198,7 +194,7 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
         options={[{ value: "read", label: t("Rendered") }, { value: "source", label: t("Source") }]} />}
       <Button size="small" variant="minimal" icon={<AppIcon name="chat" size={14} />} disabled={!!blocked || !ready} title={reading ? t("Comment on the selected blocks (c)") : `${t("Add line comment")} (Ctrl+K)`}
         onClick={() => { if (reading) blockLayer.comment(); else lineLayer.comment(); }}>{t("Comment")}</Button>
-      {!fromGit && <Button size="small" variant="minimal" icon={<AppIcon name="save" size={14} />} disabled={disabled || !canSaveFile(state)}
+      {!inWorktree && <Button size="small" variant="minimal" icon={<AppIcon name="save" size={14} />} disabled={disabled || !canSaveFile(state)}
         title={`${t("Save")} (Ctrl+S)`} onClick={() => void save()}>{t("Save")}</Button>}
       <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} disabled={busy || state.dirty} aria-label={t("Reload")} title={t("Reload")}
         onClick={() => setGeneration(value => value + 1)} />

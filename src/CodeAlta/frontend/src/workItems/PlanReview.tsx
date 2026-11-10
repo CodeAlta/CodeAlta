@@ -45,7 +45,7 @@ export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fa
     + list.rounds.length;
   useEffect(() => {
     const controller = new AbortController();
-    void api.read({ expectedEpoch: epoch, projectId, path, reload: false }, { signal: controller.signal, timeoutMilliseconds: 15000 })
+    void api.read({ expectedEpoch: epoch, projectId, worktree: null, path, reload: false }, { signal: controller.signal, timeoutMilliseconds: 15000 })
       .then(value => { if (!controller.signal.aborted) setText({ path, content: value.status === "ok" ? value.content : null }); },
         () => { if (!controller.signal.aborted) setText({ path, content: null }); });
     return () => controller.abort();

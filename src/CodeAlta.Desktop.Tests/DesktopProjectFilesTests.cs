@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
 
@@ -53,6 +54,79 @@ public sealed class DesktopProjectFilesTests
         Assert.AreEqual("ok", (await fixture.Service.ReadAsync(new(Epoch, fixture.ProjectId, "src/notes.txt"), default)).Status);
         var plain = new ProjectFilesService(fixture.Projects, Epoch);
         Assert.AreEqual("ok", (await plain.ReadAsync(new(Epoch, fixture.ProjectId, "src/notes.txt"), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task Read_AnIgnoredPlanInAnExternalWorktree_UsesThatCheckoutNotTheProject()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var git = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, ".git", "worktrees", "linked")).FullName;
+        File.WriteAllText(Path.Combine(git, "commondir"), "../..\n");
+        var worktree = Directory.CreateDirectory(Path.Combine(fixture.Root, "external-worktree")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: " + git.Replace('\\', '/') + "\n");
+        File.WriteAllText(Path.Combine(worktree, ".gitignore"), "/.alta/*\n");
+        var plans = Directory.CreateDirectory(Path.Combine(worktree, ".alta", "plans")).FullName;
+        const string relative = ".alta/plans/worktree-only.md";
+        const string text = "---\ntitle: Worktree plan\nstatus: draft\n---\n# Only in the worktree\n";
+        File.WriteAllText(Path.Combine(plans, "worktree-only.md"), text);
+
+        // The request on the wire names an absolute checkout, which need not be below the project (or on its drive).
+        var request = JsonSerializer.Deserialize<ProjectFileReadRequest>(JsonSerializer.Serialize(new
+        {
+            ExpectedEpoch = Epoch, ProjectId = fixture.ProjectId, Path = relative, Worktree = worktree,
+        }))!;
+        var read = await fixture.Service.ReadAsync(request, default);
+
+        Assert.AreEqual("ok", read.Status);
+        Assert.AreEqual(text, read.Content);
+        Assert.IsTrue(read.ReadOnly, "Worktree file reviews remain read-only.");
+        Assert.AreEqual(relative, read.Path);
+        Assert.IsNotNull(read.Revision);
+        Assert.IsEmpty(fixture.Usage.Events, "A worktree file must not be recorded as a file of the project folder.");
+
+        fixture.Write(relative, "# A different plan in the main checkout\n");
+        Assert.AreEqual(text, (await fixture.Service.ReadAsync(request, default)).Content);
+        Assert.AreEqual("# A different plan in the main checkout\n",
+            (await fixture.Service.ReadAsync(new(Epoch, fixture.ProjectId, relative), default)).Content);
+    }
+
+    [TestMethod]
+    public async Task Read_InAWorktree_RefusesForeignMissingAndInvalidCheckoutsAndEscapingPaths()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Write("inside.md", "# Main checkout\n");
+        var git = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, ".git")).FullName;
+        var worktree = Directory.CreateDirectory(Path.Combine(fixture.Root, "worktree")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: " + git.Replace('\\', '/') + "\n");
+        File.WriteAllText(Path.Combine(worktree, "inside.md"), "# Worktree\n");
+        var request = new ProjectFileReadRequest(Epoch, fixture.ProjectId, "inside.md", Worktree: worktree);
+        Assert.AreEqual("# Worktree\n", (await fixture.Service.ReadAsync(request, default)).Content);
+
+        foreach (var invalid in new[] { "", "relative", worktree + "\n", new string('x', ProjectFilesService.MaximumWorktreeLength + 1) })
+        {
+            var read = await fixture.Service.ReadAsync(request with { Worktree = invalid }, default);
+            Assert.AreEqual("invalid", read.Status, invalid);
+            Assert.IsNull(read.Content);
+        }
+
+        var foreign = Directory.CreateDirectory(Path.Combine(fixture.Root, "foreign")).FullName;
+        Directory.CreateDirectory(Path.Combine(foreign, ".git"));
+        File.WriteAllText(Path.Combine(foreign, "inside.md"), "# Not this project's file\n");
+        foreach (var missing in new[] { foreign, Path.Combine(fixture.Root, "gone") })
+        {
+            var read = await fixture.Service.ReadAsync(request with { Worktree = missing }, default);
+            Assert.AreEqual("worktree_missing", read.Status);
+            Assert.IsNull(read.Content, "An invalid checkout must never fall back to the project folder.");
+        }
+
+        foreach (var outside in new[] { "../project/inside.md", Path.Combine(fixture.ProjectPath, "inside.md"), "inside.md:stream" })
+        {
+            var read = await fixture.Service.ReadAsync(request with { Path = outside }, default);
+            Assert.AreEqual("outside_root", read.Status);
+            Assert.IsNull(read.Content);
+        }
+
+        Assert.IsEmpty(fixture.Usage.Events);
     }
 
     [TestMethod]

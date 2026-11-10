@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Worktrees;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -24,6 +25,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// that the host opened for a link (<see cref="DiskFolders"/>) instead: the editor then works in that folder,
 /// by the same rules. The folder of a built-in skill, or of a skill that a plugin brings, is only read: its
 /// files are reported as read-only, and a change is answered as <c>read_only</c>.
+/// A read may also name a worktree of the project's repository: its path is then relative to that checkout,
+/// and its text is read-only, including files Git ignores.
 /// </remarks>
 [NeoRpcService("projectFiles", Version = 1)]
 internal sealed class ProjectFilesService
@@ -33,6 +36,9 @@ internal sealed class ProjectFilesService
 
     /// <summary>Longest project-relative path accepted, in UTF-16 units.</summary>
     internal const int MaximumPathLength = 1024;
+
+    /// <summary>Longest absolute worktree folder accepted, in UTF-16 units.</summary>
+    internal const int MaximumWorktreeLength = 4096;
 
     /// <summary>Folders listed by one request.</summary>
     internal const int MaximumListedFolders = 256;
@@ -118,10 +124,21 @@ internal sealed class ProjectFilesService
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
         if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
-        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = request.Worktree is null
+            ? await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false)
+            : await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
         {
+            if (request.Worktree is { } worktree)
+            {
+                // Check repository membership, not whether the checkout is below the project: it may be on another drive.
+                if (worktree.Length is 0 or > MaximumWorktreeLength || worktree.Any(char.IsControl) || !Path.IsPathFullyQualified(worktree))
+                    return Refused("invalid");
+                if (!Directory.Exists(worktree) || !GitWorktreeService.SameRepository(root, worktree)) return Refused("worktree_missing");
+                root = Path.GetFullPath(worktree);
+            }
+
             var located = Locate(root, path!, EntryKind.File, out var full, out _);
             if (located != "ok") return Refused(located);
             // Checked before reading: a large file is never loaded to find out that it is too large.
@@ -135,9 +152,9 @@ internal sealed class ProjectFilesService
             var length = snapshot.Encoding.GetPreamble().Length + (long)snapshot.Encoding.GetByteCount(snapshot.Text);
             if (length > MaximumFileBytes) return Refused("too_large", length);
             if (snapshot.Text.Contains('\0')) return Refused("binary");
-            var readOnly = ReadOnlyFolder(request.ProjectId) || (File.GetAttributes(full) & FileAttributes.ReadOnly) != 0;
+            var readOnly = request.Worktree is not null || ReadOnlyFolder(request.ProjectId) || (File.GetAttributes(full) & FileAttributes.ReadOnly) != 0;
             // A file read again because it changed on disk was not opened again.
-            if (!request.Reload) await RecordUsageAsync(root, path!).ConfigureAwait(false);
+            if (!request.Reload && request.Worktree is null) await RecordUsageAsync(root, path!).ConfigureAwait(false);
             return new("ok", path, snapshot.Text, snapshot.Revision.ContentHash, readOnly, (int)length, stamp, EncodingName(snapshot.Encoding, snapshot.HasByteOrderMark));
         }
         catch (DecoderFallbackException)
@@ -967,20 +984,21 @@ internal sealed class ProjectFilesService
 /// <summary>Asks for the text of one file of a project.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The project; required.</param>
-/// <param name="Path">The file's path relative to the project folder, with forward or back slashes.</param>
+/// <param name="Path">The file's path relative to the project folder or named worktree, with forward or back slashes.</param>
 /// <param name="Reload">The file is read again because it changed: it is not recorded as a recently opened file.</param>
-internal sealed record ProjectFileReadRequest(string? ExpectedEpoch, string? ProjectId, string? Path, bool Reload = false);
+/// <param name="Worktree">An absolute folder of a checkout of the project's repository, or null for the project folder. Its files are read-only.</param>
+internal sealed record ProjectFileReadRequest(string? ExpectedEpoch, string? ProjectId, string? Path, bool Reload = false, string? Worktree = null);
 
 /// <summary>
 /// <c>ok</c> with the whole text, or one of <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c>,
 /// <c>unknown_project</c>, <c>archived_project</c>, <c>project_unavailable</c>, <c>outside_root</c>,
-/// <c>not_found</c>, <c>too_large</c>, <c>binary</c> and <c>read_failed</c> with none.
+/// <c>not_found</c>, <c>worktree_missing</c>, <c>too_large</c>, <c>binary</c> and <c>read_failed</c> with none.
 /// </summary>
 /// <param name="Status">The outcome code.</param>
 /// <param name="Path">The requested path with forward slashes, or null when it was not a usable path.</param>
 /// <param name="Content">The decoded text with its newlines unchanged.</param>
 /// <param name="Revision">SHA-256 of the file's bytes in hexadecimal; a write names it as its expected revision.</param>
-/// <param name="ReadOnly">Whether the file has the read-only attribute; a write would be refused.</param>
+/// <param name="ReadOnly">Whether the file is in a worktree or has the read-only attribute; it cannot be edited here.</param>
 /// <param name="Length">The file's size in bytes; also set for <c>too_large</c>, where it stops at <see cref="int.MaxValue"/>.</param>
 /// <param name="Stamp">The file's stamp when it was read, as <c>stat</c> returns it.</param>
 /// <param name="Encoding">The encoding the text was read with, for display: <c>UTF-8</c>, <c>UTF-8 BOM</c>, <c>UTF-16 LE</c>…</param>

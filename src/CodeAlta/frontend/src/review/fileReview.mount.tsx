@@ -46,8 +46,12 @@ const askActions = createAskActions(request => sessionAsks.answer(askWireRequest
   request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 }));
 const capability = createMutationCapability(epoch);
 const reads: string[] = [];
+const worktree = "C:/worktrees/outside-project";
+const worktreePath = ".alta/plans/worktree-only.md";
+host.files.set(worktreePath, "# Worktree-only ignored plan\n\nRead this copy, not the main checkout.");
+const worktreeReads: unknown[] = [];
 
-const state = { show: (_: "file" | "ask") => { } };
+const state = { show: (_: "file" | "ask" | "worktree") => { } };
 
 function Ask() {
   const [formSlot, setFormSlot] = useState<HTMLElement | null>(null);
@@ -61,9 +65,13 @@ function Ask() {
 }
 
 function Fixture() {
-  const [shown, setShown] = useState<"file" | "ask">("file");
+  const [shown, setShown] = useState<"file" | "ask" | "worktree">("file");
   state.show = setShown;
   useEffect(() => fileHub.connect(epoch), []);
+  if (shown === "worktree") return <div id="worktree-file">
+    <FileReview epoch={epoch} scope={{ projectId: "p", checkout: worktree }} path={worktreePath} hub={fileHub}
+      api={{ read: async request => { worktreeReads.push(request); return readFixtureFile(request); }, write: projectFiles.write }} />
+  </div>;
   return shown === "ask" ? <Ask /> : <div id="file" style={{ width: 1000, height: 1000, display: "flex", flexDirection: "column" }}>
     <FileReview epoch={epoch} scope={scope} path="plan.md" hub={fileHub}
       api={{ read: async request => { reads.push(request.path ?? ""); return readFixtureFile(request); }, write: projectFiles.write }} />
@@ -71,7 +79,7 @@ function Fixture() {
 }
 
 Object.assign(window, { fileReviewFixture: {
-  state, host, fileServer, askServer, reads, plan,
+  state, host, fileServer, askServer, reads, plan, worktree, worktreePath, worktreeReads,
   /** The file changes on disk: the review host moves its threads, and the next read gives the new text. */
   setFile(text: string) { host.files.set("plan.md", text); fileServer.setText(text); },
   /** The rendered block of the document that comes from these lines. */

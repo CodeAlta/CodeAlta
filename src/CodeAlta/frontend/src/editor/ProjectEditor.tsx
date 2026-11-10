@@ -181,7 +181,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       }, () => { if (alive.current) change(id, document => documentImageRead(document, { status: "read_failed", mediaType: null, stamp: null, length: 0 }, null)); });
       return;
     }
-    void api.read({ expectedEpoch: host, projectId: tab.projectId, path, reload }, { timeoutMilliseconds: 15_000 }).then(reply => {
+    void api.read({ expectedEpoch: host, projectId: tab.projectId, worktree: null, path, reload }, { timeoutMilliseconds: 15_000 }).then(reply => {
       if (alive.current) change(id, document => documentRead(document, reply, discard));
     }, () => { if (alive.current) change(id, document => documentRead(document, unread, discard)); });
   }
@@ -525,7 +525,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         return;
       }
       const path = created.path;
-      const read = await api.read({ expectedEpoch: host, projectId: tab.projectId, path, reload: true }, { timeoutMilliseconds: 15_000 });
+      const read = await api.read({ expectedEpoch: host, projectId: tab.projectId, worktree: null, path, reload: true }, { timeoutMilliseconds: 15_000 });
       if (!alive.current) return;
       if (read.status !== "ok" || read.revision === null) { refuse("The file could not be written; nothing was saved."); refreshTree.current(); return; }
       const result = await api.write({ expectedEpoch: host, projectId: tab.projectId, path, content: content.text, expectedRevision: read.revision, overwrite: false }, { timeoutMilliseconds: 30_000 });

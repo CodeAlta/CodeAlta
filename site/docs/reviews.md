@@ -95,6 +95,8 @@ An agent can ask for your review of a file or of its changes. In Plan mode it al
 
 When you submit, the review and your answers go back to the agent in one message.
 
+A file review reads the session's checkout, including files Git ignores, such as plans. Files in a worktree can be reviewed but not edited in the viewer.
+
 ## Review before commit
 
 When **Review before commit** is on, agents never commit by themselves. When their work is done, they ask for your review of the changes and stop. They commit once you approve, and only what you approved: a change made after your approval needs a new review. CodeAlta refuses an unapproved commit, whatever the permission mode of the session, and tells the agent which files changed since your approval.
