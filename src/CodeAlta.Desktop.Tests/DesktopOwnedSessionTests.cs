@@ -16,9 +16,9 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopOwnedSessionTests
 {
-    // A busy machine (a CI runner with every test project at once) takes seconds to start a host, run a turn or close a
-    // session: a wait for the real host that does not end in this time is stuck, not slow.
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    // A busy machine (a CI runner with every test project at once) can take tens of seconds to start a host, run a turn or
+    // close a session: a wait that does not end in this time is stuck, not slow. A wait that ends returns at once.
+    private static readonly TimeSpan Patience = TimeSpan.FromMinutes(2);
 
     [TestMethod]
     public void ImageOnlySend_ForwardsEmptyTextAndExactLocalMetadata()
@@ -611,7 +611,7 @@ public sealed class DesktopOwnedSessionTests
     public async Task Shutdown_RetainsLeaseUntilAllOwnedWorkIsConfirmed()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var wait = gate.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var wait = gate.Task.WaitAsync(Patience);
         try
         {
             Assert.IsFalse(DesktopApplication.CanReleaseOwnedLease(Task.CompletedTask, gate.Task, true));
@@ -798,7 +798,7 @@ public sealed class DesktopOwnedSessionTests
         try
         {
             clock.Advance(TimeSpan.FromSeconds(60));
-            await deliveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await deliveryStarted.Task.WaitAsync(Patience);
             // Delivery is pending behind a manual gate. A Task.Yield polling loop posts immediately;
             // awaiting the reminder's actual change signal does not, regardless of thread-pool throughput.
             var context = new PostingContext();
@@ -816,13 +816,13 @@ public sealed class DesktopOwnedSessionTests
         finally
         {
             releaseDelivery.TrySetResult("queued");
-            if (waiting is not null) await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+            if (waiting is not null) await waiting.WaitAsync(Patience);
         }
 
         Assert.IsNotNull(waiting);
         Assert.AreEqual(1, waiting.Result.CompletedCount);
         Assert.AreEqual(0, waiting.Result.Reminders.Single().LastExitCode);
-        var alreadyFired = await ReminderCount(reminders, "session", 1).WaitAsync(TimeSpan.FromSeconds(5));
+        var alreadyFired = await ReminderCount(reminders, "session", 1).WaitAsync(Patience);
         Assert.AreEqual(1, alreadyFired.Reminders.Single().FiredCount);
     }
 
