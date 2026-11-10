@@ -245,8 +245,10 @@ for (const light of [false, true]) {
       await page.until(`document.querySelector('.workflow-run-graph .react-flow__minimap') === null`, "fitted again, no minimap");
       assert.equal(await page.evaluate(`document.querySelector('.workflow-run-title h2').textContent`), "Fix failing tests");
       assert.equal(await page.evaluate(`document.querySelectorAll('.workflow-run-sessions tbody tr').length`), 50);
+      // Token counts use the browser's numeric locale, which can differ from the test runner's.
+      const tokens = await page.evaluate<string>(`(1500).toLocaleString()`);
       assert.deepEqual(await page.evaluate(`[...document.querySelector('.workflow-run-sessions tbody tr').children].map(e => e.textContent)`),
-        ["Fix child-0", "fix", "Done", "20 s", "1,500"]);
+        ["Fix child-0", "fix", "Done", "20 s", tokens]);
       // The timeline of the run is drawn once it is in view, under the 50 sessions.
       await page.evaluate(`document.querySelector('.workflow-run-tab .chart').scrollIntoView({ block: "nearest" })`);
       await page.until(`document.querySelector('.workflow-run-tab .chart-surface svg path, .workflow-run-tab .chart-surface canvas')`, "the timeline drawn");
