@@ -266,7 +266,7 @@ internal sealed class TailscaleCli : ITailscaleCli
 /// Tailscale Serve, which publishes a page of the loopback address on an HTTPS port of the tailnet. What a publisher published is taken
 /// off with the ports it was published with.
 /// </summary>
-internal sealed class TailscaleNetwork(ITailscaleCli cli) : IPrivateNetworkProvider
+internal sealed partial class TailscaleNetwork(ITailscaleCli cli) : IPrivateNetworkProvider
 {
     /// <summary>The id of the provider.</summary>
     internal const string ProviderId = "tailscale";

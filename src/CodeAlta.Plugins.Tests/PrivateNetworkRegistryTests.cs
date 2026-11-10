@@ -56,17 +56,36 @@ public sealed class PrivateNetworkRegistryTests
         Assert.AreEqual("100.64.0.7", TailscaleNetwork.Parse("""{"BackendState":"Running","Self":{"TailscaleIPs":["100.64.0.7"]}}""")!.Name, "without MagicDNS, its address");
     }
 
+    [TestMethod]
+    public void AServerAddress_IsRecognizedByThePublishingProviders_IncludingPlugins()
+    {
+        var presenceOnly = new Network("presence-only", PrivateNetworkCapabilities.Presence) { Suffix = ".example" };
+        var plugin = new Network("vpn", PrivateNetworkCapabilities.Publish) { Suffix = ".private.example" };
+        var registry = new PrivateNetworkRegistry(() => [new Source(presenceOnly, plugin)]);
+        Assert.AreEqual("tailscale", registry.FindForAddress(new Uri("https://box.tail1234.ts.net:8443"))?.Id);
+        Assert.AreEqual("devtunnel", registry.FindForAddress(new Uri("https://personal-2586.euw.devtunnels.ms"))?.Id);
+        Assert.AreSame(plugin, registry.FindForAddress(new Uri("https://box.private.example")));
+        Assert.IsNull(registry.FindForAddress(new Uri("https://mine.example")), "a provider without Publish is not asked to publish");
+        Assert.IsNull(registry.FindForAddress(new Uri("https://devtunnels.ms.attacker.example")));
+        Assert.IsNull(registry.FindForAddress(new Uri("https://ts.net.attacker.example")));
+        Assert.IsNull(registry.FindForAddress(new Uri("http://box.tail1234.ts.net")));
+    }
+
     private sealed class Network(string id, PrivateNetworkCapabilities capabilities) : IPrivateNetworkProvider
     {
         public PrivateNetworkPresence? Presence { get; init; }
 
         public bool Fails { get; init; }
 
+        public string? Suffix { get; init; }
+
         public string Id => id;
 
         public string DisplayName => id;
 
         public PrivateNetworkCapabilities Capabilities => capabilities;
+
+        public bool OwnsAddress(Uri address) => Suffix is not null && address.Host.EndsWith(Suffix, StringComparison.Ordinal);
 
         public ValueTask<PrivateNetworkPresence?> FindThisComputerAsync(CancellationToken cancellationToken)
             => Fails ? throw new InvalidOperationException("The network fails.") : ValueTask.FromResult(Presence);

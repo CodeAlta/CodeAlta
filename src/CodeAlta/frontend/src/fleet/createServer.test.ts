@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetDeviceView, FleetServerView } from "#neoastra";
 import { waitingApprovals } from "./approvals";
-import { localServerSteps, offersTailscaleServe, organizationUrlOf, serverAsksSudoPassword, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
+import { localServerSteps, offersNetworkPublish, offersTailscaleServe, organizationUrlOf, serverAsksSudoPassword, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 import { joinSteps, organizationAddressOf } from "./joinOrganization";
 
 const server = (id: string): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, shareUrl: null, stop: null });
@@ -19,6 +19,21 @@ test("A server that does not answer from here says what to open, and where", () 
   assert.match(serverSetupProblem("server_blocked_ufw"), /sudo ufw allow \{port\}\/tcp/u);
   assert.match(serverSetupProblem("server_proxy_unreachable"), /forwards to port \{port\} of \{host\}/u);
   assert.match(serverSetupProblem("auth_failed"), /ssh-add/u, "the failures of SSH say what they say for a machine");
+});
+
+test("A Dev Tunnel that does not answer names its host and the access needed by devices", () => {
+  assert.match(serverSetupProblem("devtunnel_host_missing"), /devtunnel host/u);
+  assert.match(serverSetupProblem("devtunnel_host_missing"), /loopback/u);
+  assert.match(serverSetupProblem("devtunnel_host_missing"), /connect token/u);
+});
+
+test("A plugin's private network offers publication and asks for sudo only when needed", () => {
+  assert.equal(offersNetworkPublish("private_network_publish_missing"), true);
+  assert.equal(offersNetworkPublish("private_network_publish_missing_sudo"), true);
+  assert.equal(serverAsksSudoPassword("private_network_publish_missing_sudo"), true);
+  assert.equal(serverAsksSudoPassword("private_network_publish_missing"), false);
+  assert.equal(offersNetworkPublish("tailscale_serve_missing_sudo"), true);
+  assert.equal(offersNetworkPublish("devtunnel_host_missing"), false);
 });
 
 test("A name of a tailnet that Tailscale Serve does not publish yet says so, and CodeAlta offers to publish it", () => {

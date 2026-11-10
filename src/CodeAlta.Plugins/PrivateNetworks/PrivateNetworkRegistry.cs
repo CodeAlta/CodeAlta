@@ -26,6 +26,28 @@ public sealed class PrivateNetworkRegistry : IPluginPrivateNetworkService
     {
     }
 
+    /// <summary>Finds the first publishing provider that recognizes a server address, including those of active plugins.</summary>
+    /// <param name="address">The server address.</param>
+    /// <returns>The provider, or null for an address the person manages themselves.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="address"/> is null.</exception>
+    public IPrivateNetworkProvider? FindForAddress(Uri address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        foreach (var provider in Providers.Where(static provider => provider.Capabilities.HasFlag(PrivateNetworkCapabilities.Publish)))
+        {
+            try
+            {
+                if (provider.OwnsAddress(address)) return provider;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                if (LogManager.IsInitialized) _logger.Warn(exception, $"The private network {provider.Id} could not recognize a server address.");
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Creates the registry with networks of its own, for tests.</summary>
     internal PrivateNetworkRegistry(IReadOnlyList<IPrivateNetworkProvider> builtIns, Func<IEnumerable<object?>> plugins)
     {

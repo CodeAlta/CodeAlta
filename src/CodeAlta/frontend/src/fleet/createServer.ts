@@ -32,6 +32,9 @@ export function serverSetupProblem(code: string): MessageKey {
     case "server_blocked_ufw": return "The server runs but does not answer from here: the firewall of {host} blocks port {port}. On {host}, run sudo ufw allow {port}/tcp, then try again.";
     case "server_blocked": return "The server runs but does not answer from here at {host}: check that port {port} is open in its firewall and that this name reaches it, then try again.";
     case "server_proxy_unreachable": return "The server runs, but its address does not answer from here: check that what you put in front of it forwards to port {port} of {host}, then try again.";
+    case "devtunnel_host_missing": return "The server runs, but the Dev Tunnel does not answer: devtunnel host must forward to its loopback port. Devices need the tunnel account or a connect token; see the instructions below.";
+    case "private_network_publish_missing": return "The server runs, but its private network does not publish it yet: let CodeAlta publish it, or run this command on the machine.";
+    case "private_network_publish_missing_sudo": return "The private network needs sudo to publish the server: give your password on the machine once. It is not kept.";
     case "tailscale_serve_missing": return "The server runs, but Tailscale Serve does not publish its address on {host} yet: let CodeAlta publish it, or run this command there, then start over.";
     case "tailscale_serve_missing_sudo": return "The server runs, but Tailscale Serve does not publish its address on {host} yet: give your password on the machine for CodeAlta to publish it with sudo (it is not kept), or run this command there, then start over.";
     case "tailscale_sudo_password_needed": return "Tailscale Serve is changed as an administrator of {host}: give your password on the machine once, for sudo. It is not kept.";
@@ -51,12 +54,17 @@ export function offersTailscaleServe(code: string): boolean {
   return code === "tailscale_serve_missing" || code === "tailscale_serve_missing_sudo";
 }
 
+/** Whether the matching private-network provider offers to publish on the server's machine. */
+export function offersNetworkPublish(code: string): boolean {
+  return offersTailscaleServe(code) || code === "private_network_publish_missing" || code === "private_network_publish_missing_sudo";
+}
+
 /**
  * Whether a failure of a server setup asks the person for their sudo password on the machine: for Always on, or for
  * Tailscale Serve, where the password comes with the offer to publish and is not needed to start over without it.
  */
 export function serverAsksSudoPassword(code: string): boolean {
-  return code === "tailscale_serve_missing_sudo" || code === "tailscale_sudo_password_needed" || asksSudoPassword(code);
+  return code === "private_network_publish_missing_sudo" || code === "tailscale_serve_missing_sudo" || code === "tailscale_sudo_password_needed" || asksSudoPassword(code);
 }
 
 /** The address of a server as typed, with its scheme (`https://` when none is given); empty when it cannot be one. */

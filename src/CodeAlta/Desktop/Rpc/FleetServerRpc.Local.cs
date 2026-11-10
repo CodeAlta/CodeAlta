@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using CodeAlta.Desktop.Fleet.MachineSetup;
 using CodeAlta.Fleet.Server;
+using CodeAlta.Plugins.PrivateNetworks;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -91,6 +92,9 @@ internal sealed partial class FleetServerService
     /// <summary>Gets what runs commands over SSH; the system's OpenSSH client unless a test gives another.</summary>
     internal ISshRunner? Ssh { get; init; }
 
+    /// <summary>Gets the networks of the host, including its active plugins, for diagnosis on the server's machine.</summary>
+    internal PrivateNetworkRegistry? PrivateNetworks { get; init; }
+
     /// <summary>Gets whether a server answers at an address from this computer; its health request unless a test says otherwise.</summary>
     internal Func<Uri, string?, CancellationToken, Task<ReachProblem?>>? Reachable { get; init; }
 
@@ -116,7 +120,7 @@ internal sealed partial class FleetServerService
         }
 
         var events = Channel.CreateUnbounded<MachineSetupEvent>(new UnboundedChannelOptions { SingleReader = true });
-        var installer = new SshServerInstaller(Ssh ?? new OpenSshRunner(), DesktopVersion);
+        var installer = new SshServerInstaller(Ssh ?? new OpenSshRunner(), DesktopVersion, PrivateNetworks);
         var run = Task.Run(async () =>
         {
             try
@@ -126,8 +130,8 @@ internal sealed partial class FleetServerService
                     Target = target, Port = request.Port ?? 2586, Address = address, DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath),
                     PackageFolder = Blank(request.PackageFolder), TrustedHostKey = TrustedHostKey(request.TrustedHostKey), OwnCertificate = request.OwnCertificate,
                     // Given to sudo -S on the machine for this setup only: never kept, never logged.
-                    AlwaysOn = request.AlwaysOn, TailscaleServe = request.TailscaleServe,
-                    SudoPassword = (request.AlwaysOn || request.TailscaleServe) && !string.IsNullOrEmpty(request.SudoPassword) ? request.SudoPassword : null,
+                    AlwaysOn = request.AlwaysOn, TailscaleServe = request.TailscaleServe, PublishNetwork = request.PublishNetwork,
+                    SudoPassword = (request.AlwaysOn || request.TailscaleServe || request.PublishNetwork) && !string.IsNullOrEmpty(request.SudoPassword) ? request.SudoPassword : null,
                 }, Reachable ?? AnswersAsync, async (linkAddress, setupAddress, code, pin, token) =>
                 {
                     try
@@ -236,5 +240,7 @@ internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string Owne
 /// <param name="AlwaysOn">Over SSH, whether the server starts with its machine, with nobody logged in (sudo there).</param>
 /// <param name="SudoPassword">The password sudo asks there for <paramref name="AlwaysOn"/> or <paramref name="TailscaleServe"/>, given once and never kept; null for none.</param>
 /// <param name="TailscaleServe">Over SSH, whether Tailscale Serve publishes the server there when <paramref name="Address"/> is the name of the machine on its tailnet and nothing serves it yet.</param>
+/// <param name="PublishNetwork">Over SSH, whether the matching private-network provider may publish the server.</param>
 internal sealed record FleetServerSetupRequest(string ExpectedEpoch, string? Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
-    string? ToolPath, string? PackageFolder, string? TrustedHostKey, bool OwnCertificate = false, bool AlwaysOn = false, string? SudoPassword = null, bool TailscaleServe = false);
+    string? ToolPath, string? PackageFolder, string? TrustedHostKey, bool OwnCertificate = false, bool AlwaysOn = false, string? SudoPassword = null, bool TailscaleServe = false,
+    bool PublishNetwork = false);

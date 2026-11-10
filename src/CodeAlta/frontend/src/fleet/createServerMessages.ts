@@ -3,6 +3,25 @@
 type Row = readonly [string, string, string, string, string];
 
 export const createServerMessages = {
+  "The server runs, but the Dev Tunnel does not answer: devtunnel host must forward to its loopback port. Devices need the tunnel account or a connect token; see the instructions below.": [
+    "El servidor funciona, pero el Dev Tunnel no responde: devtunnel host debe reenviar a su puerto de bucle local. Los dispositivos necesitan la cuenta del túnel o un token de conexión; consulta las instrucciones.",
+    "Le serveur tourne, mais le Dev Tunnel ne répond pas : devtunnel host doit relayer vers son port de boucle locale. Les appareils ont besoin du compte du tunnel ou d’un jeton de connexion ; suivez les instructions ci-dessous.",
+    "Der Server läuft, aber der Dev Tunnel antwortet nicht: devtunnel host muss an seinen Loopback-Port weiterleiten. Geräte benötigen das Tunnelkonto oder ein Verbindungstoken; siehe die Anleitung unten.",
+    "サーバーは動作していますが Dev Tunnel が応答しません。devtunnel host をループバックポートに転送してください。デバイスにはトンネルのアカウントまたは接続トークンが必要です。以下の手順を確認してください。",
+    "服务器正在运行，但 Dev Tunnel 没有响应：devtunnel host 必须转发到其环回端口。设备需要隧道账户或连接令牌；请参阅下方说明。"],
+  "The server runs, but its private network does not publish it yet: let CodeAlta publish it, or run this command on the machine.": [
+    "El servidor funciona, pero su red privada aún no lo publica: deja que CodeAlta lo publique o ejecuta este comando en la máquina.",
+    "Le serveur tourne, mais son réseau privé ne le publie pas encore : laissez CodeAlta le publier, ou lancez cette commande sur la machine.",
+    "Der Server läuft, aber sein privates Netzwerk veröffentlicht ihn noch nicht: CodeAlta kann ihn veröffentlichen, oder führen Sie diesen Befehl auf dem Rechner aus.",
+    "サーバーは動作していますが、プライベートネットワークでまだ公開されていません。CodeAlta に公開させるか、マシン上でこのコマンドを実行してください。",
+    "服务器正在运行，但其专用网络尚未发布它：让 CodeAlta 发布，或在机器上运行此命令。"],
+  "The private network needs sudo to publish the server: give your password on the machine once. It is not kept.": [
+    "La red privada necesita sudo para publicar el servidor: introduce una vez tu contraseña de la máquina. No se guarda.",
+    "Le réseau privé a besoin de sudo pour publier le serveur : donnez une fois votre mot de passe sur la machine. Il n’est pas conservé.",
+    "Das private Netzwerk benötigt sudo zum Veröffentlichen: Geben Sie Ihr Passwort auf dem Rechner einmal ein. Es wird nicht gespeichert.",
+    "サーバーの公開には sudo が必要です。マシンのパスワードを一度入力してください。保存されません。",
+    "专用网络需要 sudo 来发布服务器：请提供一次机器密码。密码不会保存。"],
+  "Publish with its private network": ["Publicar con su red privada", "Publier avec son réseau privé", "Über sein privates Netzwerk veröffentlichen", "プライベートネットワークで公開", "通过其专用网络发布"],
   "Spaces on this server": ["Espacios en este servidor", "Espaces sur ce serveur", "Bereiche auf diesem Server", "このサーバー上のスペース", "此服务器上的空间"],
   "Link all my spaces": ["Vincular todos mis espacios", "Relier tous mes espaces", "Alle meine Bereiche verknüpfen", "すべてのスペースをリンク", "关联我的所有空间"],
   "No space shows its sessions there yet, not even yours: link the spaces whose sessions the server shows.": [

@@ -1,4 +1,6 @@
 using CodeAlta.Desktop.Fleet.MachineSetup;
+using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.PrivateNetworks;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -167,6 +169,88 @@ public sealed class SshServerInstallerTests
     private async Task<SshSetupException> NoAnswerAsync(ISshRunner ssh, SshServerSetupRequest request)
         => await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.2.0").RunAsync(request, (_, _, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
             (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+
+    [TestMethod]
+    public async Task ADevTunnelThatDoesNotAnswer_NamesItsLoopbackHostAndTheAccessItsDevicesNeed()
+    {
+        var ssh = WithTailscale("");
+        var failure = await NoAnswerAsync(ssh, new SshServerSetupRequest
+        {
+            Target = new SshTarget("me", "box", null), Port = 2693, Address = new Uri("https://personal-2693.euw.devtunnels.ms"),
+        });
+
+        Assert.AreEqual(("reach", "devtunnel_host_missing"), (failure.Step, failure.Code));
+        StringAssert.Contains(failure.Message, "devtunnel host");
+        StringAssert.Contains(failure.Message, "http://127.0.0.1:2693");
+        StringAssert.Contains(failure.Message, "connect token");
+        Assert.AreEqual(0, ssh.Forwards, "a tunnel that keeps devices out is not claimed");
+    }
+
+    [TestMethod]
+    public async Task DevTunnels_AreInspectedOnTheServerMachine_WithoutChangingTheirAccess()
+    {
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        foreach (var result in new[] { new SshResult(0, Ubuntu + "devtunnel=yes\n", ""), new(0, "", ""), new(0, "", ""),
+            new(0, "Logged in as me using GitHub.", ""), new(0, """{"ports":[]}""", "") }) ssh.Answers.Enqueue(result);
+        var request = new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Port = 2693, Address = new Uri("https://personal-2693.euw.devtunnels.ms") };
+        var failure = await NoAnswerAsync(ssh, request);
+        StringAssert.Contains(failure.Message, "does not publish port 2693");
+        StringAssert.Contains(ssh.Scripts[3], "devtunnel 'user' 'show'");
+        StringAssert.Contains(ssh.Scripts[4], "devtunnel 'show' 'personal.euw' '--json' '--nologo'");
+        Assert.IsFalse(ssh.Scripts.Skip(3).Any(static script => script.Contains("'create'", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task APluginNetwork_InspectsAndPublishesThroughTheRemoteHost_OnlyWhenAsked()
+    {
+        var network = new RemoteNetwork();
+        var registry = new PrivateNetworkRegistry([], () => [new NetworkSource(network)]);
+        var ssh = WithTailscale("password", new SshResult(0, "not served", ""));
+        var request = new SshServerSetupRequest
+        {
+            Target = new SshTarget("me", "box", null), Address = new Uri("https://box.private.example"), Port = 2693,
+        };
+        var installer = new SshServerInstaller(ssh, "4.2.0", registry);
+        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => installer.RunAsync(request,
+            (_, _, _) => Task.FromResult<ReachProblem?>(new("No answer")), (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual(("private_network_publish_missing_sudo", "vpn publish --port 2693"), (failure.Code, failure.Message));
+        StringAssert.Contains(ssh.Scripts[3], "'vpn' 'status' 'value; not a command'");
+        Assert.AreEqual(0, ssh.Forwards);
+        CollectionAssert.AreEqual(new[] { false }, network.Publications);
+
+        var published = WithTailscale("password", new SshResult(0, "served", ""), new SshResult(0, "CODE-1234\n", ""));
+        var attempts = 0;
+        var link = await new SshServerInstaller(published, "4.2.0", registry).RunAsync(request with { PublishNetwork = true, SudoPassword = "once" },
+            (_, _, _) => Task.FromResult<ReachProblem?>(++attempts == 1 ? new("No answer") : null),
+            (_, _, _, _, _) => Task.FromResult("link-1"), static _ => { }, TestContext.CancellationToken);
+        Assert.AreEqual(("link-1", 2), (link, attempts));
+        CollectionAssert.AreEqual(new[] { false, true }, network.Publications);
+        StringAssert.Contains(published.Scripts[3], "'vpn' 'publish' 'value; not a command'");
+        StringAssert.Contains(published.Scripts[3], "printf '%s\\n' 'once' | sudo -S -p ''");
+    }
+
+    private sealed class NetworkSource(IPrivateNetworkProvider network) : IPrivateNetworkSource
+    {
+        public IReadOnlyList<IPrivateNetworkProvider> PrivateNetworks => [network];
+    }
+
+    private sealed class RemoteNetwork : IPrivateNetworkProvider
+    {
+        public List<bool> Publications { get; } = [];
+        public string Id => "private-vpn";
+        public string DisplayName => "Private VPN";
+        public PrivateNetworkCapabilities Capabilities => PrivateNetworkCapabilities.Publish;
+        public bool OwnsAddress(Uri address) => address.Host.EndsWith(".private.example", StringComparison.Ordinal);
+
+        public async Task<PrivateNetworkRemoteResult?> CheckRemoteAsync(IPrivateNetworkRemoteHost host, Uri address, int localPort, bool publish, CancellationToken cancellationToken)
+        {
+            Publications.Add(publish);
+            Assert.AreEqual(("Linux", "me", false), (host.OperatingSystem, host.UserName, host.IsRoot));
+            await host.RunAsync("vpn", [publish ? "publish" : "status", "value; not a command"], publish ? "Access denied" : null, cancellationToken);
+            return publish ? new("check that this computer is on the VPN", Recheck: true)
+                : new($"vpn publish --port {localPort}", host.ElevationAsksPassword ? "private_network_publish_missing_sudo" : "private_network_publish_missing");
+        }
+    }
 
     [TestMethod]
     public async Task BehindANameOfItsTailnet_ThatTailscaleServeDoesNotPublish_TheCommandIsNamed_AndNothingIsChangedThere()

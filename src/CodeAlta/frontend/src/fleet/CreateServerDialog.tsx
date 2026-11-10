@@ -10,7 +10,7 @@ import { managesMachine } from "../machines/machineManagement";
 import { sshTargetOf } from "../machines/addMachine";
 import { SetupFailureDetail } from "../machines/AddMachineDialog";
 import { hostKeyOf } from "../machines/addMachine";
-import { localServerSteps, offersTailscaleServe, organizationUrlOf, serverAsksSudoPassword, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
+import { localServerSteps, offersNetworkPublish, offersTailscaleServe, organizationUrlOf, serverAsksSudoPassword, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 import { ServerSpaces, type ServerSpacesApi, type ServerSpacesListApi } from "./ServerSpaces";
 
 /** The calls of the dialog on the servers. */
@@ -93,8 +93,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
     setTailscaleServe(serve);
     try {
       const events = await api.createServer(where === "local"
-        ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false, alwaysOn: false, sudoPassword: null, tailscaleServe: false }
-        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted", alwaysOn, sudoPassword: password, tailscaleServe: serve },
+        ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false, alwaysOn: false, sudoPassword: null, tailscaleServe: false, publishNetwork: false }
+        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted", alwaysOn, sudoPassword: password, tailscaleServe: serve, publishNetwork: serve },
         { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
@@ -187,7 +187,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
           <SetupFailureDetail code={failed.code} detail={failed.detail} />
           {!running && serverAsksSudoPassword(failed.code) && <label className="add-machine-field add-machine-sudo"><span>{t("Password on the machine")}</span>
             <InputGroup type="password" autoFocus fill value={sudoPassword} autoComplete="off" aria-label={t("Password on the machine")}
-              onChange={event => setSudoPassword(event.currentTarget.value)} onKeyDown={event => { if (event.key === "Enter" && sudoPassword) void create(null, offersTailscaleServe(failed.code) || undefined); }} /></label>}</Callout>}
+              onChange={event => setSudoPassword(event.currentTarget.value)} onKeyDown={event => { if (event.key === "Enter" && sudoPassword) void create(null, offersNetworkPublish(failed.code) || undefined); }} /></label>}</Callout>}
         {linkId && <>
           <Callout compact intent="success" role="status">{t(where === "local" ? "Your server runs on this computer, and you are its owner." : "Your server runs on {host}, and you are its owner.",
             { host: shownHost })}</Callout>
@@ -201,10 +201,10 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
         {!running && failed && <Button text={t("Back")} onClick={() => { setSteps(null); setFailed(null); setTailscaleServe(false); }} />}
         {!running && shownKey && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
           onClick={() => void create(shownKey)} />}
-        {!running && failed && !shownKey && <Button intent={offersTailscaleServe(failed.code) ? "none" : "primary"} icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
-          disabled={serverAsksSudoPassword(failed.code) && !offersTailscaleServe(failed.code) && !sudoPassword} title={t("Every step runs again from the first one.")}
+        {!running && failed && !shownKey && <Button intent={offersNetworkPublish(failed.code) ? "none" : "primary"} icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
+          disabled={serverAsksSudoPassword(failed.code) && !offersNetworkPublish(failed.code) && !sudoPassword} title={t("Every step runs again from the first one.")}
           onClick={() => void create(null)} />}
-        {!running && failed && offersTailscaleServe(failed.code) && <Button intent="primary" text={t("Publish it with Tailscale Serve")} disabled={serverAsksSudoPassword(failed.code) && !sudoPassword}
+        {!running && failed && offersNetworkPublish(failed.code) && <Button intent="primary" text={t(offersTailscaleServe(failed.code) ? "Publish it with Tailscale Serve" : "Publish with its private network")} disabled={serverAsksSudoPassword(failed.code) && !sudoPassword}
           title={t("Every step runs again from the first one, and CodeAlta runs this command on the machine.")} onClick={() => void create(null, true)} />}
         {linkId && <Button intent="primary" text={t("Done")} onClick={() => onClose(true, recoveryWords)} />}
       </>} />

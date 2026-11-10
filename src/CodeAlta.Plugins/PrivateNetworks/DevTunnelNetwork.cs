@@ -400,7 +400,7 @@ internal sealed class DevTunnelCli : IDevTunnelCli
 /// loopback address at an HTTPS address any device opens once signed in with the account of the tunnel, hosted while its user runs. It says
 /// nothing of where this computer is: the devices reach the page through the tunnel only.
 /// </summary>
-internal sealed class DevTunnelNetwork(IDevTunnelCli cli) : IPrivateNetworkProvider
+internal sealed partial class DevTunnelNetwork(IDevTunnelCli cli) : IPrivateNetworkProvider
 {
     /// <summary>The id of the provider.</summary>
     internal const string ProviderId = "devtunnel";

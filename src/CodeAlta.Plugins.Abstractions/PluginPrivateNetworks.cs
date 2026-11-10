@@ -67,6 +67,83 @@ public interface IPrivateNetworkProvider
     /// <param name="host">What the user gives the publisher: its state, its log, its background, and a way to say what changed.</param>
     /// <returns>The publisher, or null when the provider publishes nothing.</returns>
     IPrivateNetworkPublisher? CreatePublisher(IPrivateNetworkHost host) => null;
+
+    /// <summary>
+    /// Gets whether an address belongs to this network. This checks the address alone, not the local computer:
+    /// the server may be on another machine. Only providers with <see cref="PrivateNetworkCapabilities.Publish"/> are asked.
+    /// </summary>
+    /// <param name="address">The public address of the server.</param>
+    /// <returns>Whether this provider can diagnose the address.</returns>
+    bool OwnsAddress(Uri address) => false;
+
+    /// <summary>
+    /// Diagnoses a server address that does not answer, on the server's machine, not on this computer. Commands go through
+    /// <paramref name="host"/> (SSH in Create my server). Changes are allowed only when <paramref name="publish"/> is true.
+    /// A provider without remote support returns null. A publication must survive this call: it is not a Mobile publication.
+    /// </summary>
+    /// <param name="host">Runs commands on the server's machine.</param>
+    /// <param name="address">The address the devices use.</param>
+    /// <param name="localPort">The server's HTTP port on that machine's loopback.</param>
+    /// <param name="publish">Whether the person explicitly asked to publish it.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <returns>What is missing, or null when the provider has no diagnosis.</returns>
+    Task<PrivateNetworkRemoteResult?> CheckRemoteAsync(IPrivateNetworkRemoteHost host, Uri address, int localPort, bool publish, CancellationToken cancellationToken)
+        => Task.FromResult<PrivateNetworkRemoteResult?>(null);
+}
+
+/// <summary>Commands of a private network on the server's machine. Implementations never retain the elevation password.</summary>
+public interface IPrivateNetworkRemoteHost
+{
+    /// <summary>Gets the operating system there: <c>Linux</c> or <c>Darwin</c>.</summary>
+    string OperatingSystem { get; }
+
+    /// <summary>Gets the account running the commands there.</summary>
+    string UserName { get; }
+
+    /// <summary>Gets whether that account is root.</summary>
+    bool IsRoot { get; }
+
+    /// <summary>Gets whether sudo there asks a password.</summary>
+    bool ElevationAsksPassword { get; }
+
+    /// <summary>Checks for a command on that machine, never on the desktop.</summary>
+    /// <param name="command">The executable name.</param>
+    /// <param name="cancellationToken">Stops the check.</param>
+    /// <returns>Whether it is installed there.</returns>
+    Task<bool> IsInstalledAsync(string command, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs a bounded command, quoting each argument. When <paramref name="elevateOnFailure"/> is not null and a failed
+    /// command says those words, it is retried with sudo, using the password given for this attempt only.
+    /// </summary>
+    /// <param name="command">The executable name, not a shell command.</param>
+    /// <param name="arguments">Its arguments.</param>
+    /// <param name="elevateOnFailure">The refusal that permits an elevation retry; null for read-only work.</param>
+    /// <param name="cancellationToken">Stops the run.</param>
+    /// <returns>The output and whether elevation was needed or refused. Credentials must never be printed.</returns>
+    Task<PrivateNetworkRemoteCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, string? elevateOnFailure, CancellationToken cancellationToken);
+}
+
+/// <summary>What a command on the server's machine gave.</summary>
+/// <param name="ExitCode">Its exit code.</param>
+/// <param name="Output">Its answer, without SSH notices on successful commands.</param>
+/// <param name="TimedOut">Whether the command exceeded its wait.</param>
+/// <param name="NeedsPassword">Whether elevation needed a password not given for this attempt.</param>
+/// <param name="ElevationRefused">Whether sudo refused the elevation.</param>
+public sealed record PrivateNetworkRemoteCommandResult(int ExitCode, string Output, bool TimedOut = false, bool NeedsPassword = false, bool ElevationRefused = false);
+
+/// <summary>The diagnosis or publication of an unreachable server through a private network.</summary>
+/// <param name="Detail">What to do there, including the command or the page that fixes it. Never credentials.</param>
+/// <param name="ProblemCode">
+/// Null for an explanation added to the reach failure; <c>private_network_publish_missing</c> or
+/// <c>private_network_publish_missing_sudo</c> to offer publication (and ask the sudo password); otherwise a failure code.
+/// Built-in providers retain their existing codes.
+/// </param>
+/// <param name="Recheck">Whether publication succeeded and the address must be checked again. If it still fails, Detail explains what remains.</param>
+public sealed record PrivateNetworkRemoteResult(string Detail, string? ProblemCode = null, bool Recheck = false)
+{
+    /// <summary>Gets the publication name shown while the address is checked again.</summary>
+    public string? Activity { get; init; }
 }
 
 /// <summary>Gives the private networks a plugin brings, beside those of CodeAlta: implemented by the plugin class itself.</summary>

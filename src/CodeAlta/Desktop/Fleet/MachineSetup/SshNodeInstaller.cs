@@ -83,6 +83,9 @@ internal sealed record SshMachineFacts(string Os, string Architecture, string? R
     /// <summary>Gets whether Tailscale is installed there.</summary>
     public bool Tailscale { get; init; }
 
+    /// <summary>Gets whether the Dev Tunnels command line is installed there.</summary>
+    public bool DevTunnel { get; init; }
+
     /// <summary>Gets how a command runs as root there: <c>root</c> (the person is), <c>nopassword</c>, <c>password</c> (sudo asks one); null without sudo.</summary>
     public string? Sudo { get; init; }
 
@@ -273,6 +276,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         if pgrep -x alta >/dev/null 2>&1; then echo "desktop=running"; fi
         if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then echo "firewall=ufw"; fi
         if command -v tailscale >/dev/null 2>&1; then echo "tailscale=yes"; fi
+        if command -v devtunnel >/dev/null 2>&1; then echo "devtunnel=yes"; fi
         if [ -f /etc/alpine-release ]; then echo "libc=musl"; fi
         if [ "$(id -u)" = 0 ]; then echo "sudo=root"; elif command -v sudo >/dev/null 2>&1; then
           if sudo -n true >/dev/null 2>&1; then echo "sudo=nopassword"; else echo "sudo=password"; fi
@@ -311,6 +315,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
             NullIfEmpty(values.GetValueOrDefault("hostname")))
         {
             Firewall = NullIfEmpty(values.GetValueOrDefault("firewall")), Tailscale = values.GetValueOrDefault("tailscale") == "yes",
+            DevTunnel = values.GetValueOrDefault("devtunnel") == "yes",
             Sudo = values.GetValueOrDefault("sudo") is "root" or "nopassword" or "password" ? values["sudo"] : null,
         };
 

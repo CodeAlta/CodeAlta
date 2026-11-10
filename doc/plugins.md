@@ -86,6 +86,10 @@ plugins (`IPrivateNetworkSource`), in one `PrivateNetworkRegistry` of the deskto
 links) or publishes a page of the loopback address at an HTTPS address (`Publish`: the Mobile plugin). One id names one
 network, CodeAlta's first; a network that fails is passed over, never fatal. The publisher keeps its own state through its
 host, so the Mobile plugin knows no network by name.
+For a server reached over SSH, the same registry recognizes its public address through `OwnsAddress`. The matching
+provider diagnoses or publishes through `IPrivateNetworkRemoteHost`; only that host knows SSH and elevation, and only
+an explicit publication request permits changes. Network-specific commands and diagnostics stay in the provider,
+not the reach step or the desktop's process adapter.
 
 **Automation triggers and scripts.** `GetAutomationTriggers()` gives triggers of automations, each with an
 `IAutomationTriggerSource` that is polled with a cursor or keeps a listener running. The plugin only reports events:
