@@ -544,6 +544,31 @@ public sealed class ScratchpadStartupCleanupTests
     }
 
     [TestMethod]
+    public async Task AWritableHandleOfAnAncestor_ThatGoesSoon_DoesNotSkipThePass()
+    {
+        RequireWindows();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/note", "remove");
+        // Another process that moves an entry into an ancestor (the temp directory of a test run) holds it open for
+        // writing for that instant: the pass waits for it instead of giving up.
+        var writer = OpenWritableDirectory(fixture.Root);
+        Assert.IsFalse(writer.IsInvalid);
+        var release = new Thread(() => { Thread.Sleep(100); writer.Dispose(); }) { IsBackground = true };
+        try
+        {
+            var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard) { MaxAge = TimeSpan.Zero, WorkerStarted = _ => release.Start() };
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+            Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(", ", cleanup.Snapshot.Reasons));
+            Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+        }
+        finally
+        {
+            if (release.IsAlive) release.Join();
+            writer.Dispose();
+        }
+    }
+
+    [TestMethod]
     public async Task PathPinsBlockMovesIntoSharedAncestorsButNotIsolatedFixtureDirectories()
     {
         RequireWindows();
