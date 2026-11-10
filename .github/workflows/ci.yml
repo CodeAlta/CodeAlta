@@ -27,8 +27,10 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  # Linux runs every test project in one job. Windows and macOS run them slower: their projects are split in groups, each
-  # job building and testing its own, and the last group takes every test project of the solution that the others do not.
+  # Linux runs every test project in one job. macOS runs them slower: its projects are split in groups, each job building
+  # and testing its own, and the last group takes every test project of the solution that the others do not. Windows, the
+  # slowest, and where the tests run before each change is submitted, builds everything and runs the test classes that
+  # do something else on Windows (those that test `OperatingSystem.IsWindows()`).
   test:
     name: "Tests (${{ matrix.os }}${{ matrix.group && format(', {0}', matrix.group) || '' }})"
     if: github.ref_type != 'tag'
@@ -37,9 +39,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-          - { os: windows-latest, group: desktop, projects: CodeAlta.Desktop.Tests }
-          - { os: windows-latest, group: core, projects: CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
-          - { os: windows-latest, group: others, others: CodeAlta.Desktop.Tests CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
+          - { os: windows-latest, group: Windows-specific, windows: true }
           - { os: macos-latest, group: desktop, projects: CodeAlta.Desktop.Tests }
           - { os: macos-latest, group: core, projects: CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
           - { os: macos-latest, group: others, others: CodeAlta.Desktop.Tests CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
@@ -67,8 +67,16 @@ jobs:
         env:
           PROJECTS: ${{ matrix.projects }}
           OTHERS: ${{ matrix.others }}
+          WINDOWS: ${{ matrix.windows }}
         run: |
           set -euo pipefail
+          if [ "$WINDOWS" = "true" ]; then
+            # The classes of the test files that test OperatingSystem.IsWindows(), each matched by its name.
+            classes=$(grep -rlE 'OperatingSystem\.IsWindows\(\)' --include='*.cs' src/CodeAlta*.Tests \
+              | xargs grep -ohE '^\s*(public |internal )?(sealed |static |abstract )*(partial )?class [A-Za-z0-9_]+' | grep -oE '[A-Za-z0-9_]+$' | sort -u)
+            echo "$(wc -l <<< "$classes") classes"
+            echo "TEST_FILTER=$(sed 's/.*/FullyQualifiedName~.&./' <<< "$classes" | paste -sd'|')" >> "$GITHUB_ENV"
+          fi
           if [ -z "$PROJECTS$OTHERS" ]; then echo "TESTS=src/CodeAlta.slnx" >> "$GITHUB_ENV"; exit 0; fi
           chosen=()
           for path in $(grep -oE 'Path="[^"]+Tests\.csproj"' src/CodeAlta.slnx | sed -E 's/Path="([^"]+)"/\1/'); do
@@ -85,8 +93,9 @@ jobs:
       - name: "Build"
         run: dotnet build ${{ env.TESTS }} -c Release
       - name: "Test"
+        shell: bash
         # A test that hangs is named and its run stopped, instead of the job running out of time.
-        run: dotnet test ${{ env.TESTS }} -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none
+        run: dotnet test "$TESTS" -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none ${TEST_FILTER:+--filter "$TEST_FILTER"}
 
   # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
   # for every shard of the tests.
