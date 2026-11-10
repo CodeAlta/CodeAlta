@@ -51,7 +51,8 @@ jobs:
       - name: "Build"
         run: dotnet build src/CodeAlta.slnx -c Release
       - name: "Test"
-        run: dotnet test src/CodeAlta.slnx -c Release --no-build
+        # A test that hangs is named and its run stopped, instead of the job running out of time.
+        run: dotnet test src/CodeAlta.slnx -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none
 
   # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
   # for every shard of the tests.
