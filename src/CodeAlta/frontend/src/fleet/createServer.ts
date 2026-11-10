@@ -1,5 +1,5 @@
 import type { MessageKey } from "../localization";
-import { setupProblem } from "../machines/addMachine";
+import { asksSudoPassword, setupProblem } from "../machines/addMachine";
 
 /** The steps of a server set up on this computer, in their order. */
 export const localServerSteps: readonly string[] = ["find", "install", "start", "claim"];
@@ -32,6 +32,11 @@ export function serverSetupProblem(code: string): MessageKey {
     case "server_blocked_ufw": return "The server runs but does not answer from here: the firewall of {host} blocks port {port}. On {host}, run sudo ufw allow {port}/tcp, then try again.";
     case "server_blocked": return "The server runs but does not answer from here at {host}: check that port {port} is open in its firewall and that this name reaches it, then try again.";
     case "server_proxy_unreachable": return "The server runs, but its address does not answer from here: check that what you put in front of it forwards to port {port} of {host}, then try again.";
+    case "tailscale_serve_missing": return "The server runs, but Tailscale Serve does not publish its address on {host} yet: let CodeAlta publish it, or run this command there, then start over.";
+    case "tailscale_serve_missing_sudo": return "The server runs, but Tailscale Serve does not publish its address on {host} yet: give your password on the machine for CodeAlta to publish it with sudo (it is not kept), or run this command there, then start over.";
+    case "tailscale_sudo_password_needed": return "Tailscale Serve is changed as an administrator of {host}: give your password on the machine once, for sudo. It is not kept.";
+    case "tailscale_serve_disabled": return "Tailscale Serve or HTTPS certificates are not turned on for your tailnet: an admin of the tailnet turns them on at this address, then try again.";
+    case "tailscale_serve_failed": return "Tailscale Serve could not publish the server on {host}: run its command there yourself, then start over.";
     case "server_owned": return "A server with an owner runs there already: join it with an enrollment code instead.";
     case "setup_code_failed": return "The server gave no setup code.";
     case "forward_failed": return "This computer could not reach the server through SSH to set it up.";
@@ -39,6 +44,19 @@ export function serverSetupProblem(code: string): MessageKey {
     case "invalid_request": return "Check the computer, the address and the folders: a folder is a full path, and a name is needed.";
     default: return setupProblem(code);
   }
+}
+
+/** Whether a failure of a server setup is an address that Tailscale Serve does not publish yet, which CodeAlta offers to publish on the machine. */
+export function offersTailscaleServe(code: string): boolean {
+  return code === "tailscale_serve_missing" || code === "tailscale_serve_missing_sudo";
+}
+
+/**
+ * Whether a failure of a server setup asks the person for their sudo password on the machine: for Always on, or for
+ * Tailscale Serve, where the password comes with the offer to publish and is not needed to start over without it.
+ */
+export function serverAsksSudoPassword(code: string): boolean {
+  return code === "tailscale_serve_missing_sudo" || code === "tailscale_sudo_password_needed" || asksSudoPassword(code);
 }
 
 /** The address of a server as typed, with its scheme (`https://` when none is given); empty when it cannot be one. */

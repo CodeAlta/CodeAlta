@@ -57,6 +57,35 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
   }, options);
 });
 
+test("Create my server behind a name of a tailnet offers to publish it with Tailscale Serve, with the password sudo asks for it", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelectorAll('.create-server-dialog .add-machine-choice').length === 3`, "the three places");
+    await page.evaluate(`document.querySelector('.create-server-dialog .add-machine-choice').click()`);
+    await page.until(`document.querySelector('.create-server-dialog input[aria-label=Computer]')`, "the form");
+    await page.evaluate(type(".create-server-dialog input[aria-label=Computer]", "me@box"));
+    await page.evaluate(type(".create-server-dialog input[aria-label='Address of the server']", "box.tail1234.ts.net:2586"));
+    await page.evaluate(type(".create-server-dialog input[aria-label='Your name']", "Alex"));
+    await page.clickText(".create-server-dialog .bp6-button", "Create my server");
+
+    // Nothing is published at that name yet: the command is shown, and CodeAlta offers to run it there, with the password sudo asks.
+    await page.until(`document.querySelector('.create-server-dialog .add-machine-failure input[aria-label="Password on the machine"]')`, "the reach fails, and the password is asked");
+    assert.match(await page.evaluate(`document.querySelector('.add-machine-failure').textContent`) as string, /Tailscale Serve does not publish its address on box yet/u);
+    assert.equal(await page.evaluate(`document.querySelector('.add-machine-failure .add-machine-detail').textContent`), "sudo tailscale serve --bg --https=2586 http://127.0.0.1:2586");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.create-server-dialog .bp6-dialog-footer .bp6-button')].map(button =>
+      [button.textContent, button.classList.contains('bp6-intent-primary'), button.disabled])`),
+      [["Back", false, false], ["Start over", false, false], ["Publish it with Tailscale Serve", true, true]], "the person who ran the command starts over without a password");
+    assert.match(await page.evaluate(`document.querySelector('.add-machine-failure').textContent`) as string, /give your password on the machine for CodeAlta to publish it with sudo \(it is not kept\)/u);
+    await page.evaluate(type(".create-server-dialog input[aria-label='Password on the machine']", "s3cret"));
+    await page.until(`![...document.querySelectorAll('.create-server-dialog .bp6-dialog-footer .bp6-button')].find(button => button.textContent === 'Publish it with Tailscale Serve').disabled`, "the password given");
+    await page.shot("create-server-tailscale-serve");
+    await page.clickText(".create-server-dialog .bp6-button", "Publish it with Tailscale Serve");
+    await page.until(`document.querySelector('.create-server-dialog [role=status]')?.textContent === 'Your server runs on box, and you are its owner.'`, "the server is claimed");
+    const created = { ssh: "me@box", address: "https://box.tail1234.ts.net:2586", port: 2586, ownCertificate: false };
+    assert.deepEqual((await calls(page)).filter(call => call.ssh), [created, { ...created, tailscaleServe: true, sudo: true }], "the password goes with the try that publishes: one try");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("Connect to my server speaks to the owner, links every space of the person, and is approved by another computer of theirs", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('joinOwn')`);

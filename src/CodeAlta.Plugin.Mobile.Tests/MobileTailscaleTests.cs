@@ -20,6 +20,29 @@ public sealed class MobileTailscaleTests
     }
 
     [TestMethod]
+    public async Task Check_SaysWhatThePortServes_AndChangesNothing()
+    {
+        var free = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running).Answer("serve status --json", "{}");
+        var status = await new TailscaleServe(free).CheckAsync(2584, 2584, default);
+        Assert.AreEqual(("not-serving", "https://desk.tail1234.ts.net:2584"), (status.State, status.Url), "the address a publication would have");
+        CollectionAssert.AreEqual(new[] { "status --json", "serve status --json" }, free.Calls);
+
+        var ours = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""");
+        Assert.AreEqual("serving", (await new TailscaleServe(ours).CheckAsync(2584, 2584, default)).State);
+
+        var theirs = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}""");
+        Assert.AreEqual("port-taken", (await new TailscaleServe(theirs).CheckAsync(2584, 2584, default)).State);
+
+        // Published under an older name of the computer: nothing answers at its current name, and the check takes nothing off.
+        var stale = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"old-desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""");
+        Assert.AreEqual("not-serving", (await new TailscaleServe(stale).CheckAsync(2584, 2584, default)).State);
+        Assert.IsFalse(stale.Calls.Contains("serve reset"));
+    }
+
+    [TestMethod]
     public async Task Publish_LeavesAPortThatServesSomethingElse()
     {
         // The user serves an application of their own on that port: it is not replaced.
