@@ -3,6 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "esbuild";
 import { edge, withCanvas, type Page } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 // The Markdown instruction uses the real code editor; bundle its worker as the other editor fixtures do.
 const editorWorker: Plugin = { name: "editor-worker", setup(bundle) {
@@ -44,7 +45,7 @@ const enter = async (page: Page, text: string) => {
   await page.key("Enter", 13);
 };
 
-test("the texts of attribution show the ones of CodeAlta until the user writes another, and each choice is saved alone", { skip: !edge, timeout: 90_000 }, async () => {
+test("the texts of attribution show the ones of CodeAlta until the user writes another, and each choice is saved alone", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`!!${trailer} && !!document.querySelector('${instruction}')`, "the trailer and the Markdown editor");
     // The texts agents get are filled in, so the user can tweak them instead of writing them again.

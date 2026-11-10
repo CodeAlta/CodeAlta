@@ -208,7 +208,7 @@ public sealed class SearchVectorIndexTests
             try
             {
                 // The writer starts once every reader searches, so that they overlap even on one processor.
-                Assert.IsTrue(reading.Wait(TimeSpan.FromSeconds(30)), "The readers did not start.");
+                Assert.IsTrue(reading.Wait(TestTime.Seconds(30)), "The readers did not start.");
                 for (long id = 0; id < Adds; id++)
                 {
                     index.Add(id, vectors[id % vectors.Length], SearchVectorTestData.Info(SearchKind.Message));

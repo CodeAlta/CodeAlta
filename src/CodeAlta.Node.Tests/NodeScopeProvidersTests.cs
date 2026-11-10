@@ -121,7 +121,7 @@ public sealed class NodeScopeProvidersTests
         // Taken away: the node stops using it, and its key, at once.
         providers.Apply("link-1", []);
         // While the runtime still prepares it (its models listed), it is unregistered as soon as that ends.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(60);
         while (Registered() && DateTime.UtcNow < deadline) await Task.Delay(100, token);
         Assert.IsFalse(Registered(), "a provider taken away is no longer usable");
     }

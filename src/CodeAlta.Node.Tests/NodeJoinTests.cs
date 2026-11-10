@@ -13,7 +13,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class NodeJoinTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -47,7 +47,7 @@ public sealed class NodeJoinTests
             ServiceEnvironment = static () => null,
         };
         var running = node.RunAsync(["run", "--data-root", root.DataRoot, "--no-listen", "--name", "test-node"]);
-        var stop = await started.Task.WaitAsync(Patience, token);
+        var stop = await started.Task.WithinAsync(Patience, token);
         try
         {
             var (code, output, error) = await RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]);
@@ -88,7 +88,7 @@ public sealed class NodeJoinTests
         finally
         {
             stop();
-            Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token));
+            Assert.AreEqual(NodeExitCodes.Success, await running.WithinAsync(Patience, token));
         }
     }
 

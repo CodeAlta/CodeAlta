@@ -24,12 +24,12 @@ public sealed class ForwardedSignInTests
         Assert.IsFalse(forwarded.TryComplete(new Uri("http://127.0.0.1:50123/mcp/oauth/callback?code=a#fragment")));
         Assert.IsTrue(forwarded.TryComplete(new Uri("http://localhost:50123/mcp/oauth/callback?code=a%20b&state=s")));
         Assert.IsFalse(forwarded.TryComplete(new Uri("http://127.0.0.1:50123/mcp/oauth/callback?code=c")), "once");
-        var callback = await forwarded.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
+        var callback = await forwarded.WaitAsync(TestTime.Seconds(5), CancellationToken.None); // not a Task
         Assert.AreEqual("127.0.0.1", callback.Host, "read as the redirect it named");
         Assert.AreEqual("a b", ForwardedBrowserCallback.QueryValue(callback, "code"));
 
         var expires = new ForwardedBrowserCallback(new Uri("http://127.0.0.1:50124/callback"));
-        await Assert.ThrowsExactlyAsync<TimeoutException>(() => expires.WaitAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TimeoutException>(() => expires.WaitAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None)); // not a Task, not a limit: the wait that expires
     }
 
     [TestMethod]

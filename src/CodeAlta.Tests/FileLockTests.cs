@@ -5,7 +5,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class FileLockTests
 {
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task ALockFile_HasOneOwner_AndAWaiterTakesItOnceReleased()
@@ -21,13 +21,13 @@ public sealed class FileLockTests
         {
             var wait = LockFile.AcquireAsync(path, canceled.Token).AsTask();
             await canceled.CancelAsync();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => wait.WaitAsync(Hang));
+            await Assert.ThrowsAsync<OperationCanceledException>(() => wait.WithinAsync(Hang));
         }
 
         var waiter = LockFile.AcquireAsync(path, CancellationToken.None).AsTask();
         Assert.IsFalse(waiter.IsCompleted);
         await held.DisposeAsync();
-        await using (await waiter.WaitAsync(Hang))
+        await using (await waiter.WithinAsync(Hang))
         {
             Assert.IsFalse(LockFile.TryAcquire(path, out _));
         }
@@ -57,8 +57,8 @@ public sealed class FileLockTests
         Assert.IsFalse(waiter.IsCompleted);
         held.Dispose();
         held.Dispose();
-        (await waiter.WaitAsync(Hang)).Dispose();
-        (await blocked.WaitAsync(Hang)).Dispose();
+        (await waiter.WithinAsync(Hang)).Dispose();
+        (await blocked.WithinAsync(Hang)).Dispose();
         Assert.AreEqual(0, locks.Count, "A lock no owner holds or waits for is forgotten.");
     }
 
@@ -75,7 +75,7 @@ public sealed class FileLockTests
             var wait = locks.AcquireAsync(path, canceled.Token).AsTask();
             Assert.AreEqual(1, locks.Count);
             await canceled.CancelAsync();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => wait.WaitAsync(Hang));
+            await Assert.ThrowsAsync<OperationCanceledException>(() => wait.WithinAsync(Hang));
         }
 
         Assert.AreEqual(1, locks.Count, "Its owner still holds it.");
@@ -107,7 +107,7 @@ public sealed class FileLockTests
         })).ToArray();
 
         start.Set();
-        await Task.WhenAll(owners).WaitAsync(Hang);
+        await Task.WhenAll(owners).WithinAsync(Hang);
         Assert.AreEqual(1, most);
         Assert.AreEqual(0, locks.Count);
 

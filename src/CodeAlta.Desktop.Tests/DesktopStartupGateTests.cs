@@ -22,7 +22,7 @@ public sealed class DesktopStartupGateTests
         // A later snapshot does not push the moment back.
         gate.WorkspaceServed();
         time.Advance(TimeSpan.FromMilliseconds(1));
-        Assert.IsTrue(gate.Shown.Wait(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(gate.Shown.Wait(TestTime.Seconds(5)));
     }
 
     [TestMethod]
@@ -35,7 +35,7 @@ public sealed class DesktopStartupGateTests
         time.Advance(DesktopStartupGate.Fallback - TimeSpan.FromMilliseconds(1));
         Assert.IsFalse(gate.Shown.IsCompleted);
         time.Advance(TimeSpan.FromMilliseconds(1));
-        Assert.IsTrue(gate.Shown.Wait(TimeSpan.FromSeconds(5)));
+        Assert.IsTrue(gate.Shown.Wait(TestTime.Seconds(5)));
     }
 
     /// <summary>A clock that moves only when the test advances it.</summary>

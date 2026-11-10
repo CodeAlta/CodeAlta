@@ -139,7 +139,7 @@ public sealed class AutomationIntegrationTests
         using var answer = new ManualResetEventSlim();
         fixture.Tools.On(HttpMethod.Get, "/oncalls", _ =>
         {
-            answer.Wait(TimeSpan.FromSeconds(20));
+            answer.Wait(TestTime.Seconds(20));
             return (System.Net.HttpStatusCode.OK, """{"oncalls":[{"user":{"email":"bob@acme.test","name":"Bob"}}]}""");
         });
         // Off the test thread: the fake tool answers on the thread that asks it.
@@ -159,7 +159,7 @@ public sealed class AutomationIntegrationTests
         using var failure = new ManualResetEventSlim();
         fixture.Tools.On(HttpMethod.Get, "/oncalls", _ =>
         {
-            failure.Wait(TimeSpan.FromSeconds(20));
+            failure.Wait(TestTime.Seconds(20));
             return (System.Net.HttpStatusCode.ServiceUnavailable, """{"error":{"message":"down"}}""");
         });
         var before = told.Count;
@@ -201,7 +201,7 @@ public sealed class AutomationIntegrationTests
             .On(HttpMethod.Post, "/api/chat.postMessage", """{"ok":true,"ts":"3.0"}""");
 
         fixture.Service.Tick(fixture.Clock.Now);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
         var socket = await fixture.Sockets.Accepted.Reader.ReadAsync(timeout.Token);
         // Another channel, and the message event that comes beside a mention, start nothing.
         await FakeSlackSockets.SendAsync(socket, Envelope("e1", "Ev1", "app_mention", "C9999999999", "hello"));
@@ -236,7 +236,7 @@ public sealed class AutomationIntegrationTests
         fixture.Tools.On(HttpMethod.Post, "/api/apps.connections.open", """{"ok":true,"url":"wss://wss.slack.test/link"}""");
 
         fixture.Service.Tick(fixture.Clock.Now);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
         var socket = await fixture.Sockets.Accepted.Reader.ReadAsync(timeout.Token);
         await FakeSlackSockets.SendAsync(socket, Envelope("e1", "Ev1", "app_mention", "C0FFFFFFFFF", "<@A1> the second channel"));
         var second = await fixture.Runner.NextAsync();
@@ -265,7 +265,7 @@ public sealed class AutomationIntegrationTests
         fixture.Tools.On(HttpMethod.Post, "/api/apps.connections.open", """{"ok":true,"url":"wss://wss.slack.test/link"}""")
             .On(HttpMethod.Post, "/api/chat.postMessage", """{"ok":true,"ts":"6.0"}""");
         fixture.Service.Tick(fixture.Clock.Now);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
         var socket = await fixture.Sockets.Accepted.Reader.ReadAsync(timeout.Token);
 
         await FakeSlackSockets.SendAsync(socket, Envelope("e1", "Ev1", "message", "C0123ABCDEF", "the build is red"));

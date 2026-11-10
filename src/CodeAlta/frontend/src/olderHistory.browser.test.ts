@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 // The timeline of a session in headless Edge, under the production content security policy and React StrictMode:
 // a reader who goes up gets the turns before the loaded ones, a chunk at a time, and stays on the rows in view.
@@ -42,7 +43,7 @@ async function turnsFrom(page: Page, turn: number, what: string) {
   await still(page);
 }
 
-test("going up in a timeline reads the turns before, a chunk at a time, and the rows in view stay where they are", { skip: !edge, timeout: 180_000 }, async () => {
+test("going up in a timeline reads the turns before, a chunk at a time, and the rows in view stay where they are", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   await withCanvas(async page => {
     await turnsFrom(page, 9, "the latest turn");
     assert.equal(await page.evaluate(`document.querySelector('.load-more').textContent`), "Load all messages");
@@ -159,7 +160,7 @@ test("going up in a timeline reads the turns before, a chunk at a time, and the 
   }, options);
 });
 
-test("a short latest turn, a read that fails, a timeline behind another tab, and all the messages at once", { skip: !edge, timeout: 180_000 }, async () => {
+test("a short latest turn, a read that fails, a timeline behind another tab, and all the messages at once", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`olderFixture.show({ sessionId: 'short' })`);
     await turnsFrom(page, 7, "the latest turn, two messages");
@@ -278,7 +279,7 @@ test("a short latest turn, a read that fails, a timeline behind another tab, and
   }, options);
 });
 
-test("a reader leaves the end of a timeline that grows with small turns of the wheel, and comes back to it", { skip: !edge, timeout: 120_000 }, async () => {
+test("a reader leaves the end of a timeline that grows with small turns of the wheel, and comes back to it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await turnsFrom(page, 9, "the latest turn");
     assert.equal(await page.evaluate(`${scroller}.dataset.following`), "true");

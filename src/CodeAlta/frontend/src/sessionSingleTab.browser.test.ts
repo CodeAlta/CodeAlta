@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host, driven with the pointer: with the setting of Settings > Sessions
 // the sessions share a single tab. Turned on, it leaves the session shown and closes the other tabs; from there whatever
 // is opened takes that tab, nothing in it is transient, and the prompt of a new session keeps its text without a tab.
 // Turned off, the tabs are what they were before it.
-test("with a single tab for sessions, what is opened takes the place of the session shown", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("with a single tab for sessions, what is opened takes the place of the session shown", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, tabs, shown, press, session, scope, title, exceptions }) => {
     const setting = `document.querySelector('#settings-single-session-tab')`;
     const kept = `localStorage.getItem('codealta.desktop.single-session-tab.v1')`;

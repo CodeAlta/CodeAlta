@@ -9,5 +9,5 @@ internal static class TestDeadlines
     /// every test project and the browser tests at once, makes them several times slower. A bound of a few seconds reports that
     /// slowness as a failure: this one only reports what never ends.
     /// </summary>
-    internal static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan Hang = TestTime.Seconds(30);
 }

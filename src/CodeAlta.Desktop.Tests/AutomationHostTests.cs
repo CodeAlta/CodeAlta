@@ -21,7 +21,7 @@ public sealed class AutomationHostTests
 {
     private const string Epoch = "11111111-1111-4111-8111-111111111111";
     private static readonly DateTimeOffset Noon = new(2026, 10, 6, 12, 0, 0, TimeSpan.Zero);
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task Rpc_KeepsEverySettingOfATriggerOfAnotherTool_AndTestsItsConnection()
@@ -955,11 +955,11 @@ public sealed class AutomationHostTests
             Assert.IsNull(start.Problem);
             Assert.AreEqual((bool?)true, (await host.Commands.GetReviewBeforeCommitAsync(start.SessionId!)).Own, "The session is given the review the automation chose.");
             Assert.IsNotNull(start.Completion);
-            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
             Assert.AreEqual(start.SessionId, sessionId);
             Assert.AreEqual("Review what changed.", string.Concat(sent.Input.Items.OfType<AgentInputItem.Text>().Select(static text => text.Value)));
             provider.Release.SetResult();
-            Assert.AreEqual(AutomationRun.Completed, (await start.Completion.WaitAsync(Patience)).Status);
+            Assert.AreEqual(AutomationRun.Completed, (await start.Completion.WithinAsync(Patience)).Status);
 
             var session = (await workspace.SnapshotAsync(new(), default)).Sessions.Single();
             Assert.AreEqual((start.SessionId, "Nightly review", Id, project.Id, "automation-fixture"), (session.Id, session.Title, session.AutomationId, session.ProjectId, session.ProviderKey));
@@ -968,7 +968,7 @@ public sealed class AutomationHostTests
             // As a chat, in no project, started by an event: what it was about names the session too.
             var chat = await runner.StartAsync(Entry(new(Id, "A chat"), inProject: false), "run-2", "Say hello.", "#12  Crash\non start", default);
             Assert.IsNull(chat.Problem);
-            Assert.AreEqual(AutomationRun.Completed, (await chat.Completion!.WaitAsync(Patience)).Status);
+            Assert.AreEqual(AutomationRun.Completed, (await chat.Completion!.WithinAsync(Patience)).Status);
             var sessions = (await workspace.SnapshotAsync(new(), default)).Sessions;
             var started = sessions.Single(candidate => candidate.Id == chat.SessionId);
             Assert.AreEqual((null, Id, "A chat · #12 Crash on start"), (started.ProjectId, started.AutomationId, started.Title));
@@ -1029,14 +1029,14 @@ public sealed class AutomationHostTests
             var start = await runner.StartAsync(Entry(new(Id, "Triage") { Script = "triage", ScriptArguments = "{\"days\": 1}" }), "run-1",
                 "\n\n---\nThis automation was started by its command.", null, default);
             Assert.IsNull(start.Problem);
-            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
             Assert.AreEqual(start.SessionId, sessionId);
             var text = string.Concat(sent.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
             StringAssert.Contains(text, "Run the script `triage` of the library with `exec`");
             StringAssert.Contains(text, "return await workflow(\"triage\", {\"days\":1,\"event\":\"This automation was started by its command.\"});");
             Assert.IsTrue(host.CodeModeRuns.RequiresCodeMode(sessionId), "Its session has exec whatever the setting of Code Mode says.");
             provider.Release.SetResult();
-            Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+            Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WithinAsync(Patience)).Status);
             var workspace = new WorkspaceService(host, Epoch);
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
@@ -1088,11 +1088,11 @@ public sealed class AutomationHostTests
             else
             {
                 Assert.IsNull(start.Problem);
-                await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+                await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
                 Assert.AreSame(start.Guard, host.ToolGuards.Find(start.SessionId!), "the guard is the session's from its first tool call");
                 Assert.IsFalse(start.Guard!.DryRun);
                 provider.Release.SetResult();
-                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WithinAsync(Patience)).Status);
                 Assert.IsNull(host.ToolGuards.Find(start.SessionId!), "it leaves with the run");
             }
 
@@ -1139,7 +1139,7 @@ public sealed class AutomationHostTests
                 var start = await runner.StartAsync(entry, "run-1", entry.Definition.Prompt, null, dryRun: false, default);
                 Assert.IsNull(start.Problem);
                 sessionId = start.SessionId!;
-                await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+                await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
                 // A child the run starts while it works is checked by the guard of the run itself.
                 childId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, "Child", new AltaActorProvenance
                 {
@@ -1149,7 +1149,7 @@ public sealed class AutomationHostTests
                 Assert.AreSame(start.Guard, await host.ToolGuards.FindAsync(childId, default), "a child of the run is checked by the guard of the run");
                 Assert.IsNull(await host.ToolGuards.FindAsync(plainId, default));
                 provider.Release.SetResult();
-                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WithinAsync(Patience)).Status);
 
                 // Once its prompt is answered, a later turn of the session (a reminder, a job, a queued prompt) is checked still.
                 var later = await host.ToolGuards.FindAsync(sessionId, default);
@@ -1157,7 +1157,7 @@ public sealed class AutomationHostTests
                 Assert.IsNotNull(await host.ToolGuards.FindAsync(childId, default));
                 // Nobody can be asked in this host: the call that would wait for a person is not made.
                 Assert.IsNotNull(await host.ToolGuards.CheckAsync(sessionId, new AgentToolSpec("deploy_everything", "Deploys.", default), default, null,
-                    new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token).AsTask().ContinueWith(static task => task.IsCanceled ? "waits for a person" : task.Result),
+                    new CancellationTokenSource(TestTime.Seconds(2)).Token).AsTask().ContinueWith(static task => task.IsCanceled ? "waits for a person" : task.Result),
                     "a tool the automation does not allow is not called without a person");
                 var workspace = new WorkspaceService(host, Epoch);
                 await workspace.CloseSessionsAsync();
@@ -1259,7 +1259,7 @@ public sealed class AutomationHostTests
             Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "Not A Name", project.Id, null), default)).Status);
             var started = await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 2}"), default);
             Assert.AreEqual(("ok", null), (started.Status, started.Message));
-            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
             Assert.AreEqual(started.SessionId, sessionId);
             var text = string.Concat(sent.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
             StringAssert.Contains(text, "Run the script `triage` of the library with `exec`");
@@ -1285,7 +1285,7 @@ public sealed class AutomationHostTests
 
             var chosen = await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", providerId, "fixture-model", "low", ReviewBeforeCommit: true), default);
             Assert.AreEqual(("ok", null), (chosen.Status, chosen.Message));
-            var (chosenSession, _) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            var (chosenSession, _) = await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
             Assert.AreEqual(chosen.SessionId, chosenSession);
             Assert.AreEqual((bool?)true, (await host.Commands.GetReviewBeforeCommitAsync(chosenSession)).Own, "The session is given what the form chose.");
             Assert.IsTrue(host.CodeModeRuns.RequiresCodeMode(chosenSession), "A choice keeps exec for the session.");
@@ -1295,7 +1295,7 @@ public sealed class AutomationHostTests
             var ended = host.CodeModeRuns.TryStart(sessionId, "first", 1000, "call-1",
                 (_, _) => Task.FromResult(new CodeAlta.CodeMode.CodeModeRunResult(CodeAlta.CodeMode.CodeModeRunStatus.Failed, TimeSpan.FromSeconds(3))), out var noRefusal);
             Assert.IsNull(noRefusal);
-            await ended!.Completion.WaitAsync(Patience);
+            await ended!.Completion.WithinAsync(Patience);
             var running = host.CodeModeRuns.TryStart(sessionId, "second", 1000, "call-2", (_, token) => gate.Task.WaitAsync(token), out noRefusal);
             Assert.IsNull(noRefusal);
             var runs = rpc.Runs(new(Epoch));
@@ -1305,7 +1305,7 @@ public sealed class AutomationHostTests
             Assert.AreEqual(sessionId, runs.Runs[0].SessionId);
             Assert.AreEqual(TimeSpan.FromSeconds(3), runs.Runs[1].EndedAt - runs.Runs[1].StartedAt);
             gate.SetResult(new(CodeAlta.CodeMode.CodeModeRunStatus.Completed, TimeSpan.FromSeconds(1)));
-            await running.Completion.WaitAsync(Patience);
+            await running.Completion.WithinAsync(Patience);
 
             // Save as script… asks the session of the run, with the name the user gave.
             var bad = await rpc.SaveAsScriptAsync(new(Epoch, sessionId, ended.Id, "Bad Name"), default);
@@ -1325,7 +1325,7 @@ public sealed class AutomationHostTests
             var kept = host.CodeModeRuns.TryStart(sessionId, "kept", 1000, "call-3", new CodeModeRunStart("return 1;"),
                 (_, _) => Task.FromResult(new CodeAlta.CodeMode.CodeModeRunResult(CodeAlta.CodeMode.CodeModeRunStatus.Completed, TimeSpan.Zero)), out noRefusal);
             Assert.IsNull(noRefusal);
-            await kept!.Completion.WaitAsync(Patience);
+            await kept!.Completion.WithinAsync(Patience);
             Assert.AreEqual("invalid_request", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, "a", true), default)).Status);
             Assert.AreEqual("refused", (await rpc.ResumeAsync(new(Epoch, "other-session", kept.Id, null, false), default)).Status);
             Assert.AreEqual("ok", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, null, true), default)).Status);
@@ -1385,7 +1385,7 @@ public sealed class AutomationHostTests
             var started = await starter.StartAsync(project, "A task", _ => "Do the task.", false, null, "task", null);
             Assert.IsNull(started.Problem);
             Assert.AreEqual("personal", (await host.RuntimeService.GetSessionSpaceAsync(started.SessionId!))!.SpaceId);
-            await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
         }
         finally
         {
@@ -1428,13 +1428,13 @@ public sealed class AutomationHostTests
             // The session that shows the card of a task runs on a model that is not the default one of its provider.
             var shows = await starter.StartAsync(project, "Proposer", _ => "Work.", false, null, "task", new(new(providerId, "other-model", "low")));
             Assert.IsNull(shows.Problem);
-            await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
             Assert.AreEqual(("other-model", (AgentReasoningEffort?)AgentReasoningEffort.Low), (provider.Created[shows.SessionId!].Model, provider.Created[shows.SessionId!].ReasoningEffort));
 
             // Started from that card in a new session, the task runs with what that session runs with.
             var started = await starter.StartAsync(project, "A task", _ => "Do the task.", false, shows.SessionId, "workitem", new());
             Assert.IsNull(started.Problem);
-            await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            await provider.Sends.Reader.ReadAsync().AsTask().WithinAsync(Patience);
             var created = provider.Created[started.SessionId!];
             Assert.AreEqual(("other-model", (AgentReasoningEffort?)AgentReasoningEffort.Low), (created.Model, created.ReasoningEffort));
             var workspace = new WorkspaceService(host, Epoch);
@@ -1559,12 +1559,12 @@ public sealed class AutomationHostTests
 
             // Once that command has settled its receipt makes room: the host accepts commands for as long as it runs.
             provider.Release.SetResult();
-            Assert.AreEqual(AutomationRun.Completed, (await first.Completion!.WaitAsync(Patience)).Status);
+            Assert.AreEqual(AutomationRun.Completed, (await first.Completion!.WithinAsync(Patience)).Status);
             for (var index = 3; index < 6; index++)
             {
                 var next = await runner.StartAsync(entry, "run-" + index, "p", null, default);
                 Assert.IsNull(next.Problem);
-                Assert.AreEqual(AutomationRun.Completed, (await next.Completion!.WaitAsync(Patience)).Status);
+                Assert.AreEqual(AutomationRun.Completed, (await next.Completion!.WithinAsync(Patience)).Status);
             }
 
             Assert.AreEqual(4, (await workspace.SnapshotAsync(new(), default)).Sessions.Length);
@@ -1688,7 +1688,7 @@ public sealed class AutomationHostTests
 
         public async Task<(int Code, List<JsonElement> Records, string Text)> Run(string[] arguments, string? stdin = null, AltaCallerIdentity? caller = null)
         {
-            var result = await Alta.InvokeAsync(arguments, stdin, caller ?? Session, Project.ProjectPath).AsTask().WaitAsync(Patience);
+            var result = await Alta.InvokeAsync(arguments, stdin, caller ?? Session, Project.ProjectPath).AsTask().WithinAsync(Patience);
             var records = new List<JsonElement>();
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {

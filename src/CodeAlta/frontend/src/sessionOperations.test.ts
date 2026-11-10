@@ -3,6 +3,7 @@ import test from "node:test";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable } from "./sessionOperations";
 import { translate } from "./localization";
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
+import { testLimit } from "./testTime";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
 
@@ -163,9 +164,9 @@ class Fixture {
     try {
       return await Promise.race([original, new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          const error = new Error("Permanent fixture timeout; termination unconfirmed", { cause: this });
+          const error = new Error(`Permanent fixture timeout of ${testLimit(5_000)} ms; termination unconfirmed`, { cause: this });
           this.failures.push(error); reject(error);
-        }, 5_000);
+        }, testLimit(5_000));
       })]);
     } finally { clearTimeout(timer); }
   }

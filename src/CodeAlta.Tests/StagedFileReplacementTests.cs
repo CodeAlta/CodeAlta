@@ -21,7 +21,7 @@ public sealed class StagedFileReplacementTests
             // A reader as the credential stores open them: Windows refuses a plain move onto the file while it is open.
             await using (var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
             {
-                await StagedFileReplacement.MoveOverAsync(staged, path).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+                await StagedFileReplacement.MoveOverAsync(staged, path).AsTask().WithinAsync(TestTime.Seconds(10));
                 Assert.AreEqual("after", File.ReadAllText(path), "The file is replaced while the reader holds it.");
                 using var text = new StreamReader(reader);
                 Assert.AreEqual("before", text.ReadToEnd(), "The reader keeps the file it opened.");
@@ -57,7 +57,7 @@ public sealed class StagedFileReplacementTests
             {
                 var staged = StagedFileReplacement.StagedPathOf(path);
                 File.WriteAllText(staged, "after");
-                await StagedFileReplacement.MoveOverAsync(staged, path).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+                await StagedFileReplacement.MoveOverAsync(staged, path).AsTask().WithinAsync(TestTime.Seconds(10));
                 Assert.AreEqual("after", File.ReadAllText(path), "The file is replaced while the reader holds it.");
             }
 
@@ -164,7 +164,7 @@ public sealed class StagedFileReplacementTests
             });
             await Task.Delay(100);
             File.Move(staged, path);
-            Assert.AreEqual("after", await read.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.AreEqual("after", await read.WithinAsync(TestTime.Seconds(10)));
 
             // A file a replacement holds for a moment (a sharing violation, or an access denied) is read once it lets go.
             var holder = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
@@ -175,7 +175,7 @@ public sealed class StagedFileReplacementTests
             });
             await Task.Delay(100);
             await holder.DisposeAsync();
-            Assert.AreEqual("after", await read.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.AreEqual("after", await read.WithinAsync(TestTime.Seconds(10)));
 
             // No write in progress: a missing file is none, without waiting.
             File.Delete(path);

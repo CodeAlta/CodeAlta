@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { ctrl, openReviewPage, shift, type Point } from "./reviewBrowserHarness";
+import { testLimit } from "../testTime";
 
 const edge = browserExecutable;
 
 // The review of a Markdown file as the window shows it (FileReview, rendered, over a reviews hub whose host is in
 // memory), commented block by block with the mouse and the keys; then a review request of an agent in the ask panel
 // of its session, answered with a verdict.
-test("a Markdown file is reviewed block by block, and a review request is answered with a verdict", { skip: !edge, timeout: 180_000 }, async t => {
+test("a Markdown file is reviewed block by block, and a review request is answered with a verdict", { skip: !edge, timeout: testLimit(180_000) }, async t => {
   const page = await openReviewPage(new URL("./fileReview.mount.tsx", import.meta.url), `window.fileReviewFixture && !!document.querySelector("#file .markdown-content [data-source-lines]")`,
     new URL("./fileReview.neoastra.mount.ts", import.meta.url));
   const { evaluate, value, until, frames, mouse, click, clickOn, key, type } = page;

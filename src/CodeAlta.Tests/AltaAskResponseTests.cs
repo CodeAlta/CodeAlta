@@ -142,7 +142,7 @@ public sealed class AltaAskResponseTests
         service.QueueChanged += (_, args) =>
         {
             var read = Task.Run(() => service.GetPending(args.SessionId));
-            Assert.IsTrue(read.Wait(TimeSpan.FromSeconds(5)), "Response notifications must not hold the owner lock.");
+            Assert.IsTrue(read.Wait(TestTime.Seconds(5)), "Response notifications must not hold the owner lock.");
             Assert.IsFalse(service.RespondAsync(handle, () => throw new AssertFailedException("reentrant replay")).GetAwaiter().GetResult().Claimed);
             observations++;
         };

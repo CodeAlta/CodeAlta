@@ -13,7 +13,7 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class SessionConversationHeldServiceTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
     private static readonly ModelProviderId Provider = new("claude-code");
 
     [TestMethod]
@@ -44,7 +44,7 @@ public sealed class SessionConversationHeldServiceTests
         Assert.IsFalse(ask.IsCompleted);
 
         Assert.IsTrue(await fixture.Service.ResolveAsync(snapshot.Handle, AgentConversationHeldChoice.ContinueAsCopy, default));
-        Assert.AreEqual(AgentConversationHeldChoice.ContinueAsCopy, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.ContinueAsCopy, await ask.WithinAsync(Timeout));
         Assert.IsFalse(await fixture.Service.ResolveAsync(snapshot.Handle, AgentConversationHeldChoice.Wait, default), "A question is answered once.");
         Assert.AreEqual(0, (await fixture.Service.ListAsync("session", default)).Count);
         Assert.AreEqual(0, (await fixture.Service.ListWaitingSessionsAsync()).Count);
@@ -66,28 +66,28 @@ public sealed class SessionConversationHeldServiceTests
         using var failing = fixture.Service.Observe((_, _) => throw new InvalidOperationException("broken view"));
 
         var ask = fixture.Service.Handler(Request(), CancellationToken.None);
-        Assert.IsTrue(await told.WaitAsync(Timeout));
+        Assert.IsTrue(await told.WaitAsync(Timeout)); // not a Task
         var (snapshot, ended) = asked.Single();
         Assert.AreEqual((await fixture.WaitForPendingAsync()).Single().Handle, snapshot.Handle);
         Assert.IsFalse(ended.IsCancellationRequested, "The question waits.");
         Assert.IsTrue(await fixture.Service.ResolveAsync(snapshot.Handle, AgentConversationHeldChoice.Wait, default));
-        Assert.AreEqual(AgentConversationHeldChoice.Wait, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.Wait, await ask.WithinAsync(Timeout));
         Assert.IsTrue(ended.IsCancellationRequested, "An answered question has ended.");
 
         using var run = new CancellationTokenSource();
         var second = fixture.Service.Handler(Request(), run.Token);
-        Assert.IsTrue(await told.WaitAsync(Timeout));
+        Assert.IsTrue(await told.WaitAsync(Timeout)); // not a Task
         var secondEnded = asked[1].Ended;
         await run.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => second.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => second.WithinAsync(Timeout));
         Assert.IsTrue(secondEnded.IsCancellationRequested, "A question ends with its run.");
 
         observation.Dispose();
         var third = fixture.Service.Handler(Request(), CancellationToken.None);
         var handle = (await fixture.WaitForPendingAsync()).Single().Handle;
-        Assert.IsFalse(await told.WaitAsync(TimeSpan.FromMilliseconds(200)), "A stopped observation is told nothing.");
+        Assert.IsFalse(await told.WaitAsync(TestTime.Milliseconds(200)), "A stopped observation is told nothing."); // not a Task
         Assert.IsTrue(await fixture.Service.ResolveAsync(handle, AgentConversationHeldChoice.Cancel, default));
-        Assert.AreEqual(AgentConversationHeldChoice.Cancel, await third.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.Cancel, await third.WithinAsync(Timeout));
     }
 
     [TestMethod]
@@ -99,7 +99,7 @@ public sealed class SessionConversationHeldServiceTests
 
         Assert.IsFalse(await fixture.Service.ResolveAsync(handle, AgentConversationHeldChoice.OpenAnyway, default));
         Assert.IsTrue(await fixture.Service.ResolveAsync(handle, AgentConversationHeldChoice.Wait, default));
-        Assert.AreEqual(AgentConversationHeldChoice.Wait, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.Wait, await ask.WithinAsync(Timeout));
     }
 
     [TestMethod]
@@ -112,7 +112,7 @@ public sealed class SessionConversationHeldServiceTests
 
         await run.CancelAsync();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WithinAsync(Timeout));
         Assert.AreEqual(0, (await fixture.Service.ListAsync("session", default)).Count);
         Assert.AreEqual(0, (await fixture.Service.ListWaitingSessionsAsync()).Count, "The session no longer waits for the user.");
         Assert.IsFalse(await fixture.Service.ResolveAsync(handle, AgentConversationHeldChoice.Wait, default));
@@ -127,7 +127,7 @@ public sealed class SessionConversationHeldServiceTests
 
         await fixture.Forwarding.RetireAsync(fixture.Attachment);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => ask.WithinAsync(Timeout));
         Assert.AreEqual(0, (await fixture.Service.ListAsync("session", default)).Count);
     }
 
@@ -154,7 +154,7 @@ public sealed class SessionConversationHeldServiceTests
 
         await fixture.DisposeAsync();
 
-        Assert.AreEqual(AgentConversationHeldChoice.Cancel, await ask.WaitAsync(Timeout));
+        Assert.AreEqual(AgentConversationHeldChoice.Cancel, await ask.WithinAsync(Timeout));
     }
 
     [TestMethod]
@@ -178,8 +178,8 @@ public sealed class SessionConversationHeldServiceTests
         CollectionAssert.Contains((await runtime.ConversationHolds.ListWaitingSessionsAsync()).ToArray(), "session-1");
         Assert.IsTrue(await runtime.ConversationHolds.ResolveAsync(pending.Single().Handle, AgentConversationHeldChoice.OpenAnyway, default));
 
-        await send.WaitAsync(Timeout);
-        Assert.AreEqual(AgentConversationHeldChoice.OpenAnyway, await provider.Answer.Task.WaitAsync(Timeout));
+        await send.WithinAsync(Timeout);
+        Assert.AreEqual(AgentConversationHeldChoice.OpenAnyway, await provider.Answer.Task.WithinAsync(Timeout));
     }
 
     [TestMethod]

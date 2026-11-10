@@ -110,7 +110,7 @@ public sealed class CodexAppServerInstallerTests
         File.Delete(installed.Executable);
         Assert.IsNull(installer.Installed);
 
-        var again = await installer.EnsureInstalledAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        var again = await installer.EnsureInstalledAsync(null, CancellationToken.None).WithinAsync(TestTime.Seconds(30));
 
         Assert.AreEqual(installed, again);
         Assert.IsTrue(File.Exists(again.Executable));
@@ -128,14 +128,14 @@ public sealed class CodexAppServerInstallerTests
         using var installer = new CodexAppServerInstaller(root, handler, Package(archive));
 
         var exception = await Assert.ThrowsExactlyAsync<CodexInstallException>(
-            () => installer.EnsureInstalledAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+            () => installer.EnsureInstalledAsync(null, CancellationToken.None).WithinAsync(TestTime.Seconds(30)));
 
         Assert.AreEqual("disk", exception.Code);
         StringAssert.Contains(exception.Message, Path.Combine(root, CodexPinnedRelease.Version, Target, "bin", "missing-app-server") + " is missing.");
         Assert.AreEqual(1, handler.Requests, "an install that ends incomplete is not tried again");
 
         // The next call removes the incomplete folder and installs once more, then fails the same way.
-        await Assert.ThrowsExactlyAsync<CodexInstallException>(() => installer.EnsureInstalledAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+        await Assert.ThrowsExactlyAsync<CodexInstallException>(() => installer.EnsureInstalledAsync(null, CancellationToken.None).WithinAsync(TestTime.Seconds(30)));
         Assert.AreEqual(2, handler.Requests);
     }
 

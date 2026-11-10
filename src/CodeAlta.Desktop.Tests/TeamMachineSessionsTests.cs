@@ -194,7 +194,7 @@ public sealed class TeamMachineSessionsTests
         // without looking: the node does not take a session it does not find now for one that is gone.
         fixture.Service.RecordUnattendedWork("in-flight", "svc-org");
         for (var index = 0; index <= 5000; index++) fixture.Service.RecordUnattendedWork($"other-{index}", "svc-org");
-        var until = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        var until = DateTime.UtcNow + TestTime.Seconds(15);
         while (DateTime.UtcNow < until && !fixture.Host.Identities.IsOwnerWork!("in-flight")) await Task.Delay(200, token);
         Assert.IsFalse(fixture.Host.Identities.IsOwnerWork!("in-flight"), "the run in flight is still not the owner's work");
         Assert.AreEqual("max", fixture.Service.PersonOfSession(created.SessionId));

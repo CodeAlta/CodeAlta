@@ -520,7 +520,7 @@ public sealed class ModelsDevCatalogTests
         }))
         {
             catalog.StartBackgroundRefresh();
-            Assert.IsTrue(await WaitUntilAsync(() => Volatile.Read(ref handler.Requests) > 0, TimeSpan.FromSeconds(5)).ConfigureAwait(false));
+            Assert.IsTrue(await WaitUntilAsync(() => Volatile.Read(ref handler.Requests) > 0, TestTime.Seconds(5)).ConfigureAwait(false));
         }
     }
 

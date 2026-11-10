@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The bookmarks of a timeline in headless Edge, under the production content security policy and React StrictMode: the
 // button of a message, the rail beside the timeline, and going to a message that the window does not hold yet.
@@ -10,7 +11,7 @@ const ready = `document.querySelector('.history[data-window-ready="true"]') && d
 const rowOf = (contentId: string) => `document.querySelector('[data-row-offset="' + timelineFixture.journal.find(entry => entry.contentId === ${JSON.stringify(contentId)}).offset + '"]')`;
 const marks = `[...document.querySelectorAll('.bookmark-rail-mark')]`;
 
-test("a message is bookmarked from its row, its mark joins the rail, and removing it takes both away", { skip: !edge, timeout: 120_000 }, async () => {
+test("a message is bookmarked from its row, its mark joins the rail, and removing it takes both away", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(ready, "the latest turn");
     assert.equal(await page.evaluate(`document.querySelectorAll('.timeline-message').length`), 20, "the window holds the last turn");
@@ -47,7 +48,7 @@ test("a message is bookmarked from its row, its mark joins the rail, and removin
   }, options);
 });
 
-test("a mark of the rail goes to its message: older history is read until the window holds it, then the message is shown", { skip: !edge, timeout: 120_000 }, async () => {
+test("a mark of the rail goes to its message: older history is read until the window holds it, then the message is shown", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(ready, "the latest turn");
     await page.until(`${marks}.length === 1`, "the mark of the old bookmark");

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Plugin } from "esbuild";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The form of the chip shows no editor: the worker of the editor the composer module names is never started.
 const noWorker: Plugin = { name: "no-editor-worker", setup(bundle) {
@@ -13,7 +14,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${JSON.stringify(value)});
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 
-test("a command to run outside the sandbox is a card of its own: the agent's reason quoted, allowed once or denied", { skip: !edge, timeout: 90_000 }, async () => {
+test("a command to run outside the sandbox is a card of its own: the agent's reason quoted, allowed once or denied", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.command-permission-panel h3')`, "the request");
     assert.equal(await page.evaluate(`document.querySelector('.command-permission-panel h3').textContent`), "Run outside the sandbox?");
@@ -31,7 +32,7 @@ test("a command to run outside the sandbox is a card of its own: the agent's rea
   }, options);
 });
 
-test("the sandbox of a project is chosen beside its row: the choice is saved at once and closes the popover", { skip: !edge, timeout: 90_000 }, async () => {
+test("the sandbox of a project is chosen beside its row: the choice is saved at once and closes the popover", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.sandbox-project-form select')?.value === 'strict'`, "the sandbox of the project");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.sandbox-project-form option')].map(option => option.textContent)`),
@@ -45,7 +46,7 @@ test("the sandbox of a project is chosen beside its row: the choice is saved at 
   }, options);
 });
 
-test("the Agent chip marks a sandboxed session, and its Sandbox row follows the settings or gives the session its own", { skip: !edge, timeout: 90_000 }, async () => {
+test("the Agent chip marks a sandboxed session, and its Sandbox row follows the settings or gives the session its own", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.composer-selection .composer-selection-sandbox')`, "the mark of the sandbox");
     assert.equal(await page.evaluate(`document.querySelector('.composer-selection-sandbox').title`), "Sandbox: workspace · From its provider");
@@ -74,7 +75,7 @@ test("the Agent chip marks a sandboxed session, and its Sandbox row follows the 
   }, options);
 });
 
-test("the options of a session are behind More options: the switch of sub-sessions, marked on the chip when it is off", { skip: !edge, timeout: 90_000 }, async () => {
+test("the options of a session are behind More options: the switch of sub-sessions, marked on the chip when it is off", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.composer-selection')`, "the chip");
     assert.equal(await page.evaluate(`!!document.querySelector('.composer-selection-no-sub-sessions')`), false, "no mark with the defaults");

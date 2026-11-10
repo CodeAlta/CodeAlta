@@ -220,7 +220,7 @@ public sealed class DesktopProjectGitChangesTests
         var view = new DesktopChangesView();
         Assert.IsFalse(view.Show("project", null), "No window watches yet.");
         var service = new ProjectGitService(repository.Projects, Epoch, view);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource(TestTime.Seconds(30));
         await using var requests = service.WatchAsync(new(Epoch), cancellation.Token).GetAsyncEnumerator(cancellation.Token);
 
         var pending = requests.MoveNextAsync();

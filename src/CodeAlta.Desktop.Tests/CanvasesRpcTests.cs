@@ -241,12 +241,12 @@ public sealed class CanvasesRpcTests
         var one = fixture.Service.RpcOpen(new(Epoch, first.InstanceId));
         var two = fixture.Service.RpcOpen(new(Epoch, second.InstanceId));
         fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [Invoke("slow1", "slow")]));
-        await fixture.Plugin.SlowStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await fixture.Plugin.SlowStarted.Task.WithinAsync(TestTime.Seconds(30));
 
         // The page closes the tab: what the plugin was doing for it is cancelled, and nothing is left to talk to.
         Assert.AreEqual("ok", (await fixture.Service.CloseAsync(new(Epoch, first.InstanceId), default)).Status);
 
-        await fixture.Plugin.SlowCancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await fixture.Plugin.SlowCancelled.Task.WithinAsync(TestTime.Seconds(30));
         var ended = await fixture.NextAsync("rpcClosed");
         Assert.AreEqual((first.InstanceId, one.Connection), (ended.InstanceId, ended.Connection));
         Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [Invoke("late", "where")])).Status);
@@ -283,7 +283,7 @@ public sealed class CanvasesRpcTests
 
         // A page that goes away leaves no connection and no way to open one.
         next.Dispose();
-        SpinWait.SpinUntil(() => fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r4", "where")])).Status == "closed", TimeSpan.FromSeconds(30));
+        SpinWait.SpinUntil(() => fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r4", "where")])).Status == "closed", TestTime.Seconds(30));
         Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r5", "where")])).Status);
         Assert.AreEqual("not_watching", fixture.Service.RpcOpen(new(Epoch, opened.InstanceId)).Status, "asking again later can work, unlike for an instance that has no calls");
         page.Dispose();
@@ -763,7 +763,7 @@ public sealed class CanvasesRpcTests
 
             async Task<CanvasEvent> NextAsync(string kind)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
                 while (true)
                 {
                     var value = await events.Reader.ReadAsync(timeout.Token);
@@ -1005,16 +1005,16 @@ public sealed class BoardsPlugin : PluginBase
         await using var fixture = await Fixture.CreateAsync();
         var asked = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         // What a plugin registered on the end of its instance may ask the broker from another thread, and wait for the answer.
-        fixture.Plugin.OnGatedOpen = canvas => canvas.Closed.Register(() => asked.TrySetResult(Task.Run(() => fixture.Broker.GetOpen()).Wait(TimeSpan.FromSeconds(5))));
+        fixture.Plugin.OnGatedOpen = canvas => canvas.Closed.Register(() => asked.TrySetResult(Task.Run(() => fixture.Broker.GetOpen()).Wait(TestTime.Seconds(5))));
         var opening = fixture.OpenAsync("gated", key: "k");
-        await fixture.Plugin.GatedEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await fixture.Plugin.GatedEntered.Task.WithinAsync(TestTime.Seconds(30));
 
         // The window goes away while the handler of the plugin runs: the instance it was making ends once the handler returns.
         fixture.Broker.Dispose();
         fixture.Plugin.GatedRelease.TrySetResult();
 
         Assert.AreEqual("failed", (await opening).Status);
-        Assert.IsTrue(await asked.Task.WaitAsync(TimeSpan.FromSeconds(30)), "the broker answers while the token of the instance is cancelled");
+        Assert.IsTrue(await asked.Task.WithinAsync(TestTime.Seconds(30)), "the broker answers while the token of the instance is cancelled");
     }
 
     [TestMethod]
@@ -1034,7 +1034,7 @@ public sealed class BoardsPlugin : PluginBase
         Assert.IsFalse(ids.Contains(first.InstanceId!), "the oldest hidden one went");
         Assert.IsTrue(ids.Contains(shown.InstanceId!), "a shown one stays");
         // The plugin is told as it is for a tab that was closed: the token, then its handler.
-        Assert.IsTrue(SpinWait.SpinUntil(() => fixture.Plugin.Closed.Contains(first.InstanceId!), TimeSpan.FromSeconds(30)), "the plugin hears that the instance closed");
+        Assert.IsTrue(SpinWait.SpinUntil(() => fixture.Plugin.Closed.Contains(first.InstanceId!), TestTime.Seconds(30)), "the plugin hears that the instance closed");
         Assert.IsTrue(fixture.Plugin.Contexts[first.InstanceId!].Closed.IsCancellationRequested);
         Assert.AreEqual(1, fixture.Plugin.Closed.Count);
         // The tab of the instance is not told: when it is shown again the host says it does not know the instance, and the tab asks for it again.
@@ -1055,10 +1055,10 @@ public sealed class BoardsPlugin : PluginBase
         fixture.Plugin.Contexts[first.InstanceId!].VisibilityChanged += _ =>
         {
             entered.Set();
-            release.Wait(TimeSpan.FromSeconds(30));
+            release.Wait(TestTime.Seconds(30));
         };
         var hiding = Task.Run(() => fixture.OpenAsync("board", key: "k0", visible: false));
-        Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(30)));
+        Assert.IsTrue(entered.Wait(TestTime.Seconds(30)));
 
         var next = await fixture.OpenAsync("board", key: "extra", visible: false);
 
@@ -1070,7 +1070,7 @@ public sealed class BoardsPlugin : PluginBase
         Assert.AreEqual(0, fixture.Plugin.Closed.Count);
         // Once the call has let go of it, it is the oldest hidden one, and makes room.
         Assert.AreEqual("ok", (await fixture.OpenAsync("board", key: "extra", visible: false)).Status);
-        Assert.IsTrue(SpinWait.SpinUntil(() => fixture.Plugin.Closed.Contains(first.InstanceId!), TimeSpan.FromSeconds(30)));
+        Assert.IsTrue(SpinWait.SpinUntil(() => fixture.Plugin.Closed.Contains(first.InstanceId!), TestTime.Seconds(30)));
     }
 
     [TestMethod]
@@ -1110,14 +1110,14 @@ public sealed class BoardsPlugin : PluginBase
     {
         await using var fixture = await Fixture.CreateAsync();
         var opening = fixture.OpenAsync("gated", key: "k");
-        await fixture.Plugin.GatedEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await fixture.Plugin.GatedEntered.Task.WithinAsync(TestTime.Seconds(30));
 
         // The handler of the plugin still runs: the instance is not ready yet, and the change of the plugins waits for it.
         var reconciling = fixture.Broker.ReconcileAsync();
         Assert.IsFalse(reconciling.IsCompleted, "the change waits for the instance that is being opened");
         fixture.Plugin.GatedRelease.TrySetResult();
         var opened = await opening;
-        await reconciling.WaitAsync(TimeSpan.FromSeconds(30));
+        await reconciling.WithinAsync(TestTime.Seconds(30));
 
         Assert.AreEqual("ok", opened.Status);
         Assert.AreEqual(1, fixture.Plugin.GatedOpened, "the plugin is the same: its handler ran for the open and not again for the change");
@@ -1131,7 +1131,7 @@ public sealed class BoardsPlugin : PluginBase
     {
         await using var fixture = await Fixture.CreateAsync();
         var first = fixture.OpenAsync("gated", key: "k");
-        await fixture.Plugin.GatedEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await fixture.Plugin.GatedEntered.Task.WithinAsync(TestTime.Seconds(30));
         // A second tab asks for the same instance: it found the canvas, and waits for the first open.
         var second = fixture.OpenAsync("gated", key: "k");
         Assert.IsFalse(second.IsCompleted);
@@ -1201,7 +1201,7 @@ public sealed class BoardsPlugin : PluginBase
 
             async Task<CanvasEvent> NextAsync(string kind)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
                 while (true)
                 {
                     var value = await events.Reader.ReadAsync(timeout.Token);
@@ -1493,7 +1493,7 @@ public sealed class NotesPlugin : PluginBase
 
         public async Task<CanvasEvent> NextAsync(string kind)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             while (true)
             {
                 var value = await _events.Reader.ReadAsync(timeout.Token);
@@ -1534,7 +1534,7 @@ public sealed class NotesPlugin : PluginBase
         {
             public async Task<CanvasEvent> NextAsync(string kind)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
                 while (true)
                 {
                     var value = await events.Reader.ReadAsync(timeout.Token);
@@ -1545,7 +1545,7 @@ public sealed class NotesPlugin : PluginBase
             /// <summary>The next event about a tab, whatever it is: the news that plugins changed is passed over.</summary>
             public async Task<CanvasEvent> NextAsync()
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
                 while (true)
                 {
                     var value = await events.Reader.ReadAsync(timeout.Token);
@@ -1561,12 +1561,12 @@ public sealed class NotesPlugin : PluginBase
             }
 
             /// <summary>Waits for the end of the watch: a page that was replaced is told nothing more.</summary>
-            public Task EndedAsync() => events.Reader.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            public Task EndedAsync() => events.Reader.Completion.WithinAsync(TestTime.Seconds(30));
 
             public void Dispose()
             {
                 cancel.Cancel();
-                pump.Wait(TimeSpan.FromSeconds(5));
+                pump.Wait(TestTime.Seconds(5));
             }
         }
     }

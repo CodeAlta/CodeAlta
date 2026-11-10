@@ -3230,7 +3230,7 @@ public sealed partial class AltaLiveToolTests
         var prepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         models.Gate = (preparing, prepared);
         var withFiles = dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy", "--attachments", path], stdin: "Look", caller: AltaCallerIdentity.Cli).AsTask();
-        await preparing.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        await preparing.Task.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
         models.Gate = null;
         var running = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work"], caller: AltaCallerIdentity.Cli).AsTask();
         await WaitUntilAsync(() => provider.SentOptions.Count == 1).ConfigureAwait(false);
@@ -3270,7 +3270,7 @@ public sealed partial class AltaLiveToolTests
         var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
 
         // The turn goes on (its provider holds it); the command of a plugin that asked not to wait has its answer.
-        var sent = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work", "--no-wait"], caller: AltaCallerIdentity.Cli).AsTask().WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        var sent = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work", "--no-wait"], caller: AltaCallerIdentity.Cli).AsTask().WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
 
         Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Stdout + sent.Stderr);
         Assert.AreEqual("alta.session.submitted", ReadJsonLines(sent.Stdout).Single(static line => line.GetProperty("type").GetString()!.StartsWith("alta.session.", StringComparison.Ordinal)).GetProperty("type").GetString());
@@ -4001,7 +4001,7 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(prompt, "Job: " + jobId);
         StringAssert.Contains(prompt, "Result: succeeded (exit code 0)");
         StringAssert.Contains(prompt, "all checks passed");
-        await runtime.Jobs.WhenSettledAsync(jobId).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        await runtime.Jobs.WhenSettledAsync(jobId).WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
         var ended = Record(await dispatcher.InvokeAsync(["job", "status", jobId], caller: caller).ConfigureAwait(false), "alta.job.status");
         Assert.AreEqual(("succeeded", 0, "queued"), (ended.GetProperty("state").GetString(), ended.GetProperty("exitCode").GetInt32(), ended.GetProperty("resultPrompt").GetString()));
 
@@ -4022,7 +4022,7 @@ public sealed partial class AltaLiveToolTests
         var cancelled = Record(await dispatcher.InvokeAsync(["job", "cancel", waiting.GetProperty("id").GetString()!], caller: caller).ConfigureAwait(false), "alta.job.cancelled");
         Assert.AreEqual(("cancelled", true), (cancelled.GetProperty("state").GetString(), cancelled.GetProperty("wasRunning").GetBoolean()));
         Assert.IsTrue(shell.Processes[2].Killed);
-        await runtime.Jobs.WhenSettledAsync(waiting.GetProperty("id").GetString()).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        await runtime.Jobs.WhenSettledAsync(waiting.GetProperty("id").GetString()).WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
         Assert.AreEqual((1, 1), (providerRuntime.SentOptions.Count, providerRuntime.SteeredOptions.Count));
 
         // What is asked wrongly is refused before anything runs.
@@ -4685,7 +4685,7 @@ public sealed partial class AltaLiveToolTests
         var running = fixture.Host.RuntimeService.SendAsync(session, fixture.Options, new AgentSendOptions { Input = AgentInput.Text("two") }, CancellationToken.None);
         try
         {
-            await fixture.Provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            await fixture.Provider.Started.Task.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
             var self = fixture.Agent(session.SessionId);
 
             var listed = await fixture.Dispatcher.InvokeAsync(["session", "turns"], caller: self).ConfigureAwait(false);
@@ -5770,7 +5770,7 @@ public sealed partial class AltaLiveToolTests
             await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
             var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "child-session" };
             var result = await dispatcher.InvokeAsync(["session", command, sessionId, "--message", "child update"], caller: caller).AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                .WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
 
             Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
             Assert.IsFalse(running.IsCompleted, "The recipient's original run must still hold the send gate.");
@@ -5797,7 +5797,7 @@ public sealed partial class AltaLiveToolTests
         finally
         {
             sendBlocker.TrySetResult();
-            await running.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await running.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
         }
         if (!supportsSteering)
         {
@@ -6991,7 +6991,7 @@ public sealed partial class AltaLiveToolTests
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(predicate);
 
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cancellation = new CancellationTokenSource(TestTime.Seconds(2));
         try
         {
             await foreach (var runtimeEvent in runtime.StreamEventsAsync(cancellation.Token).ConfigureAwait(false))

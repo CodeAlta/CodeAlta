@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../sandbox/sandboxSettings.mount.tsx", fixture: "sandboxFixture", rpcFixture: "../demo-api.ts", width: 1300, height: 1000 } as const;
 // Chooses an option of a native select as the user does: React reads the change event.
@@ -9,7 +10,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 const steps = `[...document.querySelectorAll('.sandbox-check-steps > li[data-passed]')].map(row => row.dataset.passed + ' ' + row.querySelector('.sandbox-check-step').textContent)`;
 
-test("the status of the sandbox and its check, whose steps come as the host gives them", { skip: !edge, timeout: 90_000 }, async () => {
+test("the status of the sandbox and its check, whose steps come as the host gives them", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.sandbox-availability[data-available="true"]')`, "the status");
     assert.equal(await page.evaluate(`document.querySelector('.sandbox-availability strong').textContent`), "Available: Windows process container");
@@ -46,7 +47,7 @@ test("the status of the sandbox and its check, whose steps come as the host give
   }, options);
 });
 
-test("a profile of CodeAlta is read-only and starts a profile of the user, which is saved, shown with its problem and removed", { skip: !edge, timeout: 90_000 }, async () => {
+test("a profile of CodeAlta is read-only and starts a profile of the user, which is saved, shown with its problem and removed", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('[data-sandbox-profile="workspace"][aria-selected="true"]')`, "the first profile");
     // workspace is shown as it resolves, and cannot be changed.

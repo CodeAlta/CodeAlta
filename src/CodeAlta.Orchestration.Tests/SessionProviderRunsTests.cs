@@ -38,7 +38,7 @@ public sealed class SessionProviderRunsTests
             {
                 var first = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, stopping.Descriptor, "With the agent");
                 var second = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, staying.Descriptor, "With another provider");
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
                 Assert.IsNotNull(host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), first.SessionId, "one")).Receipt);
                 Assert.IsNotNull(host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), second.SessionId, "two")).Receipt);
                 await stopping.Started.Task.WaitAsync(timeout.Token);

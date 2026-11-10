@@ -110,7 +110,7 @@ public sealed class NamedPeopleTests
             other = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Not shared"), "create-other", token);
             // The prompt the grantee reads below is in the history of the session first, as its owner reads it: an earlier entry
             // (the start of the session) comes before it.
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(30);
             while (!HasPrompt(await owner.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token)))
             {
                 if (DateTime.UtcNow > deadline) Assert.Fail("The owner does not read the first prompt of the session in its history within 30 seconds.");
@@ -158,7 +158,7 @@ public sealed class NamedPeopleTests
         // The grant expires, or a newer signed document takes it away: what she reads live ends, while nothing new is sent too.
         Interlocked.Exchange(ref gone, 1);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        timeout.CancelAfter(TestTime.Seconds(15));
         try
         {
             await foreach (var _ in watch.Updates.ReadAllAsync(timeout.Token)) { }

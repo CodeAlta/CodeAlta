@@ -13,7 +13,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class FleetNodeBudgetQueueTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -120,7 +120,7 @@ public sealed class FleetNodeBudgetQueueTests
         var unblock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Host.Commands.SendStarting = (_, cancellation) => { reached.TrySetResult(); return unblock.Task.WaitAsync(cancellation); };
         release.SetResult();
-        await reached.Task.WaitAsync(Patience, token);
+        await reached.Task.WithinAsync(Patience, token);
         var whileStarting = File.ReadAllText(file);
         unblock.SetResult();
         fixture.Host.Commands.SendStarting = null;
@@ -216,7 +216,7 @@ public sealed class FleetNodeBudgetQueueTests
         var unblock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Host.Commands.SendStarting = (_, cancellation) => { reached.TrySetResult(); return unblock.Task.WaitAsync(cancellation); };
         release.SetResult();
-        await reached.Task.WaitAsync(Patience, token);
+        await reached.Task.WithinAsync(Patience, token);
         var whileStarting = File.ReadAllText(file);
         StringAssert.Contains(whileStarting, "send-crash", "a held send is kept until its run starts");
 
@@ -341,7 +341,7 @@ public sealed class FleetNodeBudgetQueueTests
         var started = new TaskCompletionSource();
         fixture.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(running.Task, "First.", started));
         Assert.AreEqual("accepted", (await client.SendAsync(created.SessionId, "first", retryKey: "send-1", cancellationToken: token)).Status);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
         Assert.AreEqual(1, admitted.Count, "the send was admitted before its turn");
 
         // A steer into the running turn is part of it: no admission of its own.

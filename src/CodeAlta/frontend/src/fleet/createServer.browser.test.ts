@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../fleet/createServer.mount.tsx", fixture: "serverFixture", rpcFixture: "../demo-api.ts", styles: ["../fleet/fleet.css", "../machines/machines.css"],
   width: 1100, height: 900, reducedMotion: true } as const;
@@ -9,7 +10,7 @@ const type = (selector: string, value: string) => `(() => { const input = docume
   input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
 const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.serverFixture.calls]`) as string[]).map(call => JSON.parse(call));
 
-test("Create my server leads with a machine over SSH, says what blocks it from here, then adds the managed machines", { skip: !edge, timeout: 90_000 }, async () => {
+test("Create my server leads with a machine over SSH, says what blocks it from here, then adds the managed machines", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.create-server-dialog .add-machine-choice').length === 3`, "the three places");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.create-server-dialog .add-machine-choice strong')].map(item => item.textContent)`),
@@ -57,7 +58,7 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
   }, options);
 });
 
-test("Create my server behind a name of a tailnet offers to publish it with Tailscale Serve, with the password sudo asks for it", { skip: !edge, timeout: 90_000 }, async () => {
+test("Create my server behind a name of a tailnet offers to publish it with Tailscale Serve, with the password sudo asks for it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.create-server-dialog .add-machine-choice').length === 3`, "the three places");
     await page.evaluate(`document.querySelector('.create-server-dialog .add-machine-choice').click()`);
@@ -86,7 +87,7 @@ test("Create my server behind a name of a tailnet offers to publish it with Tail
   }, options);
 });
 
-test("Connect to my server speaks to the owner, links every space of the person, and is approved by another computer of theirs", { skip: !edge, timeout: 90_000 }, async () => {
+test("Connect to my server speaks to the owner, links every space of the person, and is approved by another computer of theirs", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('joinOwn')`);
     await page.until(`document.querySelector('.join-organization-dialog.join-organization-own input')`, "the address");
@@ -108,7 +109,7 @@ test("Connect to my server speaks to the owner, links every space of the person,
   }, options);
 });
 
-test("Join an organization goes from the server to signing in, the space and the approval", { skip: !edge, timeout: 90_000 }, async () => {
+test("Join an organization goes from the server to signing in, the space and the approval", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('join')`);
     await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
@@ -131,7 +132,7 @@ test("Join an organization goes from the server to signing in, the space and the
   }, options);
 });
 
-test("Join an organization signs in through the browser with the server's methods, and an enrollment code stays at hand", { skip: !edge, timeout: 90_000 }, async () => {
+test("Join an organization signs in through the browser with the server's methods, and an enrollment code stays at hand", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('join')`);
     await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
@@ -158,7 +159,7 @@ test("Join an organization signs in through the browser with the server's method
   }, options);
 });
 
-test("Join an organization shows the mark of each brand, and a setup code typed as an enrollment code leads to It runs already", { skip: !edge, timeout: 90_000 }, async () => {
+test("Join an organization shows the mark of each brand, and a setup code typed as an enrollment code leads to It runs already", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('join')`);
     await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
@@ -191,7 +192,7 @@ test("Join an organization shows the mark of each brand, and a setup code typed 
   }, options);
 });
 
-test("Join an organization with GitHub shows the code to enter at GitHub, opens GitHub's page, and Cancel stops the wait", { skip: !edge, timeout: 90_000 }, async () => {
+test("Join an organization with GitHub shows the code to enter at GitHub, opens GitHub's page, and Cancel stops the wait", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('join')`);
     await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
@@ -224,7 +225,7 @@ test("Join an organization with GitHub shows the code to enter at GitHub, opens 
   }, options);
 });
 
-test("A device that waits comes as a toast with its words, and the Fleet button counts it until it is approved", { skip: !edge, timeout: 90_000 }, async () => {
+test("A device that waits comes as a toast with its words, and the Fleet button counts it until it is approved", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet: 1 device waits for your approval'`, "the mark");
     await page.until(`document.querySelector('.fleet-approval-toast')`, "the toast");
@@ -236,7 +237,7 @@ test("A device that waits comes as a toast with its words, and the Fleet button 
   }, options);
 });
 
-test("A computer that joined with an enrollment code is approved once the person signed in again with a way they have", { skip: !edge, timeout: 90_000 }, async () => {
+test("A computer that joined with an enrollment code is approved once the person signed in again with a way they have", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-approval-toast')`, "the toast of the machine");
     await page.evaluate(`window.serverFixture.addLaptop()`);

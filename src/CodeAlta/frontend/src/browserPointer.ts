@@ -1,5 +1,7 @@
 // The pointer of the browser tests: a press goes where the element is once it holds still, as a person's does.
 
+import { testLimit } from "./testTime";
+
 /** A command of the DevTools connection of a browser test. */
 export type DevToolsCommand = (method: string, params?: object) => Promise<Record<string, any>>;
 
@@ -23,7 +25,7 @@ export type PressOptions = Readonly<{
  * A popover or a dialog grows into place, and a row can give part of its width to its buttons under the pointer:
  * a point measured during such a change is beside the element once the press arrives.
  */
-export function steadyPoint(element: string, block: ScrollLogicalPosition = "center", timeoutMs = 5000, reachable = true): string {
+export function steadyPoint(element: string, block: ScrollLogicalPosition = "center", timeoutMs = testLimit(5000), reachable = true): string {
   return `(async () => {
     const find = () => (${element}) ?? null;
     const describe = node => node ? node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className.trim() ? '.' + node.className.trim().split(/\\s+/).join('.') : '') : 'nothing';
@@ -60,7 +62,7 @@ export function steadyPoint(element: string, block: ScrollLogicalPosition = "cen
  * @throws Error when the element is missing, moving or covered after the deadline, or when the page cannot be evaluated.
  */
 export async function pressElement(command: DevToolsCommand, element: string, what: string, options: PressOptions = {}): Promise<void> {
-  const { times = 1, button = "left", block = "center", timeoutMs = 5000 } = options;
+  const { times = 1, button = "left", block = "center", timeoutMs = testLimit(5000) } = options;
   const point = async (reachable: boolean) => {
     const reply = await command("Runtime.evaluate", { expression: steadyPoint(element, block, timeoutMs, reachable), returnByValue: true, awaitPromise: true });
     if (reply.exceptionDetails) throw new Error(`pressing ${what}: ${JSON.stringify(reply.exceptionDetails).slice(0, 600)}`);

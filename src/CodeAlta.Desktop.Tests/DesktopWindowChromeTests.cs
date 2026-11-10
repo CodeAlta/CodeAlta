@@ -199,9 +199,9 @@ public sealed class DesktopWindowChromeTests
         }, () => Volatile.Read(ref running), static () => true, static message => Assert.Fail(message), TimeSpan.FromMilliseconds(10));
 
         // A queued prompt that is sent, a run started by an agent: no event tells the indicator, it reads.
-        await cleared.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cleared.Task.WithinAsync(TestTime.Seconds(10));
         Volatile.Write(ref running, true);
-        await shown.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await shown.Task.WithinAsync(TestTime.Seconds(10));
 
         await progress.DisposeAsync();
         await progress.DisposeAsync();

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
+import { testLimit } from "../../testTime";
 
 const options = { entry: "../fleet/canvas/fleetCanvas.mount.tsx", fixture: "fleetCanvasFixture", rpcFixture: "../demo-api.ts", styles: ["../fleet/fleet.css"], width: 1100,
   height: 700, reducedMotion: true } as const;
 const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.fleetCanvasFixture.calls]`) as string[]).map(call => JSON.parse(call));
 
-test("without a server, the Fleet canvas shows the paired machines and opens the page of one from its name", { skip: !edge, timeout: 90_000 }, async () => {
+test("without a server, the Fleet canvas shows the paired machines and opens the page of one from its name", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-canvas[data-directory=paired] .fleet-machine')`, "the paired machines");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-canvas-title h1').textContent`), "Paired machines");

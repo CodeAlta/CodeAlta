@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { pressElement } from "./browserPointer";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 /** The window in headless Edge, with what a test of its tabs needs to drive it and to read it. */
 export type SessionWindow = Readonly<{
@@ -75,7 +76,7 @@ export async function withSessionWindow(storage: Readonly<Record<string, string>
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -86,8 +87,8 @@ export async function withSessionWindow(storage: Readonly<Record<string, string>
       const node = button.querySelector('[data-session-node]');
       return (node?.dataset.transient ? '~' : '') + (node?.textContent ?? '').trim() + (button.classList.contains('flexlayout__tab_button--selected') ? '*' : ''); })`;
     const until = async (condition: string, what: string) => {
-      const found = await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{let ok=false;try{ok=!!(${condition})}catch{}if(ok)resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
-      assert.equal(found, true, `${what}; tabs: ${JSON.stringify(await evaluate(tabs))}; ${exceptions.join("\n")}`);
+      const limit = testLimit(7000), found = await evaluate(`new Promise(resolve=>{const end=Date.now()+${limit};const tick=()=>{let ok=false;try{ok=!!(${condition})}catch{}if(ok)resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
+      assert.equal(found, true, `${what} (not within ${limit} ms); tabs: ${JSON.stringify(await evaluate(tabs))}; ${exceptions.join("\n")}`);
     };
     const shown = (expected: string[], what: string) => until(`JSON.stringify(${tabs})===${JSON.stringify(JSON.stringify(expected))}`, what);
     // A double click is two clicks, then the double click; the other button asks for the menu of what is under it.

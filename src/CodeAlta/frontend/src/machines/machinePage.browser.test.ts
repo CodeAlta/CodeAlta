@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css", "../secrets/secrets.css"],
   width: 1100, height: 900, reducedMotion: true } as const;
@@ -12,7 +13,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.machineFixture.calls]`) as string[]).map(call => JSON.parse(call));
 
-test("the computer that manages a machine changes what its devices may do, its projects and its version from its page", { skip: !edge, timeout: 90_000 }, async () => {
+test("the computer that manages a machine changes what its devices may do, its projects and its version from its page", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.machine-devices [role=row]:nth-child(2)')`, "the devices");
     // This computer first, with every permission and its own switch to stop managing.
@@ -59,7 +60,7 @@ test("the computer that manages a machine changes what its devices may do, its p
   }, options);
 });
 
-test("the computer that manages a machine sees why each provider is not ready, gives one its key and signs another in with a code", { skip: !edge, timeout: 90_000 }, async () => {
+test("the computer that manages a machine sees why each provider is not ready, gives one its key and signs another in with a code", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const section = ".machine-providers-section";
     await page.until(`document.querySelectorAll('${section} .machine-providers li').length === 3`, "the providers of the machine");
@@ -103,7 +104,7 @@ test("the computer that manages a machine sees why each provider is not ready, g
   }, options);
 });
 
-test("the computer that manages a machine signs it in from here: the page opens in this browser, and the machine keeps the sign-in", { skip: !edge, timeout: 90_000 }, async () => {
+test("the computer that manages a machine signs it in from here: the page opens in this browser, and the machine keeps the sign-in", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const section = ".machine-signins-section";
     await page.until(`document.querySelectorAll('${section} li').length === 5`, "the sign-ins of the machine");
@@ -153,7 +154,7 @@ test("the computer that manages a machine signs it in from here: the page opens 
   }, options);
 });
 
-test("the computer that manages a machine sets, rotates and deletes its secrets and edits its variables, never seeing a value back", { skip: !edge, timeout: 90_000 },
+test("the computer that manages a machine sets, rotates and deletes its secrets and edits its variables, never seeing a value back", { skip: !edge, timeout: testLimit(90_000) },
   async () => {
     await withCanvas(async page => {
       const section = ".machine-section[aria-label=Secrets]";
@@ -196,7 +197,7 @@ test("the computer that manages a machine sets, rotates and deletes its secrets 
     }, options);
   });
 
-test("the sessions of a machine bypass permissions by default, the computer that manages it makes them ask first, and reads why its sandbox cannot run", { skip: !edge, timeout: 90_000 }, async () => {
+test("the sessions of a machine bypass permissions by default, the computer that manages it makes them ask first, and reads why its sandbox cannot run", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const select = ".machine-session-permissions select";
     await page.until(`document.querySelector('${select}')`, "the default mode of the machine");
@@ -213,7 +214,7 @@ test("the sessions of a machine bypass permissions by default, the computer that
   }, options);
 });
 
-test("the machine page says whether its node starts at boot, and the command that makes it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the machine page says whether its node starts at boot, and the command that makes it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.machine-service .machine-command')`, "the service of the node");
     assert.equal(await page.evaluate(`document.querySelector('.machine-service [role=status]').textContent`),
@@ -224,7 +225,7 @@ test("the machine page says whether its node starts at boot, and the command tha
   }, options);
 });
 
-test("the computer that manages a machine lets agents of other machines in, space by space, and turning on their bypass asks first", { skip: !edge, timeout: 90_000 },
+test("the computer that manages a machine lets agents of other machines in, space by space, and turning on their bypass asks first", { skip: !edge, timeout: testLimit(90_000) },
   async () => {
     await withCanvas(async page => {
       const section = ".machine-agents";
@@ -267,7 +268,7 @@ test("the computer that manages a machine lets agents of other machines in, spac
     }, options);
   });
 
-test("giving up managing a machine asks first, and a machine this computer does not manage says how to be given it", { skip: !edge, timeout: 90_000 }, async () => {
+test("giving up managing a machine asks first, and a machine this computer does not manage says how to be given it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('input[aria-label="Manage — desktop"]')`, "this computer's switch");
     await page.evaluate(`document.querySelector('input[aria-label="Manage — desktop"]').click()`);
@@ -290,7 +291,7 @@ test("giving up managing a machine asks first, and a machine this computer does 
   }, options);
 });
 
-test("the computer that manages a machine adds and removes its labels on its page", { skip: !edge, timeout: 90_000 }, async () => {
+test("the computer that manages a machine adds and removes its labels on its page", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.machine-labels .bp6-tag')`, "the labels");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.machine-labels .bp6-tag')].map(tag => tag.textContent)`), ["gpu"]);
@@ -309,7 +310,7 @@ test("the computer that manages a machine adds and removes its labels on its pag
   }, options);
 });
 
-test("the computer that manages a machine lets in the person who asked, changes what a named person may do, and adds one", { skip: !edge, timeout: 90_000 }, async () => {
+test("the computer that manages a machine lets in the person who asked, changes what a named person may do, and adds one", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.machine-people [data-ask="Cy"]')`, "the request");
     assert.match(await page.evaluate(`document.querySelector('.machine-people [data-ask="Cy"]').textContent`) as string, /Cy asked to use this machine/);

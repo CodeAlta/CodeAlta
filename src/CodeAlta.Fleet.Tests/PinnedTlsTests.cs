@@ -8,7 +8,7 @@ namespace CodeAlta.Fleet.Tests;
 public sealed class PinnedTlsTests
 {
     // Only tells a hang: the handshakes themselves take milliseconds.
-    private static readonly TimeSpan HangDeadline = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan HangDeadline = TestTime.Minutes(2);
 
     [TestMethod]
     public async Task HandshakeSucceedsWithTheRightPins()

@@ -49,7 +49,7 @@ public sealed partial class McpRuntimeServiceTests
         ];
         var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Run tools");
 
-        var first = await host.Commands.AdmitSend(new("first", session.SessionId, "Activate tiny, then use echo")).Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+        var first = await host.Commands.AdmitSend(new("first", session.SessionId, "Activate tiny, then use echo")).Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
 
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, first.Outcome, first.Code);
         // One run, three model requests: the activation, the call of the new tool, the answer.
@@ -72,7 +72,7 @@ public sealed partial class McpRuntimeServiceTests
         }
 
         // The activation outlives the run: the next one has the tool from its first request.
-        var second = await host.Commands.AdmitSend(new("second", session.SessionId, "Use echo again")).Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+        var second = await host.Commands.AdmitSend(new("second", session.SessionId, "Use echo again")).Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, second.Outcome, second.Code);
         Assert.AreEqual(1, provider.Requests[3].Tools.Count(tool => tool.Spec.Name == "mcp__tiny__echo"));
         Assert.AreNotEqual(provider.Requests[0].RunId, provider.Requests[3].RunId);
@@ -90,7 +90,7 @@ public sealed partial class McpRuntimeServiceTests
         {
             var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Run tools");
             sessionId = session.SessionId;
-            var first = await host.Commands.AdmitSend(new("first", sessionId, "Load echo, then use it")).Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            var first = await host.Commands.AdmitSend(new("first", sessionId, "Load echo, then use it")).Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
             Assert.AreEqual(OwnedSessionCommandOutcome.Completed, first.Outcome, first.Code);
             // One tool of the server, not all of them.
             var tiny = provider.Requests[1].Tools.Select(static tool => tool.Spec.Name).Where(static name => name.StartsWith("mcp__tiny__", StringComparison.Ordinal)).ToArray();
@@ -110,7 +110,7 @@ public sealed partial class McpRuntimeServiceTests
         var resumed = new ActivatingProvider(["mcp", "activate", "tiny/echo"]) { AnswerAtOnce = true };
         await using (var host = await CreateHostAsync(project.Path, new McpPlugin(createPresentation: null, _home.Path), resumed, activations))
         {
-            var again = await host.Commands.AdmitSend(new("again", sessionId, "Use echo again")).Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            var again = await host.Commands.AdmitSend(new("again", sessionId, "Use echo again")).Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
             Assert.AreEqual(OwnedSessionCommandOutcome.Completed, again.Outcome, again.Code);
             var tiny = resumed.Requests[0].Tools.Select(static tool => tool.Spec.Name).Where(static name => name.StartsWith("mcp__tiny__", StringComparison.Ordinal)).ToArray();
             CollectionAssert.AreEqual(new[] { "mcp__tiny__echo" }, tiny);

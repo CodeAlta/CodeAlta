@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createUserInputReviewer, inputHandle, inputPage } from "./sessionUserInput";
+import { testLimit } from "./testTime";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const handle = { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1", sessionId: "session", runId: null, interactionId: "interaction", attemptId: epoch };
@@ -216,7 +217,7 @@ function keep<T>(work: Promise<unknown>[], start: () => Promise<T>): Promise<T> 
 }
 async function join<T>(original: Promise<T>, owner: unknown): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("Input deadline; originals retained"), { original, owner })), 5000); });
+  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`Input deadline of ${testLimit(5000)} ms; originals retained`), { original, owner })), testLimit(5000)); });
   try { return await Promise.race([original, deadline]); } finally { if (timer !== undefined) clearTimeout(timer); }
 }
 async function finish(work: Promise<unknown>[], owner: unknown, primary: unknown) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
+import { testLimit } from "../../testTime";
 
 // The Search canvas in headless Edge, over a fake `localSearch` (canvas.mount.tsx): what the overview draws, what Explore asks and opens,
 // the live updates and the quiet of a hidden tab, in both themes and at the narrow size of the window.
@@ -8,7 +9,7 @@ import { edge, withCanvas } from "../../statistics/browserHarness";
 const options = { entry: "../search/canvas/canvas.mount.tsx", fixture: "searchFixture", styles: ["../search/canvas/canvas.css"], width: 1600, height: 1000 } as const;
 const fixture = "window.searchFixture";
 
-test("the overview counts what the space sees, draws the history, the kinds and the projects, and says where the indexer is", { skip: !edge, timeout: 120_000 }, async () => {
+test("the overview counts what the space sees, draws the history, the kinds and the projects, and says where the indexer is", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4 && document.querySelector('.stat-tile-value')?.textContent === '20,455'`, "the tiles");
     const tiles = await page.evaluate<string[]>(`[...document.querySelectorAll('.stat-tile')].map(e => e.innerText.replace(/\\n+/g, ' | '))`);
@@ -45,7 +46,7 @@ test("the overview counts what the space sees, draws the history, the kinds and 
   }, options);
 });
 
-test("Explore lists a kind, searches as words are typed, explains the ranks and opens a hit as the search window would", { skip: !edge, timeout: 120_000 }, async () => {
+test("Explore lists a kind, searches as words are typed, explains the ranks and opens a hit as the search window would", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.stats-ranked-row').length > 0`, "the kinds");
     // A kind of the overview lists what is indexed of it, in Explore.
@@ -82,7 +83,7 @@ test("Explore lists a kind, searches as words are typed, explains the ranks and 
   }, options);
 });
 
-test("the canvas reads in the light theme and in the narrow tab of a 900×650 window without overflowing", { skip: !edge, timeout: 120_000 }, async () => {
+test("the canvas reads in the light theme and in the narrow tab of a 900×650 window without overflowing", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`${fixture}.setTheme(false)`);
     await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4 && document.querySelector('.search-canvas .chart-surface svg')`, "the overview");
@@ -108,7 +109,7 @@ test("the canvas reads in the light theme and in the narrow tab of a 900×650 wi
   }, { ...options, colorScheme: "light" });
 });
 
-test("with search by meaning on, the canvas says how much is searchable by meaning, hatches the days by words only, and Explore searches by meaning", { skip: !edge, timeout: 120_000 }, async () => {
+test("with search by meaning on, the canvas says how much is searchable by meaning, hatches the days by words only, and Explore searches by meaning", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4`, "the tiles");
     // Off, the canvas offers it: the button runs the command of the plugin that opens the dialog in the window.
@@ -141,7 +142,7 @@ test("with search by meaning on, the canvas says how much is searchable by meani
   }, options);
 });
 
-test("the Activity page counts the searches of 90 days by who asked, the share that found nothing and the median times", { skip: !edge, timeout: 120_000 }, async () => {
+test("the Activity page counts the searches of 90 days by who asked, the share that found nothing and the median times", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4`, "the overview");
     assert.equal(await page.evaluate<number>(`${fixture}.state.activityReads`), 0, "the activity is read when its page is shown");

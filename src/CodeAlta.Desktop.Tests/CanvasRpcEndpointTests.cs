@@ -53,7 +53,7 @@ public sealed class CanvasRpcEndpointTests
         harness.Send(connection, Invoke("r2", "board.touch", """{"project":"p9"}"""));
         var done = await harness.NextAsync(frame => frame.Id == "r2");
         Assert.IsTrue(done.Root.GetProperty("ok").GetBoolean());
-        Assert.AreEqual("p9", await seen.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreEqual("p9", await seen.Task.WithinAsync(TestTime.Seconds(10)));
     }
 
     [TestMethod]
@@ -99,10 +99,10 @@ public sealed class CanvasRpcEndpointTests
         var connection = harness.Connect();
 
         harness.Send(connection, Invoke("c1", "slow", "{}"));
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
         harness.Send(connection, """{"neoastra":1,"kind":"cancel","id":"c1"}""");
 
-        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancelled.Task.WithinAsync(TestTime.Seconds(10));
         var result = await harness.NextAsync(frame => frame.Id == "c1");
         Assert.AreEqual("operation_canceled", result.Root.GetProperty("error").GetProperty("code").GetString());
     }
@@ -179,7 +179,7 @@ public sealed class CanvasRpcEndpointTests
 
         harness.Send(connection, $$"""{"neoastra":1,"kind":"channel_close","channel":"{{channel}}"}""");
 
-        await disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await disposed.Task.WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]
@@ -209,7 +209,7 @@ public sealed class CanvasRpcEndpointTests
 
         await harness.Endpoint.DisposeAsync();
 
-        await disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await disposed.Task.WithinAsync(TestTime.Seconds(10));
         Assert.IsTrue(harness.Carrier.Closed.Contains((connection, "closed")));
         Assert.AreEqual("closed", harness.Endpoint.Receive(connection, [Invoke("late", "forever", "{}")]));
         Assert.IsNull(harness.Endpoint.Connect(1), "an endpoint that closed opens no session");
@@ -227,7 +227,7 @@ public sealed class CanvasRpcEndpointTests
         Assert.AreEqual("closed", harness.Endpoint.Receive(first, [Invoke("r1", "board.get", "{}")]), "the old connection is refused");
         Assert.AreEqual("ok", harness.Endpoint.Receive(second, [Invoke("r2", "board.get", "{}")]));
         await harness.NextAsync(frame => frame.Id == "r2");
-        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((first, "replaced")), TimeSpan.FromSeconds(10));
+        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((first, "replaced")), TestTime.Seconds(10));
         Assert.IsTrue(harness.Carrier.Closed.Contains((first, "replaced")));
         Assert.AreEqual("closed", harness.Endpoint.Receive("not-a-connection", [Invoke("r3", "board.get", "{}")]));
         Assert.IsTrue(harness.Endpoint.Close(second));
@@ -244,7 +244,7 @@ public sealed class CanvasRpcEndpointTests
         Assert.AreEqual(old, harness.Endpoint.CurrentConnection, "a session of a newer watch stays");
         harness.Endpoint.DropSession(upToGeneration: 1);
         Assert.IsNull(harness.Endpoint.CurrentConnection);
-        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((old, "page_gone")), TimeSpan.FromSeconds(10));
+        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((old, "page_gone")), TestTime.Seconds(10));
         Assert.IsTrue(harness.Carrier.Closed.Contains((old, "page_gone")));
     }
 
@@ -327,7 +327,7 @@ public sealed class CanvasRpcEndpointTests
             await Task.Delay(200);
         }
 
-        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((connection, "session_closed")), TimeSpan.FromSeconds(30));
+        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((connection, "session_closed")), TestTime.Seconds(30));
         Assert.IsTrue(harness.Carrier.Closed.Contains((connection, "session_closed")), "NeoAstra closed the session by itself, and the page must hear it");
         Assert.IsNull(harness.Endpoint.CurrentConnection);
         Assert.AreEqual("closed", harness.Endpoint.Receive(connection, [Invoke("late", "board.get", "{}")]));
@@ -345,9 +345,9 @@ public sealed class CanvasRpcEndpointTests
 
         harness.Send(connection, Invoke("r1", "board.get", "{}"));
 
-        SpinWait.SpinUntil(() => harness.Carrier.Failures > 0, TimeSpan.FromSeconds(10));
+        SpinWait.SpinUntil(() => harness.Carrier.Failures > 0, TestTime.Seconds(10));
         Assert.IsTrue(harness.Carrier.Failures > 0, "the frame could not be delivered");
-        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((connection, "session_closed")), TimeSpan.FromSeconds(10));
+        SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((connection, "session_closed")), TestTime.Seconds(10));
         Assert.IsTrue(harness.Carrier.Closed.Contains((connection, "session_closed")));
     }
 
@@ -365,11 +365,11 @@ public sealed class CanvasRpcEndpointTests
         }));
         var connection = harness.Connect();
         harness.Send(connection, Invoke("c1", "slow", "{}"));
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
 
         harness.CloseCanvas();
 
-        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancelled.Task.WithinAsync(TestTime.Seconds(10));
         await harness.DisposeAsync();
     }
 
@@ -513,7 +513,7 @@ public sealed class CanvasRpcEndpointTests
 
         public async Task<Frame> NextAsync(Func<Frame, bool> wanted)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             for (var index = 0; index < _kept.Count; index++)
             {
                 if (!wanted(_kept[index])) continue;

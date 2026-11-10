@@ -7,7 +7,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class PseudoTerminalTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     // A program that runs a line of the system's command interpreter and ends.
     private static PseudoTerminalStart Command(string line, string? directory = null, (string Name, string Value)? variable = null, int columns = 80, int rows = 24)
@@ -63,13 +63,13 @@ public sealed class PseudoTerminalTests
     {
         using var terminal = PseudoTerminal.Start(Command("echo shown-by-the-program"));
         Assert.IsTrue(terminal.ProcessId > 0);
-        var shown = await Shown(terminal).WaitAsync(Patience);
+        var shown = await Shown(terminal).WithinAsync(Patience);
         StringAssert.Contains(shown, "shown-by-the-program");
-        Assert.AreEqual(0, await terminal.Exited.WaitAsync(Patience));
+        Assert.AreEqual(0, await terminal.Exited.WithinAsync(Patience));
 
         using var failing = PseudoTerminal.Start(Command("exit 7"));
-        _ = await Shown(failing).WaitAsync(Patience);
-        Assert.AreEqual(7, await failing.Exited.WaitAsync(Patience));
+        _ = await Shown(failing).WithinAsync(Patience);
+        Assert.AreEqual(7, await failing.Exited.WithinAsync(Patience));
     }
 
     [TestMethod]
@@ -80,7 +80,7 @@ public sealed class PseudoTerminalTests
         {
             var line = OperatingSystem.IsWindows() ? "cd & echo value=%CODEALTA_TERMINAL_TEST%" : "pwd; echo value=$CODEALTA_TERMINAL_TEST";
             using var terminal = PseudoTerminal.Start(Command(line, folder.FullName, ("CODEALTA_TERMINAL_TEST", "héllo-日本")));
-            var shown = await Shown(terminal).WaitAsync(Patience);
+            var shown = await Shown(terminal).WithinAsync(Patience);
             StringAssert.Contains(shown, folder.Name);
             // The terminal speaks UTF-8 in both directions, whatever the code page of the system.
             StringAssert.Contains(shown, "value=héllo-日本");
@@ -98,8 +98,8 @@ public sealed class PseudoTerminalTests
         Type(terminal, OperatingSystem.IsWindows() ? "set MARK=typed\recho was-%MARK%\r" : "MARK=typed; echo was-$MARK\r");
         await Until(live, "was-typed");
         Type(terminal, "exit 3\r");
-        Assert.AreEqual(3, await terminal.Exited.WaitAsync(Patience));
-        _ = await shown.WaitAsync(Patience);
+        Assert.AreEqual(3, await terminal.Exited.WithinAsync(Patience));
+        _ = await shown.WithinAsync(Patience);
         // Nothing is sent to a program that has ended, and nothing fails.
         Type(terminal, "echo late\r");
     }
@@ -122,8 +122,8 @@ public sealed class PseudoTerminalTests
         terminal.Resize(132, 41);
         Type(terminal, "\r");
         await Until(live, OperatingSystem.IsWindows() ? "size=132x41" : "size=41 132");
-        Assert.AreEqual(0, await terminal.Exited.WaitAsync(Patience));
-        _ = await shown.WaitAsync(Patience);
+        Assert.AreEqual(0, await terminal.Exited.WithinAsync(Patience));
+        _ = await shown.WithinAsync(Patience);
     }
 
     [TestMethod]
@@ -135,8 +135,8 @@ public sealed class PseudoTerminalTests
         Type(terminal, "echo ready-to-end\r");
         await Until(live, "ready-to-end");
         terminal.Kill();
-        _ = await terminal.Exited.WaitAsync(Patience);
-        _ = await shown.WaitAsync(Patience);
+        _ = await terminal.Exited.WithinAsync(Patience);
+        _ = await shown.WithinAsync(Patience);
         // Ending it twice, or resizing what has ended, does nothing.
         terminal.Kill();
         terminal.Resize(100, 30);
@@ -149,7 +149,7 @@ public sealed class PseudoTerminalTests
         var exited = terminal.Exited;
         terminal.Dispose();
         terminal.Dispose();
-        _ = await exited.WaitAsync(Patience);
+        _ = await exited.WithinAsync(Patience);
         Assert.AreEqual(0, terminal.Read(new byte[16]));
     }
 
@@ -165,7 +165,7 @@ public sealed class PseudoTerminalTests
         }
         // Elsewhere the program is looked for by the process that becomes it: it ends with the code of a shell that found nothing.
         using var terminal = PseudoTerminal.Start(missing);
-        Assert.AreEqual(127, terminal.Exited.WaitAsync(Patience).GetAwaiter().GetResult());
+        Assert.AreEqual(127, terminal.Exited.WithinAsync(Patience).GetAwaiter().GetResult());
     }
 
     [TestMethod]
@@ -175,12 +175,12 @@ public sealed class PseudoTerminalTests
         // /dev/tty opens only for a process that has a controlling terminal; ps marks the leader of a session with an s
         // (the ps of macOS has no session number), and the leader of a session leads its process group.
         using var terminal = PseudoTerminal.Start(Command("test -t 0 && test -t 1 && test -t 2 && echo is-a-terminal; (exec 3</dev/tty) && echo has-a-terminal; case $(ps -o stat= -p $$) in *s*) echo leads-its-session;; esac; echo group=$(ps -o pgid= -p $$ | tr -d ' ') process=$$; trap '' PIPE 2>/dev/null; kill -l >/dev/null && echo signals-ok"));
-        var shown = await Shown(terminal).WaitAsync(Patience);
+        var shown = await Shown(terminal).WithinAsync(Patience);
         StringAssert.Contains(shown, "is-a-terminal");
         StringAssert.Contains(shown, "has-a-terminal");
         StringAssert.Contains(shown, "leads-its-session");
         StringAssert.Contains(shown, $"group={terminal.ProcessId} process={terminal.ProcessId}");
-        Assert.AreEqual(0, await terminal.Exited.WaitAsync(Patience));
+        Assert.AreEqual(0, await terminal.Exited.WithinAsync(Patience));
     }
 
     [TestMethod]
@@ -193,8 +193,8 @@ public sealed class PseudoTerminalTests
         // An é (two bytes), erased with the key that erases a character, then an x.
         Type(terminal, "é\u007fx\r");
         await Until(live, "read=[x]");
-        Assert.AreEqual(0, await terminal.Exited.WaitAsync(Patience));
-        _ = await shown.WaitAsync(Patience);
+        Assert.AreEqual(0, await terminal.Exited.WithinAsync(Patience));
+        _ = await shown.WithinAsync(Patience);
     }
 
     [TestMethod]
@@ -212,8 +212,8 @@ public sealed class PseudoTerminalTests
         Type(terminal, "echo ended-with=$?\r");
         await Until(live, "ended-with=130");
         Type(terminal, "exit\r");
-        _ = await terminal.Exited.WaitAsync(Patience);
-        _ = await shown.WaitAsync(Patience);
+        _ = await terminal.Exited.WithinAsync(Patience);
+        _ = await shown.WithinAsync(Patience);
     }
 
     [TestMethod]

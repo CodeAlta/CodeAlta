@@ -5,6 +5,7 @@ import { createMutationCapability } from "./sessionOperations";
 import { captureCompaction, compactControlBlock, compactControlBlockMessages, compactionAdmissionFailure, compactionBlock, createCompactionSubmissions, hasPendingCompaction,
   settledCompactionFailure, watchCompaction, watchedCompactionFailure } from "./sessionCompaction";
 import { messages } from "./localization";
+import { testLimit } from "./testTime";
 
 const observation: SessionRuntimeStateResponse = {
   status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
@@ -18,7 +19,7 @@ function page(kind = "Compact", key = "key"): SessionReceiptPage {
 }
 function finiteJoin<T>(task: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
-  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Fixture join timed out")), 5_000); });
+  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`Fixture join timed out after ${testLimit(5_000)} ms`)), testLimit(5_000)); });
   return Promise.race([task, deadline]).finally(() => clearTimeout(timer));
 }
 

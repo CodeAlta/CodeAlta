@@ -118,7 +118,7 @@ public sealed class OwnedSessionWorkspaceNotesTests
             launch.TrySetResult();
             try
             {
-                await f._lifetime.WaitAsync(TimeSpan.FromSeconds(10));
+                await f._lifetime.WithinAsync(TestTime.Seconds(10));
                 await f._lifetimeObserver;
                 f.Caller.Dispose(); // Only after the original body, cancellation and drain have actually joined.
             }

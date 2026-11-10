@@ -178,7 +178,7 @@ public sealed class DesktopProjectGitTests
             return Diff;
         }, TimeSpan.FromMilliseconds(50));
         Assert.AreEqual(branchOnly, await observing.StatusAsync(new(Epoch, fixture.ProjectId), default));
-        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(30)); // The run is canceled at the timeout.
+        await stopped.Task.WithinAsync(TestTime.Seconds(30)); // The run is canceled at the timeout.
         var never = new TaskCompletionSource<string?>();
         Assert.AreEqual(branchOnly, await fixture.ServiceOver((_, _) => never.Task, TimeSpan.FromMilliseconds(50)).StatusAsync(new(Epoch, fixture.ProjectId), default));
     }

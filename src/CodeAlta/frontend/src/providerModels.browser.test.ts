@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
-test("provider default-model picker lists, searches and selects without saving and rejects obsolete reads", { skip: !edge, timeout: 90_000 }, async () => {
+test("provider default-model picker lists, searches and selects without saving and rejects obsolete reads", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-model')`, "provider form");
     assert.equal(await page.evaluate(`modelsFixture.calls.length`), 0, "no provider is queried before opening its picker");
@@ -46,7 +47,7 @@ test("provider default-model picker lists, searches and selects without saving a
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000, ratio: 1.5 });
 });
 
-test("a default model the provider's complete inventory does not list is named above its models", { skip: !edge, timeout: 90_000 }, async () => {
+test("a default model the provider's complete inventory does not list is named above its models", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const missing = `document.querySelector('.provider-model-picker .provider-model-missing')?.textContent ?? null`;
     const reopen = async () => {
@@ -91,7 +92,7 @@ test("a default model the provider's complete inventory does not list is named a
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
 });
 
-test("provider model inventories reject foreign replies and explain empty or bounded lists", { skip: !edge, timeout: 90_000 }, async () => {
+test("provider model inventories reject foreign replies and explain empty or bounded lists", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-model')`, "provider form");
     for (const [change, message] of [
@@ -115,7 +116,7 @@ test("provider model inventories reject foreign replies and explain empty or bou
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
 });
 
-test("a provider that lists hundreds of models offers all of them", { skip: !edge, timeout: 90_000 }, async () => {
+test("a provider that lists hundreds of models offers all of them", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     // Azure OpenAI lists 475 models in one page: the ones after the 128th were once refused as an invalid inventory.
     await page.until(`document.querySelector('#provider-model')`, "provider form");

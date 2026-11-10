@@ -8,11 +8,12 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 import { isSanitizerParseReport } from "../sanitizerParseReport";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
 test("the Documentation tab shows the guide under the policy of the application: navigation, links, headings, pictures, search, a search in the page, a question, and a narrow pane",
-  { skip: !edge, timeout: 240_000 }, async () => {
+  { skip: !edge, timeout: testLimit(240_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-documentation-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -31,14 +32,14 @@ test("the Documentation tab shows the guide under the policy of the application:
       { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(directory, "profile"), browser);
     // Loopback is the control channel of the test alone, never an asset of the page.
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json() as { type: string; webSocketDebuggerUrl: string }[];
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json() as { type: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(targets.find(target => target.type === "page")!.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
     const pending = new Map<number, (reply: { result?: any; error?: unknown }) => void>();
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(Error(`${method} timed out`)); }, 30_000);
+      const timer = setTimeout(() => { pending.delete(id); reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
       pending.set(id, reply => { clearTimeout(timer); if (reply.error) reject(Error(JSON.stringify(reply.error))); else resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -70,7 +71,7 @@ test("the Documentation tab shows the guide under the policy of the application:
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails));
       return reply.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const expect = async (expression: string, message?: string) => assert.equal(await wait(expression), true, message ?? expression);
     // A click of the user, which is what a link of rendered Markdown follows.
@@ -437,7 +438,7 @@ test("the Documentation tab shows the guide under the policy of the application:
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 999_999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 3000))]); }
+    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, testLimit(3000)))]); }
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

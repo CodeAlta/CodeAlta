@@ -11,7 +11,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class FleetNodeSeatTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -36,7 +36,7 @@ public sealed class FleetNodeSeatTests
 
         var first = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "First", Prompt: "The first work."), "create-first", token);
         Assert.AreEqual("accepted", first.Send?.Status);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
 
         var second = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Second", Prompt: "The second work."), "create-second", token);
         Assert.AreEqual((FleetSeatStatuses.Queued, 1), (second.Send?.Status, second.Send?.Position));
@@ -68,7 +68,7 @@ public sealed class FleetNodeSeatTests
         await using (var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token))
         {
             _ = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Busy", Prompt: "The busy work."), "create-busy", token);
-            await started.Task.WaitAsync(Patience, token);
+            await started.Task.WithinAsync(Patience, token);
             var queued = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Queued", Prompt: "The queued work."), "create-queued", token);
             Assert.AreEqual(FleetSeatStatuses.Queued, queued.Send?.Status);
             queuedSession = queued.SessionId;
@@ -101,7 +101,7 @@ public sealed class FleetNodeSeatTests
         Assert.AreEqual(1, (await client.GetLimitsAsync(token)).Sessions);
 
         _ = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Busy", Prompt: "The busy work."), "create-busy", token);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
         var dropped = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Dropped", Prompt: "The dropped work."), "create-dropped", token);
         var urgent = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Urgent", Prompt: "The urgent work."), "create-urgent", token);
         Assert.AreEqual((1, 2), (dropped.Send?.Position, urgent.Send?.Position));

@@ -574,7 +574,7 @@ public sealed class StatisticsPluginTests
                     return (dynamicContent.Markdown, dynamicContent.DetailSections);
                 }
 
-                await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                await completion.Task.WithinAsync(TestTime.Seconds(2));
             }
             finally
             {

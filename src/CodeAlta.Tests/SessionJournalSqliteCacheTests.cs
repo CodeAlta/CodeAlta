@@ -388,7 +388,7 @@ public sealed class SessionJournalSqliteCacheTests
             operations.Add(Task.Run(async () => await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)));
         }
 
-        await Task.WhenAll(operations).WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+        await Task.WhenAll(operations).WithinAsync(TestTime.Seconds(60)).ConfigureAwait(false);
 
         Assert.AreEqual(12, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
     }

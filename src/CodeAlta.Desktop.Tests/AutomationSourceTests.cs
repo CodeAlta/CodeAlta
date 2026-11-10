@@ -367,7 +367,7 @@ public sealed class AutomationSourceTests
 
         public async Task<IPluginTriggerSink> ListeningAsync()
         {
-            var sink = await _listening.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var sink = await _listening.Task.WithinAsync(TestTime.Seconds(10));
             _listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
             return sink;
         }

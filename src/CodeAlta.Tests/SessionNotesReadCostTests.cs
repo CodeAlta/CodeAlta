@@ -75,14 +75,14 @@ public sealed class SessionNotesReadCostTests
             await resume.Task.WaitAsync(token);
             return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         }, default);
-        await scanning.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await scanning.Task.WithinAsync(TestTime.Seconds(5));
 
         var second = Note("second");
         try
         {
-            var page = await fixture.Store.ReadTimelinePageAsync("session", null, default).WaitAsync(TimeSpan.FromSeconds(5));
+            var page = await fixture.Store.ReadTimelinePageAsync("session", null, default).WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(first, page.Entries.Select(entry => entry.Event).OfType<AgentNotesEvent>().Single());
-            await fixture.Store.AppendEventsAsync("fixture", "notes-provider", "session", [second]).WaitAsync(TimeSpan.FromSeconds(5));
+            await fixture.Store.AppendEventsAsync("fixture", "notes-provider", "session", [second]).WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(read.IsCompleted);
         }
         finally
@@ -91,7 +91,7 @@ public sealed class SessionNotesReadCostTests
         }
 
         // The scan answers for the journal as it was when the read was admitted.
-        Assert.AreEqual(first, (await read.WaitAsync(TimeSpan.FromSeconds(5))).Latest);
+        Assert.AreEqual(first, (await read.WithinAsync(TestTime.Seconds(5))).Latest);
         Assert.AreEqual(second, await fixture.Store.ReadLatestNotesAsync("session"));
     }
 
@@ -267,14 +267,14 @@ public sealed class SessionNotesReadCostTests
             await resume.Task.WaitAsync(token);
             return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         }, path => appendStream = new(new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read)), () => Task.CompletedTask, default);
-        await scanning.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await scanning.Task.WithinAsync(TestTime.Seconds(5));
 
         var during = Update("during");
         try
         {
-            var page = await fixture.Store.ReadTimelinePageAsync("session", null, default).WaitAsync(TimeSpan.FromSeconds(5));
+            var page = await fixture.Store.ReadTimelinePageAsync("session", null, default).WithinAsync(TestTime.Seconds(5));
             Assert.AreEqual(first, page.Entries.Select(entry => entry.Event).OfType<AgentNotesEvent>().Single());
-            await fixture.Store.AppendEventsAsync("fixture", "notes-provider", "session", [during]).WaitAsync(TimeSpan.FromSeconds(5));
+            await fixture.Store.AppendEventsAsync("fixture", "notes-provider", "session", [during]).WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(append.IsCompleted);
         }
         finally
@@ -282,7 +282,7 @@ public sealed class SessionNotesReadCostTests
             resume.SetResult();
         }
 
-        await append.WaitAsync(TimeSpan.FromSeconds(5));
+        await append.WithinAsync(TestTime.Seconds(5));
         // Under the journal gate only the record written during the scan was left to validate.
         Assert.IsTrue(appendStream!.LowestRead >= unscanned - AgentJournalNotesReader.GuardBytes, "The scanned records were read again under the journal gate.");
         var events = await fixture.Store.ReadEventsAsync("session");

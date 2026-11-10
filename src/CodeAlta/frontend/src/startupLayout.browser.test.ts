@@ -8,12 +8,13 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
 // Real main, dependency observers and production styles, but an empty inert owned host. A fresh
 // browser profile captures the first placement, not a reload after window geometry was remembered.
-test("empty owned startup opens usable provider settings and a guide without ResizeObserver errors", { skip: !edge, timeout: 90_000 }, async t => {
+test("empty owned startup opens usable provider settings and a guide without ResizeObserver errors", { skip: !edge, timeout: testLimit(90_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-startup-layout-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -63,14 +64,14 @@ test("empty owned startup opens usable provider settings and a guide without Res
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({settings:document.querySelector('.settings-dialog')?.open,focus:document.activeElement?.outerHTML.slice(0,200),prompt:document.querySelector('#catalog-prompt .view-lines')?.textContent,errors:window.startupErrors});else setTimeout(tick,25)};tick()})`);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({settings:document.querySelector('.settings-dialog')?.open,focus:document.activeElement?.outerHTML.slice(0,200),prompt:document.querySelector('#catalog-prompt .view-lines')?.textContent,errors:window.startupErrors});else setTimeout(tick,25)};tick()})`);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true)))))");
     const stable = async (stage: string) => {
       // Under load the browser can start Blueprint's transition after a Node-side delay has elapsed.

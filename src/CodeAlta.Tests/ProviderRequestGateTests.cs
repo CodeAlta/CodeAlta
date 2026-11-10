@@ -7,7 +7,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ProviderRequestGateTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task AcquireAsync_AdmitsWaitersInTheOrderTheyCameAsync()
@@ -23,9 +23,9 @@ public sealed class ProviderRequestGateTests
         }
 
         first.Dispose();
-        (await waiters[0].WaitAsync(Timeout)).Dispose();
-        (await waiters[1].WaitAsync(Timeout)).Dispose();
-        (await waiters[2].WaitAsync(Timeout)).Dispose();
+        (await waiters[0].WithinAsync(Timeout)).Dispose();
+        (await waiters[1].WithinAsync(Timeout)).Dispose();
+        (await waiters[2].WithinAsync(Timeout)).Dispose();
 
         CollectionAssert.AreEqual(new[] { "b", "c", "d" }, order.ToArray());
         Assert.AreEqual(0, gate.ActiveCount);
@@ -45,10 +45,10 @@ public sealed class ProviderRequestGateTests
         await WaitUntilAsync(() => placesOfC.Count == 1);
 
         first.Dispose();
-        var slotOfB = await b.WaitAsync(Timeout);
+        var slotOfB = await b.WithinAsync(Timeout);
         await WaitUntilAsync(() => placesOfC.Count == 2);
         slotOfB.Dispose();
-        (await c.WaitAsync(Timeout)).Dispose();
+        (await c.WithinAsync(Timeout)).Dispose();
 
         CollectionAssert.AreEqual(new[] { 0 }, placesOfB.ToArray());
         CollectionAssert.AreEqual(new[] { 1, 0 }, placesOfC.ToArray());
@@ -96,12 +96,12 @@ public sealed class ProviderRequestGateTests
 
         await cancellation.CancelAsync();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => cancelled.WaitAsync(Timeout));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => cancelled.WithinAsync(Timeout));
         await WaitUntilAsync(() => placesOfNext.Count == 2);
         CollectionAssert.AreEqual(new[] { 1, 0 }, placesOfNext.ToArray());
         Assert.AreEqual(1, gate.WaitingCount);
         first.Dispose();
-        (await next.WaitAsync(Timeout)).Dispose();
+        (await next.WithinAsync(Timeout)).Dispose();
         Assert.AreEqual(0, gate.ActiveCount);
     }
 
@@ -146,18 +146,18 @@ public sealed class ProviderRequestGateTests
         // One more slot at a time: the waiters admitted together by one limit record their names in whatever order
         // their continuations run, which says nothing of the order of the gate.
         gate.SetLimit(2);
-        using var slotOfB = await b.WaitAsync(Timeout);
+        using var slotOfB = await b.WithinAsync(Timeout);
         Assert.IsFalse(c.IsCompleted);
         Assert.IsFalse(d.IsCompleted);
 
         gate.SetLimit(3);
-        using var slotOfC = await c.WaitAsync(Timeout);
+        using var slotOfC = await c.WithinAsync(Timeout);
         Assert.IsFalse(d.IsCompleted);
         Assert.AreEqual(3, gate.ActiveCount);
         Assert.AreEqual(1, gate.WaitingCount);
 
         gate.SetLimit(null);
-        (await d.WaitAsync(Timeout)).Dispose();
+        (await d.WithinAsync(Timeout)).Dispose();
         CollectionAssert.AreEqual(new[] { "b", "c", "d" }, order.ToArray());
     }
 
@@ -178,7 +178,7 @@ public sealed class ProviderRequestGateTests
         Assert.AreEqual(1, gate.ActiveCount);
 
         third.Dispose();
-        (await waiter.WaitAsync(Timeout)).Dispose();
+        (await waiter.WithinAsync(Timeout)).Dispose();
         Assert.AreEqual(0, gate.ActiveCount);
     }
 
@@ -210,7 +210,7 @@ public sealed class ProviderRequestGateTests
 
         Assert.AreSame(gate, registry.GetRequestGate(new ModelProviderId("SPARK-VLLM")));
         Assert.AreEqual(2, gate.Limit);
-        (await waiting.WaitAsync(Timeout)).Dispose();
+        (await waiting.WithinAsync(Timeout)).Dispose();
 
         registry.RegisterOrReplace(descriptor with { MaxConcurrentRequests = null }, () => throw new InvalidOperationException("not created"));
         Assert.IsNull(gate.Limit);
@@ -225,7 +225,7 @@ public sealed class ProviderRequestGateTests
         var updatesOfSecond = new ConcurrentQueue<AgentTurnSessionUpdate>();
 
         var first = executor.ExecuteTurnAsync(CreateRequest("one"), NoDelta, NoUpdate);
-        await inner.StartOf("one").WaitAsync(Timeout);
+        await inner.StartOf("one").WithinAsync(Timeout);
         var second = executor.ExecuteTurnAsync(CreateRequest("two"), NoDelta, (update, _) =>
         {
             updatesOfSecond.Enqueue(update);
@@ -235,10 +235,10 @@ public sealed class ProviderRequestGateTests
         Assert.IsFalse(inner.Started.ContainsKey("two") && inner.Started["two"].Task.IsCompleted, "The second request waits while the first one streams.");
 
         inner.Finish("one");
-        await first.WaitAsync(Timeout);
-        await inner.StartOf("two").WaitAsync(Timeout);
+        await first.WithinAsync(Timeout);
+        await inner.StartOf("two").WithinAsync(Timeout);
         inner.Finish("two");
-        await second.WaitAsync(Timeout);
+        await second.WithinAsync(Timeout);
 
         var updates = updatesOfSecond.ToArray();
         Assert.HasCount(2, updates);

@@ -177,7 +177,7 @@ public sealed class ServerUpdateTests
         var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new RecordingRunner(0, gate: release.Task);
         var first = Application(runner, out _, out var firstError).RunAsync(["run", "--data-root", paths.DataRoot]);
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
         while (runner.Started.Count == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
         Assert.AreEqual(1, runner.Started.Count, firstError.ToString());
 
@@ -187,7 +187,7 @@ public sealed class ServerUpdateTests
         var startedBySecond = runner.Started.Count - 1;
         store.Confirm(target);
         release.TrySetResult(0);
-        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(first, second).WithinAsync(TestTime.Seconds(30));
 
         Assert.IsTrue(ended, "the second run is refused at once");
         Assert.AreEqual(0, startedBySecond, "the second run starts no other version");

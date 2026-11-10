@@ -15,7 +15,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ClaudeCodeExternalTurnsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task TurnsMadeInVsCode_AreWrittenAsTurnsMadeElsewhere_AndTheNextTurnResumesWithoutThem()
@@ -80,7 +80,7 @@ public sealed class ClaudeCodeExternalTurnsTests
         await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
         var events = new List<AgentEvent>();
         session.Subscribe(e => { lock (events) events.Add(e); });
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("third") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("third") }).WithinAsync(Timeout);
 
         var process = SessionProcess(cli);
         Assert.AreEqual(conversation, process.ResumedSessionId);
@@ -313,9 +313,9 @@ public sealed class ClaudeCodeExternalTurnsTests
         };
         await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
         await using var session = await runtime.CreateSessionAsync(CreateOptions(runtime, directory));
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WithinAsync(Timeout);
 
-        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().WaitAsync(Timeout);
+        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().WithinAsync(Timeout);
         Assert.IsTrue(outcome!.Success);
 
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
@@ -355,12 +355,12 @@ public sealed class ClaudeCodeExternalTurnsTests
         };
         await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
         await using var session = await runtime.CreateSessionAsync(CreateOptions(runtime, directory));
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WithinAsync(Timeout);
 
         var send = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second") });
-        await started.Task.WaitAsync(Timeout);
-        await session.AbortAsync().WaitAsync(Timeout);
-        await Assert.ThrowsAsync<OperationCanceledException>(() => send.WaitAsync(Timeout));
+        await started.Task.WithinAsync(Timeout);
+        await session.AbortAsync().WithinAsync(Timeout);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => send.WithinAsync(Timeout));
 
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
         var read = await ReadAsync(cli, (await store.GetStateAsync(session.SessionId))!, directory);
@@ -375,7 +375,7 @@ public sealed class ClaudeCodeExternalTurnsTests
         var cli = new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") };
         await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
         await using var session = await runtime.CreateSessionAsync(CreateOptions(runtime, directory));
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WithinAsync(Timeout);
         var process = SessionProcess(cli);
         var transcript = new Transcript(TranscriptPath(cli, directory, process.SessionId), process.SessionId, directory.Path);
         transcript.Write(
@@ -393,7 +393,7 @@ public sealed class ClaudeCodeExternalTurnsTests
         Assert.AreEqual(AgentExternalTurnsStatus.Unchanged, (await executor.ReadExternalTurnsAsync(recorded, directory.Path, CancellationToken.None)).Status);
 
         // The next answer of the session records it.
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second") }).WithinAsync(Timeout);
         Assert.IsNotNull(ClaudeCodeProviderState.Read((await store.GetStateAsync(session.SessionId))!)!.Position);
     }
 
@@ -494,7 +494,7 @@ public sealed class ClaudeCodeExternalTurnsTests
             WorkingDirectory = directory.Path,
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         });
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WithinAsync(Timeout);
         var process = SessionProcess(cli);
         return (cli, session.SessionId, process.SessionId, process.Entries.Last());
     }

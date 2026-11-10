@@ -73,8 +73,8 @@ public sealed class AgentHubExactAbortTests
         internal AgentSessionHandleId Handle { get; private set; }
         internal Task Keep(Task work) { lock (_gate) _work.Add(work); return work; }
         internal Task<T> Keep<T>(Task<T> work) { Keep((Task)work); return work; }
-        internal Task Wait(Task work) => Keep(Keep(work).WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Wait<T>(Task<T> work) => Keep(Keep(work).WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Wait(Task work) => Keep(Keep(work).WithinAsync(TestTime.Seconds(5)));
+        internal Task<T> Wait<T>(Task<T> work) => Keep(Keep(work).WithinAsync(TestTime.Seconds(5)));
         internal async Task Expect<T>(Task work) where T : Exception
         {
             lock (_gate) _expected.Add(work);
@@ -84,7 +84,7 @@ public sealed class AgentHubExactAbortTests
         {
             var f = new Fixture();
             f._lifetime = f.Lifetime(exact, body);
-            f._deadline = f._lifetime.WaitAsync(TimeSpan.FromSeconds(10));
+            f._deadline = f._lifetime.WithinAsync(TestTime.Seconds(10));
             try { await f._deadline; }
             catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
             Exception[] failures;

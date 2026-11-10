@@ -151,7 +151,7 @@ public sealed class OwnedSessionNotesReadTests
             fixture._lifetime = fixture.RunCore(body, launch.Task);
             fixture._lifetimeObserver = Settle(fixture._lifetime);
             launch.TrySetResult();
-            try { await fixture._lifetime.WaitAsync(TimeSpan.FromSeconds(30)); await fixture._lifetimeObserver; }
+            try { await fixture._lifetime.WithinAsync(TestTime.Seconds(30)); await fixture._lifetimeObserver; }
             catch (Exception ex)
             {
                 fixture._closing = true;

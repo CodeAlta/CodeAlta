@@ -561,7 +561,7 @@ public sealed class SessionSandboxTests
         public async Task<AgentToolResult> CallAsync(string tool, object arguments)
             => await tools.Single(candidate => candidate.Spec.Name == tool).Handler(
                 new AgentToolInvocation(new ModelProviderId("codex"), sessionId, Guid.NewGuid().ToString("N"), tool, System.Text.Json.JsonSerializer.SerializeToElement(arguments)),
-                CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(60));
+                CancellationToken.None).WithinAsync(TestTime.Seconds(60));
     }
 
     // A sandbox that runs the worker in this process, on two pipes, and records the policies it is given.

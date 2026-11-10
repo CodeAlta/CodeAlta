@@ -3,6 +3,7 @@ import test from "node:test";
 import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from "./sessionDisplay";
 import { createMutationCapability } from "./sessionOperations";
 import type { SessionDisplayItem, SessionDisplayText, SessionDisplayToolActivity, SessionDisplayView } from "#neoastra";
+import { testLimit } from "./testTime";
 
 const row: SessionDisplayText = { timestamp: null, sequence: null, runId: "run", contentId: "content", kind: "Assistant", text: "before", isComplete: false, isTruncated: false, startedWithDelta: true };
 function tool(overrides: Partial<SessionDisplayToolActivity> = {}): SessionDisplayToolActivity {
@@ -108,12 +109,12 @@ async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
     finishDeadline = resolve;
     timer = setTimeout(() => {
       expired = true; // Permanent failure; late completion never permits unsubscribe/release of uncertain resources.
-      deadlineFailure = new Error("Display fixture deadline; uncertain work retained, not proven terminated", {
+      deadlineFailure = new Error(`Display fixture deadline of ${testLimit(5_000)} ms; uncertain work retained, not proven terminated`, {
         cause: { originals, stores, iterators, signals, releases, unsubscribes, body, bodyWait, joined, joinWait, fixture },
       });
       stop();
       reject(deadlineFailure);
-    }, 5_000);
+    }, testLimit(5_000));
   });
   const deadlineObserver = deadline.then(() => {}, () => {});
   let primary: unknown;

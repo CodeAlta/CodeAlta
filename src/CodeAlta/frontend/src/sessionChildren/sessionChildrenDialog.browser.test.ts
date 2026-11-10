@@ -7,9 +7,10 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 test("the child sessions of a session show their tree across projects, chats and spaces, and are deleted with it only once asked",
-  { skip: !browserExecutable, timeout: 180_000 }, async () => {
+  { skip: !browserExecutable, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-children-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -22,13 +23,13 @@ test("the child sessions of a session show their tree across projects, chats and
     browser = spawn(browserExecutable!, [...browserBaseArgs, "--window-size=1200,900",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(`${method} timed out`)), 30_000);
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))), testLimit(30_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -42,7 +43,7 @@ test("the child sessions of a session show their tree across projects, chats and
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const dialog = "document.querySelector('dialog.session-children-dialog[open]')";
     const rows = `[...${dialog}.querySelectorAll('.session-children-row')]`;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../fleet/fleetBudgets.mount.tsx", fixture: "fleetBudgetsFixture", rpcFixture: "../demo-api.ts",
   styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/fleetBudgets.css"], width: 1300, height: 900, reducedMotion: true } as const;
@@ -14,7 +15,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 const calls = `[...window.fleetBudgetsFixture.calls].map(call => JSON.parse(call))`;
 
-test("each budget shows its scope, rules and consumption, and a budget is added and removed from the page", { skip: !edge, timeout: 90_000 }, async () => {
+test("each budget shows its scope, rules and consumption, and a budget is added and removed from the page", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-budget-row').length === 2`, "the budgets");
     await page.shot("fleet-budgets-large");
@@ -64,7 +65,7 @@ test("each budget shows its scope, rules and consumption, and a budget is added 
 });
 
 test("a notification closed with the ✕ of its toast is dismissed for the person, and does not come back when the window starts again",
-  { skip: !edge, timeout: 90_000 }, async () => {
+  { skip: !edge, timeout: testLimit(90_000) }, async () => {
     await withCanvas(async page => {
       await page.until(`document.querySelector('.fleet-hold-row')`, "the page");
       await page.evaluate(`window.fleetBudgetsFixture.showButton()`);
@@ -87,7 +88,7 @@ test("a notification closed with the ✕ of its toast is dismissed for the perso
   });
 
 test("a session started on a machine whose budget holds its prompt says it waits, and Continue anyway beside it continues that run",
-  { skip: !edge, timeout: 90_000 }, async () => {
+  { skip: !edge, timeout: testLimit(90_000) }, async () => {
     await withCanvas(async page => {
       await page.until(`document.querySelector('.fleet-hold-row')`, "the page");
       await page.evaluate(`window.fleetBudgetsFixture.heldStart()`);
@@ -102,7 +103,7 @@ test("a session started on a machine whose budget holds its prompt says it waits
     }, options);
   });
 
-test("a session of another machine that waits for a command to allow is counted in the mark of the Fleet button", { skip: !edge, timeout: 90_000 }, async () => {
+test("a session of another machine that waits for a command to allow is counted in the mark of the Fleet button", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-hold-row')`, "the page");
     // A session of this computer that waits is marked in its own window; one of the Mac mini is the Fleet's.
@@ -115,7 +116,7 @@ test("a session of another machine that waits for a command to allow is counted 
 });
 
 test("a run held by a budget is continued anyway from the Fleet button's toast, the notification is dismissed, and the page stays whole when narrow",
-  { skip: !edge, timeout: 90_000 }, async () => {
+  { skip: !edge, timeout: testLimit(90_000) }, async () => {
     await withCanvas(async page => {
       await page.until(`document.querySelector('.fleet-hold-row')`, "the run that waits");
       await page.evaluate(`window.fleetBudgetsFixture.showButton()`);

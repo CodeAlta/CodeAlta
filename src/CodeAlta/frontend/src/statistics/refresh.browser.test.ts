@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./browserHarness";
+import { testLimit } from "../testTime";
 
-test("the Statistics menu saves the display interval and manual refresh reads immediately", { skip: !edge, timeout: 120_000 }, async () => {
+test("the Statistics menu saves the display interval and manual refresh reads immediately", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`statsFixture.render({ scenario: "ready" })`);
     await page.until(`document.querySelector('.stats-block') && !document.querySelector('.stats-tile-skeleton') && !document.querySelector('.stats-block[data-state="loading"]')`, "the overview");

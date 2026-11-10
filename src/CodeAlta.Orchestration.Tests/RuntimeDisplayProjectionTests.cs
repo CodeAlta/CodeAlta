@@ -41,14 +41,14 @@ public sealed class RuntimeDisplayProjectionTests
         Assert.IsFalse(next.IsCompleted);
 
         publisher.TryPublish(Text(" more", "a"));
-        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsTrue(await next.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual("mine more", observer.Current.Snapshot.Sessions.Single().Text.Single().Text);
         Assert.IsTrue(observer.Current.HasGap, "The revisions of the other session were not sent.");
 
         // An omitted event changes the counters of every replacement: it wakes the observation.
         next = observer.MoveNextAsync().AsTask();
         publisher.TryPublish(Text("omitted", " "));
-        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsTrue(await next.WithinAsync(TestTime.Seconds(10)));
         Assert.AreEqual(1L, observer.Current.Snapshot.OmittedSessionEvents);
         Assert.AreEqual(1, publisher.Display.SubscriberCount);
 
@@ -69,9 +69,9 @@ public sealed class RuntimeDisplayProjectionTests
         Assert.HasCount(1, observer.Current.Snapshot.Sessions);
         var next = observer.MoveNextAsync().AsTask();
         for (var i = 1; i <= RuntimeDisplayProjection.MaxSessions; i++) publisher.TryPublish(Text("x", $"session-{i}"));
-        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsTrue(await next.WithinAsync(TestTime.Seconds(10)));
         while (observer.Current.Snapshot.EvictedSessions == 0)
-            Assert.IsTrue(await observer.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(await observer.MoveNextAsync().AsTask().WithinAsync(TestTime.Seconds(10)));
         Assert.IsEmpty(observer.Current.Snapshot.Sessions);
         publisher.Complete();
     }
@@ -82,7 +82,7 @@ public sealed class RuntimeDisplayProjectionTests
         for (var i = 0; i < 100; i++)
         {
             var publisher = new SessionRuntimeEventPublisher(1);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(5));
             await using var observer = publisher.Display.ObserveAsync(timeout.Token).GetAsyncEnumerator();
             var admission = Task.Run(() => publisher.TryPublish(Text("admitted")));
             Assert.IsTrue(await observer.MoveNextAsync());

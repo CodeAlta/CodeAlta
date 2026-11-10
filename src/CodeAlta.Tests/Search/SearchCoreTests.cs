@@ -352,7 +352,7 @@ public sealed class SearchIndexerTests
             : ValueTask.FromResult<IReadOnlyList<SearchDocument>>([]));
         await using var fixture = new SearchFixture(tools);
         fixture.Indexer.Start();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
 
         // A file read while it was written: the read fails, and the status says so.
         fixture.Indexer.Signal("tools");

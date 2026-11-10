@@ -76,8 +76,9 @@ jobs:
         run: dotnet build src/CodeAlta.slnx -c Release
       - name: "Test"
         shell: bash
-        # A test that hangs is named and its run stopped, instead of the job running out of time.
-        run: dotnet test src/CodeAlta.slnx -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none ${TEST_FILTER:+--filter "$TEST_FILTER"}
+        # A test that hangs is named and its run stopped, instead of the job running out of time. The limits of the tests
+        # are 4 times longer on CI (src/TestSupport/TestTime.cs): a stuck test can take minutes to fail by itself.
+        run: dotnet test src/CodeAlta.slnx -c Release --no-build --blame-hang-timeout 25m --blame-hang-dump-type none ${TEST_FILTER:+--filter "$TEST_FILTER"}
 
   # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
   # for every shard of the tests.

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 import { workletFile } from "./workletFile";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 // Mounts the production microphone button, prompt editor, download notice and Speech settings page in headless
 // Edge, under StrictMode and the page's production content security policy, over a host and a microphone the
@@ -71,7 +72,7 @@ async function withPage(entry: string, fixture: string, body: (page: Page) => Pr
     const problems: string[] = [], requested: string[] = [];
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method} timed out`)); }, 30_000);
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
       waiting.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -93,9 +94,9 @@ async function withPage(entry: string, fixture: string, body: (page: Page) => Pr
       const reply = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
-    const until = async (expression: string, what: string, milliseconds = 10_000) => {
+    const until = async (expression: string, what: string, milliseconds = testLimit(10_000)) => {
       const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${milliseconds}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 25); })(); })`);
-      if (!found) assert.fail(`waited for ${what}; ${problems.join(" | ")}\n${await evaluate<string>("document.body.innerText.slice(0, 900)").catch(() => "")}`);
+      if (!found) assert.fail(`waited for ${what} (limit ${milliseconds} ms); ${problems.join(" | ")}\n${await evaluate<string>("document.body.innerText.slice(0, 900)").catch(() => "")}`);
     };
     // The pointer goes onto the element and presses it there, as a user does: what covers it gets the click instead.
     const click = async (selector: string) => {
@@ -149,7 +150,7 @@ const choice = "document.querySelector('.speech-setup select')";
 const devices = `[...(${choice}?.options ?? [])].map(option => option.textContent)`;
 const bar = "document.querySelector('.speech-setup .speech-level > span')";
 
-test("the microphone of a composer dictates into its prompt, and stops with a click, F9's command, Escape, a send and a hidden pane", { skip: !edge, timeout: 120_000 }, async () => {
+test("the microphone of a composer dictates into its prompt, and stops with a click, F9's command, Escape, a send and a hidden pane", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, key, shot }) => {
     await until(`${view()} === 'idle' && ${view("b")} === 'idle'`, "the two microphones");
     assert.deepEqual(await evaluate(`[${mic()}.id, ${mic("b")}.id, ${mic()}.title, ${mic()}.getAttribute('aria-pressed')]`), ["dictate-prompt", "dictate-prompt-b", "Dictate the prompt (F9)", "false"]);
@@ -403,7 +404,7 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
   });
 });
 
-test("the setup starts a dictation on the chosen microphone when the model is there, and a microphone that gives nothing is said once", { skip: !edge, timeout: 120_000 }, async () => {
+test("the setup starts a dictation on the chosen microphone when the model is there, and a microphone that gives nothing is said once", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click }) => {
     const pick = (id: string) => evaluate(`(() => { const e = ${choice}; e.value = ${JSON.stringify(id)}; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     const silent = "'No sound comes from the microphone (NVIDIA Broadcast). Choose another one in the Speech settings.'";
@@ -473,7 +474,7 @@ test("the setup starts a dictation on the chosen microphone when the model is th
   }, [], [["speechFixture.installed", model], ["speechFixture.warnAfter", "700"]]);
 });
 
-test("the user chooses what a dictation they stop does to the prompt: keep it, or send it", { skip: !edge, timeout: 120_000 }, async () => {
+test("the user chooses what a dictation they stop does to the prompt: keep it, or send it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, key }) => {
     const state = `${f}.host.state`, mode = "document.querySelector('#settings-speech-send')";
     const sent = `${f}.composers.a.sent`;
@@ -548,7 +549,7 @@ test("the user chooses what a dictation they stop does to the prompt: keep it, o
   }, [], [["speechFixture.installed", model], ["codealta.desktop.speech.microphone.v1", JSON.stringify({ device: null, confirmed: true })]]);
 });
 
-test("a dictation that hears nothing for a long time stops by itself, keeps its words and sends nothing", { skip: !edge, timeout: 120_000 }, async () => {
+test("a dictation that hears nothing for a long time stops by itself, keeps its words and sends nothing", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click }) => {
     await until(`${view()} === 'idle'`, "the microphone");
     await click('[data-composer="a"] .speech-button');
@@ -572,7 +573,7 @@ test("a dictation that hears nothing for a long time stops by itself, keeps its 
     ["codealta.desktop.speech.microphone.v1", JSON.stringify({ device: null, confirmed: true })]]);
 });
 
-test("the Speech settings page of a window without speech to prompt says why, and nothing else", { skip: !edge, timeout: 60_000 }, async () => {
+test("the Speech settings page of a window without speech to prompt says why, and nothing else", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until }) => {
     // A window started on folders of its own has no speech to prompt: its host answers every call `unavailable`.
     await evaluate(`${f}.host.state.status = 'unavailable'; ${f}.setSettings(true)`);
@@ -583,7 +584,7 @@ test("the Speech settings page of a window without speech to prompt says why, an
   });
 });
 
-test("the Speech settings page turns it on and off, chooses and downloads a model, and removes one", { skip: !edge, timeout: 120_000 }, async () => {
+test("the Speech settings page turns it on and off, chooses and downloads a model, and removes one", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, shot }) => {
     const state = `${f}.host.state`, page = "document.querySelector('.speech-settings')";
     const enabled = "document.querySelector('#settings-speech-enabled')", select = "document.querySelector('#settings-speech-model')";
@@ -748,14 +749,14 @@ test("the Speech settings page turns it on and off, chooses and downloads a mode
   });
 });
 
-test("the capture opens the microphone under the policy of the page, gives the chunks of the host, and closes what it opened", { skip: !edge, timeout: 90_000 }, async () => {
+test("the capture opens the microphone under the policy of the page, gives the chunks of the host, and closes what it opened", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   const requested = await withPage("./capture.mount.ts", "captureFixture", async ({ evaluate, until }) => {
     const c = "window.captureFixture";
     assert.equal(await evaluate(`${c}.available`), true);
     await evaluate(`${c}.start()`);
     // The first microphone and audio context of a new browser can take more than ten seconds to open (seen on macOS,
     // where the next runs open them in less than three): the wait is longer here, below the 30 s of a command.
-    await until(`${c}.ready === 1 || ${c}.errors.length`, "the microphone open", 25_000);
+    await until(`${c}.ready === 1 || ${c}.errors.length`, "the microphone open", testLimit(25_000));
     assert.deepEqual(await evaluate(`${c}.errors`), []);
     await until(`${c}.chunks.length >= 5`, "half a second of audio");
     // A tenth of a second of 16 kHz 16-bit audio, whatever the rate of the system.

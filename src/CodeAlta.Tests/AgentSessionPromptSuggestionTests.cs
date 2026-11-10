@@ -12,7 +12,7 @@ namespace CodeAlta.Tests;
 public sealed class AgentSessionPromptSuggestionTests
 {
     private const string Guidance = "Next prompt suggestion: end your final answer with a <next_prompt> tag.";
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task Suggestion_IsTheTagOfTheAnswer_ToldAfterTheRun_AndNeverShownNorRecorded()
@@ -25,7 +25,7 @@ public sealed class AgentSessionPromptSuggestionTests
         await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: true);
         var events = Collect(session);
 
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WithinAsync(Timeout);
 
         StringAssert.Contains(executor.DeveloperInstructions[^1], Guidance);
         var all = events.All();
@@ -48,10 +48,10 @@ public sealed class AgentSessionPromptSuggestionTests
         await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: true);
         var events = Collect(session);
 
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WithinAsync(Timeout);
         // Too long to be sent as it is: it is hidden all the same, and suggests nothing.
         executor.Chunks = ["Done.\n<next_prompt>" + new string('x', AgentPromptSuggestionEvent.MaximumLength + 1) + "</next_prompt>"];
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WithinAsync(Timeout);
 
         Assert.AreEqual(0, events.All().OfType<AgentPromptSuggestionEvent>().Count());
         Assert.AreEqual("Done.\n", events.All().OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content);
@@ -65,7 +65,7 @@ public sealed class AgentSessionPromptSuggestionTests
         await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: false);
         var events = Collect(session);
 
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WithinAsync(Timeout);
 
         Assert.IsFalse(executor.DeveloperInstructions[^1]!.Contains("Next prompt suggestion", StringComparison.Ordinal));
         Assert.AreEqual(0, events.All().OfType<AgentPromptSuggestionEvent>().Count());
@@ -81,12 +81,12 @@ public sealed class AgentSessionPromptSuggestionTests
         await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: true, () => Volatile.Read(ref enabled));
         var events = Collect(session);
 
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WithinAsync(Timeout);
         Assert.IsFalse(executor.DeveloperInstructions[^1]!.Contains("Next prompt suggestion", StringComparison.Ordinal));
         Assert.AreEqual(0, events.All().OfType<AgentPromptSuggestionEvent>().Count(), "A tag the model writes while the setting is off is not told.");
 
         Volatile.Write(ref enabled, true);
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WithinAsync(Timeout);
         StringAssert.Contains(executor.DeveloperInstructions[^1], Guidance);
         Assert.AreEqual("go ahead", events.All().OfType<AgentPromptSuggestionEvent>().Single().Suggestion);
     }

@@ -21,13 +21,13 @@ public sealed class PluginRuntimeLifecycleTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.IsNotNull(result.ActivePlugin);
-        await TrackingPlugin.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await TrackingPlugin.Started.Task.WithinAsync(TestTime.Seconds(5));
         Assert.IsTrue(result.ActivePlugin.RuntimeContext.Services.Tasks.HasRunningTasks);
 
         var diagnostics = await result.ActivePlugin.DeactivateAsync(TimeSpan.FromSeconds(5));
 
         Assert.AreEqual(0, diagnostics.Count, string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => diagnostic.Message)));
-        await TrackingPlugin.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await TrackingPlugin.Cancelled.Task.WithinAsync(TestTime.Seconds(5));
         Assert.IsFalse(result.ActivePlugin.RuntimeContext.IsValid);
         Assert.IsFalse(result.ActivePlugin.RuntimeContext.Services.Tasks.HasRunningTasks);
         Assert.IsNull(result.ActivePlugin.Instance);
@@ -193,7 +193,7 @@ public sealed class PluginRuntimeLifecycleTests
             });
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.Message)));
-        var commandResult = await AltaInvokingPlugin.Result.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var commandResult = await AltaInvokingPlugin.Result.Task.WithinAsync(TestTime.Seconds(5));
         Assert.AreEqual(0, commandResult.ExitCode);
         Assert.IsFalse(alta.UntrustedInvokeCalled);
         Assert.AreEqual(discovered.Descriptor.RuntimeKey, alta.PluginRuntimeKey);

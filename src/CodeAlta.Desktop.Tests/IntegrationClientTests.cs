@@ -143,7 +143,7 @@ public sealed class IntegrationClientTests
         await using var sockets = new FakeSlackSockets();
         var listener = new SlackSocketListener(new SlackClient(http, new Uri("https://slack.test/api/")), sockets.ConnectAsync);
         var messages = System.Threading.Channels.Channel.CreateUnbounded<SlackMessage>();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var stop = new CancellationTokenSource(TestTime.Seconds(30));
         var running = listener.RunAsync("xapp-app", message => messages.Writer.WriteAsync(message).AsTask(), null, stop.Token);
 
         var first = await sockets.Accepted.Reader.ReadAsync(stop.Token);
@@ -182,7 +182,7 @@ public sealed class IntegrationClientTests
         var listener = new SlackSocketListener(new SlackClient(http, new Uri("https://slack.test/api/")), sockets.ConnectAsync);
         var messages = System.Threading.Channels.Channel.CreateUnbounded<SlackMessage>();
         var changed = System.Threading.Channels.Channel.CreateUnbounded<bool>();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var stop = new CancellationTokenSource(TestTime.Seconds(30));
         var running = listener.RunAsync("xapp-app", message => messages.Writer.WriteAsync(message).AsTask(), () => changed.Writer.TryWrite(listener.Connected), stop.Token);
 
         var socket = await sockets.Accepted.Reader.ReadAsync(stop.Token);
@@ -212,7 +212,7 @@ public sealed class IntegrationClientTests
         await using var sockets = new FakeSlackSockets();
         var listener = new SlackSocketListener(new SlackClient(http, new Uri("https://slack.test/api/")), sockets.ConnectAsync);
         var messages = System.Threading.Channels.Channel.CreateUnbounded<SlackMessage>();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var stop = new CancellationTokenSource(TestTime.Seconds(30));
         var running = listener.RunAsync("xapp-app", message => messages.Writer.WriteAsync(message).AsTask(), null, stop.Token);
 
         var first = await sockets.Accepted.Reader.ReadAsync(stop.Token);

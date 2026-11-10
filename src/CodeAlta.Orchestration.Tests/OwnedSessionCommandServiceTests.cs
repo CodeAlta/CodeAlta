@@ -29,7 +29,7 @@ public sealed class OwnedSessionCommandServiceTests
         // The index is built in the background: a caller asks again while the folder is still being read.
         // A deadline, not a count of attempts: a loaded machine reads the folder later, never differently.
         var indexing = System.Diagnostics.Stopwatch.StartNew();
-        while (search.Status == "indexing" && indexing.Elapsed < TimeSpan.FromSeconds(30))
+        while (search.Status == "indexing" && indexing.Elapsed < TestTime.Seconds(30))
         {
             await Task.Delay(50);
             search = await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None));
@@ -2248,7 +2248,7 @@ public sealed class OwnedSessionCommandServiceTests
         private readonly List<Exception> _failures = [];
         private readonly List<Task> _cleanupWaits = [];
         private readonly List<Task<bool>> _cleanupWorkers = [];
-        private static readonly TimeSpan BodyTimeout = TimeSpan.FromSeconds(60);
+        private static readonly TimeSpan BodyTimeout = TestTime.Seconds(60);
         private Task? _setup;
         private Task? _body;
         private Task? _disposal;
@@ -2278,7 +2278,7 @@ public sealed class OwnedSessionCommandServiceTests
                 launch.TrySetResult();
                 // The body is a sequence of steps, each observed within its own five seconds: one step's budget
                 // would fail a body of several steps on a loaded machine and close the host under its last step.
-                await fixture.Track(fixture._body.WaitAsync(BodyTimeout));
+                await fixture.Track(fixture._body.WithinAsync(BodyTimeout));
             }
             catch (Exception ex)
             {
@@ -2570,8 +2570,8 @@ public sealed class OwnedSessionCommandServiceTests
             catch (Exception ex) { lock (_gate) _observedFaults.Add(ex); }
         }
 
-        internal Task Observe(Task task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
-        internal Task<T> Observe<T>(Task<T> task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
+        internal Task Observe(Task task) => Track(Track(task).WithinAsync(TestDeadlines.Hang));
+        internal Task<T> Observe<T>(Task<T> task) => Track(Track(task).WithinAsync(TestDeadlines.Hang));
 
         internal Task ObserveReadiness(Task readiness, OwnedSessionCommandReceipt receipt, string stage)
             => Track(ObserveReadinessAsync(readiness, receipt, stage));
@@ -2582,7 +2582,7 @@ public sealed class OwnedSessionCommandServiceTests
             // Retain the actual race and bounded observer, but not the bare notification.
             var completion = Track(receipt.Completion);
             var race = Track(Task.WhenAny(readiness, completion));
-            var wait = Track(race.WaitAsync(TestDeadlines.Hang));
+            var wait = Track(race.WithinAsync(TestDeadlines.Hang));
             try { await wait.ConfigureAwait(false); }
             catch (TimeoutException) { throw new TimeoutException($"Provider readiness timed out at {stage}."); }
             if (readiness.IsCompletedSuccessfully) return;
@@ -2637,7 +2637,7 @@ public sealed class OwnedSessionCommandServiceTests
         private async Task<bool> DrainAsync(Task task)
         {
             // Each task has its own timeout, not one already-expired shared cleanup token.
-            var observer = task.WaitAsync(TestDeadlines.Hang);
+            var observer = task.WithinAsync(TestDeadlines.Hang);
             lock (_gate) _cleanupWaits.Add(observer);
             try { await observer.ConfigureAwait(false); return true; }
             catch (Exception ex)

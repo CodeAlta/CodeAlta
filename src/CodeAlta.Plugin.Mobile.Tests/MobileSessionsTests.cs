@@ -680,13 +680,13 @@ public sealed class MobileSessionsTests
         var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()), clock: clock, promptPatience: TimeSpan.FromMinutes(1));
 
         var prompt = api.PromptAsync("a", new JsonObject { ["text"] = "Convert these", ["attachments"] = new JsonArray(new JsonObject { ["title"] = "a.docx", ["mediaType"] = "application/octet-stream", ["base64"] = "aGk=" }) }, default);
-        await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await clock.TimerCreated.Task.WithinAsync(TestTime.Seconds(30));
         // The files take long to prepare (a document converted, a model checked): well after the old three seconds, the phone still waits.
         clock.Advance(TimeSpan.FromSeconds(10));
         Assert.IsFalse(prompt.IsCompleted, "The request waits for alta, not for a fixed time.");
         handedOver.SetResult(FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "This model does not read images." }));
 
-        var answer = await prompt.WaitAsync(TimeSpan.FromSeconds(30));
+        var answer = await prompt.WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual((false, "This model does not read images."), ((bool?)answer!["ok"], (string?)answer["error"]), "A refusal after the files were prepared reaches the phone.");
 
         // Only a command that hangs ends the wait, at the bound the phone and Tailscale Serve would give up at.
@@ -694,9 +694,9 @@ public sealed class MobileSessionsTests
         alta.Answer("session send", (_, _) => hanging.Task);
         clock.TimerCreated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var waiting = api.PromptAsync("a", new JsonObject { ["text"] = "Go on" }, default);
-        await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await clock.TimerCreated.Task.WithinAsync(TestTime.Seconds(30));
         clock.Advance(TimeSpan.FromMinutes(1));
-        Assert.AreEqual(true, (bool?)(await waiting.WaitAsync(TimeSpan.FromSeconds(30)))!["pending"]);
+        Assert.AreEqual(true, (bool?)(await waiting.WithinAsync(TestTime.Seconds(30)))!["pending"]);
         hanging.SetResult(FakeAlta.Transcript(0));
     }
 

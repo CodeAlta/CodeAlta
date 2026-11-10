@@ -393,7 +393,7 @@ public sealed class CodexCliTurnExecutorTests
 
         var conversation = await fixture.RunAsync([User("check a")]);
 
-        var steer = await steered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var steer = await steered.Task.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual("also check b", steer[0]!["text"]!.GetValue<string>());
         Assert.AreEqual(1, server.RequestsOf("turn/start").Count(), "the message went into the running turn");
         Assert.AreEqual("steered", Text(conversation[^1]));

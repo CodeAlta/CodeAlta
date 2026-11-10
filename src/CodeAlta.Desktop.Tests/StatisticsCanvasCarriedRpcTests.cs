@@ -208,7 +208,7 @@ public sealed class StatisticsCanvasCarriedRpcTests
     {
         await using var fixture = await Fixture.CreateAsync(watch: false);
         // The page restored its tab and asked before it watched: the tab waits. When the page watches, the first thing it hears is that plugins are there.
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
         await foreach (var value in fixture.Service.WatchAsync(new(Epoch), timeout.Token))
         {
             Assert.AreEqual("plugins", value.Kind);
@@ -221,10 +221,10 @@ public sealed class StatisticsCanvasCarriedRpcTests
     {
         using var broker = new DesktopCanvases(new DesktopPluginUi());
         var service = new CanvasesService(broker, Epoch);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
         await using var watch = service.WatchAsync(new(Epoch), timeout.Token).GetAsyncEnumerator(timeout.Token);
         var first = watch.MoveNextAsync().AsTask();
-        SpinWait.SpinUntil(() => broker.WatchGeneration > 0, TimeSpan.FromSeconds(5));
+        SpinWait.SpinUntil(() => broker.WatchGeneration > 0, TestTime.Seconds(5));
 
         broker.Attach(new PluginRuntimeManager(), () => null);
 
@@ -417,7 +417,7 @@ public sealed class StatisticsCanvasCarriedRpcTests
 
         public async Task<CanvasEvent> NextAsync(Func<CanvasEvent, bool> wanted)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(60));
             foreach (var value in _kept.ToArray())
             {
                 if (!wanted(value)) continue;

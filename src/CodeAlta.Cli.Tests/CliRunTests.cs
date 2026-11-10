@@ -254,10 +254,10 @@ public sealed class CliRunTests
             ClientInfo = new Implementation { Name = "test", Version = "1.0.0" },
             ClientCapabilities = new ClientCapabilities(),
             ProtocolVersion = ProtocolVersion.From(1),
-        }, messages.Enqueue).WaitAsync(TimeSpan.FromSeconds(30));
-        await agent.WaitAsync(TimeSpan.FromSeconds(30));
+        }, messages.Enqueue).WithinAsync(TestTime.Seconds(30));
+        await agent.WithinAsync(TestTime.Seconds(30));
         var expected = run.Lines.Length;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(30);
         while (messages.Count < expected && DateTime.UtcNow < deadline) await Task.Delay(20);
 
         var methods = messages.Select(static message => message.Method).ToArray();
@@ -411,7 +411,7 @@ public sealed class CliRunTests
         using var signal = new CancellationTokenSource();
 
         var running = root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "wait"], cancellationToken: signal.Token);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await started.Task.WithinAsync(TestTime.Seconds(30));
         signal.Cancel();
         var run = await running;
 
@@ -434,12 +434,12 @@ public sealed class CliRunTests
         try
         {
             var running = root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "wait"], cancellationToken: signal.Token);
-            await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await started.Task.WithinAsync(TestTime.Seconds(30));
             var watch = System.Diagnostics.Stopwatch.StartNew();
             signal.Cancel();
-            var run = await running.WaitAsync(TimeSpan.FromSeconds(30));
+            var run = await running.WithinAsync(TestTime.Seconds(30));
 
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(15), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(15), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
             Assert.AreEqual(CliExitCodes.Aborted, run.ExitCode, run.Stderr);
             var result = Result(run);
             Assert.AreEqual("aborted", result.GetProperty("status").GetString());
@@ -461,9 +461,9 @@ public sealed class CliRunTests
         try
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var run = await root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "--timeout", "1", "wait"]).WaitAsync(TimeSpan.FromSeconds(30));
+            var run = await root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "--timeout", "1", "wait"]).WithinAsync(TestTime.Seconds(30));
 
-            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(16), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
+            Assert.IsTrue(watch.Elapsed < TestTime.Seconds(16), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
             Assert.AreEqual(CliExitCodes.Timeout, run.ExitCode, run.Stderr);
             Assert.AreEqual("timeout", Result(run).GetProperty("abortReason").GetString());
         }

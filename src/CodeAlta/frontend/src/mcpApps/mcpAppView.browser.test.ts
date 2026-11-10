@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 const origin = "https://app.invalid";
@@ -51,7 +52,7 @@ request("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "test
 const away = `<!DOCTYPE html><script>parent.postMessage({ jsonrpc: "2.0", id: 99, method: "ui/message", params: { role: "user", content: [{ type: "text", text: "from away" }] } }, "*");</script>`;
 
 test("a view gets its input, its result and its context, calls the tools of its server, and is stopped once it leaves its page",
-  { skip: !edge, timeout: 180_000 }, async () => {
+  { skip: !edge, timeout: testLimit(180_000) }, async () => {
     const directory = await mkdtemp(join(tmpdir(), "codealta-mcp-app-"));
     let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
     try {
@@ -82,7 +83,7 @@ test("a view gets its input, its result and its context, calls the tools of its 
       const problems: string[] = [];
       const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
         const id = ++sequence;
-        const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method} timed out`)); }, 20_000);
+        const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(testLimit(20_000), `the answer to ${method}`))); }, testLimit(20_000));
         waiting.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
         socket!.send(JSON.stringify({ id, method, params }));
       });
@@ -105,8 +106,8 @@ test("a view gets its input, its result and its context, calls the tools of its 
         assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
       };
       const until = async (expression: string, what: string) => {
-        const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + 15000; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
-        if (!found) assert.fail(`waited for ${what}: ${JSON.stringify(await evaluate("mcpAppFixture.state"))}; frames ${JSON.stringify(await evaluate("[...document.querySelectorAll('iframe')].map(frame => frame.src)"))}; requests ${requested.join(" ")}; ${problems.join(" | ")}`);
+        const limit = testLimit(15000), found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${limit}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
+        if (!found) assert.fail(`waited for ${what} (limit ${limit} ms): ${JSON.stringify(await evaluate("mcpAppFixture.state"))}; frames ${JSON.stringify(await evaluate("[...document.querySelectorAll('iframe')].map(frame => frame.src)"))}; requests ${requested.join(" ")}; ${problems.join(" | ")}`);
       };
       await command("Page.enable"); await command("Runtime.enable"); await command("Log.enable");
       await command("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });

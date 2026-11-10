@@ -6,7 +6,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class TerminalIntegrationTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Patience = TestTime.Seconds(60);
 
     private static async Task Until(Func<bool> condition, Func<string> what)
     {
@@ -156,7 +156,7 @@ public sealed class TerminalIntegrationTests
             Assert.AreEqual(commands, terminal.ReadCommands(10, output: false).Count, Shown());
 
             terminal.Write("exit\r");
-            await terminal.Ended.WaitAsync(Patience);
+            await terminal.Ended.WithinAsync(Patience);
         }
         finally
         {

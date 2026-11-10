@@ -7,10 +7,11 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
-test("the script of plugin HTML: a component drawn in the tree, a mount on the fragment, charts, pauses, reloads and failures, under StrictMode", { skip: !edge, timeout: 180_000 }, async () => {
+test("the script of plugin HTML: a component drawn in the tree, a mount on the fragment, charts, pauses, reloads and failures, under StrictMode", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-plugin-script-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -21,13 +22,13 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(`${method} timed out`)), 30_000);
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))), testLimit(30_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -41,9 +42,9 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
-    const settle = (milliseconds = 250) => new Promise(resolve => setTimeout(resolve, milliseconds));
+    const settle = (milliseconds = 250) => new Promise(resolve => setTimeout(resolve, milliseconds)); // not a limit: a pause
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("window.scriptFixture"), true);
 
@@ -159,7 +160,7 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
     // Charts: a block with a JSON option is drawn; an option that is not data is a short message; nothing throws.
     const option = JSON.stringify({ xAxis: { type: "category", data: ["a", "b"] }, yAxis: {}, series: [{ type: "bar", data: [1, 2] }] }).replaceAll("\"", "&quot;");
     await evaluate(`scriptFixture.clear(); scriptFixture.render({ html: '<div class="alta-chart" data-option="${option}" data-label="Bars"></div><div class="alta-chart" data-option="{&quot;series&quot;:[{&quot;formatter&quot;:&quot;function(){}&quot;}],&quot;graphic&quot;:[]}"></div><div class="alta-chart" data-option="not json"></div><div class="alta-chart"></div>' })`);
-    assert.equal(await wait("document.querySelector('.alta-chart svg, .alta-chart canvas')", 15_000), true, "a valid option is drawn");
+    assert.equal(await wait("document.querySelector('.alta-chart svg, .alta-chart canvas')", testLimit(15_000)), true, "a valid option is drawn");
     assert.equal(await evaluate("document.querySelectorAll('.plugin-chart-invalid').length"), 3, "an option that is not data, not JSON or missing is a quiet message");
     assert.equal(await evaluate("document.querySelector('.plugin-chart-invalid').textContent"), "This chart could not be drawn.");
     assert.equal(await evaluate("document.querySelector('.alta-chart .chart-label').textContent"), "Bars", "the label is the accessible name");
@@ -171,7 +172,7 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 5000))]); }
+    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, testLimit(5000)))]); }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

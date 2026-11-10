@@ -50,7 +50,7 @@ public sealed class OwnedSessionAskRuntimeTests
             owner.CloseAdmission();
             var drain = owner.DrainAsync();
             var all = Task.WhenAll(close, drain);
-            try { await all.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await all.WithinAsync(TestTime.Seconds(5)); }
             catch (Exception ex) { ex.Data["OriginalJoin"] = all; ex.Data["AskOwner"] = owner; ex.Data["OriginalStart"] = start; throw; }
         }
         Assert.AreEqual(1, hook.Closed);
@@ -74,10 +74,10 @@ public sealed class OwnedSessionAskRuntimeTests
             var starting = lifecycle.StartedAsync(new("actual"), default);
             Assert.AreSame(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => starting));
             closing = lifecycle.ClosingAsync(new("actual"));
-            await first.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await first.Entered.Task.WithinAsync(TestTime.Seconds(5));
             // First closing signals Entered synchronously; Combined invokes the second before awaiting both.
             // Use the second component's own readiness, never a scheduler-dependent counter assertion.
-            await second.CloseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await second.CloseEntered.Task.WithinAsync(TestTime.Seconds(5));
             Assert.IsFalse(closing.IsCompleted);
             Assert.IsFalse((await execution.Tool.Handler(OwnedSessionAskServiceTests.Invocation(), default)).Success);
         }
@@ -88,7 +88,7 @@ public sealed class OwnedSessionAskRuntimeTests
             owner.CloseAdmission();
             var drain = owner.DrainAsync();
             var all = Task.WhenAll(closing ?? Task.CompletedTask, drain);
-            try { await all.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await all.WithinAsync(TestTime.Seconds(5)); }
             catch (Exception ex) { ex.Data["OriginalJoin"] = all; ex.Data["AskOwner"] = owner; ex.Data["FirstComponent"] = first; throw; }
         }
     }
@@ -144,7 +144,7 @@ public sealed class OwnedSessionAskRuntimeTests
             var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             fixture._lifetime = fixture.RunOwned(launch.Task);
             launch.TrySetResult();
-            var observation = fixture._lifetime.WaitAsync(TimeSpan.FromSeconds(30));
+            var observation = fixture._lifetime.WithinAsync(TestTime.Seconds(30));
             try { await observation; }
             catch (Exception ex)
             {
@@ -208,7 +208,7 @@ public sealed class OwnedSessionAskRuntimeTests
                 Assert.AreEqual(head.Handle.AskId, _provider.AnswerOptions!.AskId);
                 // The run that carries the answer has started and goes on: the answer is admitted all the same,
                 // where it was "submitting" until that run ended (a page waits 8 seconds for it).
-                Assert.AreEqual("admitted", (await Keep(answer.WaitAsync(TimeSpan.FromSeconds(10)))).Status);
+                Assert.AreEqual("admitted", (await Keep(answer.WithinAsync(TestTime.Seconds(10)))).Status);
                 Assert.IsFalse(_provider.ReleaseAnswer.Task.IsCompleted);
                 Assert.AreEqual("fake-2", _host.Commands.Asks.Observe(action.ActionId, head.Handle)!.RunId);
                 var formatted = AltaAskAnswerMarkdownFormatter.Format(head.Request, action.Answers);
