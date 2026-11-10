@@ -87,16 +87,30 @@ public sealed class ModelServerProviderRefresh : IAsyncDisposable
 
     private async Task RefreshPendingAsync()
     {
+        try
+        {
+            await RefreshQueuedAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // Whatever ends the reads, a failure they do not expect included, the next change still starts one: a change
+            // queued meanwhile starts it now.
+            lock (_gate)
+            {
+                _running = !_closed && _pending.Count > 0;
+                if (_running) _refresh = Task.Run(RefreshPendingAsync);
+            }
+        }
+    }
+
+    private async Task RefreshQueuedAsync()
+    {
         while (true)
         {
             string[] references;
             lock (_gate)
             {
-                if (_closed || _pending.Count == 0)
-                {
-                    _running = false;
-                    return;
-                }
+                if (_closed || _pending.Count == 0) return;
 
                 references = [.. _pending];
                 _pending.Clear();
