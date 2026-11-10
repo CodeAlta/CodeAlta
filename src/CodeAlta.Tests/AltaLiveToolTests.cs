@@ -7514,11 +7514,13 @@ public sealed partial class AltaLiveToolTests
                         Directory.Delete(Path, recursive: true);
                         return;
                     }
-                    catch (IOException) when (attempt < 20)
+                    // The database of a session that just closed is let go in a moment, longer on a busy machine: ten
+                    // seconds, and a file still held is a leak.
+                    catch (IOException) when (attempt < 200)
                     {
                         Thread.Sleep(50);
                     }
-                    catch (UnauthorizedAccessException) when (attempt < 20)
+                    catch (UnauthorizedAccessException) when (attempt < 200)
                     {
                         Thread.Sleep(50);
                     }

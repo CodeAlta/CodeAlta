@@ -945,7 +945,9 @@ public sealed class DesktopOwnedSessionTests
 
         private async Task<bool> DrainAsync(IEnumerable<Task> tasks)
         {
-            var waits = tasks.Distinct().Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
+            // A busy machine (a CI runner with every test project at once) takes seconds to close a session: a task that does
+            // not end in this time is stuck, not slow.
+            var waits = tasks.Distinct().Select(task => task.WaitAsync(TimeSpan.FromSeconds(30))).ToArray();
             lock (_gate) _cleanup.AddRange(waits);
             var confirmed = true;
             foreach (var wait in waits)

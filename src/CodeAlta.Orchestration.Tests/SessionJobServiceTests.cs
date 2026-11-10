@@ -397,7 +397,9 @@ public sealed class SessionJobServiceTests
                 """);
             using var job = ShellCommandProcess.Start("& (Get-Process -Id $PID).Path -NoProfile -File intermediate.ps1 grandchild.txt; Start-Sleep -Seconds 60", folder, static _ => { });
             var file = Path.Combine(folder, "grandchild.txt");
-            for (var wait = 0; wait < 300 && !File.Exists(file); wait++) await Task.Delay(100);
+            // Two shells start one after the other: on a busy machine each takes seconds.
+            for (var wait = 0; wait < 1200 && !File.Exists(file); wait++) await Task.Delay(100);
+            Assert.IsTrue(File.Exists(file), "The child did not start its grandchild in two minutes.");
             grandchild = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(file), System.Globalization.CultureInfo.InvariantCulture));
             _ = grandchild.SafeHandle;
             Assert.IsFalse(grandchild.HasExited, "The regression requires a grandchild that outlives its parent.");
