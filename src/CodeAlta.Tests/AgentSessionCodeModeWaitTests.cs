@@ -13,11 +13,12 @@ namespace CodeAlta.Tests;
 // the turn keeps waiting for it however long the user takes, and exec gives its result in the same turn.
 public sealed partial class AgentSessionTests
 {
-    // exec gives up on a script after 300 ms of its own time; the user takes 900 ms.
-    // The yield leaves room for the engine to start and reach ask() on a loaded machine: that time is the script's own and
-    // counts. The user then takes far longer than the yield, which must not count.
-    private const int ShortYield = 1500;
-    private const int UserTime = 4000;
+    // exec gives up on a script after ShortYield of its own time; the user takes UserTime, longer.
+    // The yield leaves room for the engine to start and reach ask() on a slow CI runner (1.5 s was too little on macOS):
+    // that time is the script's own and counts. The user then takes longer than the yield, which must not count.
+    private const int ShortYield = 10_000;
+    private const int UserTime = 12_000;
+    private static readonly TimeSpan Patience = TimeSpan.FromMinutes(1);
 
     private static async Task<(AgentToolResult? Result, bool WaitedInTurn)> RunExecInTurnAsync(string code, ICodeModeQuestions? questions,
         Func<AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> permission, CodeModeRunRegistry runs, Task userAsked, TaskCompletionSource userAnswers)
@@ -60,12 +61,12 @@ public sealed partial class AgentSessionTests
             new AgentSessionCreateOptions { ProviderKey = provider.ProviderKey, Model = "gpt-5.4", WorkingDirectory = workspace, OnPermissionRequest = (request, token) => permission(request, token) });
 
         var turn = session.SendAsync(new() { Input = AgentInput.Text("Work"), AdditionalTools = [exec] });
-        await userAsked.WaitAsync(TimeSpan.FromSeconds(10));
+        await userAsked.WaitAsync(Patience);
         // The user takes longer than the yield of exec: the turn still runs, and its exec still waits for the script.
         await Task.Delay(UserTime);
         var waitedInTurn = !turn.IsCompleted && execResult is null && runs.List(summary.SessionId).Single() is { Running: true } run && !runs.FindAny(run.Id)!.Backgrounded;
         userAnswers.SetResult();
-        await turn.WaitAsync(TimeSpan.FromSeconds(20));
+        await turn.WaitAsync(Patience);
         return (execResult, waitedInTurn);
     }
 
