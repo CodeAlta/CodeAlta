@@ -2379,6 +2379,46 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task PlanList_InAnExternalWorktree_IncludesIgnoredWorktreeOnlyPlans()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Directory.CreateDirectory(Path.Combine(root.Path, "project")).FullName;
+        var git = Directory.CreateDirectory(Path.Combine(projectPath, ".git", "worktrees", "linked")).FullName;
+        File.WriteAllText(Path.Combine(git, "commondir"), "../..\n");
+        var worktree = Directory.CreateDirectory(Path.Combine(root.Path, "external-worktree")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: " + git.Replace('\\', '/') + "\n");
+        File.WriteAllText(Path.Combine(worktree, ".gitignore"), "/.alta/*\n");
+        var plans = Directory.CreateDirectory(Path.Combine(worktree, ".alta", "plans")).FullName;
+        File.WriteAllText(Path.Combine(plans, "2026-11-10-local.md"), "---\ntitle: Worktree plan\nstatus: draft\n---\n# Local\n");
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
+        var projects = new ProjectCatalog(options);
+        var project = await projects.UpsertFromPathAsync(projectPath);
+        var items = new CodeAlta.Catalog.WorkItems.WorkItemService(new CodeAltaConfigStore(options), Path.Combine(root.Path, "state"));
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(projects).Add(items));
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = project.Id };
+
+        var listed = await dispatcher.InvokeAsync(["plan", "list"], caller: caller, cwd: worktree);
+        Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Stderr);
+        var records = ReadJsonLines(listed.Stdout);
+        Assert.AreEqual(1, records.Single(static line => line.GetProperty("type").GetString() == "alta.plan.summary").GetProperty("count").GetInt32());
+        var plan = records.Single(static line => line.GetProperty("type").GetString() == "alta.plan");
+        Assert.AreEqual("2026-11-10-local", plan.GetProperty("id").GetString());
+        Assert.AreEqual("Worktree plan", plan.GetProperty("title").GetString());
+
+        var mainPlans = Directory.CreateDirectory(Path.Combine(projectPath, ".alta", "plans")).FullName;
+        File.WriteAllText(Path.Combine(mainPlans, "2026-11-10-local.md"), "---\ntitle: Main copy\nstatus: done\n---\n# Main\n");
+        File.WriteAllText(Path.Combine(mainPlans, "2026-11-09-main.md"), "---\ntitle: Main only\nstatus: approved\n---\n# Main only\n");
+        listed = await dispatcher.InvokeAsync(["plan", "list", "--status", "all"], caller: caller, cwd: worktree);
+        var plansListed = ReadJsonLines(listed.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.plan").ToArray();
+        CollectionAssert.AreEqual(new[] { "2026-11-10-local", "2026-11-09-main" }, plansListed.Select(static line => line.GetProperty("id").GetString()).ToArray());
+        Assert.AreEqual("Worktree plan", plansListed[0].GetProperty("title").GetString(), "The worktree's copy takes precedence.");
+
+        var all = await dispatcher.InvokeAsync(["plan", "list", "--all", "--status", "all"], caller: caller, cwd: worktree);
+        Assert.AreEqual("Main copy", ReadJsonLines(all.Stdout).First(static line => line.GetProperty("type").GetString() == "alta.plan").GetProperty("title").GetString(),
+            "Listing every project still reads their main checkout, not the caller's worktree.");
+    }
+
+    [TestMethod]
     public async Task Review_RequestListReplyAndStatus_WorkOnTheCheckoutOfTheCaller()
     {
         using var root = TempDirectory.Create();

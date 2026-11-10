@@ -333,6 +333,30 @@ public sealed class WorkItemTests
     }
 
     [TestMethod]
+    public async Task Plans_InAWorktree_IncludeLocalPlansWithTheProjectAsFallback()
+    {
+        using var root = new TempRoot();
+        var (items, project) = await root.CreateAsync();
+        var plans = Directory.CreateDirectory(Path.Combine(project.ProjectPath, ".alta", "plans")).FullName;
+        var worktree = Directory.CreateDirectory(Path.Combine(root.Path, "external-worktree")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".gitignore"), "/.alta/*\n");
+        var local = Directory.CreateDirectory(Path.Combine(worktree, ".alta", "plans")).FullName;
+        File.WriteAllText(Path.Combine(plans, "2026-11-09-shared.md"), "---\ntitle: Main copy\nstatus: approved\n---\n# Main\n");
+        File.WriteAllText(Path.Combine(plans, "2026-11-08-main.md"), "# Only in the project\n");
+        File.WriteAllText(Path.Combine(local, "2026-11-10-local.md"), "# Only in the worktree\n");
+        File.WriteAllText(Path.Combine(local, "2026-11-09-shared.md"), "---\ntitle: Worktree copy\nstatus: in-progress\n---\n# Worktree\n");
+
+        var listed = items.ListPlans(project, worktree);
+        CollectionAssert.AreEqual(new[] { "2026-11-10-local", "2026-11-09-shared", "2026-11-08-main" }, listed.Select(static plan => plan.Id).ToArray());
+        Assert.AreEqual("Worktree copy", listed[1].Title);
+        Assert.AreEqual(WorkPlanStatus.InProgress, listed[1].Status);
+        Assert.AreEqual(items.GetPlan(project, listed[1].Id, worktree), listed[1], "Show and list use the same copy.");
+        Assert.AreEqual(items.GetPlan(project, listed[2].Id, worktree), listed[2]);
+        CollectionAssert.AreEqual(items.ListPlans(project).ToArray(), items.ListPlans(project, null).ToArray());
+        Assert.AreEqual("Main copy", items.ListPlans(project)[0].Title);
+    }
+
+    [TestMethod]
     public async Task Plan_OfASessionInAWorktree_IsTheCopyOfThatWorktree()
     {
         using var root = new TempRoot();

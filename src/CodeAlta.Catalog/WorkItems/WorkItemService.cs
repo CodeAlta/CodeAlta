@@ -326,6 +326,25 @@ public sealed partial class WorkItemService
         return ListPlansIn(project.ProjectPath);
     }
 
+    /// <summary>Lists the plans visible to a session, including plans found only in its worktree, the newest first.</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="workingDirectory">
+    /// The folder the session works in, or null for the project folder. A plan there takes precedence over the
+    /// same plan in the project folder; plans found only in the project folder remain visible.
+    /// </param>
+    /// <returns>The plans whose files can be read, up to <see cref="MaximumItems"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
+    public IReadOnlyList<WorkPlan> ListPlans(ProjectDescriptor project, string? workingDirectory)
+    {
+        var plans = ListPlans(project);
+        if (string.IsNullOrWhiteSpace(workingDirectory)) return plans;
+        return ListPlansIn(workingDirectory).Concat(plans)
+            .DistinctBy(static plan => plan.Id, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .OrderByDescending(static plan => plan.Id, StringComparer.OrdinalIgnoreCase)
+            .Take(MaximumItems)
+            .ToArray();
+    }
+
     /// <summary>Reads what describes one plan.</summary>
     /// <param name="project">The project.</param>
     /// <param name="id">The id of the plan.</param>

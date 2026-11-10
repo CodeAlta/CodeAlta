@@ -281,7 +281,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             else
             {
                 var worktree = all ? null : CallerWorktree(context, project);
-                foreach (var plan in worktree is null ? items.ListPlans(project) : PlansOfCaller(items, project, worktree))
+                foreach (var plan in items.ListPlans(project, worktree))
                 {
                     var name = WorkItemFiles.NameOf(plan.Status);
                     if (filter == "all" || filter == name || filter == "open" && plan.Status != WorkPlanStatus.Done)
@@ -296,10 +296,6 @@ internal sealed partial class BuiltInAltaCommandContributor
         WriteSummary(context, $"alta.{kind}.summary", count, truncated: false);
         return AltaExitCodes.Success;
     }
-
-    // The plans a session in a worktree sees: the ones of the project, each as its worktree has it when it does.
-    private static IEnumerable<WorkPlan> PlansOfCaller(WorkItemService items, ProjectDescriptor project, string worktree)
-        => items.ListPlans(project).Select(plan => items.GetPlan(project, plan.Id, worktree) ?? plan);
 
     private static async ValueTask<int> HandleWorkItemShowAsync(AltaCommandContext context, string kind, string? projectRef, string? id)
     {
