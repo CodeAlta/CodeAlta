@@ -91,6 +91,23 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task ADeletionAnswered_LeavesTheNextOneFree() => Fixture.RunAsync(async f =>
+    {
+        // The window deletes a project again as soon as it is told that the name was wrong: the deletion that answered must
+        // no longer hold the others back, or the next one is told that a deletion goes on.
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        var answers = new List<string>();
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            answers.Add(await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(project.Id, f.ProjectRoot, "Wrong project", project.Archived)));
+            answers.Add(await f.Observe(f.Host.Commands.DeleteCatalogSessionAsync("missing-session", project.Id, f.ProjectRoot, "Missing")));
+        }
+
+        Assert.IsFalse(answers.Contains("busy"), string.Join(", ", answers.Distinct()));
+    });
+
+    [TestMethod]
     public Task SelectionWithoutModel_KeepsTheSessionModelInsteadOfSendingNone() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;

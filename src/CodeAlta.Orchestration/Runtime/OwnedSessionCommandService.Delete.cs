@@ -33,14 +33,18 @@ public sealed partial class OwnedSessionCommandService
     private async Task DeleteCatalogProjectOwnedAsync(string projectId, string projectPath, string confirmedName,
         bool expectedArchived, TaskCompletionSource<string> completion)
     {
+        string status;
         try
         {
-            completion.TrySetResult(await _runtime.DeleteOwnedCatalogProjectAsync(projectId, projectPath, confirmedName, expectedArchived,
+            status = await _runtime.DeleteOwnedCatalogProjectAsync(projectId, projectPath, confirmedName, expectedArchived,
                 sessionId => { lock (_gate) return IsOwnerBusy(sessionId) || Asks.List(sessionId).Head is not null; })
-                .ConfigureAwait(false));
+                .ConfigureAwait(false);
         }
-        catch (Exception) { completion.TrySetResult("delete_unconfirmed"); }
-        finally { lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; } }
+        catch (Exception) { status = "delete_unconfirmed"; }
+        // The deletion is free again before its answer is given: who reads the answer can delete again at once (a project
+        // refused for its name, then confirmed with the right one) and is not told that a deletion goes on.
+        lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; }
+        completion.TrySetResult(status);
     }
 
     /// <summary>Reserves one exact-session journal deletion. Caller cancellation is owned by the waiting bridge only.</summary>
@@ -109,18 +113,18 @@ public sealed partial class OwnedSessionCommandService
     private async Task DeleteCatalogSessionTreeOwnedAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
         string[] expectedDescendants, TaskCompletionSource<OwnedSessionTreeDeletion> completion, TaskCompletionSource<string> reservation)
     {
+        OwnedSessionTreeDeletion deletion;
         try
         {
-            completion.TrySetResult(await _runtime.DeleteOwnedCatalogSessionTreeAsync(sessionId, projectId, workspacePath, confirmedTitle, expectedDescendants,
-                OwnerBusyOrAsking).ConfigureAwait(false));
+            deletion = await _runtime.DeleteOwnedCatalogSessionTreeAsync(sessionId, projectId, workspacePath, confirmedTitle, expectedDescendants,
+                OwnerBusyOrAsking).ConfigureAwait(false);
         }
         // Some journals may already have been removed. The caller must inspect, never retry automatically.
-        catch (Exception) { completion.TrySetResult(OwnedSessionTreeDeletion.Refused("delete_unconfirmed")); }
-        finally
-        {
-            lock (_gate) { if (ReferenceEquals(_deleteWork, reservation.Task)) _deleteWork = null; }
-            reservation.TrySetResult(completion.Task.IsCompletedSuccessfully ? completion.Task.Result.Status : "delete_unconfirmed");
-        }
+        catch (Exception) { deletion = OwnedSessionTreeDeletion.Refused("delete_unconfirmed"); }
+        // Free again before the answer, as a deletion of a project.
+        lock (_gate) { if (ReferenceEquals(_deleteWork, reservation.Task)) _deleteWork = null; }
+        completion.TrySetResult(deletion);
+        reservation.TrySetResult(deletion.Status);
     }
 
     /// <summary>Tells which of these sessions something goes on in: a run, a queue, a question, a job, background work.</summary>
@@ -136,19 +140,18 @@ public sealed partial class OwnedSessionCommandService
     private async Task DeleteCatalogSessionOwnedAsync(string sessionId, string? projectId, string workspacePath,
         string confirmedTitle, TaskCompletionSource<string> completion)
     {
+        string status;
         try
         {
-            completion.TrySetResult(await _runtime.DeleteOwnedCatalogSessionAsync(sessionId, projectId, workspacePath, confirmedTitle)
-                .ConfigureAwait(false));
+            status = await _runtime.DeleteOwnedCatalogSessionAsync(sessionId, projectId, workspacePath, confirmedTitle).ConfigureAwait(false);
         }
         catch (Exception)
         {
             // The exact journal may already have been removed. The caller must inspect, never retry automatically.
-            completion.TrySetResult("delete_unconfirmed");
+            status = "delete_unconfirmed";
         }
-        finally
-        {
-            lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; }
-        }
+        // Free again before the answer, as a deletion of a project.
+        lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; }
+        completion.TrySetResult(status);
     }
 }
