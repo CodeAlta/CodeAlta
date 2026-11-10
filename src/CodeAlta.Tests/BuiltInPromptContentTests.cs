@@ -112,6 +112,8 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "alta tag list");
         StringAssert.Contains(defaultPrompt.Body, "never invent one");
         StringAssert.Contains(defaultPrompt.Body, "alta tag propose");
+        // A new tag is considered each time none fits, not left to the agent's choice.
+        StringAssert.Contains(defaultPrompt.Body, "When no tag fits, look at the other open tasks");
         StringAssert.Contains(defaultPrompt.Body, "Do not start a task you proposed");
         StringAssert.Contains(defaultPrompt.Body, "alta task complete <id>");
         StringAssert.Contains(defaultPrompt.Body, "alta plan status <plan-id> done");

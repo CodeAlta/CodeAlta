@@ -56,13 +56,17 @@ test("a card shows the short id of its task after the date, in the color of its 
   assert.equal(card(null).includes("work-tag-id"), false, "a task without a short id shows none");
 });
 
-test("the card of a task says the new tag its session proposed with it", () => {
+test("the card of a task asks about the new tag its session proposed with it, beside the decisions", () => {
   const proposal = { name: "parser", description: "The parser of the files.", newTag: true, sessionId: "s1", tasks: [{ id: "lead", reason: null }, { id: "a", reason: null }, { id: "b", reason: null }] };
   const projects = [{ projectId: "p", truncated: false, plans: [], tasks: [row("lead", "task", "pending"), row("other", "task", "pending")], tags: null, declinedTags: null, tagProposals: [proposal] }];
   const card = (id: string) => render(createElement(WorkItemCards, { hub: hub(state({ projects })), dockPreference: createDockPreference(),
     items: workItems(projects, new Set(["s1"])).filter(item => item.id === id), preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
-  assert.match(card("lead"), /<p class="work-card-tag-suggestion">.*Suggested tag<span class="work-tag"[^>]* title="The parser of the files.">parser<\/span><small>3 tasks<\/small>.*Review/s);
-  assert.equal(card("other").includes("work-card-tag-suggestion"), false, "only the tasks the proposal names");
+  const lead = card("lead");
+  assert.match(lead, /<div class="work-tag-question" role="group" aria-label="New tag"><span class="work-tag-question-head">.*New tag<span class="work-tag"[^>]*>parser<\/span><small>1 task<\/small><\/span>.*>Review<.*aria-label="Decline the tag parser" title="No agent proposes this tag again.".*<p class="work-tag-question-text" title="The parser of the files.">The parser of the files.<\/p><\/div>/s,
+    "a new tag, the open tasks it fits, its review, its refusal, and what it would be for");
+  assert.ok(lead.indexOf("work-card-more") < lead.indexOf("work-tag-question") && lead.indexOf("work-tag-question") < lead.indexOf("<footer"),
+    "after the details, with the decisions on the task");
+  assert.equal(card("other").includes("work-tag-question"), false, "only the tasks the proposal names");
 });
 
 test("a card and a row show the tags of their task, and its detail lets the user change them", () => {
@@ -81,6 +85,15 @@ test("a card and a row show the tags of their task, and its detail lets the user
   assert.match(tab, /<div class="work-task-tags" role="group" aria-label="Tags"><span class="work-tag"[^>]* title="The phone app.">mobile<button type="button" class="work-tag-remove" aria-label="Remove the tag mobile"/,
     "the detail shows each tag with what it is for, and a way to remove it");
   assert.match(tab, />Add tag<\/span>/);
+  assert.equal(tab.includes("work-tag-question"), false, "no question without a new tag proposed");
+
+  // A new tag an agent proposed with the task: its detail asks about it under its tags.
+  const proposal = { name: "parser", description: "The parser of the files.", newTag: true, sessionId: "s1", tasks: [{ id: "tagged", reason: null }, { id: "other", reason: null }] };
+  const asked = render(createElement(WorkItemsPanel, { hub: hub(state({ projects: [{ projectId: "p", truncated: false, plans: [],
+    tasks: [row("tagged", "task", "pending", { tags: ["mobile"] }), row("other", "task", "pending")], tags: [{ name: "mobile", description: "The phone app.", openTasks: 1, listed: true }],
+    declinedTags: null, tagProposals: [proposal] }] })), projects: [project], sessions, runningSessions: new Set<string>(),
+    projectId: "p", visible: true, onActivate: never, onStart: never, onOpenSession: never, onOpenFile: never, onOpenSettings: never }));
+  assert.match(asked, /class="work-task-tags".*<div class="work-tag-question" role="group" aria-label="New tag">.*?parser<\/span><small>2 tasks<\/small>.*?aria-label="Decline the tag parser"/s);
 });
 
 test("a task the session started itself says so, with nothing left to decide but putting its card away", () => {

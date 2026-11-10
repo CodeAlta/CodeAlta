@@ -53,7 +53,7 @@ Tags are yours, to organize tasks that pile up: `mobile`, `flaky-tests`, `window
 - **Find tasks by tag** with the **Tags** menu beside the search box: the list keeps the tasks that have one of the tags you tick. Typing `#mobile` in the search box does the same.
 - **Manage tags** from the **Tags** menu: edit the name and the description of a tag, delete it (from its tasks too), describe a tag that was only written on tasks, and forget a name you declined.
 - **A new tag finds its tasks.** With **Find the tasks it fits** ticked, a session reads the open tasks of the project and proposes the ones the tag fits. They wait above the list: **Review** shows them, with why each fits; untick the wrong ones and apply.
-- **Agents use your tags.** An agent that creates a task gives it the tags whose description fits it, or whose name clearly does for a tag without a description, and never creates one. When several open tasks share a topic no tag covers, it may propose a new tag: its card says **Suggested tag**, and the proposal waits in the Work items tab. **Dismiss** it, and no agent proposes that name again.
+- **Agents use your tags.** An agent that creates a task gives it the tags whose description fits it, or whose name clearly does for a tag without a description, and never creates one. When no tag fits and at least two other open tasks share the topic, it proposes a new tag. The card of the task asks about it above its buttons, as do the details of the task in the Work items tab: **New tag**, its name, the open tasks it fits and what it would be for. **Review** shows those tasks, to tick the right ones and correct the description before you apply; **×** declines it, and no agent proposes that name again.
 
 ## Plans
 

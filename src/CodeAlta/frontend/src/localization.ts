@@ -2698,7 +2698,7 @@ export const messages = dictionary({
   "A session found these open tasks for the tag. Untick the ones it does not fit.": ["Una sesión encontró estas tareas abiertas para la etiqueta. Desmarca las que no le corresponden.", "Une session a trouvé ces tâches ouvertes pour l’étiquette. Décochez celles qui ne lui correspondent pas.", "Eine Sitzung hat diese offenen Aufgaben für den Tag gefunden. Entfernen Sie den Haken bei denen, die nicht passen.", "セッションがこのタグに合う未完了タスクを見つけました。合わないものはチェックを外してください。", "一个会话为该标签找到了这些未关闭的任务。取消勾选不相符的任务。"],
   "Tag one task": ["Etiquetar una tarea", "Étiqueter une tâche", "Eine Aufgabe taggen", "1 件のタスクにタグを付ける", "给一个任务加标签"],
   "Tag {count} tasks": ["Etiquetar {count} tareas", "Étiqueter {count} tâches", "{count} Aufgaben taggen", "{count} 件のタスクにタグを付ける", "给 {count} 个任务加标签"],
-  "Suggested tag": ["Etiqueta sugerida", "Étiquette suggérée", "Vorgeschlagener Tag", "提案されたタグ", "建议的标签"],
+  "Decline the tag {name}": ["Rechazar la etiqueta {name}", "Refuser l’étiquette {name}", "Den Tag {name} ablehnen", "タグ {name} を断る", "拒绝标签 {name}"],
   "1 task": ["1 tarea", "1 tâche", "1 Aufgabe", "タスク 1 件", "1 个任务"],
   "{count} tasks": ["{count} tareas", "{count} tâches", "{count} Aufgaben", "タスク {count} 件", "{count} 个任务"],
   "Back to Inbox": ["Volver a la bandeja de entrada", "Remettre dans la boîte de réception", "Zurück in den Eingang", "受信箱に戻す", "移回收件箱"],

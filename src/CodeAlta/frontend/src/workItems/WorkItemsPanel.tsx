@@ -10,7 +10,7 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { TagChips, TagFilter, TagManagerDialog, TagProposalBanners, TagProposalDialog, TaskTagField, type ShownTagProposal } from "./WorkItemTagViews";
+import { NewTagQuestion, TagChips, TagFilter, TagManagerDialog, TagProposalBanners, TagProposalDialog, TaskTagField, type ShownTagProposal } from "./WorkItemTagViews";
 import type { WorkItemTagRow } from "#neoastra";
 import { createdDay, filterWorkItems, shownTags, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
   workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
@@ -208,6 +208,8 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 reload={reload} onForget={() => overview.refresh()} />
               : current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
                 providers={providers} sessionSettings={sessionSettings} tags={shownTags(state.projects, current.projectId)}
+                tagQuestion={proposals.find(shown => shown.proposal.newTag && shown.projectId === current.projectId && shown.tasks.some(task => task.id === current.id)) ?? null}
+                onReviewTag={setReviewing} onDeclineTag={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
                 preferredStart={state.settings.start} onStart={(way, request) => start(current, way, request)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
@@ -375,10 +377,12 @@ function ShortIdCopy({ shortId }: { shortId: string }) {
 }
 
 function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
-  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession, tags }: {
+  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession, tags, tagQuestion, onReviewTag, onDeclineTag }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
   /** The tags of the project of the item. */
   tags: readonly WorkItemTagRow[];
+  /** A new tag an agent proposes with this task, which the detail asks about, or null. */
+  tagQuestion: ShownTagProposal | null; onReviewTag: (shown: ShownTagProposal) => void; onDeclineTag: (shown: ShownTagProposal) => void;
   /** The host's epoch: a plan that is not done takes comments; null shows it without. */
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
@@ -403,6 +407,8 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
       <h3>{item.title}</h3>
       <WorkItemTags item={item} projectName={projectName} />
       {task && <TaskTagField hub={hub} item={item} tags={tags} disabled={busy} />}
+      {task && tagQuestion && <NewTagQuestion proposal={tagQuestion.proposal} count={tagQuestion.tasks.length} onReview={() => onReviewTag(tagQuestion)}
+        onDecline={() => onDeclineTag(tagQuestion)} />}
       {item.statusText && <p className="work-detail-status">{item.statusText}</p>}
       {runner && <button type="button" className="work-runner work-runner-link" title={t("Open the session that does it")} onClick={onOpenSession}>
         {runnerWorking ? <ActivitySpinner size={12} /> : <AppIcon name="chat" size={12} />}<span>{runner.title}</span><AppIcon name="chevronRight" size={12} /></button>}

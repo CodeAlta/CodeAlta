@@ -5,7 +5,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { MarkdownContent } from "../MarkdownContent";
-import { TagChip, TagChips, TagProposalDialog, type ShownTagProposal } from "./WorkItemTagViews";
+import { NewTagQuestion, TagChips, TagProposalDialog, type ShownTagProposal } from "./WorkItemTagViews";
 import { useShellLanguage } from "../shellLanguage";
 import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workItems, workItemTone, workKindIcon,
   type WorkItem, type WorkStart } from "./workItems";
@@ -131,14 +131,12 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const plan = item.kind === "plan";
   // The session works on it: there is nothing to start or to decide, only to see.
   const running = item.stage === "running";
-  // A new tag the session proposed with this task: the card says so, and its review is the one of Work items.
+  // A new tag the session proposed with this task: the card asks about it beside the decisions, and its review is the one of Work items.
   const project = item.kind === "task" ? workState.projects.find(candidate => candidate.projectId === item.projectId) : undefined;
   const suggestion = project?.tagProposals?.find(proposal => proposal.newTag && proposal.sessionId === item.proposedBy && proposal.tasks.some(match => match.id === item.id)) ?? null;
-  const review = () => {
-    if (!project || !suggestion) return;
-    const tasks = workItems([project], new Set()).filter(task => task.kind === "task" && suggestion.tasks.some(match => match.id === task.id));
-    setReviewing({ projectId: project.projectId, projectName: null, proposal: suggestion, tasks });
-  };
+  const suggestionTasks = project && suggestion ? workItems([project], new Set()).filter(task => task.kind === "task" && suggestion.tasks.some(match => match.id === task.id)) : [];
+  const review = () => { if (project && suggestion) setReviewing({ projectId: project.projectId, projectName: null, proposal: suggestion, tasks: suggestionTasks }); };
+  const decline = () => { if (suggestion) void hub.tag(item.projectId, "dismiss", suggestion.name); };
   const acknowledge = () => void hub.act(item, "acknowledge");
   const later = () => void hub.act(item, plan ? "acknowledge" : "later");
   const dismiss = () => void hub.act(item, "dismiss");
@@ -231,10 +229,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <h3 id={titleId}>{item.title}</h3>
           <WorkItemTags item={item} shortId tags />
           {item.summary && <p className="work-card-summary">{item.summary}</p>}
-          {suggestion && <p className="work-card-tag-suggestion"><AppIcon name="tag" size={13} />{t("Suggested tag")}<TagChip name={suggestion.name} title={suggestion.description} />
-            <small>{t(suggestion.tasks.length === 1 ? "1 task" : "{count} tasks", { count: suggestion.tasks.length })}</small>
-            <Button size="small" variant="minimal" onClick={review}>{t("Review")}</Button></p>}
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
+          {suggestion && <NewTagQuestion proposal={suggestion} count={suggestionTasks.length} onReview={review} onDecline={decline} />}
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
             : <WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start => onStart(item, start)} />}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>

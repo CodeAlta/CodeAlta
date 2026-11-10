@@ -263,6 +263,19 @@ export function TagProposalBanners({ proposals, onReview, onDismiss }: { proposa
   })}</div>;
 }
 
+/** The question of a new tag an agent proposes with a task, beside the decisions on the task: the tag and what it would be for, its review, and its refusal. */
+export function NewTagQuestion({ proposal, count, onReview, onDecline }: { proposal: WorkItemTagProposalRow; count: number; onReview: () => void; onDecline: () => void }) {
+  const { t } = useShellLanguage();
+  return <div className="work-tag-question" role="group" aria-label={t("New tag")}>
+    <span className="work-tag-question-head"><AppIcon name="tag" size={13} />{t("New tag")}<TagChip name={proposal.name} />
+      <small>{t(count === 1 ? "1 task" : "{count} tasks", { count })}</small></span>
+    <Button size="small" variant="minimal" onClick={onReview}>{t("Review")}</Button>
+    <Button size="small" variant="minimal" icon={<AppIcon name="close" size={13} />} aria-label={t("Decline the tag {name}", { name: proposal.name })}
+      title={t("No agent proposes this tag again.")} onClick={onDecline} />
+    {proposal.description && <p className="work-tag-question-text" title={proposal.description}>{proposal.description}</p>}
+  </div>;
+}
+
 /**
  * Reviews a tag proposal: the tasks it names, ticked, each with why; a new tag with what it would be for. **Apply** tags
  * the ticked tasks (and creates a new tag); **Dismiss** tags none, and declines a new tag.
