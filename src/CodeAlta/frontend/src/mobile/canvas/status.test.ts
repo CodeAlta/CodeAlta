@@ -28,12 +28,14 @@ test("a status is read as the plugin sends it, and what is not one is refused", 
 
 test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sign-in offered, and each state said", () => {
   const tunnel = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}) => serving({
-    connectUrl: "https://abc-2584.euw.devtunnels.ms/#k=secret", address: "https://abc-2584.euw.devtunnels.ms", ...overrides },
+    connectUrl: "https://abc-2584.euw.devtunnels.ms/?k=secret", address: "https://abc-2584.euw.devtunnels.ms", ...overrides },
     { id: "devtunnel", state: "serving", url: "https://abc-2584.euw.devtunnels.ms", detail: "Dev Tunnels serves it.", ...provider });
   const read = readStatus(JSON.parse(JSON.stringify(tunnel())));
   assert.deepEqual([read?.provider.id, read?.provider.state, read?.provider.url], ["devtunnel", "serving", "https://abc-2584.euw.devtunnels.ms"]);
   const served = mobileView(tunnel());
   assert.deepEqual([served.code?.address, served.problems], ["https://abc-2584.euw.devtunnels.ms", []]);
+  assert.equal(mobileView(tunnel({ address: null })).code?.address, "https://abc-2584.euw.devtunnels.ms/", "the token of the link, in its query or its fragment, is never shown");
+  assert.equal(mobileView(serving({ address: null })).code?.address, "https://pc.tail1.ts.net:8443/");
   assert.equal(served.instruction, "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account.");
 
   const out = { connectUrl: null, address: null, qr: null };

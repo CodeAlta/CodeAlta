@@ -593,7 +593,11 @@ public sealed class MobilePlugin : PluginBase
     {
         var state = _state;
         var url = ServedUrl(state);
-        var connect = url is not null && _access?.PairingToken is { } token ? $"{url}/#k={token}" : null;
+        // The token is in the fragment of the link, which no server is sent. A network whose devices sign in first in their browser (a
+        // Dev Tunnel) loses the fragment on the way and keeps the query: the token is there, and the page takes it out of the address
+        // at once. That network carries every request of the phone, the sign-in with the token too, so it learns nothing more.
+        var mark = _network?.Capabilities.HasFlag(PrivateNetworkCapabilities.BrowserSignIn) == true ? '?' : '#';
+        var connect = url is not null && _access?.PairingToken is { } token ? $"{url}/{mark}k={token}" : null;
         return new MobileStatus(state.Server, _listeningPort ?? _settings.Port, state.ServerDetail, View(state), connect, connect is null ? null : url,
             connect is null ? null : MobileQr.Rows(connect));
     }

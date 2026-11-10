@@ -87,7 +87,7 @@ A [Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/overview)
 1. Install the [Dev Tunnels command line](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started) (`devtunnel`) on the computer, for example with `winget install Microsoft.devtunnel` on Windows or `brew install --cask devtunnel` on macOS.
 2. In **Settings > Extensions > Mobile**, choose **Dev Tunnels** under **Phones connect through**, then **Apply**.
 3. The first time, the Mobile tab asks you to sign in: **Sign in with GitHub** opens the page of GitHub in your browser.
-4. Scan the QR code. The first time, the phone asks you to sign in with the same GitHub account, and the code is lost on the way: the page then says the phone is not connected yet. Scan the QR code again.
+4. Scan the QR code. The first time, the phone asks you to sign in with the same GitHub account, then opens the page.
 
 CodeAlta makes the tunnel once, in your account, and keeps it, open to your account alone: its address stays the same, and the phones connected stay connected. The tunnel serves while CodeAlta runs with the plugin on. Dev Tunnels has [limits](https://learn.microsoft.com/azure/developer/dev-tunnels/faq) on the use of a tunnel; the phone page is light.
 
@@ -106,7 +106,7 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 - The plugin publishes one port of the computer on the tailnet, 2584 unless you change it, and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
 - After you rename the computer, CodeAlta publishes the page again under the new name when it starts. Tailscale can only take off the old address together with everything else it serves: CodeAlta does it when the page is all Tailscale Serve publishes, and otherwise leaves the old address, which no longer answers; `tailscale serve reset` removes it with the rest.
 - Turn the plugin off in **Settings > Plugins**: the page stops, and Tailscale no longer serves it.
-- Through Dev Tunnels, anyone who has the address of the tunnel reaches the page, but every request needs the key a phone gets with the QR code, as with Tailscale. The tunnel goes through the servers of Microsoft, over HTTPS. Going back to Tailscale, or turning the plugin off, stops the tunnel.
+- Through Dev Tunnels, only the GitHub account of the tunnel reaches the page, and every request needs the key a phone gets with the QR code, as with Tailscale. The tunnel goes through the servers of Microsoft, over HTTPS, and so does the pairing token of the QR code, in the address the phone opens. Going back to Tailscale, or turning the plugin off, stops the tunnel.
 
 ## Settings
 

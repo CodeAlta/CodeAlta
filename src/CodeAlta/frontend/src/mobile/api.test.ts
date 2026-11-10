@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, failureText, memoryStore, notConnectedMessage, SignedOutError, signedOutMessage, takeFragmentToken, tokenKey } from "./api";
+import { ApiError, createApi, failureText, memoryStore, notConnectedMessage, SignedOutError, signedOutMessage, takeAddressToken, tokenKey } from "./api";
 
 type Call = { url: string; method: string; body: unknown };
 
@@ -17,13 +17,27 @@ function server(routes: Record<string, Array<[number, string?]>>) {
 }
 
 test("the token of the QR link is taken from the fragment and the address is cleared", () => {
-  let cleared = 0;
-  assert.equal(takeFragmentToken("#k=abc%2Bdef", () => cleared++), "abc+def");
-  assert.equal(cleared, 1);
-  assert.equal(takeFragmentToken("#/session/1", () => cleared++), null);
-  assert.equal(cleared, 1, "an address without a token is left as it is");
-  assert.equal(takeFragmentToken("#k=", () => cleared++), null);
-  assert.equal(cleared, 2, "an empty token still leaves the address");
+  const left: string[] = [];
+  assert.equal(takeAddressToken({ search: "", hash: "#k=abc%2Bdef" }, rest => left.push(rest)), "abc+def");
+  assert.deepEqual(left, [""]);
+  assert.equal(takeAddressToken({ search: "?a=b%20c", hash: "#k=abc" }, rest => left.push(rest)), "abc");
+  assert.deepEqual(left, ["", "?a=b%20c"], "a query without a token stays as it was written");
+  assert.equal(takeAddressToken({ search: "", hash: "#/session/1" }, rest => left.push(rest)), null);
+  assert.equal(left.length, 2, "an address without a token is left as it is");
+  assert.equal(takeAddressToken({ search: "", hash: "#k=" }, rest => left.push(rest)), null);
+  assert.equal(left.length, 3, "an empty token still leaves the address");
+});
+
+test("the token of the QR link is taken from the query, where the sign-in of a tunnel keeps it", () => {
+  // A Dev Tunnel sends the phone to the sign-in of GitHub first, which loses the fragment of the address and keeps its query.
+  const left: string[] = [];
+  assert.equal(takeAddressToken({ search: "?k=abc-def_1", hash: "" }, rest => left.push(rest)), "abc-def_1");
+  assert.equal(takeAddressToken({ search: "?a=1&k=abc%2Bdef&b=2", hash: "#/session/s1" }, rest => left.push(rest)), "abc+def");
+  assert.deepEqual(left, ["", "?a=1&b=2#/session/s1"], "the token leaves the address; what else it holds stays");
+  assert.equal(takeAddressToken({ search: "?a=1", hash: "" }, rest => left.push(rest)), null);
+  assert.equal(left.length, 2, "an address without a token is left as it is");
+  assert.equal(takeAddressToken({ search: "?k=", hash: "" }, rest => left.push(rest)), null);
+  assert.deepEqual(left.slice(2), [""], "an empty token still leaves the address");
 });
 
 test("signIn keeps the key the computer gives in place of the token, and forgets a refused one", async () => {
@@ -73,7 +87,7 @@ test("a 401 without a kept token is signed out at once; a second 401 after a sig
 });
 
 test("a phone that never kept a key is told to scan the code, not that it is no longer connected", async () => {
-  // The GitHub sign-in of a Dev Tunnel loses the #k= of the QR link: the page opens with neither a token nor a key.
+  // The sign-in a network asks for first can lose the token of the QR link: the page opens with neither a token nor a key.
   const { fetch } = server({ "/api/sessions": [[401]] });
   const api = createApi({ fetch, store: memoryStore(), onSignedOut: () => { } });
   await assert.rejects(api.sessions(0, 6, []), (error: Error) => error instanceof SignedOutError && error.message === notConnectedMessage);
