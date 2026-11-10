@@ -87,7 +87,9 @@ The fit before the download is an estimate, read from the header of the model: t
 
 **More settings** chooses the build, the GPUs, the port, how many models stay loaded at once, who reaches it (**This machine and your computers** or **This machine only**), whether it keeps running when CodeAlta exits, and other options of `llama-server`.
 
-The server starts once its build and its models are there; until then it shows **Waiting**. A server that fails is restarted a few times, then shows **Failed** with the reason: read the end of its log in its details.
+The server starts once its build and its models are there; until then it shows **Waiting**. Its provider lists the models as soon as the server serves them, even when you added it while the server was waiting. Changes to its models appear automatically; you do not need **Test provider**.
+
+A server that fails is restarted a few times, then shows **Failed** with the reason: read the end of its log in its details.
 
 Already running a `llama-server` by hand? **Import a command line…** reads its command, its models, GPUs and options, into a new server for you to check and add.
 

@@ -26,27 +26,32 @@ internal sealed class DesktopModelServers : IAsyncDisposable
 {
     private static readonly TimeSpan RemoteTimeout = TimeSpan.FromSeconds(8);
     private readonly DesktopFleet? _fleet;
+    private readonly CodeAlta.Fleet.ModelServerProviderRefresh _providerModels;
     private readonly ConcurrentDictionary<string, (FleetNodeClient Client, IDisposable Watch)> _watches = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _disposed = new();
-    // The state of each server last read, by machine and server, and the machines being read again.
-    private readonly ConcurrentDictionary<(string Machine, string Server), string> _serverStates = new();
+    // Changes during a read or probe must cause another read, not be lost.
     private readonly ConcurrentDictionary<string, byte> _reading = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _dirty = new(StringComparer.Ordinal);
 
     /// <summary>Creates the model servers of the window.</summary>
     /// <param name="local">The model host of this computer, or null for an instance that runs none (explicit roots).</param>
     /// <param name="fleet">The paired machines, or null.</param>
     /// <param name="transports">Where the providers reach the servers.</param>
-    public DesktopModelServers(ModelHost? local, DesktopFleet? fleet, FleetModelServerTransports transports)
+    /// <param name="providerModels">Refreshes the providers when their server's models change; owned by this view.</param>
+    public DesktopModelServers(ModelHost? local, DesktopFleet? fleet, FleetModelServerTransports transports, CodeAlta.Fleet.ModelServerProviderRefresh providerModels)
     {
         ArgumentNullException.ThrowIfNull(transports);
+        ArgumentNullException.ThrowIfNull(providerModels);
         Local = local;
         _fleet = fleet;
+        _providerModels = providerModels;
         Transports = transports;
         transports.Local = local;
         transports.Remote = machine => _fleet?.Find(machine) is { } host ? token => WaitOnlineAsync(host, token) : null;
+        if (fleet is not null) fleet.Changed += OnFleetChanged;
         if (local is not null)
         {
-            local.Changed += () => OnChanged(FleetModelServerTransports.LocalMachine);
+            local.Changed += OnLocalChanged;
             local.DownloadEnded += download => DownloadEnded?.Invoke(FleetModelServerTransports.LocalMachine, download);
             local.TaskEnded += task => TaskEnded?.Invoke(FleetModelServerTransports.LocalMachine, task);
         }
@@ -67,38 +72,45 @@ internal sealed class DesktopModelServers : IAsyncDisposable
     /// <summary>Raised when an install or an update of this computer or of a machine it watches ended.</summary>
     public event Action<string, HostTask>? TaskEnded;
 
-    /// <summary>
-    /// Raised with a machine and a server once that server is ready, also the first time it is read ready: the providers
-    /// that name it read its models again (a provider read before its server started has none).
-    /// </summary>
-    public event Action<string, string>? ServerReady;
-
     /// <summary>Gets or sets what adds or changes a provider of this computer that uses a model server.</summary>
     public Func<string, string, string, CancellationToken, Task>? SaveLocalProvider { get; set; }
 
+    private void OnLocalChanged() => OnChanged(FleetModelServerTransports.LocalMachine);
+
+    private void OnFleetChanged() => _ = WatchAfterFleetChangeAsync();
+
+    private async Task WatchAfterFleetChangeAsync()
+    {
+        try { await WatchMachinesAsync(_disposed.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_disposed.IsCancellationRequested) { }
+        catch (ObjectDisposedException) when (_disposed.IsCancellationRequested) { }
+    }
+
     private void OnChanged(string machine)
     {
+        if (_disposed.IsCancellationRequested) return;
         Changed?.Invoke(machine);
-        if (ServerReady is null || !_reading.TryAdd(machine, 0)) return;
+        _dirty[machine] = 0;
+        if (!_reading.TryAdd(machine, 0)) return;
         // The changes of a machine come in bursts: its servers are read once after them.
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(300, _disposed.Token).ConfigureAwait(false);
-                _reading.TryRemove(machine, out _);
-                var status = await StatusAsync(machine, _disposed.Token).ConfigureAwait(false);
-                foreach (var server in status.Servers)
+                while (_dirty.TryRemove(machine, out _))
                 {
-                    var key = (machine, server.Definition.Id);
-                    var before = _serverStates.TryGetValue(key, out var known) ? known : null;
-                    _serverStates[key] = server.Status.State;
-                    if (server.Status.State == "ready" && before != "ready") ServerReady?.Invoke(machine, server.Definition.Id);
+                    await Task.Delay(300, _disposed.Token).ConfigureAwait(false);
+                    var status = await StatusAsync(machine, _disposed.Token).ConfigureAwait(false);
+                    await _providerModels.UpdateAsync(machine, status.Servers).ConfigureAwait(false);
                 }
             }
             catch (Exception exception) when (exception is ModelHostException or OperationCanceledException or IOException or TimeoutException or ObjectDisposedException)
             {
+            }
+            finally
+            {
                 _reading.TryRemove(machine, out _);
+                if (_dirty.ContainsKey(machine)) OnChanged(machine);
             }
         });
     }
@@ -108,10 +120,13 @@ internal sealed class DesktopModelServers : IAsyncDisposable
     /// <returns>A task that ends once it runs.</returns>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (Local is null) return;
-        await Local.StartAsync(cancellationToken).ConfigureAwait(false);
-        // The servers that were up before this window started are ready now.
-        OnChanged(FleetModelServerTransports.LocalMachine);
+        if (Local is not null)
+        {
+            await Local.StartAsync(cancellationToken).ConfigureAwait(false);
+            // The servers that were up before this window started are ready now.
+            OnLocalChanged();
+        }
+        await WatchMachinesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Lists the machines: this computer first, then the paired machines.</summary>
@@ -178,8 +193,16 @@ internal sealed class DesktopModelServers : IAsyncDisposable
                     if (ended.Download is { } download) DownloadEnded?.Invoke(id, download);
                     if (ended.Task is { } task) TaskEnded?.Invoke(id, task);
                 }, cancellationToken).ConfigureAwait(false);
+                if (!ReferenceEquals(host.CurrentClient, client) || _disposed.IsCancellationRequested)
+                {
+                    watch.Dispose();
+                    continue;
+                }
                 if (_watches.TryRemove(id, out var replaced)) replaced.Watch.Dispose();
                 _watches[id] = (client, watch);
+                // Read once after subscribing, including on reconnection: no Settings page has to be opened.
+                await _providerModels.UpdateAsync(id, []).ConfigureAwait(false);
+                OnChanged(id);
             }
             catch (Exception exception) when (exception is FleetException or IOException or TimeoutException or ObjectDisposedException or FleetConnectionClosedException)
             {
@@ -320,8 +343,11 @@ internal sealed class DesktopModelServers : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        if (_fleet is not null) _fleet.Changed -= OnFleetChanged;
+        if (Local is not null) Local.Changed -= OnLocalChanged;
         await _disposed.CancelAsync().ConfigureAwait(false);
         foreach (var watch in _watches.Values) watch.Watch.Dispose();
+        await _providerModels.DisposeAsync().ConfigureAwait(false);
         if (Local is not null) await Local.DisposeAsync().ConfigureAwait(false);
         _disposed.Dispose();
     }

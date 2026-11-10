@@ -89,7 +89,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
     public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
         Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities,
         Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment,
-        Func<ModelProviderDescriptor, bool>? isPersonalProvider)
+        Func<ModelProviderDescriptor, bool>? isPersonalProvider, CodeAlta.ModelServers.ModelHost? modelServers = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var provider = new ScriptedFleetProvider();
@@ -102,6 +102,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
             Host = on, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
             PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
             AdmitEnvironment = admitEnvironment, IsPersonalProvider = isPersonalProvider,
+            ModelServers = modelServers,
         });
         var service = Service(host);
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);

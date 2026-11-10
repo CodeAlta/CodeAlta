@@ -23,6 +23,7 @@
     <!-- A CodeAlta Server of the test process, which altanode join enrolls in. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\CodeAlta.Server\CodeAlta.Server.csproj" />
+    <ProjectReference Include="..\CodeAlta.Tests.FakeLlamaServer\CodeAlta.Tests.FakeLlamaServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

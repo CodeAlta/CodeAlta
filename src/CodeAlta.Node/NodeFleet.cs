@@ -42,14 +42,17 @@ internal sealed class NodeFleet : IAsyncDisposable
     private readonly DeviceIdentity _identity;
     private readonly FleetDirectListener? _listener;
     private readonly string? _listenerFile;
+    private readonly Fleet.ModelServerProviderRefresh _providerModels;
 
-    private NodeFleet(DeviceIdentity identity, FleetNodeService service, FleetDirectListener? listener, IReadOnlyList<string> addresses, string? listenerFile)
+    private NodeFleet(DeviceIdentity identity, FleetNodeService service, FleetDirectListener? listener, IReadOnlyList<string> addresses, string? listenerFile,
+        Fleet.ModelServerProviderRefresh providerModels)
     {
         _identity = identity;
         Service = service;
         _listener = listener;
         Addresses = addresses;
         _listenerFile = listenerFile;
+        _providerModels = providerModels;
     }
 
     /// <summary>Gets the node API.</summary>
@@ -201,7 +204,7 @@ internal sealed class NodeFleet : IAsyncDisposable
             // The moves this node took and a stop left unfinished end by its own decisions: a committed one is installed,
             // one never committed is undone. Those it gave away wait for the device that drove them to come back.
             _ = RecoverMovesAsync(service);
-            return new NodeFleet(identity, service, listener, addresses, file);
+            return new NodeFleet(identity, service, listener, addresses, file, new Fleet.ModelServerProviderRefresh(node.Host, modelServers));
         }
         catch
         {
@@ -265,6 +268,7 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <returns>A task that completes once they stopped.</returns>
     public async ValueTask DisposeAsync()
     {
+        await _providerModels.DisposeAsync().ConfigureAwait(false);
         if (_listenerFile is not null)
         {
             try { File.Delete(_listenerFile); }
