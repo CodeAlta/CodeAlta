@@ -464,7 +464,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         // what a request without one runs at.
         if (request.FastMode == true && request.ModelInfo?.FastMode is not null)
         {
-            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.FastModeKey] = ReadFastModeBetas(request.ModelInfo);
+            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.FastModeKey] =
+                ReadText(request.ModelInfo.Capabilities, FastModeBetasCapabilityKey) ?? string.Empty;
         }
 
         if (options.MaxOutputTokens is not null)
@@ -1003,34 +1004,20 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         return null;
     }
 
-    // The highest effort a listed model recorded; a capability read back from a saved list may be a JSON string.
+    // The highest effort a listed model recorded.
     private static string? ReadHighestEffort(AgentModelInfo? model)
-    {
-        if (model?.Capabilities?.TryGetValue(HighestEffortCapabilityKey, out var value) != true)
-        {
-            return null;
-        }
+        => ReadText(model?.Capabilities, HighestEffortCapabilityKey) is ("xhigh" or "max") and var effort ? effort : null;
 
-        var effort = value switch
-        {
-            string text => text,
-            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
-            _ => null,
-        };
-        return effort is "xhigh" or "max" ? effort : null;
-    }
-
-    // The betas of fast mode a listed model recorded, empty for none; a capability read back from a saved list may be a
-    // JSON string.
-    private static string ReadFastModeBetas(AgentModelInfo model)
-        => model.Capabilities?.TryGetValue(FastModeBetasCapabilityKey, out var value) == true
+    // A text a listed model recorded; one read back from a saved list may be a JSON string.
+    private static string? ReadText(IReadOnlyDictionary<string, object?>? capabilities, string key)
+        => capabilities?.TryGetValue(key, out var value) == true
             ? value switch
             {
                 string text => text,
-                JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
-                _ => string.Empty,
+                JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+                _ => null,
             }
-            : string.Empty;
+            : null;
 
     private static bool? ReadFlag(IReadOnlyDictionary<string, JsonElement> rawData, string name)
         => rawData.TryGetValue(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
