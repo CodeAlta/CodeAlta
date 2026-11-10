@@ -19,7 +19,7 @@ import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
-import { changedSessionOptions, sessionContextSize, sessionOptionsOf } from "./sessionSettings/sessionOptions";
+import { changedSessionOptions, sessionContextSize, sessionFastMode, sessionFastModeFellBack, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable, type PluginPromptOutcome, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -339,6 +339,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // the alta tool or a tier gives it another model or effort. The composer shows it at once.
   const observedEntry = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry : undefined;
   const observedSettings = observedEntry ? [observedEntry.pendingAgentPromptId ?? observedEntry.agentPromptId, observedEntry.modelId, observedEntry.reasoningEffort] : null;
+  // The fast mode the provider reported the last request ran in: a session that chose none runs in it (an OpenAI project
+  // whose default tier is fast).
+  const reportedFastMode = observedEntry?.reportedFastMode ?? null;
   // Lifecycle observations, not polling: reconcile persisted selection after attach/detach/switch, and after a change
   // of the host to the agent prompt, the model or the effort of the session.
   const catalogObservation = useRef<string | null>(null);
@@ -1274,7 +1277,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       return;
     }
 
+    const fastModeChanged = (result.options.fastMode ?? null) !== (shownOptions?.fastMode ?? null);
     setSessionOptions({ key: reviewKey, options: result.options });
+    // The host forgets the speed it was told before another choice of fast mode: the chip reads it again.
+    if (fastModeChanged) void runtimeScope.current?.refresh();
   }
   // The sandbox the session runs in: read with the session and again after each turn (the settings may have changed
   // meanwhile), and changed at once from the form of the Agent chip. What the settings give is known while the session
@@ -1532,6 +1538,8 @@ ${value}` : value);
             + (selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model")),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
         sandbox: sessionSandboxSummary(shownSandbox?.reply), subSessions: shownOptions?.subSessions ?? null,
+        fastMode: sessionFastMode(selectedModel, shownOptions, reportedFastMode),
+        fastModeFellBack: sessionFastModeFellBack(selectedModel, shownOptions, reportedFastMode),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
@@ -1572,7 +1580,8 @@ ${value}` : value);
       sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
         choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
       options={shownOptions && { changed: changedSessionOptions(shownOptions, selectedModel),
-        content: <SessionOptionsFields id={sessionId} value={shownOptions} context={selectedModel} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
+        content: <SessionOptionsFields id={sessionId} value={shownOptions} context={selectedModel} reportedFastMode={reportedFastMode} disabled={invalidEpoch}
+          onChange={value => void applyOptions(value)} /> }}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}

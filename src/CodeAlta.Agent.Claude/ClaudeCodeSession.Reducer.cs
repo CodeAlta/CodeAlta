@@ -437,6 +437,14 @@ internal sealed partial class ClaudeCodeSession
         bool stopped;
         lock (_gate)
         {
+            // The CLI can change its setting during a turn. Its reported state, not the last accepted flag request,
+            // decides whether the next turn needs to reapply our choice; cooldown still means fast mode is enabled.
+            _cliFastMode = ClaudeCodeJson.GetString(result, "fast_mode_state") switch
+            {
+                "on" or "cooldown" => true,
+                "off" => false,
+                _ => _cliFastMode,
+            };
             stopped = _stoppedByDecision;
             _stoppedByDecision = false;
         }
@@ -540,6 +548,18 @@ internal sealed partial class ClaudeCodeSession
             case "compact_boundary":
                 await onSessionUpdate(
                         new AgentTurnSessionUpdate { Kind = AgentSessionUpdateKind.Info, Message = DescribeCompaction(message) },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                break;
+            case "notification" when ClaudeCodeJson.GetString(message, "text") is { Length: > 0 } notice:
+                // What the CLI shows in its own window, such as fast mode retried at standard speed for want of usage
+                // credits (key fast-mode-overage-rejected), a model the organization refuses, or a compaction that failed.
+                await onSessionUpdate(
+                        new AgentTurnSessionUpdate
+                        {
+                            Kind = ClaudeCodeJson.GetString(message, "color") is "error" or "warning" ? AgentSessionUpdateKind.Warning : AgentSessionUpdateKind.Info,
+                            Message = $"Claude Code: {notice}",
+                        },
                         cancellationToken)
                     .ConfigureAwait(false);
                 break;
@@ -842,7 +862,9 @@ internal sealed partial class ClaudeCodeSession
                 CacheWriteTokens: cacheWrite,
                 CachedInputTokens: cacheRead,
                 Cost: _resultCost,
-                DurationMs: _resultDurationMs),
+                DurationMs: _resultDurationMs,
+                // The speed the request ran at: standard after a rate limit or without usage credits, even in fast mode.
+                FastMode: ClaudeCodeJson.GetString(usage, "speed") switch { "fast" => true, "standard" => false, _ => null }),
             RateLimits: _rateLimits,
             Scope: AgentUsageScope.CurrentWindow,
             Source: AgentUsageSource.ProviderUsage,

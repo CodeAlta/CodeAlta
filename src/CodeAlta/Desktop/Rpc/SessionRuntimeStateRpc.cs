@@ -114,7 +114,8 @@ internal sealed class SessionRuntimeStateService
             { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)],
               RemoteControl = entry.RemoteControl.Status == CodeAlta.Agent.AgentRemoteControlStatus.Off ? null : SessionRemoteControlResponse.From(entry.RemoteControl),
               // A suggestion is sent as it is or not at all: one that is cut is not a prompt to send.
-              PromptSuggestion = entry.PromptSuggestion is { Length: > 0 } suggestion && Text(suggestion) ? suggestion : null };
+              PromptSuggestion = entry.PromptSuggestion is { Length: > 0 } suggestion && Text(suggestion) ? suggestion : null,
+              ReportedFastMode = entry.ReportedFastMode };
         }
         // Eight strings <=256 UTF-16 units at six-byte worst-case JSON escaping, fixed GUIDs,
         // ordinal/enums/keys plus 4 KiB framing fit below 32 KiB. No values are truncated.
@@ -160,7 +161,7 @@ internal sealed class SessionRuntimeStateService
         Object(6);
         Text(state.Status); Text(state.HostEpoch); Text(state.SessionId); Text(state.RuntimeInstanceId);
         if (state.Entry is not { } entry) return bound;
-        Object(15);
+        Object(16);
         Text(entry.AttachmentGeneration); Text(entry.ActiveRunId); Text(entry.ProviderId); Text(entry.ProviderKey); Text(entry.ModelId);
         Text(entry.ReasoningEffort); Text(entry.AgentPromptId); Text(entry.PendingAgentPromptId); Text(entry.PromptSuggestion);
         if (entry.Activity is { } activity)
@@ -216,6 +217,10 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
     /// <summary>What the model suggested as the next prompt once the last turn ended; absent when there is none.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? PromptSuggestion { get; init; }
+
+    /// <summary>Whether the provider reported the last request ran in fast mode; absent until a response says it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReportedFastMode { get; init; }
 }
 
 /// <summary>A background task of a session.</summary>

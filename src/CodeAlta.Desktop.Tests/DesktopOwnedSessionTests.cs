@@ -170,6 +170,7 @@ public sealed class DesktopOwnedSessionTests
         Assert.AreEqual("1M", options[0].Values[1].Name);
         Assert.IsNull(options[0].Toggle);
         Assert.AreEqual(true, options[1].Toggle, "an option that is on or off");
+        Assert.IsTrue(choices.Models.Single().FastMode, "the model has a fast mode, on for a session that chose nothing");
 
         // The host keeps the option for the model, and answers the choices as they are then.
         var set = await SetAsync("context", "1m");
@@ -182,6 +183,18 @@ public sealed class DesktopOwnedSessionTests
         Assert.AreEqual("invalid_request", (await SetAsync(" ", "1m")).Status);
         Assert.AreEqual("stale_epoch", (await SetAsync("fast", "true", epoch: "other-epoch")).Status);
     });
+
+    [TestMethod]
+    public void SessionOptionsChoice_RecordsAFastModeChosenOff_AndNothingForNoChoice()
+    {
+        var off = SessionOptionsChoice.Record(new(true, FastMode: false));
+        Assert.IsNotNull(off);
+        Assert.IsFalse(off.FastMode);
+        Assert.IsFalse(SessionOptionsChoice.Of(off).FastMode);
+        Assert.IsTrue(SessionOptionsChoice.Of(SessionOptionsChoice.Record(new(true, FastMode: true))).FastMode);
+        Assert.IsNull(SessionOptionsChoice.Record(new(true)), "a session that chose nothing records nothing");
+        Assert.IsNull(SessionOptionsChoice.Of(null).FastMode);
+    }
 
     [TestMethod]
     public Task Tier_IsRecordedForTheSession_AndNamedByItsChoices() => RealFixture.RunAsync(async f =>
@@ -1053,6 +1066,7 @@ public sealed class DesktopOwnedSessionTests
                 new AgentModelOption("context", "Context", [new("300k", "300K"), new("1m", "1M")], "300k"),
                 new AgentModelOption("fast", "Fast", [new("false"), new("true")], "false"),
             ],
+            FastMode = true,
         };
 
         public ModelProviderDescriptor Descriptor => provider.Descriptor;

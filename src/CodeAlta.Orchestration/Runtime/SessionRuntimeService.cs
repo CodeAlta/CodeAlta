@@ -2261,6 +2261,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort,
             ContextSize = AgentSessionOptions.Of(session.Options).ContextSize,
             DefaultContextSize = SelectionProviderOf(options.ProviderKey ?? session.ResolvedProviderKey)?.DefaultContextSize,
+            FastMode = AgentSessionOptions.Of(session.Options).FastMode,
             // Nobody reads the reasoning of a headless run: its summaries are not asked for.
             OmitReasoningSummaries = Headless,
             PermissionMode = permissionMode,
@@ -3459,7 +3460,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
             { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId),
-              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion };
+              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion, ReportedFastMode = entry.ReportedFastMode };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -4819,6 +4820,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
         entry.UsageSequence = entry.UsageSequence == long.MaxValue ? long.MaxValue : entry.UsageSequence + 1;
         entry.LastObservedUsage = SessionRuntimeUsageObservation.FromEvent(entry.UsageSequence, update);
+        if (update.Usage.LastOperation?.FastMode is { } fastMode) entry.ReportedFastMode = fastMode;
     }
 
     private static bool IsQueueDrainTrigger(AgentEvent @event)
@@ -6236,6 +6238,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public bool IsTerminated { get; private set; }
 
         public SessionRuntimeUsageObservation? LastObservedUsage { get; set; }
+        // The fast mode the provider last reported a request of this attachment ran in; null until one says it.
+        public bool? ReportedFastMode { get; set; }
         public long UsageSequence { get; set; }
         public long OmittedUsageEvents { get; set; }
         private volatile bool _activityOpen;

@@ -127,6 +127,23 @@ public sealed class SessionRuntimeStateRpcTests
     }
 
     [TestMethod]
+    public async Task ReportedFastModeIsSentOnceAResponseSaidIt()
+    {
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null);
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+        var none = await service.CurrentAsync(new(Epoch, "session"), default);
+        Assert.IsNull(none.Entry!.ReportedFastMode);
+        Assert.DoesNotContain("reportedFastMode", JsonSerializer.Serialize(none, DesktopJsonContext.Default.SessionRuntimeStateResponse));
+
+        foreach (var reported in new[] { true, false })
+        {
+            state = state with { Entry = entry with { ReportedFastMode = reported } };
+            Assert.AreEqual(reported, (await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.ReportedFastMode);
+        }
+    }
+
+    [TestMethod]
     public async Task ActivityProjectionPreservesOffsetAndExactCountsAndRejectsInvalidTime()
     {
         var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null)
@@ -202,6 +219,7 @@ public sealed class SessionRuntimeStateRpcTests
                     started, AgentBackgroundTaskOutcome.Failed) { IsJob = true, ExitCode = int.MinValue, EndedAt = started })],
                 RemoteControl = remote ? new(AgentRemoteControlStatus.Failed, "https://claude.ai/" + new string('x', 494), Text(512)) : AgentRemoteControl.Off,
                 PromptSuggestion = Text(256),
+                ReportedFastMode = true,
             });
         }
         var observed = State('x', 0, false);
@@ -247,7 +265,8 @@ public sealed class SessionRuntimeStateRpcTests
             [typeof(SessionRuntimeScopedResponse)] = ["HostEpoch", "Observation", "ProjectId", "ProjectPath", "Scope", "SessionId", "Status"],
             [typeof(SessionRuntimeStateResponse)] = ["CoordinatorTransitionInProgress", "Entry", "HostEpoch", "RuntimeInstanceId", "SessionId", "Status"],
             [typeof(SessionRuntimeStateEntry)] = ["Activity", "ActiveRunId", "AgentPromptId", "AttachmentGeneration", "BackgroundTasks", "IsRetiring", "IsTerminated",
-                "ModelId", "PendingAgentPromptId", "PromptSuggestion", "ProviderId", "ProviderKey", "QueueDrainInProgress", "ReasoningEffort", "RemoteControl"],
+                "ModelId", "PendingAgentPromptId", "PromptSuggestion", "ProviderId", "ProviderKey", "QueueDrainInProgress", "ReasoningEffort", "RemoteControl",
+                "ReportedFastMode"],
             [typeof(SessionRuntimeActivityResponse)] = ["AdmittedEvents", "OmittedEvents", "Source", "Timestamp"],
             [typeof(SessionRuntimeBackgroundTaskResponse)] = ["EndedAt", "ExitCode", "IsJob", "Kind", "StartedAt", "State", "TaskId", "ToolCallId", "Description"],
             [typeof(SessionRemoteControlResponse)] = ["Error", "SessionUrl", "Status"],

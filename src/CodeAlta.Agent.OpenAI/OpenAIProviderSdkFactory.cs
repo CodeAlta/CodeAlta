@@ -112,7 +112,7 @@ internal static class OpenAIProviderSdkFactory
         CancellationToken cancellationToken)
     {
         var models = await ListModelsCoreAsync(provider, providerDescriptor, cancellationToken).ConfigureAwait(false);
-        return AgentModelMetadataEnricher.EnrichModels(
+        return WithFastMode(provider, providerDescriptor, AgentModelMetadataEnricher.EnrichModels(
             models,
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
@@ -120,7 +120,23 @@ internal static class OpenAIProviderSdkFactory
             provider.ModelsIncludeRegex,
             OpenAIKnownModelLimits.For(provider),
             // A session of the API can use a model at each of its prices; Codex gives the sizes its configuration takes.
-            contextPriceTiers: provider.CodexSubscription is null);
+            contextPriceTiers: provider.CodexSubscription is null));
+    }
+
+    // The fast mode of the models (AgentModelInfo.FastMode). With Codex, the models whose discovery lists priority, on
+    // when the service_tier of the provider asks for it. On the Responses API of OpenAI, base models, off: a request
+    // without a tier runs at the default tier of the project, which the response names. Fine-tuned models have no fast mode.
+    private static IReadOnlyList<AgentModelInfo> WithFastMode(OpenAIProviderOptions provider, ModelProviderRuntimeDescriptor providerDescriptor, IReadOnlyList<AgentModelInfo> models)
+    {
+        if (provider.CodexSubscription is { } codex)
+        {
+            var byDefault = codex.ServiceTier == "priority";
+            return [.. models.Select(model => CodexSubscriptionModelCapabilities.FromModel(model).SupportsPriorityServiceTier ? model with { FastMode = byDefault } : model)];
+        }
+
+        return providerDescriptor.TransportKind == AgentTransportKind.OpenAIResponses && OpenAIResponsesTurnExecutor.IsOfficialOpenAIResponsesEndpoint(provider)
+            ? [.. models.Select(static model => model with { FastMode = model.Id.StartsWith("ft:", StringComparison.Ordinal) ? null : false })]
+            : models;
     }
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsCoreAsync(

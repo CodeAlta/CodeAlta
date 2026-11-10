@@ -457,7 +457,7 @@ import { externalEditors as externalEditorsApi } from "#neoastra";
 import { sandboxSettings, type SandboxScopeItem, type SandboxSessionResponse } from "#neoastra";
 import { notSandboxed, sessionSandboxSummary } from "./sandbox/sandboxChoices";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
-import { changedSessionOptions, sessionContextSize, sessionOptionsOf } from "./sessionSettings/sessionOptions";
+import { changedSessionOptions, sessionContextSize, sessionFastMode, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { SandboxSettings } from "./sandbox/SandboxSettings";
 import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
 import { createExternalOpener, ExternalOpenerContext, failure } from "./externalEditors/externalEditors";
@@ -5104,7 +5104,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         review: reviewSetting === null ? null : draftReview ?? reviewSetting,
         sandbox: !draftSandboxScopes ? null : draftSandbox === null ? sessionSandboxSummary(draftSandboxScopes)
           : { profile: draftSandbox.toLowerCase() === notSandboxed ? null : draftSandbox, source: "session", problem: null },
-        subSessions: sessionOptionsOf(draftOptions).subSessions }}
+        subSessions: sessionOptionsOf(draftOptions).subSessions, fastMode: sessionFastMode(draftModel, draftOptions) }}
       review={reviewSetting !== null && <ReviewBeforeCommitSelect id={`composer-review-${choiceId}`} own={draftReview} setting={reviewSetting} disabled={locked}
         onChange={next => setDraftReview(next)} />}
       sandbox={draftSandboxScopes && <SessionSandboxSelect id={`composer-sandbox-${choiceId}`} own={draftSandbox} inherited={draftSandboxScopes.profile}

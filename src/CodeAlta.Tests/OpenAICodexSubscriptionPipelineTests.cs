@@ -1603,6 +1603,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
         Assert.AreEqual(!lite, model.Capabilities?["supportsParallelToolCalls"]);
         Assert.AreEqual(supportsPriority, CodexSubscriptionModelCapabilities.FromModel(model).SupportsPriorityServiceTier);
+        Assert.AreEqual(supportsPriority ? false : null, model.FastMode, "A model that advertises priority has a fast mode, off without a service_tier.");
         var tiers = Assert.IsInstanceOfType<IReadOnlyList<string>>(model.Capabilities?["serviceTiers"]);
         Assert.AreEqual(supportsPriority, tiers.Contains("priority"));
         var roundTripped = JsonSerializer.Deserialize(

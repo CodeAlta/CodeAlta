@@ -84,6 +84,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private string? _settingsPermissionMode;
     // A switch was given up before its answer: the CLI may be in the mode asked for, or still in the other one.
     private bool _cliPermissionModeUnknown;
+    // Whether the running CLI is in fast mode, as it said when it started or as it was switched since; null when unknown.
+    private bool? _cliFastMode;
 
     // What the CLI knows of the conversation of CodeAlta.
     private bool _conversationBound;
@@ -238,6 +240,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             if (!showsOwnTurn)
             {
                 await EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: newUserMessages.Count > 0, CreateHeldAsk(onSessionUpdate)).ConfigureAwait(false);
+                // The speed the session chose applies from the turn its prompt starts, not within one the CLI runs.
+                if (newUserMessages.Count > 0 && _connection is { IsClosed: false } connection)
+                {
+                    await SwitchFastModeAsync(connection, request.FastMode, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             if (toolsChanged)
@@ -755,6 +762,54 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
     }
 
+    // Puts the running CLI in the fast mode the session chose, from its next turn, without starting it again: the flag
+    // settings of a process are its own, never saved as the user's, and they are the opt-in a CLI driven by an SDK waits
+    // for (sdk_opt_in_required). A session that chose none leaves the CLI as it started. A CLI that refuses runs at its
+    // own speed, and the turn says so.
+    private async Task SwitchFastModeAsync(ClaudeCodeConnection connection, bool? fastMode, Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate, CancellationToken cancellationToken)
+    {
+        bool? current;
+        lock (_gate)
+        {
+            current = _cliFastMode;
+        }
+
+        if (fastMode is not { } wanted || current == wanted)
+        {
+            return;
+        }
+
+        try
+        {
+            await connection.RequestAsync(
+                    "apply_flag_settings",
+                    writer =>
+                    {
+                        writer.WriteStartObject("settings");
+                        writer.WriteBoolean("fastMode", wanted);
+                        writer.WriteEndObject();
+                    },
+                    _options.ControlTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            lock (_gate)
+            {
+                _cliFastMode = wanted;
+            }
+        }
+        catch (Exception ex) when (ex is ClaudeCodeControlException or TimeoutException or IOException)
+        {
+            await onSessionUpdate(
+                    new AgentTurnSessionUpdate
+                    {
+                        Kind = AgentSessionUpdateKind.Warning,
+                        Message = $"Claude Code did not turn fast mode {(wanted ? "on" : "off")}: this turn runs at the speed of its settings. {ex.Message}",
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
     // The built-in shell tool of CodeAlta, whose counterparts the CLI is started without when the session turns it off.
     private const string ShellCommandTool = "shell_command";
     private const string ExecTool = "exec";
@@ -880,6 +935,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _turnActive = false;
             _cliPermissionMode = permissionMode;
             _cliPermissionModeUnknown = false;
+            _cliFastMode = null;
         }
 
         ForgetBackgroundTasks();
@@ -939,6 +995,15 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
         ReadRemoteControlAvailability(initialized);
 
+        // The fast mode the process starts in, off until the session opts in; an older CLI does not say it.
+        if (ClaudeCodeJson.GetString(initialized, "fast_mode_state") is not null)
+        {
+            lock (_gate)
+            {
+                _cliFastMode = ClaudeCodeModelCatalog.IsFastModeOn(initialized);
+            }
+        }
+
         // The CLI says which mode it is in: a process started without one is in the mode of the user's settings.
         if (ClaudeCodeJson.GetString(initialized, "current_permission_mode") is { Length: > 0 } reported)
         {
@@ -984,6 +1049,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _launchKey = null;
             _cliPermissionMode = null;
             _cliPermissionModeUnknown = false;
+            _cliFastMode = null;
         }
 
         // What a process that is being replaced still writes is not listened to.

@@ -160,7 +160,8 @@ const props = {
     entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: background, queueDrainInProgress: draining,
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null,
       // An idle attachment can have a next-turn prompt selection: normal Send consumes it.
-      pendingAgentPromptId: "default", activity: null },
+      pendingAgentPromptId: "default", activity: null,
+      reportedFastMode: (window as Window & { fixtureReportedFastMode?: boolean | null }).fixtureReportedFastMode ?? null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
 // The composer with the side questions of its session, as the shell gives them: their count on its button, which shows them.

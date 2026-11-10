@@ -27,10 +27,26 @@ const modelOptions = () => (window as Window & { fixtureModelOptions?: OptionsFi
 const optionsOf = (fixture: OptionsFixture) => [
   { id: "context", name: "Context", value: fixture.context, values: [{ value: "300k", name: "300K" }, { value: "1m", name: "1M" }] },
   { id: "fast", name: "Fast", value: fixture.fast, values: [{ value: "false", name: "Off" }, { value: "true", name: "On" }], toggle: true }];
+/**
+ * What a test of the options of a session sets on the window: the options the host keeps for it, its model having a fast
+ * mode off by default; `calls` are the options the host was asked for.
+ */
+type SessionOptionsFixture = { options: { subSessions: boolean; fastMode?: boolean | null }; calls: unknown[] };
+const sessionOptions = () => (window as Window & { fixtureSessionOptions?: SessionOptionsFixture }).fixtureSessionOptions;
 // The provider of the session: the removed one until the host switched it.
 const provider = () => removed()?.switched.at(-1) ?? (removed() ? "fixture-removed" : "fixture-provider");
 export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "unavailable" }), setReviewBeforeCommit: async () => ({ status: "unavailable" }),
-  options: async () => ({ status: "unavailable" }), setOptions: async () => ({ status: "unavailable" }),
+  options: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => sessionOptions()
+    ? { status: "ok", epoch: expectedEpoch, sessionId, options: sessionOptions()!.options } : { status: "unavailable" },
+  setOptions: async ({ expectedEpoch, sessionId, options }: { expectedEpoch: string; sessionId: string; options: SessionOptionsFixture["options"] }) => {
+    const fixture = sessionOptions();
+    if (!fixture) return { status: "unavailable" };
+    fixture.calls.push(options);
+    fixture.options = options;
+    // As on the host, a speed reported before a new choice says nothing of its next turn.
+    (window as Window & { fixtureReportedFastMode?: boolean | null }).fixtureReportedFastMode = null;
+    return { status: "ok", epoch: expectedEpoch, sessionId, options };
+  },
   providerChoices: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => ({ status: "ok", epoch: expectedEpoch, sessionId,
     runtimeInstanceId: "11111111-1111-4111-8111-111111111111", attachmentGeneration: null, providerKey: provider(), revision: "1",
     providers: [{ id: "fixture-provider", name: "Fixture Default" }] }),
@@ -56,7 +72,7 @@ export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "u
       models: [(window as Window & { fixtureNoReasoning?: boolean }).fixtureNoReasoning
         ? { id: "fixture-model", name: "Fixture model", efforts: [], effortsComplete: true, imageInput: null, startEffort: null }
         : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high",
-          ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}) }],
+          ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}), ...(sessionOptions() ? { fastMode: false } : {}) }],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.
       ...((window as Window & { fixtureOutsideSpace?: boolean }).fixtureOutsideSpace ? { providerOutsideSpace: true, providerName: "Fixture Business" } : {}) }),

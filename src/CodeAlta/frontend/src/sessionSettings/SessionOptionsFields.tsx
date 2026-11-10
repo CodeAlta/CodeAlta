@@ -3,24 +3,27 @@ import type { SessionOptionsChoice } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { compactTokens } from "../contextUsage";
 import { useShellLanguage } from "../shellLanguage";
-import { sessionOptionsOf, storedSessionOptions, type ModelContextSizes } from "./sessionOptions";
+import { sessionFastMode, sessionOptionsOf, storedSessionOptions, type ModelContextSizes, type SessionOptionsModel } from "./sessionOptions";
 
 /**
  * The options of a session in the form of its Agent chip, under More options: a switch per option with what it does in
- * one line, and the size of its context where its model has several. A change gives the options the session records
- * (null for the defaults).
+ * one line, the fast mode where its model has one, and the size of its context where its model has several. A change
+ * gives the options the session records (null for the defaults).
  */
-export function SessionOptionsFields({ id, value, context = null, disabled = false, onChange }: {
+export function SessionOptionsFields({ id, value, context = null, reportedFastMode = null, disabled = false, onChange }: {
   /** Tells the controls of this form apart from the others of the page. */
   id: string;
   value: SessionOptionsChoice | null;
-  /** The model of the session, whose sizes of context are offered where it has several. */
-  context?: ModelContextSizes | null;
+  /** The model of the session, whose fast mode and sizes of context are offered where it has them. */
+  context?: SessionOptionsModel | null;
+  /** The fast mode the provider last reported for the session, which a session that chose none runs in. */
+  reportedFastMode?: boolean | null;
   disabled?: boolean;
   onChange: (value: SessionOptionsChoice | null) => void;
 }) {
   const { t } = useShellLanguage();
   const options = sessionOptionsOf(value);
+  const fastMode = sessionFastMode(context, value, reportedFastMode);
   return <>
     <FormGroup className="composer-selection-option" labelFor={`composer-sub-sessions-${id}`}
       helperText={t(options.subSessions ? "The agent can start sessions of its own (sub-agents)." : "The agent does all the work itself: it starts no session.")}>
@@ -34,6 +37,12 @@ export function SessionOptionsFields({ id, value, context = null, disabled = fal
         labelElement={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Private")}</span>}
         onChange={event => onChange(storedSessionOptions({ ...options, private: event.currentTarget.checked }))} />
     </FormGroup>
+    {fastMode !== null && <FormGroup className="composer-selection-option" labelFor={`composer-fast-mode-${id}`}
+      helperText={t(fastMode ? "Faster output, at a higher price per token." : "Standard speed and price.")}>
+      <Switch id={`composer-fast-mode-${id}`} checked={fastMode} disabled={disabled}
+        labelElement={<span className="composer-selection-label"><AppIcon name="fastMode" size={14} />{t("Fast mode")}</span>}
+        onChange={event => onChange(storedSessionOptions({ ...options, fastMode: event.currentTarget.checked }))} />
+    </FormGroup>}
     {!!context?.contextSizes?.length && <FormGroup label={t("Context size")} labelFor={`composer-context-size-${id}`} helperText={t("The conversation is compacted before it exceeds this size.")}>
       <ContextSizeSelect id={`composer-context-size-${id}`} value={options.contextSize ?? null} context={context} session disabled={disabled}
         onChange={contextSize => onChange(storedSessionOptions({ ...options, contextSize }))} />

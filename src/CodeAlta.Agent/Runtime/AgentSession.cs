@@ -117,6 +117,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private AgentModelInfo? _resolvedModelInfo;
     private bool _resolvedModelInfoLoaded;
     private long? _contextSize;
+    private bool? _fastMode;
     private AgentSessionSummary _summary;
     private AgentSessionState _state;
     private AgentRunId? _activeRunId;
@@ -2407,6 +2408,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             SessionInstructions = sessionInstructions,
             ReasoningEffort = _options.ReasoningEffort,
             ContextSize = _contextSize,
+            FastMode = _fastMode,
             OmitReasoningSummaries = _options.OmitReasoningSummaries,
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
@@ -5749,6 +5751,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // The size the session chose, else the one of its provider, where the model has it.
             _contextSize = model?.ChooseContextSize(_options.ContextSize, _options.DefaultContextSize);
             _resolvedModelInfo = model?.WithContextSize(_contextSize);
+            // The fast mode the session chose, for a model that has one: without a choice the provider does as it does.
+            _fastMode = model?.FastMode is not null ? _options.FastMode : null;
             // A session whose context CodeAlta measures takes the limit of its model as resolved here: a change of its
             // model or of its size of context leaves the one of its last usage behind until a request reports again.
             if (_turnExecutor is not IAgentProviderCompaction && _resolvedModelInfo?.GetContextSize() is { } limit &&

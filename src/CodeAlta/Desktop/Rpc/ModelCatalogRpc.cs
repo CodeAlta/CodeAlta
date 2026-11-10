@@ -321,6 +321,7 @@ internal sealed class ModelCatalogService(
             EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null,
             ContextSizes = ContextSizeContract.Of(model.ContextSizes),
             ContextSize = model.ContextSizes is { Count: > 0 } ? ContextSizeContract.Of(model.ChooseContextSize(defaultContextSize) ?? model.GetContextSize()) : null,
+            FastMode = model.FastMode,
             Deprecated = IsDeprecated(metadata) ? true : null,
             RetiresAt = IsDeprecated(metadata) ? Date(metadata, "retiresAt") : null,
             Price = inputCost is null && outputCost is null ? null : new ModelCatalogPrice(inputCost, outputCost,
@@ -494,6 +495,10 @@ internal sealed record ModelCatalogModel(string Id, string Name, string? Descrip
     // The size of a session that chose none: the one of its provider when the model has it, else its own.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ContextSize { get; init; }
+
+    // Whether a session that chose nothing runs the model in fast mode; absent for a model without one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FastMode { get; init; }
 
     // True when the provider or models.dev says the model is deprecated: it still runs until it retires; absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

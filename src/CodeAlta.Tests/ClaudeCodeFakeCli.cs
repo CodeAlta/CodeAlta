@@ -43,6 +43,18 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI answers a switch of permission mode it takes.</summary>
     public bool AnswerPermissionModeSwitch { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets the fast mode state `initialize` answers (<c>fast_mode_state</c>), the default model being marked
+    /// <c>supportsFastMode</c>; <see langword="null"/> for a CLI that says neither.
+    /// </summary>
+    public string? FastModeState { get; set; }
+
+    /// <summary>Gets or sets the fast-mode state reported by each result, when the CLI changed it while running.</summary>
+    public string? ResultFastModeState { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the CLI refuses <c>apply_flag_settings</c>, as an older one does.</summary>
+    public bool RefuseFlagSettings { get; set; }
+
     /// <summary>Gets or sets a value indicating whether `initialize` says Remote Control is available.</summary>
     public bool RemoteControlAvailable { get; set; } = true;
 
@@ -305,6 +317,11 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     public IReadOnlyList<string> PermissionModeRequests => [.. _received
         .Where(static message => Type(message) == "control_request" && message.GetProperty("request").GetProperty("subtype").GetString() == "set_permission_mode")
         .Select(static message => message.GetProperty("request").GetProperty("mode").GetString()!)];
+
+    /// <summary>Gets the fast modes the host asked the process for with <c>apply_flag_settings</c>, refused or not.</summary>
+    public IReadOnlyList<bool> FastModeRequests => [.. _received
+        .Where(static message => Type(message) == "control_request" && message.GetProperty("request").GetProperty("subtype").GetString() == "apply_flag_settings")
+        .Select(static message => message.GetProperty("request").GetProperty("settings").GetProperty("fastMode").GetBoolean())];
 
     /// <summary>Gets everything the host wrote to the process.</summary>
     public IReadOnlyList<JsonElement> Received => [.. _received];
@@ -624,6 +641,11 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
             result["credential_expires_at"] = expiresAt;
         }
 
+        if (_cli.ResultFastModeState is { } fastModeState)
+        {
+            result["fast_mode_state"] = fastModeState;
+        }
+
         Emit(result);
         if (idle)
         {
@@ -702,6 +724,12 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                     ["remote_control_auto_enable"] = false,
                     ["remote_control_auto_connect_default"] = false,
                 };
+                if (_cli.FastModeState is { } fastModeState)
+                {
+                    initialized["fast_mode_state"] = fastModeState;
+                    initialized["models"]![0]!["supportsFastMode"] = true;
+                }
+
                 if (_cli.ListsToolsAtStart)
                 {
                     // The server of CodeAlta is connected while the CLI initializes, before it answers.
@@ -784,6 +812,17 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 else
                 {
                     Connect();
+                }
+
+                break;
+            case "apply_flag_settings":
+                if (_cli.RefuseFlagSettings)
+                {
+                    RespondError(requestId, "Unsupported control request subtype: apply_flag_settings");
+                }
+                else
+                {
+                    Respond(requestId, null);
                 }
 
                 break;

@@ -307,6 +307,7 @@ const icons = {
   themeSystem: Monitor,
   user: UserRound,
   automation: Zap,
+  fastMode: Zap,
   workflow: Workflow,
   play: Play,
   pause: Pause,

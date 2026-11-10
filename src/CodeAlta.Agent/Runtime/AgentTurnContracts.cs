@@ -460,6 +460,13 @@ public sealed record AgentTurnRequest
     public long? ContextSize { get; init; }
 
     /// <summary>
+    /// Gets or initializes the fast mode the session chose for a model that has one (<see cref="AgentModelInfo.FastMode"/>):
+    /// <see langword="true"/> asks the provider for its fast mode, <see langword="false"/> for its standard speed. Null,
+    /// also for a model without one, sends nothing: the provider does what it does by itself.
+    /// </summary>
+    public bool? FastMode { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether nobody reads the summaries of the reasoning (a headless run): a provider that asks
     /// the model for them asks for none. The reasoning itself is unchanged.
     /// </summary>

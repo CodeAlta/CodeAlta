@@ -51,6 +51,12 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
     /// else its own; null for a model that has one size.
     /// </summary>
     public long? ContextSize { get; init; }
+
+    /// <summary>
+    /// Gets whether the model has a fast mode with its provider, and whether it runs fast for a session that chose nothing
+    /// (<see cref="AgentModelInfo.FastMode"/>); null for a model without one.
+    /// </summary>
+    public bool? FastMode { get; init; }
 }
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
@@ -213,7 +219,8 @@ public sealed partial class OwnedSessionCommandService
                 { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort,
                   EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m), Options = m.Options?.Take(16).ToArray() ?? [],
                   ContextSizes = m.ContextSizes?.Take(16).ToArray() ?? [],
-                  ContextSize = m.ContextSizes is { Count: > 0 } ? m.ChooseContextSize(configured?.DefaultContextSize) ?? m.GetContextSize() : null }).ToArray())
+                  ContextSize = m.ContextSizes is { Count: > 0 } ? m.ChooseContextSize(configured?.DefaultContextSize) ?? m.GetContextSize() : null,
+                  FastMode = m.FastMode }).ToArray())
         {
             PermissionModes = modes,
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.

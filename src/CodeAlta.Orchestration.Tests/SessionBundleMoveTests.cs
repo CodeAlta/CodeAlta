@@ -31,6 +31,7 @@ public sealed class SessionBundleMoveTests
         await using (var source = await machines.CreateSourceHostAsync(sourceProvider))
         {
             sessionId = (await source.Commands.CreateDraftSessionAsync(source.CurrentProject, sourceProvider.Descriptor, "Parser work")).SessionId;
+            Assert.AreEqual("ok", (await source.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { FastMode = true })).Status);
             await SendAsync(source, sessionId, "Let us plan.");
             machines.Git(machines.SourceProject, "checkout", "-q", "-b", "feature/parser");
             machines.Write(machines.SourceProject, "src/parser.txt", "unpushed\n");
@@ -71,6 +72,8 @@ public sealed class SessionBundleMoveTests
 
             Assert.AreEqual(SessionMoveState.Finished, committed.Status, string.Join(" ", committed.Warnings));
             Assert.AreEqual(1, committed.Transaction!.Epoch);
+            Assert.IsTrue((await target.RuntimeService.GetSessionOptionsAsync(sessionId)).FastMode,
+                "A move to another machine preserves the session's explicit fast-mode choice.");
             var folder = committed.Transaction.WorkFolder!;
             Assert.AreEqual(folder, await target.RuntimeService.GetSessionWorktreeAsync(sessionId));
             Assert.AreEqual("feature/parser", machines.Git(folder, "branch", "--show-current").Trim());
