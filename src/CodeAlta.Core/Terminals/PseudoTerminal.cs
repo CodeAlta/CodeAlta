@@ -62,6 +62,12 @@ public abstract class PseudoTerminal : IDisposable
     /// <param name="data">The bytes, in UTF-8.</param>
     public abstract void Write(ReadOnlySpan<byte> data);
 
+    /// <summary>
+    /// Gets whether the terminal gathers what is typed into lines, and shows it, before the program reads it: the line
+    /// mode of a pty, which a line editor leaves while it reads the keys itself. Always false on Windows.
+    /// </summary>
+    public virtual bool GathersLines => false;
+
     /// <summary>Changes the size of the screen of the program.</summary>
     /// <param name="columns">Its width, in characters.</param>
     /// <param name="rows">Its height, in lines.</param>

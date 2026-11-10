@@ -13,9 +13,9 @@ public sealed class DesktopTerminalsTests
     {
         private readonly DirectoryInfo _folder = Directory.CreateTempSubdirectory("codealta-terminals-");
 
-        public Fixture(Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? identity = null)
+        public Fixture(Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? identity = null, string shellName = "sh")
         {
-            var shell = OperatingSystem.IsWindows() ? @"C:\shell\sh" : "/shell/sh";
+            var shell = OperatingSystem.IsWindows() ? @"C:\shell\" + shellName : "/shell/" + shellName;
             var profiles = new TerminalProfiles(name => name == "SHELL" ? shell : null, path => path == shell, static () => [], static _ => [], windows: false, mac: false);
             Terminals = new DesktopTerminals("1.2.3", profiles, start =>
             {
@@ -420,6 +420,50 @@ public sealed class DesktopTerminalsTests
         while (!piece.Replayed);
         // Less than was written, and all of what the terminal still has.
         Assert.IsTrue(again < flood && again >= TerminalHistory.DefaultCapacity - TerminalHistory.PartSize, again.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
+    public async Task WhatIsTypedAtThePromptOfPowerShell_WaitsForItsLineEditor()
+    {
+        using var fixture = new Fixture(shellName: "pwsh");
+        var (terminal, program) = fixture.Create(agent: true);
+        Assert.AreEqual("pwsh", Path.GetFileName(fixture.Starts[^1].FileName));
+        // The prompt is shown, and the pty is still in line mode: PSReadLine does not read the keys yet.
+        program.GatherLines(true);
+        program.Show($"{Esc}]633;A\u0007PS> {Esc}]633;B\u0007");
+        await Until(() => terminal.Describe().Integrated, "The prompt");
+        Assert.IsTrue(terminal.Write("ls\r"));
+        await Task.Delay(300);
+        Assert.AreEqual(string.Empty, program.Typed, "the line waits for the line editor");
+        program.GatherLines(false);
+        await Until(() => program.Typed == "ls\r", "The line once the editor reads the keys");
+
+        // A program that a command runs reads its lines from the line mode: they are not held.
+        program.Show($"ls\r\n{Esc}]633;E;cat\u0007{Esc}]633;C\u0007");
+        await Until(() => terminal.Describe().Busy, "The command");
+        program.GatherLines(true);
+        Assert.IsTrue(terminal.Write("text\r"));
+        await Until(() => program.Typed == "ls\rtext\r", "The line of the program");
+
+        // A line editor that never comes: the line goes after a moment.
+        program.Show($"{Esc}]633;D;0\u0007{Esc}]633;A\u0007PS> {Esc}]633;B\u0007");
+        await Until(() => !terminal.Describe().Busy, "The prompt back");
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        Assert.IsTrue(terminal.Write("dir\r"));
+        await Until(() => program.Typed.EndsWith("dir\r", StringComparison.Ordinal), "The line after the patience");
+        Assert.IsTrue(waited.Elapsed >= DesktopTerminal.LineEditorPatience - TimeSpan.FromMilliseconds(100), waited.Elapsed.ToString());
+    }
+
+    [TestMethod]
+    public async Task WhatIsTypedAtThePromptOfAnotherShell_IsNotHeld()
+    {
+        using var fixture = new Fixture();
+        var (terminal, program) = fixture.Create(agent: true);
+        program.GatherLines(true);
+        program.Show($"{Esc}]633;A\u0007$ {Esc}]633;B\u0007");
+        await Until(() => terminal.Describe().Integrated, "The prompt");
+        Assert.IsTrue(terminal.Write("ls\r"));
+        await Until(() => program.Typed == "ls\r", "The line");
     }
 
     [TestMethod]
