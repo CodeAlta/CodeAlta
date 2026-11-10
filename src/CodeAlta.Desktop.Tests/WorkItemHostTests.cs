@@ -146,6 +146,11 @@ public sealed class WorkItemHostTests
         Assert.AreEqual(0, items.GetTask(project, ids[0])!.Tags.Count);
         Assert.AreEqual(AltaExitCodes.NotFound, (await fixture.Run(["tag", "matches", "desktop", "--task", shortIds[0]])).Code, "only an existing tag");
         Assert.AreEqual(AltaExitCodes.NotFound, (await fixture.Run(["tag", "matches", "mobile", "--task", "zzzz"])).Code, "only open tasks");
+        // Every task named has the tag already: nothing is given to the user, and the proposal that waits stays as it is.
+        var (allTagged, _, allTaggedWhy) = await fixture.Run(["tag", "matches", "mobile", "--task", shortIds[3]]);
+        Assert.AreEqual(AltaExitCodes.Usage, allTagged);
+        StringAssert.Contains(allTaggedWhy, "already has the tag 'mobile'");
+        CollectionAssert.AreEqual(new[] { ids[0], ids[1] }, items.ListTagProposals(project.Id).Single().Tasks.Select(static match => match.TaskId).ToArray());
 
         // The page lists the proposal and applies it to the tasks the user kept.
         var listed = (await fixture.Rpc.ListAsync(new(Epoch, [project.Id]), default)).Projects.Single().TagProposals!.Single();

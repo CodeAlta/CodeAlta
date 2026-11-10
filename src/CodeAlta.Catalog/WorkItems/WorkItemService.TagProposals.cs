@@ -20,6 +20,9 @@ public enum WorkTagProposalRefusal
 
     /// <summary>The session already has a new tag waiting for the user.</summary>
     AlreadyProposed,
+
+    /// <summary>Every task named already has the tag: there is nothing for the user to apply.</summary>
+    AlreadyTagged,
 }
 
 /// <summary>What recording a tag proposal gave.</summary>
@@ -48,7 +51,10 @@ public sealed partial class WorkItemService
     /// <param name="name">The name of the tag.</param>
     /// <param name="matches">The tasks, by id or short id, each with why; the ones that already have the tag are left out.</param>
     /// <param name="sessionId">The session that found them; null when it is not known.</param>
-    /// <returns>The proposal, or why it was refused.</returns>
+    /// <returns>
+    /// The proposal, or why it was refused: <see cref="WorkTagProposalRefusal.AlreadyTagged"/> when no task is left, which
+    /// records nothing and leaves a proposal of the tag that already waits as it is.
+    /// </returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">The name is not a tag name.</exception>
     public WorkTagProposalResult ProposeTagMatches(ProjectDescriptor project, string name, IReadOnlyList<WorkTagMatch> matches, string? sessionId)
@@ -67,8 +73,13 @@ public sealed partial class WorkItemService
             return new(null, WorkTagProposalRefusal.UnknownTask, unknown);
         }
 
-        var proposal = new WorkTagProposal(project.Id, tag, null, NewTag: false, [.. found.Where(match => !tasks.First(task => task.Id == match.TaskId).Tags.Contains(tag))],
-            sessionId, _time.GetUtcNow());
+        List<WorkTagMatch> untagged = [.. found.Where(match => !tasks.First(task => task.Id == match.TaskId).Tags.Contains(tag))];
+        if (untagged.Count == 0)
+        {
+            return new(null, WorkTagProposalRefusal.AlreadyTagged);
+        }
+
+        var proposal = new WorkTagProposal(project.Id, tag, null, NewTag: false, untagged, sessionId, _time.GetUtcNow());
         _tagProposals.Put(proposal);
         Changed?.Invoke();
         return new(proposal, null);

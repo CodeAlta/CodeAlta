@@ -133,6 +133,8 @@ internal sealed partial class BuiltInAltaCommandContributor
                 WorkTagProposalRefusal.Declined => PermissionDenied(context, "tag.declined", $"The user declined the tag '{tag}'. Do not propose it again."),
                 WorkTagProposalRefusal.TooFewTasks => UsageError(context, "tag.tooFewTasks",
                     $"A new tag is proposed for at least {WorkItemService.MinimumNewTagTasks} open tasks. Do not propose it: create the task without a tag.", command),
+                WorkTagProposalRefusal.AlreadyTagged => UsageError(context, "tag.alreadyTagged",
+                    $"Every task you named already has the tag '{tag}': nothing was given to the user. Say so; do not run it again for these tasks.", command),
                 _ => PermissionDenied(context, "tag.alreadyProposed", "This session already proposed a new tag that waits for the user. Do not propose another one."),
             };
         }
