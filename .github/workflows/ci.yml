@@ -27,13 +27,22 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # Linux runs every test project in one job. Windows and macOS run them slower: their projects are split in groups, each
+  # job building and testing its own, and the last group takes every test project of the solution that the others do not.
   test:
-    name: "Tests (${{ matrix.os }})"
+    name: "Tests (${{ matrix.os }}${{ matrix.group && format(', {0}', matrix.group) || '' }})"
     if: github.ref_type != 'tag'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+          - { os: windows-latest, group: desktop, projects: CodeAlta.Desktop.Tests }
+          - { os: windows-latest, group: core, projects: CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
+          - { os: windows-latest, group: others, others: CodeAlta.Desktop.Tests CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
+          - { os: macos-latest, group: desktop, projects: CodeAlta.Desktop.Tests }
+          - { os: macos-latest, group: core, projects: CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
+          - { os: macos-latest, group: others, others: CodeAlta.Desktop.Tests CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     steps:
@@ -45,7 +54,7 @@ jobs:
       - name: "Allow the sandbox of Chromium browsers"
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      # Defender scans every file the build and the tests write: the tests ran several times slower, and their timings failed.
+      # Defender scans every file the build and the tests write, which slows both.
       - name: "Stop the real-time scan of Windows"
         if: runner.os == 'Windows'
         shell: pwsh
@@ -53,11 +62,31 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
+      - name: "Choose the tests"
+        shell: bash
+        env:
+          PROJECTS: ${{ matrix.projects }}
+          OTHERS: ${{ matrix.others }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PROJECTS$OTHERS" ]; then echo "TESTS=src/CodeAlta.slnx" >> "$GITHUB_ENV"; exit 0; fi
+          chosen=()
+          for path in $(grep -oE 'Path="[^"]+Tests\.csproj"' src/CodeAlta.slnx | sed -E 's/Path="([^"]+)"/\1/'); do
+            name=$(basename "$path" .csproj)
+            if [ -n "$PROJECTS" ]; then [[ " $PROJECTS " == *" $name "* ]] || continue
+            else [[ " $OTHERS " == *" $name "* ]] && continue; fi
+            chosen+=("src/$path")
+          done
+          [ ${#chosen[@]} -gt 0 ] || { echo "::error::No test project in this group"; exit 1; }
+          printf '%s\n' "${chosen[@]}"
+          dotnet new sln --format slnx --name ci-tests --output src
+          dotnet sln src/ci-tests.slnx add --in-root "${chosen[@]}"
+          echo "TESTS=src/ci-tests.slnx" >> "$GITHUB_ENV"
       - name: "Build"
-        run: dotnet build src/CodeAlta.slnx -c Release
+        run: dotnet build ${{ env.TESTS }} -c Release
       - name: "Test"
         # A test that hangs is named and its run stopped, instead of the job running out of time.
-        run: dotnet test src/CodeAlta.slnx -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none
+        run: dotnet test ${{ env.TESTS }} -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none
 
   # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
   # for every shard of the tests.
