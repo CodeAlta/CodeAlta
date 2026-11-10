@@ -146,11 +146,11 @@ Each limit is a meter. Its fill is what is used; the small mark shows how far th
 | Codex | The windows of the ChatGPT plan (5 hours, a week), the limits of a model, the credits | The Codex CLI of OpenAI (`codex` on the `PATH`, signed in with the same account) |
 | Codex CLI | The same, for the account of the provider | Codex, in the folder of the provider |
 | Copilot | The AI credits or premium requests of the month, chat and completions | GitHub, with the sign-in of the provider |
-| Claude Code | The 5-hour window, the week, the limits of a model, the extra usage | The Claude Code CLI |
+| Claude Code | The 5-hour window, the week, the weekly limit of a model, the usage credits spent | The Claude Code CLI |
 
 - CodeAlta asks when you open the page or the context usage, or choose **Refresh usage**, never in the background. An answer is kept for a minute.
 - For Codex and Claude Code, CodeAlta asks the provider's command-line program and never reads its credentials. When the program is missing, or the Codex CLI is signed in with another account, the Usage section says so. For a ChatGPT plan, install the Codex CLI and run `codex login`.
-- In a session, the limits the last turns reported are shown while they are recent.
+- In a session, the limits the last turns reported are shown until the provider answers, and keep its answer up to date while the turns run.
 
 ## Prompt caching
 

@@ -5,7 +5,7 @@ namespace CodeAlta.Agent.Claude;
 
 /// <summary>
 /// Reads what a Claude subscription has left by asking the Claude Code CLI, which is the one that knows the account:
-/// the five-hour window, the week, the limits of a model and the extra usage. A short-lived process answers and
+/// the five-hour window, the week, the limits of a model and the usage credits spent. A short-lived process answers and
 /// exits; no model is called, and CodeAlta never reads the credentials of the CLI.
 /// </summary>
 public static class ClaudeCodeAccountUsage
@@ -119,9 +119,9 @@ public static class ClaudeCodeAccountUsage
         }
 
         if (ClaudeCodeJson.TryGetObject(rateLimits, "extra_usage", out var extra) && ClaudeCodeJson.GetBoolean(extra, "is_enabled") &&
-            ClaudeCodeJson.GetDouble(extra, "utilization") is { } spent)
+            ExtraUsage(extra) is { } credits)
         {
-            limits.Add(new AgentSubscriptionLimit("extra_usage", UsedPercent: Math.Max(0, spent)));
+            limits.Add(credits);
         }
 
         return limits.Count == 0
@@ -135,6 +135,20 @@ public static class ClaudeCodeAccountUsage
         {
             limits.Add(limit);
         }
+    }
+
+    // The usage credits spent beyond the plan in the billing period. The share comes only with a monthly limit; the
+    // amounts come in the minor unit of their currency (cents), and are left out when the answer names no currency.
+    private static AgentSubscriptionLimit? ExtraUsage(JsonElement extra)
+    {
+        var share = ClaudeCodeJson.GetDouble(extra, "utilization");
+        var currency = ClaudeCodeJson.GetString(extra, "currency") is { Length: 3 } code && code.All(char.IsAsciiLetter) ? code.ToUpperInvariant() : null;
+        var scale = Math.Pow(10, ClaudeCodeJson.GetInt64(extra, "decimal_places") is >= 0 and <= 4 and var places ? places : 2);
+        double? Amount(string property) => currency is not null && ClaudeCodeJson.GetDouble(extra, property) is >= 0 and var minor ? minor / scale : null;
+        var used = Amount("used_credits");
+        return share is null && used is null
+            ? null
+            : new AgentSubscriptionLimit("extra_usage", UsedPercent: share is { } value ? Math.Max(0, value) : null, Used: used, Total: Amount("monthly_limit"), Currency: currency);
     }
 
     // A window the account does not have comes without a utilization.

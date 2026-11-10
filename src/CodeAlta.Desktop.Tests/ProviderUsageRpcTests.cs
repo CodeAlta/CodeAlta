@@ -50,7 +50,8 @@ public sealed class ProviderUsageRpcTests
                 new AgentSubscriptionLimit("chat", Unlimited: true),
                 new AgentSubscriptionLimit("credits", Unit: "credits", Remaining: 62500.4),
                 new AgentSubscriptionLimit("named\u0007badly", "ok"),
-                new AgentSubscriptionLimit("odd", new string('n', 200), UsedPercent: double.NaN, WindowMinutes: -5, Used: -1),
+                new AgentSubscriptionLimit("odd", new string('n', 200), UsedPercent: double.NaN, WindowMinutes: -5, Used: -1, Currency: "euros"),
+                new AgentSubscriptionLimit("extra_usage", Used: 20.99, Total: 50.0004, Remaining: 29.01, Currency: "eur"),
             ], Start))),
         };
         using var service = fake.Service();
@@ -70,7 +71,9 @@ public sealed class ProviderUsageRpcTests
         Assert.AreEqual(62500, response.Limits[4].Remaining);
         // A name that is not plain short text is left out; so are the figures that are not ones.
         Assert.AreEqual(new ProviderUsageLimit("odd", null, null, null, null, null, null, null, false, null), response.Limits[5]);
-        Assert.HasCount(6, response.Limits);
+        // An amount of money keeps its cents, and names its currency by its code.
+        Assert.AreEqual(new ProviderUsageLimit("extra_usage", null, null, null, null, 20.99m, 50m, null, false, 29.01m, "EUR"), response.Limits[6]);
+        Assert.HasCount(7, response.Limits);
     }
 
     [TestMethod]

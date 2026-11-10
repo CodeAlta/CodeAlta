@@ -139,10 +139,14 @@ internal sealed class ProviderUsageService : IDisposable
         var limits = usage.Limits
             .Where(static limit => Bound(limit.Id) is not null)
             .Take(MaximumLimits)
-            .Select(static limit => new ProviderUsageLimit(
-                Bound(limit.Id)!, Bound(limit.Name), Number(limit.UsedPercent, 999), limit.ResetsAt,
-                limit.WindowMinutes is > 0 and <= 60L * 24 * 366 and var minutes ? (int)minutes : null,
-                Number(limit.Used, int.MaxValue), Number(limit.Total, int.MaxValue), Bound(limit.Unit), limit.Unlimited, Number(limit.Remaining, int.MaxValue)))
+            .Select(static limit =>
+            {
+                var currency = Currency(limit.Currency);
+                return new ProviderUsageLimit(
+                    Bound(limit.Id)!, Bound(limit.Name), Number(limit.UsedPercent, 999), limit.ResetsAt,
+                    limit.WindowMinutes is > 0 and <= 60L * 24 * 366 and var minutes ? (int)minutes : null,
+                    Amount(limit.Used, currency), Amount(limit.Total, currency), Bound(limit.Unit), limit.Unlimited, Amount(limit.Remaining, currency), currency);
+            })
             .ToArray();
         return limits.Length == 0
             ? Empty("not_available", key, supported: true)
@@ -189,6 +193,14 @@ internal sealed class ProviderUsageService : IDisposable
     private static int? Number(double? value, int maximum)
         => value is { } number && double.IsFinite(number) && number >= 0 ? (int)Math.Min(Math.Round(number), maximum) : null;
 
+    // An amount of money keeps the fraction of its currency; a count is a whole number.
+    private static decimal? Amount(double? value, string? currency)
+        => value is { } number && double.IsFinite(number) && number >= 0 ? (decimal)Math.Min(Math.Round(number, currency is null ? 0 : 3), int.MaxValue) : null;
+
+    // A currency is the three letters of its ISO 4217 code; anything else is left out, and its amounts are counts.
+    private static string? Currency(string? value)
+        => value is { Length: 3 } && value.All(char.IsAsciiLetter) ? value.ToUpperInvariant() : null;
+
     private sealed class Entry
     {
         public SemaphoreSlim Gate { get; } = new(1, 1);
@@ -223,7 +235,8 @@ internal sealed record ProviderUsageResponse(string Status, string? Key, bool Su
 
 /// <summary>
 /// One limit: a window of time (<c>WindowMinutes</c>) or a quota, with how much is used in percent and, when the
-/// provider counts them, in units (<c>requests</c> or <c>credits</c>).
+/// provider counts them, in units (<c>requests</c> or <c>credits</c>) or in money: <c>Currency</c> is then the ISO
+/// 4217 code of the currency of <c>Used</c>, <c>Total</c> and <c>Remaining</c>.
 /// </summary>
 internal sealed record ProviderUsageLimit(string Id, string? Name, int? UsedPercent, DateTimeOffset? ResetsAt, int? WindowMinutes,
-    int? Used, int? Total, string? Unit, bool Unlimited, int? Remaining);
+    decimal? Used, decimal? Total, string? Unit, bool Unlimited, decimal? Remaining, string? Currency = null);

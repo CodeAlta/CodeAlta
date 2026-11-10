@@ -5,14 +5,14 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import type { MessageKey } from "./localization";
 import { useShellLanguage } from "./shellLanguage";
-import { elapsedPercent, limitIntent, limitLabel, planLabel, providerLimits, resetMoment, timeLeft, unitCount, type UsageLimit } from "./subscriptionUsage";
+import { elapsedPercent, limitAmount, limitIntent, limitLabel, planLabel, providerLimits, resetMoment, timeLeft, type UsageLimit } from "./subscriptionUsage";
 
 type Api = Pick<typeof providerUsage, "read">;
 const units: Record<string, MessageKey> = { requests: "requests", credits: "credits" };
 
 /**
  * The limits of a subscription, one meter each: how much is used, how far the period has gone (the mark on the
- * meter), what is counted when the provider counts it, and when the limit starts over.
+ * meter), what is counted or spent when the provider says it, and when the limit starts over.
  */
 export function UsageLimitList({ limits, now = Date.now() }: { limits: readonly UsageLimit[]; now?: number }) {
   const { t, locale } = useShellLanguage();
@@ -23,12 +23,15 @@ export function UsageLimitList({ limits, now = Date.now() }: { limits: readonly 
     const until = timeLeft(limit.resetsAt, now);
     const moment = until ? resetMoment(limit.resetsAt, now, locale) : null;
     const unit = limit.unit && units[limit.unit] ? t(units[limit.unit]) : limit.unit ?? "";
+    const amount = (value: number) => limitAmount(value, limit.currency, locale);
     const counted = limit.used !== null && limit.total !== null
-      ? t("{used} of {total} {unit}", { used: unitCount(limit.used, locale), total: unitCount(limit.total, locale), unit }).trim() : null;
+      ? t("{used} of {total} {unit}", { used: amount(limit.used), total: amount(limit.total), unit }).replace(/\s+/g, " ").trim() : null;
+    // Money spent without a limit to be a share of: the amount is its figure.
+    const spent = limit.used !== null && limit.total === null && limit.currency ? t("{amount} spent", { amount: amount(limit.used) }) : null;
     // A balance has no total to be a share of: what is left is its figure.
     const left = limit.remaining !== null
-      ? t("{count} {unit} left", { count: unitCount(limit.remaining, locale), unit: limit.id === "credits" ? "" : unit }).replace(/\s+/g, " ").trim() : null;
-    const headline = limit.unlimited ? t("Unlimited") : percent !== null ? t("{percent}% used", { percent }) : left;
+      ? t("{count} {unit} left", { count: amount(limit.remaining), unit: limit.id === "credits" ? "" : unit }).replace(/\s+/g, " ").trim() : null;
+    const headline = limit.unlimited ? t("Unlimited") : percent !== null ? t("{percent}% used", { percent }) : spent ?? left;
     return <div key={limit.id} className="subscription-limit" data-intent={limit.unlimited ? "none" : limitIntent(percent)}>
       <div className="subscription-limit-head">
         <span className="subscription-limit-name">{t(key)}{scope && <small>{scope}</small>}</span>
