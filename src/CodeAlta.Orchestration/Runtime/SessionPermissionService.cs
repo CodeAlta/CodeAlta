@@ -145,20 +145,20 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private async Task<AgentPermissionDecision> HandleOwnedDefaultAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return new(OnlyTheUserAllows(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
+        if (FullTrust) return OnlyTheUserAllows(request) ? AgentPermissionDecision.DeniedUnattended(OnlyTheUserReason(request)) : new(AgentPermissionDecisionKind.AllowOnce);
         if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
-            return new(_autoApproveOwnedPermissions() && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
+            return _autoApproveOwnedPermissions() && !AlwaysAsks(request) ? new(AgentPermissionDecisionKind.AllowOnce) : NotAsked(request);
         var policy = policyOf(request.SessionId);
         if (!AlwaysAsks(request) && (policy == SessionPermissionPolicy.Approve || (policy == SessionPermissionPolicy.AcceptEdits && request is AgentFileChangePermissionRequest)))
             return new(AgentPermissionDecisionKind.AllowOnce);
-        if (SessionReviewTarget?.Invoke(request.SessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
+        if (SessionReviewTarget?.Invoke(request.SessionId) is not { } target) return AgentPermissionDecision.DeniedUnattended(SessionNotOpenReason);
         var execution = await CreateOwnedExecutionAsync(Guid.NewGuid(), request.SessionId, cancellationToken, policy, enableUserInput: false).ConfigureAwait(false);
-        if (execution is null) return new(AgentPermissionDecisionKind.Deny);
+        if (execution is null) return AgentPermissionDecision.DeniedUnattended(NotDeliveredReason);
         try
         {
             return await BindOwnedExecutionAsync(execution, target.RuntimeId, target.Attachment, target.ProviderId).ConfigureAwait(false)
                 ? await HandleOwnedCommandAsync(execution, request, cancellationToken).ConfigureAwait(false)
-                : new(AgentPermissionDecisionKind.Deny);
+                : AgentPermissionDecision.DeniedUnattended(NotDeliveredReason);
         }
         finally
         {
@@ -198,23 +198,39 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return new(OnlyTheUserAllows(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
-        if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
+        if (FullTrust) return OnlyTheUserAllows(request) ? AgentPermissionDecision.DeniedUnattended(OnlyTheUserReason(request)) : new(AgentPermissionDecisionKind.AllowOnce);
+        if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return AgentPermissionDecision.DeniedUnattended(SessionNotOpenReason);
         request = request with { SessionId = sessionId, ProviderId = target.ProviderId };
         // A review of its own that asks whatever the mode of the session: it follows no policy.
         var execution = await CreateOwnedExecutionAsync(Guid.NewGuid(), sessionId, cancellationToken).ConfigureAwait(false);
-        if (execution is null) return new(AgentPermissionDecisionKind.Deny);
+        if (execution is null) return AgentPermissionDecision.DeniedUnattended(NotDeliveredReason);
         try
         {
             return await BindOwnedExecutionAsync(execution, target.RuntimeId, target.Attachment, target.ProviderId).ConfigureAwait(false)
                 ? await HandleOwnedCommandAsync(execution, request, cancellationToken).ConfigureAwait(false)
-                : new(AgentPermissionDecisionKind.Deny);
+                : AgentPermissionDecision.DeniedUnattended(NotDeliveredReason);
         }
         finally
         {
             await CloseOwnedExecutionAsync(execution).ConfigureAwait(false);
         }
     }
+
+    // Why a request is denied without the user being asked.
+    private const string SessionNotOpenReason = "the session is not open where the user could be asked";
+    private const string NotDeliveredReason = "CodeAlta could not put the request to the user";
+
+    // The denial of a request that nobody is asked about: one that only the user approves has no user to approve it,
+    // another is denied by the permission mode that does not approve it.
+    private static AgentPermissionDecision NotAsked(AgentPermissionRequest request)
+        => AlwaysAsks(request)
+            ? AgentPermissionDecision.DeniedUnattended("only the user can approve this request, and this run does not ask the user")
+            : AgentPermissionDecision.DeniedByPolicy("the permission mode of this session does not approve it, and this run does not ask the user");
+
+    private static string OnlyTheUserReason(AgentPermissionRequest request)
+        => IsOutsideSandbox(request)
+            ? "only the user can let a command run outside the sandbox of the session, and this run has no user"
+            : "only the user can let a session use their own browser, and this run has no user";
 
     // A request no permission mode answers for the user: the load of a skill of an MCP server, whose instructions may ask
     // for commands, and a command a sandboxed session asks to run outside its sandbox. It waits for the user, or is
@@ -271,9 +287,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     {
         if (FullTrust || policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
         var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
-        return (request, token) => Task.FromResult(new AgentPermissionDecision(
-            token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
-            : autoApprove && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+        return (request, token) => Task.FromResult(
+            token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)
+            : autoApprove && !AlwaysAsks(request) ? new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce) : NotAsked(request));
     }
 
     /// <summary>Gets the host's default user-input answer for sessions it owns: the request is canceled.</summary>
@@ -425,6 +441,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     {
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var afterSend = false;
+        var unreviewed = false;
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
             // The send has ended, its run with it: the request comes from the script of one of its calls that went on in
@@ -442,7 +459,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
                 && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
-            if ((!reviewCommands && !AlwaysAsks(request)) || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
+            unreviewed = !reviewCommands && !AlwaysAsks(request);
+            if (unreviewed || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
                 || !HasOwnedDeliveryCapacity(execution)) return null;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
             var snapshot = OwnedSnapshot(handle, request);
@@ -458,7 +476,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         }, null).ConfigureAwait(false);
         launch.TrySetResult();
         if (afterSend) return await HandleOwnedDefaultAsync(request, cancellationToken).ConfigureAwait(false);
-        return delivery is null ? new(AgentPermissionDecisionKind.Deny) : await delivery.ConfigureAwait(false);
+        if (delivery is not null) return await delivery.ConfigureAwait(false);
+        return unreviewed ? NotAsked(request) : AgentPermissionDecision.DeniedUnattended(NotDeliveredReason);
     }
 
     // What a send grants and reviews for one request: the policy its session has now when it follows it, the flags it
@@ -972,7 +991,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         if (!canceled && entry.OwnedExecution is not null
             && decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel or AgentPermissionDecisionKind.AllowAlways)) return false;
         _pending.Remove(handle);
-        entry.Completion.SetResult(new(canceled ? AgentPermissionDecisionKind.Cancel : decision));
+        // Every answer that resolves a waiting request is the user's: on the card of its session, in a dialog, on a phone.
+        entry.Completion.SetResult(canceled ? new(AgentPermissionDecisionKind.Cancel) : new(decision) { Source = AgentPermissionDecisionSource.User });
         return !canceled || decision == AgentPermissionDecisionKind.Cancel;
     }
 

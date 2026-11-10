@@ -867,7 +867,7 @@ public static partial class AgentBuiltInToolFactory
             case AgentPermissionDecisionKind.AllowForSession:
                 break;
             case AgentPermissionDecisionKind.Deny:
-                return Failure("shell_command was denied by the host.");
+                return Failure(Denied("shell_command", decision));
             case AgentPermissionDecisionKind.Cancel:
                 return Failure("shell_command was canceled by the host.");
             default:
@@ -1640,11 +1640,17 @@ public static partial class AgentBuiltInToolFactory
         return decision.Kind switch
         {
             AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession => null,
-            AgentPermissionDecisionKind.Deny => Failure($"{toolName} was denied by the host."),
+            AgentPermissionDecisionKind.Deny => Failure(Denied(toolName, decision)),
             AgentPermissionDecisionKind.Cancel => Failure($"{toolName} was canceled by the host."),
             _ => Failure($"Unsupported permission decision '{decision.Kind}'."),
         };
     }
+
+    // A denial that says who denied the tool, and why, when its decision tells.
+    private static string Denied(string toolName, AgentPermissionDecision decision)
+        => decision.Source == AgentPermissionDecisionSource.Unspecified
+            ? $"{toolName} was denied by the host."
+            : $"{toolName} was not run. {decision.DescribeDenial()}";
 
     private static string DetectExistingNewline(string text)
         => text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";

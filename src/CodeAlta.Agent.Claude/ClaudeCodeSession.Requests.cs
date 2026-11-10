@@ -134,7 +134,7 @@ internal sealed partial class ClaudeCodeSession
                 AgentPermissionDecisionKind.AllowOnce => Allow(input, default),
                 AgentPermissionDecisionKind.AllowForSession => Allow(input, request.TryGetProperty("permission_suggestions", out var suggestions) ? suggestions : default),
                 AgentPermissionDecisionKind.Cancel => Deny("The user cancelled this action in CodeAlta.", interrupt: true),
-                _ => Deny("This action was denied in CodeAlta.", interrupt: false),
+                _ => Deny(decision.DescribeDenial(), interrupt: false),
             };
         }
         catch (OperationCanceledException)
