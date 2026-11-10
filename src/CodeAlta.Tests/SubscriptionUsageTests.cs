@@ -237,11 +237,56 @@ public sealed class SubscriptionUsageTests
         Assert.AreEqual("Sonnet", reading.Usage.Limits[2].Name, "A model that has a window of its own is listed once.");
         Assert.AreEqual("Fable", reading.Usage.Limits[3].Name);
         Assert.AreEqual(30, reading.Usage.Limits[4].UsedPercent);
+        Assert.IsNull(reading.Usage.Limits[4].Used, "An amount whose currency is not said is left out.");
 
         using var none = JsonDocument.Parse("""{ "subscription_type": null, "rate_limits_available": false, "rate_limits": null }""");
         Assert.AreEqual(AgentSubscriptionUsageReading.Unavailable, ClaudeCodeAccountUsage.Parse(none.RootElement, Now).Status);
         using var empty = JsonDocument.Parse("""{ "subscription_type": "pro", "rate_limits": { "five_hour": { "utilization": null }, "extra_usage": { "is_enabled": false, "utilization": 3 } } }""");
         Assert.AreEqual(AgentSubscriptionUsageReading.Unavailable, ClaudeCodeAccountUsage.Parse(empty.RootElement, Now).Status);
+    }
+
+    [TestMethod]
+    public void ClaudeCode_ReadsTheLimitOfAModelAndTheUsageCreditsSpent()
+    {
+        // What Claude Code 2.1.318 answers for a plan without a five-hour window, with a weekly limit of one model and
+        // usage credits that have no monthly limit: no share of a limit, only the amount, in cents of its currency.
+        using var document = JsonDocument.Parse("""
+            { "subscription_type": "max", "rate_limits_available": true,
+              "rate_limits": {
+                "five_hour": null,
+                "seven_day": { "utilization": 37, "resets_at": "2026-11-16T13:59:58.719115+00:00", "limit_dollars": null, "used_dollars": null },
+                "seven_day_opus": null, "seven_day_sonnet": null,
+                "extra_usage": { "is_enabled": true, "monthly_limit": null, "used_credits": 2099, "utilization": null, "currency": "EUR", "decimal_places": 2,
+                                 "disabled_reason": null, "spend_limit_reached": false },
+                "limits": [ { "kind": "weekly_all", "group": "weekly", "percent": 37 },
+                            { "kind": "weekly_scoped", "group": "weekly", "percent": 66, "scope": { "model": { "id": null, "display_name": "Fable" } } } ],
+                "spend": { "used": { "amount_minor": 2099, "currency": "EUR", "exponent": 2 }, "limit": null, "percent": 0, "balance": null },
+                "model_scoped": [ { "display_name": "Fable", "utilization": 66, "resets_at": "2026-11-16T13:59:59.719318+00:00" } ] } }
+            """);
+
+        var limits = ClaudeCodeAccountUsage.Parse(document.RootElement, Now).Usage!.Limits;
+
+        CollectionAssert.AreEqual(new[] { "seven_day", "seven_day:fable", "extra_usage" }, limits.Select(static limit => limit.Id).ToArray());
+        Assert.AreEqual(37, limits[0].UsedPercent);
+        Assert.AreEqual("Fable", limits[1].Name);
+        Assert.AreEqual(66, limits[1].UsedPercent);
+        Assert.AreEqual(7 * 24 * 60, limits[1].WindowMinutes);
+        Assert.AreEqual(new AgentSubscriptionLimit("extra_usage", Used: 20.99, Currency: "EUR"), limits[2]);
+
+        // With a monthly limit, the credits are also a share of it; another currency has another minor unit.
+        AgentSubscriptionLimit? Credits(string extra)
+        {
+            using var answer = JsonDocument.Parse($$"""{ "rate_limits": { "seven_day": { "utilization": 1 }, "extra_usage": {{extra}} } }""");
+            return ClaudeCodeAccountUsage.Parse(answer.RootElement, Now).Usage!.Limits.SingleOrDefault(static limit => limit.Id == "extra_usage");
+        }
+
+        Assert.AreEqual(new AgentSubscriptionLimit("extra_usage", UsedPercent: 30, Used: 15, Total: 50, Currency: "USD"),
+            Credits("""{ "is_enabled": true, "monthly_limit": 5000, "used_credits": 1500, "utilization": 30, "currency": "usd" }"""));
+        Assert.AreEqual(new AgentSubscriptionLimit("extra_usage", Used: 2099, Currency: "JPY"),
+            Credits("""{ "is_enabled": true, "monthly_limit": null, "used_credits": 2099, "utilization": null, "currency": "JPY", "decimal_places": 0 }"""));
+        Assert.IsNull(Credits("""{ "is_enabled": true, "monthly_limit": null, "used_credits": 2099, "utilization": null }"""), "Cents of no currency say nothing.");
+        Assert.IsNull(Credits("""{ "is_enabled": true, "used_credits": 2099, "currency": "euros" }"""));
+        Assert.IsNull(Credits("""{ "is_enabled": false, "used_credits": 2099, "currency": "EUR" }"""), "Credits that are turned off are not a limit of the account.");
     }
 
     // An app server that answers from literal lines, with a notification before each answer.

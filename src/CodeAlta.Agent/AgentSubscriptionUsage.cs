@@ -23,6 +23,10 @@ public sealed record AgentSubscriptionUsage(string? Plan, IReadOnlyList<AgentSub
 /// <param name="Unit">What a unit is: <c>requests</c> or <c>credits</c>.</param>
 /// <param name="Remaining">How many units are left, for a balance that has no total.</param>
 /// <param name="Unlimited">Whether the plan sets no limit.</param>
+/// <param name="Currency">
+/// The ISO 4217 code of the currency, such as <c>EUR</c>, when <paramref name="Used"/>, <paramref name="Total"/> and
+/// <paramref name="Remaining"/> are amounts of money: they are then in that currency, not in its minor unit.
+/// </param>
 public sealed record AgentSubscriptionLimit(
     string Id,
     string? Name = null,
@@ -33,7 +37,8 @@ public sealed record AgentSubscriptionLimit(
     double? Total = null,
     string? Unit = null,
     bool Unlimited = false,
-    double? Remaining = null);
+    double? Remaining = null,
+    string? Currency = null);
 
 /// <summary>The answer of a provider that was asked for the usage of its subscription.</summary>
 /// <param name="Status">One of the statuses of this type.</param>

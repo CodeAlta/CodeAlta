@@ -3,13 +3,12 @@ import type { MessageKey } from "./localization";
 
 /** One limit of a subscription as the views show it: a window of time or a quota, whoever reported it. */
 export type UsageLimit = Readonly<{ id: string; name: string | null; usedPercent: number | null; resetsAt: string | null; windowMinutes: number | null;
-  used: number | null; total: number | null; unit: string | null; unlimited: boolean; remaining: number | null }>;
+  used: number | null; total: number | null; unit: string | null; unlimited: boolean; remaining: number | null;
+  /** The ISO 4217 code of the currency when `used`, `total` and `remaining` are amounts of money. */
+  currency: string | null }>;
 
 /** The provider types that are a subscription whose usage the host can read. */
 export const hasSubscriptionUsage = (type: string | null | undefined) => type === "codex" || type === "codex-cli" || type === "copilot" || type === "claude-code";
-
-/** How old the limits a session reported may be before the provider is asked instead. */
-export const liveLimitsLifetime = 15 * 60 * 1000;
 
 const minute = 60 * 1000;
 const near = (minutes: number, expected: number) => minutes >= expected * .95 && minutes <= expected * 1.05;
@@ -21,7 +20,7 @@ export function limitLabel(limit: Pick<UsageLimit, "id" | "name" | "unit" | "win
     case "premium_interactions": return { key: limit.unit === "credits" ? "AI credits" : "Premium requests", scope };
     case "chat": return { key: "Chat", scope };
     case "completions": return { key: "Code completions", scope };
-    case "extra_usage": return { key: "Extra usage", scope };
+    case "extra_usage": return { key: "Usage credits", scope };
     case "credits": return { key: "Credits", scope };
   }
   const minutes = limit.windowMinutes;
@@ -84,6 +83,10 @@ export function planLabel(plan: string | null | undefined): string | null {
 /** A count of requests or credits, grouped as the reader's language groups numbers. */
 export const unitCount = (value: number, locale?: string) => Math.round(value).toLocaleString(locale);
 
+/** An amount of a limit: money as the reader's language writes its currency when the limit has one, else a count. */
+export const limitAmount = (value: number, currency: string | null, locale?: string) => currency && /^[A-Za-z]{3}$/.test(currency)
+  ? new Intl.NumberFormat(locale, { style: "currency", currency }).format(value) : unitCount(value, locale);
+
 /** The limits of a provider answer, as the views show them. */
 export const providerLimits = (limits: readonly ProviderUsageLimit[]): UsageLimit[] => limits.map(limit => ({ ...limit }));
 
@@ -91,7 +94,7 @@ function sessionWindow(id: string, window: SessionUsageRateWindow | null): Usage
   if (!window || window.usedPercent === null && !window.resetsAt) return null;
   const minutes = window.windowDurationMinutes && /^\d{1,7}$/.test(window.windowDurationMinutes) ? Number(window.windowDurationMinutes) : null;
   return { id, name: null, usedPercent: window.usedPercent, resetsAt: window.resetsAt, windowMinutes: minutes || null,
-    used: null, total: null, unit: null, unlimited: false, remaining: null };
+    used: null, total: null, unit: null, unlimited: false, remaining: null, currency: null };
 }
 
 /** The limits the turns of a session reported: its two windows, the shorter one first. */
@@ -101,13 +104,21 @@ export function sessionLimits(rateLimits: SessionUsageRateLimits | null | undefi
 }
 
 /**
- * Whether the limits a session reported are the ones to show: they have a figure, and they are recent. Otherwise the
- * provider is asked, when it can be.
+ * The limits a provider answered, each window of the plan with what a session reported for it since. The provider is
+ * asked when the usage is opened and the turns report as they run, so neither is always the newer one; but the use
+ * of a period only grows: of two figures of one period the larger is the newer, and a window that ends later has
+ * started over.
  */
-export function liveLimitsAreCurrent(limits: readonly UsageLimit[], updatedAt: string | null | undefined, now: number): boolean {
-  if (!limits.some(limit => limit.usedPercent !== null)) return false;
-  const at = updatedAt ? new Date(updatedAt).getTime() : Number.NaN;
-  return !Number.isNaN(at) && now - at >= -minute && now - at < liveLimitsLifetime;
+export function withLiveWindows(asked: readonly UsageLimit[], live: readonly UsageLimit[]): UsageLimit[] {
+  return asked.map(limit => {
+    // A limit of a model or a quota is not one of the two windows a session reports.
+    if (limit.name || !limit.windowMinutes || limit.usedPercent === null) return limit;
+    const window = live.find(value => value.usedPercent !== null && !!value.windowMinutes && near(value.windowMinutes, limit.windowMinutes!));
+    if (!window) return limit;
+    const later = (window.resetsAt ? new Date(window.resetsAt).getTime() : Number.NaN) - (limit.resetsAt ? new Date(limit.resetsAt).getTime() : Number.NaN);
+    if (later > 5 * minute) return { ...limit, usedPercent: window.usedPercent, resetsAt: window.resetsAt };
+    return later < -5 * minute || window.usedPercent! <= limit.usedPercent ? limit : { ...limit, usedPercent: window.usedPercent };
+  });
 }
 
 /** Canonical English lines of the limits, for the Markdown copy of the usage window. */
@@ -119,9 +130,11 @@ export function limitsMarkdown(limits: readonly UsageLimit[], plan: string | nul
   for (const limit of limits) {
     const { key, scope } = limitLabel(limit);
     const name = `${english[key] ?? key}${scope ? ` (${scope})` : ""}`;
+    const amount = (value: number) => limitAmount(value, limit.currency, "en-US");
     const parts = [limit.unlimited ? "unlimited" : limit.usedPercent !== null ? `${Math.round(limit.usedPercent)}% used` : null,
-      limit.used !== null && limit.total !== null ? `${unitCount(limit.used, "en-US")} of ${unitCount(limit.total, "en-US")} ${limit.unit ?? ""}`.trim() : null,
-      limit.remaining !== null ? `${unitCount(limit.remaining, "en-US")} left` : null,
+      limit.used !== null && limit.total !== null ? `${amount(limit.used)} of ${amount(limit.total)} ${limit.unit ?? ""}`.trim()
+        : limit.used !== null && limit.currency ? `${amount(limit.used)} spent` : null,
+      limit.remaining !== null ? `${amount(limit.remaining)} left` : null,
       limit.resetsAt && timeLeft(limit.resetsAt, now) ? `resets in ${timeLeft(limit.resetsAt, now)}` : null].filter(Boolean);
     lines.push(`- ${name}: ${parts.join(" · ") || "—"}`);
   }

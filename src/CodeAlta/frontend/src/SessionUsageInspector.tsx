@@ -9,7 +9,7 @@ import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, 
 import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
 import { CacheCountdown, ContextRing, SignInEnd } from "./promptSurface/PromptSurfaceParts";
 import { signInEnd } from "./promptSurface/promptSurface";
-import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
+import { limitsMarkdown, planLabel, providerLimits, sessionLimits, withLiveWindows } from "./subscriptionUsage";
 import { createUsageReads, sessionTotalsAfterRead, usageMessage, validateUsage, type UsageReadEvents, type UsageReadReason, type UsageTarget } from "./sessionUsage";
 import { formatDuration } from "./toolCall";
 import type { createMutationCapability } from "./sessionOperations";
@@ -40,8 +40,9 @@ function UsageCard({ title, aside, children }: { title: ReactNode; aside?: React
 /**
  * Compact context-usage meter for the composer bar, with a details window that carries what the TUI
  * usage popup shows: context pressure, the last operation's token breakdown, the usage of the subscription and the
- * provider's session totals. The usage of the subscription is what the last turns reported while that is recent;
- * otherwise the provider is asked, when the window opens and on a refresh only. It reads the last observed usage when the session is shown and again
+ * provider's session totals. The usage of the subscription is what the provider answers, asked when the window opens
+ * and on a refresh only, with what the turns reported since for its windows; until it answers, and when it cannot,
+ * the windows the turns reported. It reads the last observed usage when the session is shown and again
  * (at most every few seconds) when `refreshKey` changes; until the host has an observation it falls
  * back to the last persisted usage record of the loaded timeline. The totals of the whole session are read from its
  * journal when the window opens and on a refresh, once each, and stay shown until the window closes.
@@ -56,7 +57,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   provider?: string | null; model?: string | null;
   /** The size of context the session uses, where its model has several: shown at once, before a turn reports it. */
   limit?: string | null;
-  /** Reads the usage of the subscription of the provider, for a session whose turns reported none. */
+  /** Reads the usage of the subscription of the provider: all its limits, where the turns report two windows at most. */
   subscription?: Pick<typeof providerUsage, "read">;
   /** Opens a page of the user guide, for the note of a usage that is only estimated. */
   onOpenDocumentation?: (page: string, anchor: string | null) => void;
@@ -170,17 +171,17 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
     operation.initiator && t("initiator {initiator}", { initiator: operation.initiator }),
     operation.durationMs && formatDuration(Number(operation.durationMs)) && t("duration {duration}", { duration: formatDuration(Number(operation.durationMs)) }),
     operation.cost && t("cost {cost}", { cost: costText(operation) ?? operation.cost })].filter((value): value is string => !!value) : [];
-  // What the turns of the session reported is shown while it is recent; otherwise the provider is asked.
+  // The provider knows more than the two windows the turns report (the limit of a model, the credits spent): it is
+  // asked when the window opens. What the turns reported is shown until it answers, and when it cannot.
   const live = useMemo(() => sessionLimits(limits), [limits]);
-  const liveCurrent = liveLimitsAreCurrent(live, updated, Date.now());
-  const asked = useProviderUsage(target.epoch, provider ?? null, open && allowed && !liveCurrent, subscription);
+  const asked = useProviderUsage(target.epoch, provider ?? null, open && allowed, subscription);
   const reading = asked.response?.status === "ok" && asked.response.limits.length > 0 ? asked.response : null;
-  const shownLimits = liveCurrent || !reading ? live : providerLimits(reading.limits);
-  const plan = liveCurrent || !reading ? limits?.planType ?? null : reading.plan;
+  const shownLimits = useMemo(() => reading ? withLiveWindows(providerLimits(reading.limits), live) : live, [reading, live]);
+  const plan = reading ? reading.plan ?? limits?.planType ?? null : limits?.planType ?? null;
   const subscriptionNote = !shownLimits.length && asked.response?.supported ? usageNote(asked.response) : null;
   async function copy() {
     const markdown = [usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,
-      operation, rateLimits: limits, sessionTotal: total, currentSession: totals }), ...(liveCurrent || !reading ? [] : limitsMarkdown(shownLimits, plan, Date.now()))].join("\n");
+      operation, rateLimits: reading ? null : limits, sessionTotal: total, currentSession: totals }), ...(reading ? limitsMarkdown(shownLimits, plan, Date.now()) : [])].join("\n");
     try { await navigator.clipboard.writeText(markdown); setCopied(true); } catch { setCopied(false); }
   }
   const operations = operationSegments(operation);
@@ -205,7 +206,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
       onCancel={event => { event.preventDefault(); close(); }} onKeyDown={event => event.stopPropagation()}
       headerActions={<>
         <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} aria-label={t("Copy as Markdown")} title={t("Copy as Markdown")} onClick={() => void copy()} />
-        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={() => { read("refresh"); if (!liveCurrent) asked.refresh(); }} /></>}>
+        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={() => { read("refresh"); asked.refresh(); }} /></>}>
       <div className="context-usage-details">
         <header className="context-usage-subject">
           <div><strong className="with-logo"><ProviderIcon providerKey={provider} size={15} />{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
@@ -234,7 +235,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
           {sessionSegments.length ? <UsageBreakdown segments={sessionSegments} label={t("Current session")} />
             : <p className="usage-card-note">{t("No token counts were reported for this session.")}</p>}
         </UsageCard>}
-        {(shownLimits.length > 0 || subscriptionNote || asked.loading && !liveCurrent) && <UsageCard title={t("Subscription usage")} aside={planLabel(plan)}>
+        {(shownLimits.length > 0 || subscriptionNote || asked.loading) && <UsageCard title={t("Subscription usage")} aside={planLabel(plan)}>
           {shownLimits.length > 0 ? <UsageLimitList limits={shownLimits} />
             : <p className="usage-card-note">{subscriptionNote ? t(subscriptionNote.key, subscriptionNote.tool ? { tool: subscriptionNote.tool } : undefined) : t("Reading the usage…")}</p>}
         </UsageCard>}

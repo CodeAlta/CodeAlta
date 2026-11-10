@@ -5,13 +5,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ProviderUsageResponse } from "#neoastra";
 import { locales, translate } from "./localization";
 import { ShellLanguageContext } from "./shellLanguage";
-import { elapsedPercent, hasSubscriptionUsage, limitIntent, limitLabel, limitsMarkdown, liveLimitsAreCurrent, liveLimitsLifetime, planLabel,
-  resetMoment, sessionLimits, timeLeft, type UsageLimit } from "./subscriptionUsage";
+import { elapsedPercent, hasSubscriptionUsage, limitAmount, limitIntent, limitLabel, limitsMarkdown, planLabel,
+  resetMoment, sessionLimits, timeLeft, withLiveWindows, type UsageLimit } from "./subscriptionUsage";
 import { UsageLimitList, usageNote } from "./UsageLimits";
 
 const now = new Date("2026-10-08T09:00:00Z").getTime();
 const limit = (change: Partial<UsageLimit> = {}): UsageLimit => ({ id: "five_hour", name: null, usedPercent: 40, resetsAt: "2026-10-08T11:00:00Z", windowMinutes: 300,
-  used: null, total: null, unit: null, unlimited: false, remaining: null, ...change });
+  used: null, total: null, unit: null, unlimited: false, remaining: null, currency: null, ...change });
 const never = () => assert.fail("rendering must not act");
 const render = (limits: UsageLimit[], locale: typeof locales[number] = "en") => renderToStaticMarkup(
   createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } }, createElement(UsageLimitList, { limits, now })));
@@ -29,7 +29,7 @@ test("a limit is named after its window, or after what the provider counts", () 
   assert.equal(limitLabel(limit({ id: "premium_interactions", unit: "credits" })).key, "AI credits");
   assert.equal(limitLabel(limit({ id: "chat" })).key, "Chat");
   assert.equal(limitLabel(limit({ id: "completions" })).key, "Code completions");
-  assert.equal(limitLabel(limit({ id: "extra_usage" })).key, "Extra usage");
+  assert.equal(limitLabel(limit({ id: "extra_usage" })).key, "Usage credits");
   assert.equal(limitLabel(limit({ id: "credits" })).key, "Credits");
   for (const type of ["codex", "copilot", "claude-code"]) assert.equal(hasSubscriptionUsage(type), true);
   for (const type of ["xai", "openai-chat", "", null, undefined]) assert.equal(hasSubscriptionUsage(type), false);
@@ -66,7 +66,7 @@ test("the time before a limit starts over, how far its period has gone, and its 
   assert.equal(resetMoment(null, now), null);
 });
 
-test("the limits a session reported are its two windows, shown while they are recent", () => {
+test("the limits a session reported are its two windows, which bring the answer of the provider up to date", () => {
   const live = sessionLimits({ name: "five_hour", planType: null, primary: { usedPercent: 6, resetsAt: "2026-10-08T11:00:00Z", windowDurationMinutes: "300" },
     secondary: { usedPercent: 52, resetsAt: "2026-10-12T05:00:00Z", windowDurationMinutes: "10080" } });
   assert.deepEqual(live.map(value => [value.id, value.usedPercent, value.windowMinutes]), [["session:primary", 6, 300], ["session:secondary", 52, 10080]]);
@@ -75,12 +75,23 @@ test("the limits a session reported are its two windows, shown while they are re
   assert.deepEqual(sessionLimits({ name: null, planType: null, primary: { usedPercent: null, resetsAt: null, windowDurationMinutes: null }, secondary: null }), []);
   assert.equal(sessionLimits({ name: null, planType: null, primary: { usedPercent: 3, resetsAt: null, windowDurationMinutes: "many" }, secondary: null })[0].windowMinutes, null);
 
-  const at = (ago: number) => new Date(now - ago).toISOString();
-  assert.equal(liveLimitsAreCurrent(live, at(60_000), now), true);
-  assert.equal(liveLimitsAreCurrent(live, at(liveLimitsLifetime + 1000), now), false, "An old figure is not shown as the usage of now: the provider is asked.");
-  assert.equal(liveLimitsAreCurrent(live, null, now), false);
-  assert.equal(liveLimitsAreCurrent([], at(1000), now), false);
-  assert.equal(liveLimitsAreCurrent([limit({ usedPercent: null })], at(1000), now), false, "A window without a figure says too little.");
+  // The provider answers more than the two windows: the limit of a model and the credits spent stay as it said them.
+  const week = limit({ id: "seven_day", usedPercent: 50, windowMinutes: 10080, resetsAt: "2026-10-12T04:59:58.7Z" });
+  const fable = limit({ id: "seven_day:fable", name: "Fable", usedPercent: 66, windowMinutes: 10080, resetsAt: "2026-10-12T04:59:59.7Z" });
+  const spent = limit({ id: "extra_usage", usedPercent: null, windowMinutes: null, resetsAt: null, used: 20.99, currency: "EUR" });
+  const merged = withLiveWindows([limit({ usedPercent: 5 }), week, fable, spent], live);
+  assert.deepEqual(merged.map(value => [value.id, value.usedPercent]), [["five_hour", 6], ["seven_day", 52], ["seven_day:fable", 66], ["extra_usage", null]],
+    "A turn that ran since the answer says more use of the same period.");
+  assert.equal(merged[1].resetsAt, week.resetsAt);
+  assert.deepEqual([merged[2], merged[3]], [fable, spent]);
+  assert.equal(withLiveWindows([limit({ usedPercent: 9 })], live)[0].usedPercent, 9, "The use of a period only grows: the larger figure is the newer one.");
+  const startedOver = sessionLimits({ name: null, planType: null, primary: { usedPercent: 1, resetsAt: "2026-10-08T16:00:00Z", windowDurationMinutes: "300" }, secondary: null });
+  assert.deepEqual(withLiveWindows([limit({ usedPercent: 97 })], startedOver).map(value => [value.usedPercent, value.resetsAt]), [[1, "2026-10-08T16:00:00Z"]],
+    "A window that ends later has started over since the answer.");
+  assert.equal(withLiveWindows([limit({ usedPercent: 2, resetsAt: "2026-10-08T16:00:00Z" })], live)[0].usedPercent, 2, "A figure of the period before says nothing of this one.");
+  assert.equal(withLiveWindows([limit({ usedPercent: 2, resetsAt: null })], live)[0].usedPercent, 6);
+  assert.deepEqual(withLiveWindows([week], []), [week]);
+  assert.deepEqual(withLiveWindows([], live), []);
 });
 
 test("the limits are meters with what is counted and when they start over, in every language", () => {
@@ -88,10 +99,13 @@ test("the limits are meters with what is counted and when they start over, in ev
     limit({ id: "seven_day:opus", name: "Opus", usedPercent: 140, windowMinutes: 10080, resetsAt: null }),
     limit({ id: "premium_interactions", usedPercent: 23, used: 4678, total: 20000, unit: "credits", windowMinutes: 44640, resetsAt: "2026-11-01T00:00:00Z" }),
     limit({ id: "chat", usedPercent: null, unlimited: true, windowMinutes: null, resetsAt: null }),
-    limit({ id: "credits", usedPercent: null, remaining: 62500, unit: "credits", windowMinutes: null, resetsAt: null })];
+    limit({ id: "credits", usedPercent: null, remaining: 62500, unit: "credits", windowMinutes: null, resetsAt: null }),
+    limit({ id: "extra_usage", usedPercent: null, used: 20.99, currency: "EUR", windowMinutes: null, resetsAt: null })];
   for (const locale of locales) {
     const html = render(limits, locale);
-    for (const key of ["5-hour limit", "Weekly limit", "AI credits", "Chat", "Credits", "Unlimited"] as const) assert.ok(html.includes(`>${translate(locale, key)}`), `${locale}: ${key}`);
+    for (const key of ["5-hour limit", "Weekly limit", "AI credits", "Chat", "Credits", "Usage credits", "Unlimited"] as const)
+      assert.ok(html.includes(`>${translate(locale, key).replace(/'/g, "&#x27;")}`), `${locale}: ${key}`);
+    assert.ok(html.includes(`<strong>${translate(locale, "{amount} spent", { amount: limitAmount(20.99, "EUR", locale) })}</strong>`), `${locale}: money spent without a limit is the figure of its row`);
     assert.ok(html.includes(translate(locale, "{percent}% used", { percent: 6 })), locale);
     assert.ok(html.includes(translate(locale, "Resets in {time}", { time: "2 h" })), locale);
     assert.ok(html.includes("<small>Opus</small>"), "A limit of a model names it.");
@@ -104,6 +118,13 @@ test("the limits are meters with what is counted and when they start over, in ev
   assert.ok(html.includes("140% used"));
   assert.ok(html.includes("4,678 of 20,000 credits"));
   assert.ok(html.includes(">62,500 left<"), "A balance of credits is named by its row.");
+  assert.ok(html.includes(">€20.99 spent<"), "Money is written in its currency, with its cents.");
+  // With a monthly limit, the credits spent are a share of it, and the amounts say of how much.
+  const capped = render([limit({ id: "extra_usage", usedPercent: 30, used: 15, total: 50, currency: "EUR", windowMinutes: null, resetsAt: null })]);
+  assert.ok(capped.includes("30% used") && capped.includes(">€15.00 of €50.00<") && !capped.includes("spent"));
+  assert.ok(render([limit({ id: "credits", usedPercent: null, remaining: 19.78, currency: "EUR", windowMinutes: null, resetsAt: null })]).includes(">€19.78 left<"));
+  assert.equal(limitAmount(1234.5, null, "en-US"), "1,235");
+  assert.equal(limitAmount(1234.5, "not a code", "en-US"), "1,235", "What is not a currency code is not given to the formatter, which would throw.");
   assert.ok(html.includes("left:60%"), "The mark says how far the five hours have gone.");
   assert.equal(render([]), '<div class="subscription-limits"></div>');
 });
@@ -125,6 +146,9 @@ test("why a provider shows no usage, and the copy of the usage as Markdown", () 
 
   assert.deepEqual(limitsMarkdown([], "pro", now), []);
   assert.deepEqual(limitsMarkdown([limit(), limit({ id: "premium_interactions", usedPercent: 23, used: 4678, total: 20000, unit: "credits", resetsAt: null }),
-    limit({ id: "seven_day:opus", name: "Opus", windowMinutes: 10080, usedPercent: null, unlimited: true, resetsAt: null })], "max", now),
-  ["", "## Subscription usage", "", "- Plan: max", "- 5-hour limit: 40% used · resets in 2 h", "- AI credits: 23% used · 4,678 of 20,000 credits", "- Weekly limit (Opus): unlimited"]);
+    limit({ id: "seven_day:opus", name: "Opus", windowMinutes: 10080, usedPercent: null, unlimited: true, resetsAt: null }),
+    limit({ id: "extra_usage", windowMinutes: null, usedPercent: null, resetsAt: null, used: 20.99, currency: "EUR" }),
+    limit({ id: "extra_usage", windowMinutes: null, usedPercent: 30, resetsAt: null, used: 15, total: 50, currency: "USD" })], "max", now),
+  ["", "## Subscription usage", "", "- Plan: max", "- 5-hour limit: 40% used · resets in 2 h", "- AI credits: 23% used · 4,678 of 20,000 credits", "- Weekly limit (Opus): unlimited",
+    "- Usage credits: €20.99 spent", "- Usage credits: 30% used · $15.00 of $50.00"]);
 });
