@@ -49,6 +49,26 @@ public sealed class CodeModeAgentsTests
     }
 
     [TestMethod]
+    public async Task AChild_IsCreatedInTheSpaceOfItsParent()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider, fullTrust: true, headlessInstructions: true);
+        await using var driver = new HeadlessSessionDriver(host);
+        var space = (await host.SpaceCatalog.CreateAsync("Business")).Space!;
+        var parent = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var moved = await host.Commands.MoveSessionToSpaceAsync(parent.SessionId, space.Id);
+        Assert.AreEqual("ok", moved.Status, string.Join(" ", moved.Warnings));
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Child answer."));
+
+        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-s" }, CancellationToken.None).WaitAsync(Hang);
+
+        Assert.IsTrue(result.Succeeded, result.Failure);
+        var child = await host.RuntimeService.TryGetResumableSessionAsync(result.SessionId!, CancellationToken.None);
+        Assert.AreEqual(space.Id, child!.SpaceId, "the child is listed under its parent, not in the other spaces of its project");
+    }
+
+    [TestMethod]
     public async Task ARun_WritesItsRecordsInTheJournalOfItsSession_InOrder_BeforeItsResult()
     {
         var (root, provider, host, driver, parent) = await CreateAsync();
