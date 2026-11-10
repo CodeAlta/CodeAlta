@@ -16,6 +16,10 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopOwnedSessionTests
 {
+    // A busy machine (a CI runner with every test project at once) takes seconds to start a host, run a turn or close a
+    // session: a wait for the real host that does not end in this time is stuck, not slow.
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+
     [TestMethod]
     public void ImageOnlySend_ForwardsEmptyTextAndExactLocalMetadata()
     {
@@ -243,7 +247,7 @@ public sealed class DesktopOwnedSessionTests
             if (result.Outcome != OwnedSessionCommandOutcome.Completed) return result;
             var marker = Guid.NewGuid().ToString("N");
             f.Provider.EmitIdle!(marker);
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(Patience);
             await f.Keep(Committed());
             return result;
 
@@ -522,7 +526,7 @@ public sealed class DesktopOwnedSessionTests
         await f.Wait(send.Completion);
         var marker = Guid.NewGuid().ToString("N");
         f.Provider.EmitIdle!(marker);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(Patience);
         await f.Keep(Committed());
         async Task Committed()
         {
@@ -762,7 +766,7 @@ public sealed class DesktopOwnedSessionTests
     {
         var changes = Channel.CreateUnbounded<bool>();
         void Changed(object? sender, EventArgs args) => changes.Writer.TryWrite(true);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(Patience);
         // Subscribe before reading: a firing between the snapshot and the wait must not be missed.
         // Changed is invalidation, not completion; always requery the real reminder owner.
         reminders.Reminders.Changed += Changed;
@@ -878,8 +882,8 @@ public sealed class DesktopOwnedSessionTests
             try { await task.ConfigureAwait(false); }
             catch (Exception ex) { lock (_gate) _failures.Add(ex); }
         }
-        internal Task Wait(Task task) => Keep(task.WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Wait<T>(Task<T> task) => Keep(task.WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Wait(Task task) => Keep(task.WaitAsync(Patience));
+        internal Task<T> Wait<T>(Task<T> task) => Keep(task.WaitAsync(Patience));
         internal OwnedSessionCommandReceipt Retain(OwnedSessionCommandAdmission admission)
         {
             if (admission.Receipt is not null) Keep(admission.Receipt.Completion);
@@ -945,9 +949,7 @@ public sealed class DesktopOwnedSessionTests
 
         private async Task<bool> DrainAsync(IEnumerable<Task> tasks)
         {
-            // A busy machine (a CI runner with every test project at once) takes seconds to close a session: a task that does
-            // not end in this time is stuck, not slow.
-            var waits = tasks.Distinct().Select(task => task.WaitAsync(TimeSpan.FromSeconds(30))).ToArray();
+            var waits = tasks.Distinct().Select(task => task.WaitAsync(Patience)).ToArray();
             lock (_gate) _cleanup.AddRange(waits);
             var confirmed = true;
             foreach (var wait in waits)

@@ -108,6 +108,8 @@ public sealed class EmbeddingTests
         using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
         {
             while (client.Running) await Task.Delay(20, timeout.Token);
+            // The client lets the worker go at once; the worker's thread ends once it has read the request to exit.
+            while (!workers[0].Ended) await Task.Delay(20, timeout.Token);
         }
 
         Assert.IsTrue(workers[0].Ended, "an idle worker is asked to exit");

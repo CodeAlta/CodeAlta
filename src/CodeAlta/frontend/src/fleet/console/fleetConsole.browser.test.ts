@@ -76,6 +76,9 @@ test("the machines are filtered, sorted, and a row opens its details in place", 
     await page.until(`${rows}.length === 4`, "the macs");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-filters-total').textContent`), "4 of 22");
     await page.key("Escape", 27);
+    // The menu gives the focus back to its button once it has faded out: a busy machine does it after a later click,
+    // which then loses the focus (the row below would not hear Escape).
+    await page.until(`!document.querySelector('.fleet-filters-menu')`, "the menu of the systems closed");
     await page.clickText(".fleet-filters .bp6-button", "Clear");
     await page.until(`${rows}.length === 22`, "every machine again");
 
@@ -91,6 +94,7 @@ test("the machines are filtered, sorted, and a row opens its details in place", 
     await page.until(`document.querySelector('.fleet-table-details .machine-row-details')`, "the details");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-table-details').previousElementSibling.getAttribute('aria-selected')`), "true");
     assert.ok(await page.evaluate(`[...document.querySelectorAll('.machine-details-actions .bp6-button')].some(button => button.textContent === 'Open its page')`));
+    await page.until(`document.activeElement === document.querySelector('.fleet-table-details')?.previousElementSibling`, "the focus on the row opened");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.fleet-table-details')`, "the details closed");
     assert.deepEqual(page.problems, []);
