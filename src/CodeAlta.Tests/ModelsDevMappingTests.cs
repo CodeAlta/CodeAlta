@@ -27,6 +27,26 @@ public sealed class ModelsDevMappingTests
     }
 
     [TestMethod]
+    [DataRow("claude-opus-4-8-20260219")]
+    [DataRow("claude-opus-4-8-2026-02-19")]
+    public void ADatedModel_IsFoundByItsUndatedCatalogEntry(string modelId)
+    {
+        var database = CreateDatabase();
+
+        Assert.IsTrue(database.TryGetModel("anthropic", modelId, out var model));
+        Assert.AreEqual("claude-opus-4-8", model.Id);
+    }
+
+    [TestMethod]
+    [DataRow("claude-opus-4-8-20260230")]
+    [DataRow("claude-opus-4-8-12345678")]
+    [DataRow("claude-opus-4-8-2026021x")]
+    public void AModelSuffixThatIsNotACompactDate_IsNotStripped(string modelId)
+    {
+        Assert.IsFalse(CreateDatabase().TryGetModel("anthropic", modelId, out _));
+    }
+
+    [TestMethod]
     public void AProviderIsFound_ByItsEndpoint_AndASharedEndpointNeedsItsKey()
     {
         var database = CreateDatabase();

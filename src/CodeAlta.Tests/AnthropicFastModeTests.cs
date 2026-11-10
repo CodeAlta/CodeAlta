@@ -37,6 +37,20 @@ public sealed class AnthropicFastModeTests
     }
 
     [TestMethod]
+    [DataRow("claude-opus-5-5-20261015")]
+    [DataRow("claude-opus-5-5-2026-10-15")]
+    public async Task ADatedModel_KeepsTheFastModeOfItsCatalogEntry(string modelId)
+    {
+        var model = await ListedAsync(modelId).ConfigureAwait(false);
+        Assert.AreEqual(false, model.FastMode, "A dated model keeps the fast mode of its undated catalog entry.");
+
+        var sent = await SendAsync(ClaudeApi, model, fastMode: true).ConfigureAwait(false);
+
+        Assert.AreEqual("fast", sent.Body.RootElement.GetProperty("speed").GetString());
+        CollectionAssert.Contains(sent.Betas.ToArray(), FastModeBeta);
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(null)]
     public async Task ASessionThatDoesNotAskForIt_IsSentNoSpeed(bool? fastMode)
