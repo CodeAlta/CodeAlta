@@ -250,9 +250,9 @@ export type PromptMode = "send" | "steer" | "queue";
 /** What a send or a queue changes of the session, chosen on the phone: each stays the session's. */
 export type PromptSelection = Readonly<{ model?: string; reasoning?: string; agent?: string; permissionMode?: string }>;
 
-/** `POST /api/sessions`. */
+/** `POST /api/sessions`: a session in `project`, or a chat (in no project) with `chat`. */
 export type NewSessionRequest = Readonly<{
-  project: string; text: string; tier?: string; provider?: string; model?: string; reasoning?: string; prompt?: string; permissionMode?: string; worktree?: boolean;
+  project?: string; chat?: boolean; text: string; tier?: string; provider?: string; model?: string; reasoning?: string; prompt?: string; permissionMode?: string; worktree?: boolean;
   attachments?: readonly PromptAttachment[];
 }>;
 

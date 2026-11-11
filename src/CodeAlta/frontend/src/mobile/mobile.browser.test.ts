@@ -370,7 +370,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`!(${shown("#sheet")}) && !document.querySelector('.row[data-id="s1"]')`, "the sessions of site only");
     await click("#new");
     await waitFor(`document.getElementById('new-project').value === 'p2'`, "the project the list keeps to");
-    assert.deepEqual(await evaluate<string[]>("[...document.querySelector('#new-project').options].map(o => o.value)"), ["p2"]);
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelector('#new-project').options].map(o => o.value)"), ["\u0000chat", "p2"], "the chats first, then the projects");
     assert.equal(await evaluate("document.getElementById('filter').hidden"), false);
     await click("#filter");
     await waitFor(shown("#sheet"), "the project sheet");
@@ -379,11 +379,11 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await waitFor(`document.getElementById('new-project').value === 'p1'`, "the project after changing the filter in the form");
-    assert.deepEqual(await evaluate<string[]>("[...document.querySelector('#new-project').options].map(o => o.value)"), ["p1"]);
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelector('#new-project').options].map(o => o.value)"), ["\u0000chat", "p1"]);
     await click("#filter");
     await waitFor(shown("#sheet"), "the project sheet");
     await evaluate("document.querySelector('#sheet-list li:first-child button').click()");
-    await waitFor(`!(${shown("#sheet")}) && document.querySelector('#new-project').options.length === 3`, "every project available again");
+    await waitFor(`!(${shown("#sheet")}) && document.querySelector('#new-project').options.length === 4`, "every project available again");
     await waitFor(`document.getElementById('new-project').value === 'p1'`, "the last selected project again");
 
     // A new session: the default tier of the settings; a prompt that did not go is back in the composer of its session.
@@ -423,6 +423,25 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`document.getElementById('detail-note').textContent.includes("not sent: The provider is busy.")`, "the failed send on its page");
     assert.equal(await evaluate("document.getElementById('prompt').value"), "Make it faster");
     await waitFor(`document.querySelector('#detail-title').textContent === "New: Make it faster"`, "a session out of the list read alone");
+
+    // "None (Chat)", first of the projects: a chat in no project, which has no worktree to offer.
+    server.state.createAnswer = {};
+    await evaluate("location.hash = '#/new'");
+    await waitFor(`document.querySelector('#new-project').options[0]?.textContent === "None (Chat)"`, "the chats, first of the projects");
+    await evaluate(`(() => { const select = document.getElementById('new-project'); select.value = '\\u0000chat'; select.dispatchEvent(new Event('change')); })()`);
+    await click("#new-more");
+    await waitFor(shown("#new-more-sheet"), "the options of a new chat");
+    assert.equal(await evaluate("document.getElementById('new-worktree').closest('label').hidden"), true, "no worktree for a chat");
+    await click("#new-more-done");
+    assert.doesNotMatch(await evaluate<string>("document.getElementById('new-more').getAttribute('aria-label')"), /worktree/);
+    await typeInto("#new-text", "What is a monad?");
+    await evaluate("document.getElementById('new-form').requestSubmit()");
+    await waitFor(`location.hash === "#/session/new2"`, "the page of the new chat");
+    const chatRequest = server.requests.filter(r => r.method === "POST" && r.path === "/api/sessions").at(-1)?.body as Record<string, unknown>;
+    assert.deepEqual([chatRequest.chat, chatRequest.project, chatRequest.worktree, chatRequest.text], [true, undefined, undefined, "What is a monad?"]);
+    await evaluate(tapMenuItem("#menu-new"));
+    await waitFor(`document.getElementById('new-project').value === '\\u0000chat'`, "a chat viewed gives the chats to the form");
+    await evaluate(`(() => { const select = document.getElementById('new-project'); select.value = 'p1'; select.dispatchEvent(new Event('change')); })()`);
 
     // Files: a chip, one removed, a send that clears the strip and shows the file, then a failed send that gives the files back.
     await evaluate("location.hash = '#/session/s1'");
