@@ -8,6 +8,34 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class IssueViewStoreTests
 {
     [TestMethod]
+    public void ASubProject_HasItsOwnViews_ElseThoseOfTheFolderItInheritsFrom()
+    {
+        var repository = Path.Combine(Path.GetTempPath(), "alta-issue-views-" + Guid.NewGuid().ToString("N"));
+        var billing = Path.Combine(repository, "services", "billing");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(repository, ".alta"));
+            Directory.CreateDirectory(Path.Combine(billing, ".alta"));
+            File.WriteAllText(Path.Combine(repository, ".alta", "issues.toml"), "[jira.views.Team.type]\nvalue = \"Bug\"\n\n[jira.views.Mine.assignee]\nvalue = \"@me\"\n");
+            var store = new IssueViewStore();
+
+            CollectionAssert.AreEqual(new[] { "Team", "Mine" }, store.ReadViews("jira", IssueViewKind.Issues, billing, [repository]).Select(static view => view.Name).ToArray(),
+                "the views of the repository while the sub-project has none");
+            Assert.AreEqual("Team", store.ReadCurrent("jira", IssueViewKind.Issues, billing, [repository])?.Name);
+            Assert.AreEqual(0, store.ReadViews("jira", billing).Count, "a project that is no sub-project has its own views alone");
+
+            File.WriteAllText(Path.Combine(billing, ".alta", "issues.toml"), "[jira.views.Invoices.component]\nvalue = \"Billing\"\n");
+            CollectionAssert.AreEqual(new[] { "Invoices" }, store.ReadViews("jira", IssueViewKind.Issues, billing, [repository]).Select(static view => view.Name).ToArray(),
+                "its own views replace those of the repository");
+        }
+        finally
+        {
+            try { Directory.Delete(repository, recursive: true); }
+            catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
+    }
+
+    [TestMethod]
     public void TheViewsOfAProject_AreTheUsersThenTheTeams_AndTheCurrentOneIsTheUsersChoice()
     {
         var project = Path.Combine(Path.GetTempPath(), "alta-issue-views-" + Guid.NewGuid().ToString("N"));

@@ -274,15 +274,45 @@ public sealed partial class SessionRuntimeService
         // The session writes its working directory, never its project folder besides: a session in a worktree leaves
         // the checkout of the user as it is. The project folders are the repositories whose git folder its worktree
         // may write.
+        var (writable, projectFolders) = await SandboxProjectFoldersAsync(sessionId, cancellationToken).ConfigureAwait(false);
         var folders = new SandboxSessionFolders
         {
             WorkingDirectory = Path.GetFullPath(workingDirectory),
+            Writable = writable,
+            ProjectFolders = projectFolders,
             Repositories = [.. projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)],
             Scratchpad = scratchpad,
             Readable = await ToolOutputGrantAsync(sessionId, cancellationToken).ConfigureAwait(false),
             SkillFolders = await SkillFoldersOfAsync(sessionId, cancellationToken).ConfigureAwait(false),
         };
         return new SessionSandboxStart(sessionId, providerId, profile, folders, environment?.Variables ?? [], commandGuard);
+    }
+
+    // What the project of a session adds to its sandbox: the folder of the repository a sub-project writes when the session
+    // works in the folder of its project (ProjectResourceRoots.WriteRoots), and the folders of the projects of the
+    // repository, whose settings stay protected wherever the session writes. In a worktree, which is a checkout of its own,
+    // those folders are where they are in it: at the same place from the folder the session works in as from the folder
+    // of its project. They come from the catalog: no folder of the repository is walked.
+    private async Task<(IReadOnlyList<string> Writable, IReadOnlyList<string> ProjectFolders)> SandboxProjectFoldersAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is not { ProjectId: { } projectId }) return ([], []);
+            var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            if (projects.FirstOrDefault(candidate => string.Equals(candidate.Id, projectId, StringComparison.OrdinalIgnoreCase)) is not { } project) return ([], []);
+            var repositoryId = project.ParentId ?? project.Id;
+            var declared = projects.Where(candidate => string.Equals(candidate.ParentId, repositoryId, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (declared.Count == 0) return ([], []);
+            var worktree = _entries.TryGetValue(sessionId, out var entry) ? entry.WorktreeDirectory : null;
+            var anchor = Path.GetFullPath(worktree ?? project.ProjectPath);
+            IReadOnlyList<string> folders = [.. declared.Select(candidate => Path.GetFullPath(Path.Combine(anchor, Path.GetRelativePath(project.ProjectPath, candidate.ProjectPath))))];
+            return (worktree is null ? ProjectResourceRoots.WriteRoots(project) : [], folders);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            // A catalog that cannot be read adds nothing: the session writes its own folder, whose settings stay protected.
+            return ([], []);
+        }
     }
 
     // The agent is told to read the whole of a long output in the tool output of its session, which CodeAlta writes
@@ -321,8 +351,11 @@ public sealed partial class SessionRuntimeService
             var record = await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
             var project = record?.ProjectId is { } projectId ? await _projectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
             var space = await GetSpaceFilterAsync(record?.SpaceId, project, cancellationToken).ConfigureAwait(false);
-            folders.AddRange(CodeAlta.Catalog.Skills.AddedSkillFolders.Roots(_configStore.LoadGlobalSkillFolders(), space.SpaceId, space.SkillFolders, project?.SkillFolders,
+            folders.AddRange(CodeAlta.Catalog.Skills.AddedSkillFolders.Roots(_configStore.LoadGlobalSkillFolders(), space.SpaceId, space.SkillFolders, project?.EffectiveSkillFolders,
                 UserHomeRoot, _catalogOptions.GlobalRoot).Select(static root => root.RootPath));
+            // The skills a sub-project inherits from the folders above it, which its sandbox may not reach otherwise.
+            foreach (var root in ProjectResourceRoots.Inherited(project))
+                folders.AddRange([Path.Combine(root, ".alta", "skills"), Path.Combine(root, ".agents", "skills"), Path.Combine(root, ".github", "skills")]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)
         {

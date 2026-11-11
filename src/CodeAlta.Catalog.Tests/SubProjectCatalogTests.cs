@@ -41,12 +41,17 @@ public sealed class SubProjectCatalogTests
         Assert.AreEqual(ProjectCatalog.DeriveSubProjectId(repository.Id, "billing"), billing.Id);
         Assert.AreEqual((repository.Id, "services/billing", "billing"), (billing.ParentId, billing.SubPath, billing.DeclaredKey));
         Assert.AreEqual("contoso-billing", billing.Slug);
+        Assert.AreEqual(("contoso", repository.Slug, repository.ProjectPath), (billing.RepositoryName, billing.RepositorySlug, billing.RepositoryPath));
         Assert.AreEqual("Invoices.", billing.Description);
         CollectionAssert.AreEqual(new[] { "work" }, billing.Spaces, "A sub-project is in the spaces of its repository.");
         CollectionAssert.AreEqual(new[] { "contoso.payments" }, billing.DeclaredLabels);
         CollectionAssert.AreEqual(new[] { repository.ProjectPath }, billing.InheritedRoots);
         var core = projects.Single(static project => project.DeclaredKey == "core");
         CollectionAssert.AreEqual(new[] { billing.ProjectPath, repository.ProjectPath }, core.InheritedRoots, "The nearest declared folder first.");
+        CollectionAssert.AreEqual(core.InheritedRoots, fixture.Projects.GetInheritedRoots(core.Id).ToList(), "As the last load found them, for a reader without the descriptor.");
+        Assert.AreEqual(0, fixture.Projects.GetInheritedRoots(repository.Id).Count);
+        CollectionAssert.AreEqual(core.InheritedRoots, fixture.Projects.GetInheritedRootsOfFolder(core.ProjectPath + Path.DirectorySeparatorChar).ToList(), "By its folder too.");
+        Assert.AreEqual(0, fixture.Projects.GetInheritedRootsOfFolder(repository.ProjectPath).Count);
         Assert.AreEqual(billing.Id, (await fixture.Projects.LoadAsync()).Single(static project => project.DeclaredKey == "billing").Id, "Every load gives the same identifier.");
 
         var used = await fixture.Projects.EnsurePersistedAsync(billing.Copy());

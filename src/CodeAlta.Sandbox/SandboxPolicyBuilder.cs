@@ -14,7 +14,7 @@ public static class SandboxPolicyBuilder
         ".vscode", ".claude", ".codex", ".copilot", ".gemini", ".cursor", ".mcp.json", Path.Combine(".github", "mcp.json"),
         Path.Combine(".alta", "config.toml"), Path.Combine(".alta", "mcp.json"), Path.Combine(".alta", "plugins"),
         Path.Combine(".alta", "skills"), Path.Combine(".alta", "prompts"), Path.Combine(".alta", "plugin-data"),
-        Path.Combine(".alta", "local"), Path.Combine(".alta", "issues.toml"),
+        Path.Combine(".alta", "local"), Path.Combine(".alta", "issues.toml"), Path.Combine(".alta", "projects.toml"),
     ];
 
     // Below the home folder: what holds secrets of CodeAlta, of tools and of the user. They are outside every
@@ -116,9 +116,28 @@ public static class SandboxPolicyBuilder
             protectedEntries.AddRange(ProtectedEntries.Select(entry => Path.Combine(root, entry)));
         }
 
+        // The other projects inside what the session writes keep their settings as its own folder does: a session of the
+        // root of a monorepo, or of a sub-project that writes the repository, does not change those of a sub-project.
+        var projectGitFolders = new List<string>();
+        foreach (var project in folders.ProjectFolders.Select(Full).Distinct(comparer).Where(project => roots.Any(root => IsInside(root, project))))
+        {
+            protectedEntries.AddRange(ProtectedEntries.Select(entry => Path.Combine(project, entry)));
+            var dotGit = Path.Combine(project, ".git");
+            if (Directory.Exists(dotGit))
+            {
+                projectGitFolders.Add(dotGit);
+            }
+            else if (File.Exists(dotGit))
+            {
+                // A git submodule: its `.git` file, which names its git folder, and that folder when the session writes it.
+                protectedEntries.Add(dotGit);
+                if (NamedGitFolder(dotGit, project) is { } named && readWrite.Any(grant => IsInside(grant, named))) projectGitFolders.Add(named);
+            }
+        }
+
         // The git folder of each writable root is protected as it is found, whatever a `.git` file names.
         var emptyFiles = new List<string>();
-        foreach (var gitFolder in gitFolders.Concat(roots.Select(static root => Path.Combine(root, ".git")).Where(Directory.Exists)).Distinct(comparer))
+        foreach (var gitFolder in gitFolders.Concat(roots.Select(static root => Path.Combine(root, ".git")).Where(Directory.Exists)).Concat(projectGitFolders).Distinct(comparer))
         {
             protectedEntries.Add(Path.Combine(gitFolder, "hooks"));
             protectedEntries.Add(Path.Combine(gitFolder, "config"));
@@ -262,6 +281,21 @@ public static class SandboxPolicyBuilder
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return [];
+        }
+    }
+
+    // The git folder a `.git` file names (`gitdir: <path>`, from the folder of the file); null when it names none. What a
+    // file the session may have written names only adds what is protected: nothing is granted for it.
+    internal static string? NamedGitFolder(string dotGitFile, string folder)
+    {
+        try
+        {
+            var line = File.ReadLines(dotGitFile).FirstOrDefault(static text => text.StartsWith("gitdir:", StringComparison.OrdinalIgnoreCase));
+            return line is null ? null : Full(Path.GetFullPath(line["gitdir:".Length..].Trim(), folder));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
         }
     }
 

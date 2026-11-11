@@ -1193,7 +1193,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
         {
-            session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory, knownPrompts);
+            session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory, session.ProjectRef, knownPrompts);
         }
 
         if (localState.MessageCount is { } messageCount)
@@ -2150,7 +2150,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 _events.TryPublish(new SessionHostEvent(session.SessionId, DateTimeOffset.UtcNow, AgentSessionUpdateKind.Warning, diagnostic.Message));
             }
         }
-        var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
+        var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project);
         // The provider the session would run with, as the host allows it to this session (a node: account credentials only for
         // the sessions of an unattended run), at every attachment: a change of provider, a tier or a fallback, a child.
         if (ProviderGate is { } providerGate
@@ -2290,7 +2290,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Tools = tools,
             DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
             DisabledToolPatterns = toolPatterns,
-            WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
+            // A sub-project session in the folder of its project writes the folder of its repository too; one in a
+            // worktree writes its worktree, as any session does.
+            WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree,
+                worktree is null ? [.. options.ProjectRoots, .. ProjectResourceRoots.WriteRoots(project)] : options.ProjectRoots),
             CommandGuard = CreateCommandGuard(session.SessionId),
             ToolInterceptor = toolInterceptor,
             // Where its built-in tools run: in the worker of its sandbox while it is sandboxed, read at each call.
@@ -4096,14 +4099,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
         }
 
-        return SkillCatalogQuery.ForSession(
+        return SkillCatalogQuery.ForProject(
             _configStore,
             _catalogOptions.GlobalRoot,
             UserHomeRoot,
-            project?.ProjectPath,
+            project,
             projectRoots,
-            space,
-            project?.SkillFolders);
+            space);
     }
 
     /// <summary>
@@ -5359,7 +5361,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
             {
-                session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory);
+                session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory, session.ProjectRef);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Text.Json.JsonException)
@@ -5686,7 +5688,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 LatestSummary = session.Summary,
                 ModelId = session.ModelId,
                 ReasoningEffort = session.ReasoningEffort,
-                AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, projectRoot: null, knownPrompts),
+                AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, projectRoot: null, projectId: null, knownPrompts),
             };
         }
 
@@ -5721,21 +5723,27 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             LatestSummary = session.Summary,
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
-            AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, project.ProjectPath, knownPrompts),
+            AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, project.ProjectPath, project.Id, knownPrompts),
         };
     }
 
-    internal IReadOnlyList<AgentPromptDescriptor> ListOwnedPrompts(string? projectRoot, SpaceFilter? space)
+    internal IReadOnlyList<AgentPromptDescriptor> ListOwnedPrompts(ProjectDescriptor? project, SpaceFilter? space)
     {
-        ValidateDiscoveryProjectRoot(projectRoot);
-        return AgentPromptCatalog.InSpace((PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(new AgentPromptCatalogQuery
-        {
-            ProjectRoot = projectRoot,
-            ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
-            UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = UserHomeRoot,
-        }), space);
+        ValidateDiscoveryProjectRoot(project?.ProjectPath);
+        return AgentPromptCatalog.InSpace((PromptCatalog ?? new AgentPromptCatalog())
+            .ListEffectivePrompts(PromptQuery(project?.ProjectPath, ProjectResourceRoots.Inherited(project))), space);
     }
+
+    // The prompts a session sees: those of the user and of the folder of its project, after those of the folders a
+    // sub-project inherits from.
+    private AgentPromptCatalogQuery PromptQuery(string? projectRoot, IReadOnlyList<string> inheritedRoots) => new()
+    {
+        ProjectRoot = projectRoot,
+        InheritedProjectRoots = inheritedRoots,
+        ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
+        UserCodeAltaRoot = _catalogOptions.GlobalRoot,
+        UserProfileRoot = UserHomeRoot,
+    };
 
     /// <summary>Gets the space a session of a project is in when it records <paramref name="spaceId"/>, or when it is created in it.</summary>
     /// <param name="spaceId">The space the session is created in; <see langword="null"/> for none.</param>
@@ -5754,7 +5762,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="IOException">The global configuration cannot be read.</exception>
     internal SpaceFilter LoadSpaceFilter(string spaceId) => SpaceFilter.Load(_configStore, spaceId);
 
-    private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot, KnownPromptNames? knownPrompts = null)
+    // The prompt of a session as its folder knows it, else the default one. The folders a sub-project inherits its prompts
+    // from are those the catalog last found for its project.
+    private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot, string? projectId, KnownPromptNames? knownPrompts = null)
     {
         ValidateDiscoveryProjectRoot(projectRoot);
         var normalized = NormalizeOptionalText(promptId);
@@ -5763,39 +5773,32 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return null;
         }
 
-        var names = knownPrompts is null ? ListKnownPromptNames(projectRoot) : knownPrompts.Of(projectRoot);
+        IReadOnlyList<string> inherited = projectRoot is null ? [] : _projectCatalog.GetInheritedRoots(projectId);
+        var names = knownPrompts is null ? ListKnownPromptNames(projectRoot, inherited) : knownPrompts.Of(projectRoot, inherited);
         return names.Contains(normalized) ? normalized : AgentPromptCatalog.DefaultPromptName;
     }
 
-    private HashSet<string> ListKnownPromptNames(string? projectRoot)
-    {
-        var query = new AgentPromptCatalogQuery
-        {
-            ProjectRoot = projectRoot,
-            ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
-            UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = UserHomeRoot,
-        };
-        return (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(query)
+    private HashSet<string> ListKnownPromptNames(string? projectRoot, IReadOnlyList<string> inheritedRoots)
+        => (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(PromptQuery(projectRoot, inheritedRoots))
             .Select(static prompt => prompt.PromptName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
 
     // The names of the prompts of each folder, read once for one listing of the sessions.
     private sealed class KnownPromptNames(SessionRuntimeService runtime)
     {
         private readonly Dictionary<string, HashSet<string>> _names = new(StringComparer.Ordinal);
 
-        public HashSet<string> Of(string? projectRoot)
+        public HashSet<string> Of(string? projectRoot, IReadOnlyList<string> inheritedRoots)
         {
-            var key = projectRoot ?? string.Empty;
-            if (!_names.TryGetValue(key, out var names)) _names[key] = names = runtime.ListKnownPromptNames(projectRoot);
+            var key = string.Join('\n', [projectRoot ?? string.Empty, .. inheritedRoots]);
+            if (!_names.TryGetValue(key, out var names)) _names[key] = names = runtime.ListKnownPromptNames(projectRoot, inheritedRoots);
             return names;
         }
     }
 
-    private AgentPromptUsageInfo? ResolveAgentPromptUsage(SystemPromptBundle? promptBundle, string? projectRoot)
+    private AgentPromptUsageInfo? ResolveAgentPromptUsage(SystemPromptBundle? promptBundle, ProjectDescriptor? project)
     {
+        var projectRoot = project?.ProjectPath;
         ValidateDiscoveryProjectRoot(projectRoot);
         var promptName = NormalizeOptionalText(promptBundle?.Manifest.Composition.AgentPromptName);
         if (promptName is null)
@@ -5803,13 +5806,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return null;
         }
 
-        var query = new AgentPromptCatalogQuery
-        {
-            ProjectRoot = projectRoot,
-            ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
-            UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = UserHomeRoot,
-        };
+        var query = PromptQuery(projectRoot, ProjectResourceRoots.Inherited(project));
         var descriptor = (PromptCatalog ?? new AgentPromptCatalog()).ResolvePrompt(query, promptName);
         if (descriptor is null)
         {

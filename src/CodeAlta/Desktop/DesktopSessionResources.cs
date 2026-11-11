@@ -55,13 +55,14 @@ internal sealed class DesktopSessionResources
         var space = await runtime.GetSpaceFilterAsync(record.SpaceId, project, cancellationToken).ConfigureAwait(false);
         var profile = _home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        var skillQuery = SkillCatalogQuery.ForSession(new CodeAltaConfigStore(_host.CatalogOptions), _host.CatalogOptions.GlobalRoot, profile,
-            project?.ProjectPath, otherProjectRoots: null, space, project?.SkillFolders) with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = false, ModelVisibleOnly = true };
+        var skillQuery = SkillCatalogQuery.ForProject(new CodeAltaConfigStore(_host.CatalogOptions), _host.CatalogOptions.GlobalRoot, profile,
+            project, otherProjectRoots: null, space) with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = false, ModelVisibleOnly = true };
         var skills = (await _host.SkillCatalog.ListAsync(skillQuery, cancellationToken).ConfigureAwait(false)).Select(static skill => skill.Name);
 
         var prompts = AgentPromptCatalog.InSpace(new AgentPromptCatalog().ListEffectivePrompts(new AgentPromptCatalogQuery
         {
             ProjectRoot = project?.ProjectPath,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(project),
             ProjectPromptResourcesTrusted = project is not null,
             UserCodeAltaRoot = _host.CatalogOptions.GlobalRoot,
             UserProfileRoot = profile,
@@ -80,7 +81,7 @@ internal sealed class DesktopSessionResources
         var running = _host.PluginRuntime.ActivePlugins
             .Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
                 && adapter.IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId), plugin.RuntimeContext.Scope, space.SpaceId)
-                && plugin.RuntimeContext.AppliesToProject(project?.Id, project?.ProjectPath))
+                && plugin.RuntimeContext.AppliesToProject(project?.Id, project?.ProjectPath, ProjectResourceRoots.Inherited(project)))
             .ToArray();
         var global = new CodeAltaConfigStore(_host.CatalogOptions).LoadGlobal();
         var resolver = new PluginRuntimeConfigResolver();

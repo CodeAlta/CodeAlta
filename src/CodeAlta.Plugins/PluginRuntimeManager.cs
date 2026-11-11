@@ -312,7 +312,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                     discovered,
                     sourcePackage: null,
                     loadContext: null,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets, InheritedProjectRoots = InheritedRootsOfFolder },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)
@@ -483,6 +483,9 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
 
     // The spaces of the plugins as the adapter reads them when a plugin asks; none read puts every plugin in every space.
     private SpaceAssignments ReadSpaceAssignments() => Adapter.SpaceAssignments is { } read ? read() : SpaceAssignments.Empty;
+
+    // The folders a project inherits its setup from, by its folder, as the host tells the adapter.
+    private IReadOnlyList<string> InheritedRootsOfFolder(string projectPath) => Adapter.InheritedProjectRootsOfFolder is { } read ? read(projectPath) : [];
 
     private static PluginHostInfo CreateHostInfo(PluginRuntimeManagerOptions options)
         => new()

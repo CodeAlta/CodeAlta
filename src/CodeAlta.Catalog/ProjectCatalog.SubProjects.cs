@@ -46,6 +46,45 @@ public sealed partial class ProjectCatalog
     private readonly Dictionary<string, (ProjectManifest Map, Dictionary<string, (string FullPath, ProjectManifestFolderState State)> Folders)> _folders
         = new(StringComparer.Ordinal);
 
+    // The folders each sub-project inherits from, as the last load found them, replaced whole by each load: for the readers
+    // that hold an identifier of a project and no descriptor.
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> _inheritedRoots = new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>
+    /// Gets the folders a project inherits its setup from, the nearest first (<see cref="ProjectResourceRoots.Inherited"/>),
+    /// as the last load of this catalog found them, without reading anything: for a reader that holds the identifier of a
+    /// project and no descriptor. A reader that has the descriptor takes them from it.
+    /// </summary>
+    /// <param name="projectId">The identifier of the project; null for none.</param>
+    /// <returns>The folders; empty for a project that is no sub-project, or before the first load.</returns>
+    public IReadOnlyList<string> GetInheritedRoots(string? projectId)
+        => projectId is not null && Volatile.Read(ref _inheritedRoots).TryGetValue(projectId, out var roots) ? roots : [];
+
+    // The same, by the folder of the project.
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> _inheritedRootsOfFolders = new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>
+    /// Gets the folders a project inherits its setup from, as <see cref="GetInheritedRoots"/> does, by the folder of the
+    /// project: for a reader that holds a folder and no identifier, such as a plugin.
+    /// </summary>
+    /// <param name="projectPath">The folder of the project; null for none.</param>
+    /// <returns>The folders; empty for a folder that is no sub-project, or before the first load.</returns>
+    public IReadOnlyList<string> GetInheritedRootsOfFolder(string? projectPath)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath)) return [];
+        string folder;
+        try
+        {
+            folder = NormalizePath(projectPath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return [];
+        }
+
+        return Volatile.Read(ref _inheritedRootsOfFolders).TryGetValue(folder, out var roots) ? roots : [];
+    }
+
     /// <summary>Works out the identifier of a sub-project from its repository project and its key in the map.</summary>
     /// <param name="repositoryId">The identifier of the repository project.</param>
     /// <param name="key">The key of the sub-project in the map.</param>
@@ -241,6 +280,24 @@ public sealed partial class ProjectCatalog
     // other map declares; the folder of a project that two maps declare belongs to the nearer repository.
     private async Task<List<ProjectDescriptor>> WithSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
     {
+        var result = await WithDeclaredSubProjectsAsync(projects, cancellationToken).ConfigureAwait(false);
+        var inherited = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var ofFolders = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in result)
+        {
+            if (!project.IsSubProject) continue;
+            IReadOnlyList<string> roots = [.. project.InheritedRoots];
+            inherited[project.Id] = roots;
+            ofFolders[project.ProjectPath] = roots;
+        }
+
+        Volatile.Write(ref _inheritedRoots, inherited);
+        Volatile.Write(ref _inheritedRootsOfFolders, ofFolders);
+        return result;
+    }
+
+    private async Task<List<ProjectDescriptor>> WithDeclaredSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
+    {
         if (projects.Count == 0) return projects;
         var claims = new Dictionary<string, (ProjectDescriptor Repository, ProjectManifestEntry Entry)>(StringComparer.OrdinalIgnoreCase);
         var repositories = new List<(ProjectDescriptor Repository, ProjectManifest Map)>();
@@ -346,6 +403,8 @@ public sealed partial class ProjectCatalog
         project.WriteScope = entry.Write;
         project.InheritedSandbox = repository.Sandbox;
         project.InheritedSkillFolders = [.. repository.SkillFolders];
+        project.RepositoryName = repository.DisplayName;
+        project.RepositorySlug = repository.Slug;
         // The declared folders of the same repository that hold this one, the nearest first, then the repository.
         var roots = new List<string>();
         for (var folder = Path.GetDirectoryName(project.ProjectPath); folder is not null && folder.Length > repository.ProjectPath.Length;

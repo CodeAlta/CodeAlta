@@ -351,6 +351,7 @@ public sealed class AgentInstructionTemplateProvider
         var prompt = new AgentPromptCatalog().ResolvePrompt(new AgentPromptCatalogQuery
         {
             ProjectRoot = project?.ProjectPath,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(project),
             ProjectPromptResourcesTrusted = project is not null,
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
             UserProfileRoot = UserHomeRoot,
@@ -449,14 +450,13 @@ public sealed class AgentInstructionTemplateProvider
             return null;
         }
 
-        var query = SkillCatalogQuery.ForSession(
+        var query = SkillCatalogQuery.ForProject(
             _configStore,
             _catalogOptions.GlobalRoot,
             UserHomeRoot,
-            project?.ProjectPath,
+            project,
             otherProjectRoots: null,
-            space,
-            project?.SkillFolders);
+            space);
         return await _skillCatalog.ListAsync(
                 query with
                 {

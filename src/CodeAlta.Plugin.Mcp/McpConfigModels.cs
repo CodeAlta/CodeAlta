@@ -181,6 +181,10 @@ internal sealed record McpConfigPathOptions
 
     public string? ProjectDirectory { get; init; }
 
+    // The folders the project inherits its setup from, the nearest first (a sub-project of a monorepo: its repository):
+    // their files are read after those of the project, whose servers win on a name. They are never written.
+    public IReadOnlyList<string> InheritedProjectDirectories { get; init; } = [];
+
     // The servers a host was given in memory for its sessions (McpPlugin.AddSessionServers): a source of the project that no
     // file holds, read after the file of CodeAlta of the project.
     public IReadOnlyList<McpServerDefinition> SessionServers { get; init; } = [];

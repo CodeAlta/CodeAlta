@@ -16,13 +16,14 @@ public sealed class ProjectCodeAltaSkillRootProvider : ISkillRootProvider
         return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>(
             context.ProjectRoots
                 .Where(static path => !string.IsNullOrWhiteSpace(path))
-                .Select(static projectRoot => new SkillRootRegistration
+                // The project first, then the folders it inherits from, the nearest first.
+                .Select(static (projectRoot, index) => new SkillRootRegistration
                 {
                     RootPath = Path.Combine(projectRoot, ".alta", "skills"),
                     SourceKind = SkillSourceKind.ProjectAlta,
                     SourceId = $"project-alta:{Path.GetFullPath(projectRoot)}",
                     Scope = SkillScopeKind.Project,
-                    Precedence = SkillRootPrecedence.ProjectAlta,
+                    Precedence = SkillRootPrecedence.OfProjectRoot(SkillRootPrecedence.ProjectAlta, index),
                 })
                 .ToArray());
     }
@@ -44,13 +45,13 @@ public sealed class ProjectCommonSkillRootProvider : ISkillRootProvider
         return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>(
             context.ProjectRoots
                 .Where(static path => !string.IsNullOrWhiteSpace(path))
-                .Select(static projectRoot => new SkillRootRegistration
+                .Select(static (projectRoot, index) => new SkillRootRegistration
                 {
                     RootPath = Path.Combine(projectRoot, ".agents", "skills"),
                     SourceKind = SkillSourceKind.ProjectCommon,
                     SourceId = $"project-common:{Path.GetFullPath(projectRoot)}",
                     Scope = SkillScopeKind.Project,
-                    Precedence = SkillRootPrecedence.ProjectCommon,
+                    Precedence = SkillRootPrecedence.OfProjectRoot(SkillRootPrecedence.ProjectCommon, index),
                 })
                 .ToArray());
     }
@@ -74,14 +75,14 @@ public sealed class ProjectCopilotSkillRootProvider : ISkillRootProvider
         return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>(
             context.ProjectRoots
                 .Where(static path => !string.IsNullOrWhiteSpace(path))
-                .Select(static projectRoot => new SkillRootRegistration
+                .Select(static (projectRoot, index) => new SkillRootRegistration
                 {
                     RootPath = Path.Combine(projectRoot, ".github", "skills"),
                     SourceKind = SkillSourceKind.ProjectCopilot,
                     SourceId = $"project-copilot:{Path.GetFullPath(projectRoot)}",
                     Scope = SkillScopeKind.Project,
                     // With the common root: of two skills of one name, the path decides, and `.agents` comes before `.github`.
-                    Precedence = SkillRootPrecedence.ProjectCommon,
+                    Precedence = SkillRootPrecedence.OfProjectRoot(SkillRootPrecedence.ProjectCommon, index),
                 })
                 .ToArray());
     }

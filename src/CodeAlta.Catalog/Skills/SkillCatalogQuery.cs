@@ -139,4 +139,38 @@ public sealed record SkillCatalogQuery
             IncludeUntrusted = true,
         };
     }
+
+    /// <summary>
+    /// Builds the query of the skills a session of a project can see, as
+    /// <see cref="ForSession(CodeAltaConfigStore?, string?, string?, string?, IEnumerable{string}?, SpaceFilter?, IEnumerable{string}?)"/>
+    /// does, with what the project takes from the descriptor: the skills of its folder, then those of the folders a
+    /// sub-project inherits from (<see cref="ProjectResourceRoots"/>), the nearest winning on a name; the folders of skills
+    /// added for it, else for its repository (<see cref="ProjectDescriptor.EffectiveSkillFolders"/>); and the skills that
+    /// its configuration or the one of a folder it inherits from disables.
+    /// </summary>
+    /// <param name="configStore">The configuration store; <see langword="null"/> when the host keeps none, where nothing is disabled or added.</param>
+    /// <param name="userCodeAltaRoot">The CodeAlta folder of the user; <see langword="null"/> to omit its skills.</param>
+    /// <param name="userProfileRoot">The profile folder of the user; <see langword="null"/> to omit its common skills.</param>
+    /// <param name="project">The project of the session; <see langword="null"/> for none.</param>
+    /// <param name="otherProjectRoots">More folders whose skills the session sees, after those of the project; their configuration is not read.</param>
+    /// <param name="space">What the space of the session has; <see langword="null"/> to list the skills of every space, without the folders of a space.</param>
+    /// <returns>The query.</returns>
+    /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">A configuration file cannot be read.</exception>
+    public static SkillCatalogQuery ForProject(
+        CodeAltaConfigStore? configStore,
+        string? userCodeAltaRoot,
+        string? userProfileRoot,
+        ProjectDescriptor? project,
+        IEnumerable<string>? otherProjectRoots,
+        SpaceFilter? space)
+    {
+        var inherited = ProjectResourceRoots.Inherited(project);
+        var query = ForSession(configStore, userCodeAltaRoot, userProfileRoot, project?.ProjectPath, [.. inherited, .. otherProjectRoots ?? []], space,
+            project?.EffectiveSkillFolders);
+        if (configStore is null || inherited.Count == 0) return query;
+        var disabled = new HashSet<string>(query.ProjectDisabledSkillNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var root in inherited) disabled.UnionWith(configStore.LoadProjectDisabledSkillNames(root));
+        return query with { ProjectDisabledSkillNames = disabled };
+    }
 }

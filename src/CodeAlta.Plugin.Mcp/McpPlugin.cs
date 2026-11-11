@@ -52,7 +52,7 @@ public sealed partial class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(options);
         var home = new McpHome(userHomeDirectory ?? options.UserHomeDirectory, options.CodeAltaRoot);
         _home = home;
-        _configCache = new McpConfigCache(options.GlobalConfigContent);
+        _configCache = new McpConfigCache(options.GlobalConfigContent) { InheritedProjectDirectories = InheritedRootsOf };
         ShowsApps = options.ShowsApps;
         LoadsSkills = options.LoadsSkills;
         ReadOnlyConfiguration = options.ReadOnlyConfiguration;
@@ -65,6 +65,20 @@ public sealed partial class McpPlugin : PluginBase
         {
             _presentation = createPresentation(_managementService, _activationState)
                 ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
+        }
+    }
+
+    // The folders a sub-project inherits its servers from (its repository), as the host tells; none before the plugin runs
+    // in a host.
+    private IReadOnlyList<string> InheritedRootsOf(string projectDirectory)
+    {
+        try
+        {
+            return Services.Workspace.GetInheritedProjectRoots(projectDirectory);
+        }
+        catch (InvalidOperationException)
+        {
+            return [];
         }
     }
 

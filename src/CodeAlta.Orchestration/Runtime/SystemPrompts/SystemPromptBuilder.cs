@@ -61,6 +61,7 @@ public sealed class SystemPromptBuilder
             UserProfileRoot = UserHomeOf(request),
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(request.Project),
             ProjectPromptResourcesTrusted = projectRoot is not null,
         });
 
@@ -718,6 +719,14 @@ public sealed class SystemPromptBuilder
             sessionLines.Add($"- Project root: {MarkdownCode(projectRoot)}");
         }
 
+        // A sub-project is a folder of the repository whose map declares it: the agent knows where it is and how to
+        // reach the other projects of the repository. What it says comes from the descriptor, the same at each build.
+        if (request.Project is { IsSubProject: true, RepositoryPath: { } repositoryPath, SubPath: { } subPath } subProject)
+        {
+            sessionLines.Add($"- Repository: {subProject.RepositoryName ?? Path.GetFileName(repositoryPath)} ({repositoryPath}); this project is its folder `{subPath}`. "
+                + $"Other projects of the repository: `alta project list --parent {subProject.RepositorySlug ?? subProject.ParentId}`.");
+        }
+
         // How an answer names a file: the frontends open such a link on the file, at its line. A relative path is
         // read from the folder the session works in, which is the root the Session Context names.
         if (worktree is not null || projectRoot is not null || workingDirectory is not null)
@@ -968,6 +977,7 @@ public sealed class SystemPromptBuilder
             UserProfileRoot = UserHomeOf(request),
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(request.Project),
             ProjectPromptResourcesTrusted = projectRoot is not null,
         });
         // The prompts of the session's space, and the one it runs with, which it keeps.
@@ -1292,9 +1302,9 @@ public sealed class SystemPromptBuilder
             yield return new PromptRoot("user-global", 1, roots.GlobalPromptRoot);
         }
 
-        if (roots.ProjectPromptResourcesTrusted && roots.ProjectPromptRoot is not null && Directory.Exists(roots.ProjectPromptRoot))
+        foreach (var (precedence, root) in roots.ProjectPromptRoots(2))
         {
-            yield return new PromptRoot("project", 2, roots.ProjectPromptRoot);
+            if (Directory.Exists(root)) yield return new PromptRoot("project", precedence, root);
         }
     }
 

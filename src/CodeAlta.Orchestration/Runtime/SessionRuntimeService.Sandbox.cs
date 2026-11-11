@@ -169,7 +169,7 @@ public sealed partial class SessionRuntimeService
             Session = own,
             Model = modelSandbox,
             Provider = providerSandbox,
-            Project = project?.Sandbox,
+            Project = project?.EffectiveSandbox,
             Space = space?.Settings.NewSessions?.Sandbox,
             AllSessions = allSessions,
         });

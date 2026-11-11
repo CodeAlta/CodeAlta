@@ -325,6 +325,83 @@ public sealed class SessionSandboxTests
             "the folder of CodeAlta is not granted for its skills");
     }
 
+    [TestMethod]
+    public async Task ASubProject_RunsInTheSandboxAndReadsTheSkillFoldersOfItsRepository_UntilItChoosesItsOwn()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var billing = await f.SubProjectAsync("billing", "services/billing");
+        await f.CreateSessionAsync("s", billing);
+        var library = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(f.Options.GlobalRoot)!, "repository-library")).FullName;
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await f.Projects.UpdateSandboxAsync(f.Project.Id, "workspace"));
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await f.Projects.UpdateSkillFoldersAsync(f.Project.Id, current => [.. current, library]));
+
+        Assert.AreEqual(new SandboxChoice("workspace", SandboxScope.Project), (await f.Runtime.GetSessionSandboxAsync("s")).Choice, "the choice of the repository");
+        File.WriteAllText(Path.Combine(billing.ProjectPath, "a.txt"), "a");
+        Assert.IsTrue((await f.RoutedTools("s", billing).CallAsync("read_file", new { path = "a.txt" })).Success);
+        CollectionAssert.Contains(backend.Starts.Single().ReadOnly.ToList(), library, "the folders of skills added for the repository");
+
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await f.Projects.UpdateSandboxAsync(billing.Id, SandboxProfiles.Off));
+        Assert.AreEqual(new SandboxChoice(null, SandboxScope.Project), (await f.Runtime.GetSessionSandboxAsync("s")).Choice, "its own choice wins");
+    }
+
+    [TestMethod]
+    public async Task ASubProjectSession_WritesItsRepository_ButNotTheSettingsOfItsProjects_UnlessItsMapKeepsItToItsFolder()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var repository = f.Project.ProjectPath;
+        var billing = await f.SubProjectAsync("billing", "services/billing");
+        var web = await f.SubProjectAsync("web", "apps/web");
+        var reports = await f.SubProjectAsync("reports", "tools/reports", write: "folder");
+        // A sub-project that is a git submodule, with its git folder in the one of the repository.
+        File.WriteAllText(Path.Combine(web.ProjectPath, ".git"), "gitdir: ../../.git/modules/web\n");
+        var webGit = Directory.CreateDirectory(Path.Combine(repository, ".git", "modules", "web")).FullName;
+        Directory.CreateDirectory(Path.Combine(repository, "libs"));
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        await f.CreateSessionAsync("s", billing);
+        var tools = f.RoutedTools("s", billing);
+
+        var shared = Path.Combine(repository, "libs", "shared.cs");
+        var crossing = await tools.CallAsync("write_file", new { path = shared, content = "x" });
+        Assert.IsTrue(crossing.Success, crossing.Error);
+        var policy = backend.Starts.Last();
+        CollectionAssert.Contains(policy.ReadWrite.ToList(), repository, "the folder of the repository");
+        foreach (var settings in new[]
+                 {
+                     Path.Combine(repository, ".alta", "projects.toml"), Path.Combine(repository, ".alta", "config.toml"), Path.Combine(billing.ProjectPath, ".alta", "config.toml"),
+                     Path.Combine(web.ProjectPath, ".alta", "config.toml"), Path.Combine(web.ProjectPath, ".alta", "skills"), Path.Combine(web.ProjectPath, ".claude"),
+                     Path.Combine(web.ProjectPath, ".mcp.json"), Path.Combine(web.ProjectPath, ".git"), Path.Combine(webGit, "hooks"), Path.Combine(webGit, "config"),
+                     Path.Combine(reports.ProjectPath, ".alta", "config.toml"),
+                 })
+        {
+            CollectionAssert.Contains(policy.Protected.ToList(), settings, settings);
+        }
+
+        var otherSettings = await tools.CallAsync("write_file", new { path = Path.Combine(web.ProjectPath, ".alta", "config.toml"), content = "[sandbox]\nall_sessions = \"off\"\n" });
+        Assert.IsFalse(otherSettings.Success, "the settings of another sub-project");
+
+        await f.CreateSessionAsync("narrow", reports);
+        var narrow = await f.RoutedTools("narrow", reports).CallAsync("write_file", new { path = shared, content = "y" });
+        Assert.IsFalse(narrow.Success, "`write = \"folder\"` keeps a sub-project to its own folder");
+        Assert.IsFalse(backend.Starts.Last().ReadWrite.Contains(repository, StringComparer.OrdinalIgnoreCase));
+        Assert.AreEqual("x", File.ReadAllText(shared));
+    }
+
+    [TestMethod]
+    public async Task ASessionOfTheRootOfAMonorepo_KeepsTheSettingsOfItsSubProjects()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var billing = await f.SubProjectAsync("billing", "services/billing");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        await f.CreateSessionAsync("s");
+
+        Assert.IsTrue((await f.RoutedTools("s").CallAsync("write_file", new { path = Path.Combine("services", "billing", "a.cs"), content = "a" })).Success);
+        CollectionAssert.Contains(backend.Starts.Last().Protected.ToList(), Path.Combine(billing.ProjectPath, ".alta", "config.toml"));
+        Assert.IsFalse((await f.RoutedTools("s").CallAsync("write_file", new { path = Path.Combine("services", "billing", ".alta", "mcp.json"), content = "{}" })).Success);
+    }
+
     private static bool IsInside(string root, string path)
     {
         var relative = Path.GetRelativePath(root, path);
@@ -690,14 +767,18 @@ public sealed class SessionSandboxTests
             => RoutedTools(sessionId, Runtime.CreateSandboxToolRouter(sessionId, "codex", [Project.ProjectPath]),
                 (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
 
+        public RoutedToolSet RoutedTools(string sessionId, ProjectDescriptor project)
+            => RoutedTools(sessionId, Runtime.CreateSandboxToolRouter(sessionId, "codex", [project.ProjectPath]),
+                (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), workingDirectory: project.ProjectPath);
+
         public RoutedToolSet RoutedTools(string sessionId, CodeAlta.Agent.Runtime.Tools.IAgentBuiltInToolRouter router, AgentPermissionRequestHandler permissions,
-            Func<string, string, CancellationToken, ValueTask<string?>>? guard = null)
+            Func<string, string, CancellationToken, ValueTask<string?>>? guard = null, string? workingDirectory = null)
         {
             var options = new CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolOptions
             {
                 ProviderId = new ModelProviderId("codex"),
                 SessionId = sessionId,
-                WorkingDirectory = Project.ProjectPath,
+                WorkingDirectory = workingDirectory ?? Project.ProjectPath,
                 OnPermissionRequest = permissions,
                 CommandGuard = guard is null ? null : (command, folder, token) => guard(command, folder, token),
             };
@@ -725,16 +806,28 @@ public sealed class SessionSandboxTests
             return document.RootElement.GetProperty("raw").Clone();
         }
 
-        public async Task CreateSessionAsync(string id)
+        // A sub-project the map of the project declares, with its folder; the map lists every key given so far.
+        public async Task<ProjectDescriptor> SubProjectAsync(string key, string path, string? write = null)
+        {
+            Directory.CreateDirectory(Path.Combine(Project.ProjectPath, path));
+            var map = Path.Combine(Project.ProjectPath, ".alta", ProjectManifest.FileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(map)!);
+            File.AppendAllText(map, $"[projects.{key}]\npath = \"{path}\"\n{(write is null ? "" : $"write = \"{write}\"\n")}\n");
+            return (await Projects.LoadAsync()).Single(project => project.DeclaredKey == key);
+        }
+
+        public Task CreateSessionAsync(string id) => CreateSessionAsync(id, Project);
+
+        public async Task CreateSessionAsync(string id, ProjectDescriptor project)
         {
             var session = new SessionViewDescriptor
             {
-                SessionId = id, Kind = SessionViewKind.ProjectSession, ProviderId = "codex", ProviderKey = "codex", ProjectRef = Project.Id,
-                WorkingDirectory = Project.ProjectPath, Title = id, Status = SessionViewStatus.Active, CreatedAt = CreatedAt, UpdatedAt = CreatedAt, LastActiveAt = CreatedAt,
+                SessionId = id, Kind = SessionViewKind.ProjectSession, ProviderId = "codex", ProviderKey = "codex", ProjectRef = project.Id,
+                WorkingDirectory = project.ProjectPath, Title = id, Status = SessionViewStatus.Active, CreatedAt = CreatedAt, UpdatedAt = CreatedAt, LastActiveAt = CreatedAt,
             };
             await Journal.EnsureHeaderAsync(session);
             await Journal.CreateSessionStore().UpsertSessionAsync(new() { SessionId = id, ProviderId = new("codex"), ProviderKey = "codex", ProtocolFamily = "codex",
-                WorkingDirectory = Project.ProjectPath, Title = id, CreatedAt = CreatedAt, UpdatedAt = CreatedAt });
+                WorkingDirectory = project.ProjectPath, Title = id, CreatedAt = CreatedAt, UpdatedAt = CreatedAt });
             await Journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex" });
         }
 

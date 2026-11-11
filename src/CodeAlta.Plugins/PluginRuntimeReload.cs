@@ -291,7 +291,7 @@ public sealed partial class PluginRuntimeManager
                         new DiscoveredPluginType { Type = builtIn.ResolvePluginType(), Descriptor = descriptor },
                         sourcePackage: null,
                         loadContext: null,
-                        new PluginActivationOptions { HostInfo = _hostInfo!, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets },
+                        new PluginActivationOptions { HostInfo = _hostInfo!, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets, InheritedProjectRoots = InheritedRootsOfFolder },
                         CancellationToken.None)
                     .ConfigureAwait(false);
                 diagnostics.AddRange(activation.Diagnostics);
@@ -498,7 +498,7 @@ public sealed partial class PluginRuntimeManager
                     discovered,
                     package,
                     load.LoadContext,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets, InheritedProjectRoots = InheritedRootsOfFolder },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)
@@ -720,7 +720,8 @@ public sealed partial class PluginRuntimeManager
             new CodeAltaConfigStore(catalogOptions),
             catalogOptions.ConfigPath,
             string.IsNullOrWhiteSpace(projectRoot) ? null : Path.Combine(projectRoot, ".alta", "config.toml"),
-            projectRoot);
+            projectRoot,
+            options.ProjectContext?.InheritedRoots ?? []);
     }
 
     private static PluginRootBuildFileOptions CreateBuildFileOptions(PluginRuntimeManagerOptions options)

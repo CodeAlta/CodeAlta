@@ -58,8 +58,30 @@ public sealed class PluginRuntimeConfigResolver
         string globalConfigPath,
         string? projectConfigPath = null,
         string? projectRoot = null)
+        => LoadValidatedConfig(store, globalConfigPath, projectConfigPath, projectRoot, []);
+
+    /// <summary>
+    /// Loads global/project configuration only after validation, as
+    /// <see cref="LoadValidatedConfig(CodeAltaConfigStore, string, string?, string?)"/> does, with the configuration of
+    /// the folders a sub-project inherits from under its own (<see cref="CodeAltaConfigStore.LoadProject(string?, IReadOnlyList{string})"/>):
+    /// what the repository turns off stays off.
+    /// </summary>
+    /// <param name="store">The CodeAlta configuration store.</param>
+    /// <param name="globalConfigPath">The global config path to validate before loading.</param>
+    /// <param name="projectConfigPath">The project config path to validate before loading, when available.</param>
+    /// <param name="projectRoot">The project root used to load project config, when available.</param>
+    /// <param name="inheritedRoots">The folders the project inherits its setup from, the nearest first; empty for none.</param>
+    /// <returns>The load result.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="store"/> or <paramref name="inheritedRoots"/> is <see langword="null"/>.</exception>
+    public static PluginRuntimeConfigLoadResult LoadValidatedConfig(
+        CodeAltaConfigStore store,
+        string globalConfigPath,
+        string? projectConfigPath,
+        string? projectRoot,
+        IReadOnlyList<string> inheritedRoots)
     {
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(inheritedRoots);
         var diagnostics = new List<PluginRuntimeDiagnostic>();
         if (!ValidateConfigFile(globalConfigPath, "global", diagnostics))
         {
@@ -79,7 +101,7 @@ public sealed class PluginRuntimeConfigResolver
             {
                 Succeeded = true,
                 GlobalConfig = store.LoadGlobal(),
-                ProjectConfig = string.IsNullOrWhiteSpace(projectRoot) ? null : store.LoadProject(projectRoot),
+                ProjectConfig = string.IsNullOrWhiteSpace(projectRoot) ? null : store.LoadProject(projectRoot, inheritedRoots),
                 Diagnostics = diagnostics,
             };
         }

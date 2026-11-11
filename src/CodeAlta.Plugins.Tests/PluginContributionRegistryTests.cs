@@ -48,6 +48,39 @@ public sealed class PluginContributionRegistryTests
     }
 
     [TestMethod]
+    public void TheWorkspaceOfAPlugin_TellsTheFoldersASubProjectInheritsFrom_AsTheRuntimeKnowsThem()
+    {
+        var repository = Path.Combine(Path.GetTempPath(), "contoso");
+        var billing = Path.Combine(repository, "services", "billing");
+        IPluginWorkspaceService host = new NoopPluginWorkspaceService();
+        var workspace = new InheritingWorkspace(host, folder => folder == billing ? [repository] : []);
+
+        CollectionAssert.AreEqual(new[] { repository }, workspace.GetInheritedProjectRoots(billing).ToArray());
+        Assert.AreEqual(0, workspace.GetInheritedProjectRoots(repository).Count);
+        Assert.AreEqual(0, host.GetInheritedProjectRoots(billing).Count, "a host that does not tell");
+    }
+
+    [TestMethod]
+    public void AContributionOfARepository_AppliesToTheSubProjectsThatInheritFromIt()
+    {
+        var repository = Path.Combine(Path.GetTempPath(), "contoso");
+        var registration = new PluginContributionRegistration
+        {
+            Handle = PluginContributionHandle.Create("plugin", "Plugin", PluginPoint.Command, "hello", 0, 1),
+            Contribution = new object(),
+            Scope = PluginScope.Project,
+            ScopeProjectId = "contoso",
+            ScopeProjectPath = repository,
+        };
+        var billing = Path.Combine(repository, "services", "billing");
+
+        Assert.IsTrue(PluginContributionRegistry.AppliesToProject(registration, "billing", billing, [repository]));
+        Assert.IsTrue(PluginContributionRegistry.AppliesToProject(registration, "core", Path.Combine(billing, "core"), [billing, repository]));
+        Assert.IsFalse(PluginContributionRegistry.AppliesToProject(registration, "billing", billing, []), "a folder inside the repository that is no sub-project");
+        Assert.IsFalse(PluginContributionRegistry.AppliesToProject(registration, "other", Path.Combine(Path.GetTempPath(), "other"), [Path.Combine(Path.GetTempPath(), "other-repository")]));
+    }
+
+    [TestMethod]
     public void SnapshotOrdersByScopeContributionOrderPluginAndOrdinal()
     {
         var registry = new PluginContributionRegistry();

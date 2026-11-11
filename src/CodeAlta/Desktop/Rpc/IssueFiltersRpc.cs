@@ -214,11 +214,14 @@ internal sealed partial class IssuesService
         }
     }
 
-    private IReadOnlyList<IssueView> ReadAll(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
+    // The views of the project; with `inherited`, those of the folder of its repository when a sub-project has none, as the
+    // tab reads them. What edits the views edits those of the project itself.
+    private IReadOnlyList<IssueView> ReadAll(string service, IssueViewKind kind, Catalog.ProjectDescriptor project, bool inherited = false)
     {
         try
         {
-            return Views?.ReadViews(service, kind, project.ProjectPath) ?? [];
+            return (inherited ? Views?.ReadViews(service, kind, project.ProjectPath, Catalog.ProjectResourceRoots.Inherited(project))
+                : Views?.ReadViews(service, kind, project.ProjectPath)) ?? [];
         }
         catch (ArgumentException)
         {
@@ -240,13 +243,13 @@ internal sealed partial class IssuesService
     }
 
     private IReadOnlyList<IssueViewName> ReadViews(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
-        => [.. ReadAll(service, kind, project).Select(static view => new IssueViewName(view.Name, SourceName(view.Source)))];
+        => [.. ReadAll(service, kind, project, inherited: true).Select(static view => new IssueViewName(view.Name, SourceName(view.Source)))];
 
     private IssueView? ReadCurrent(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
     {
         try
         {
-            return Views?.ReadCurrent(service, kind, project.ProjectPath);
+            return Views?.ReadCurrent(service, kind, project.ProjectPath, Catalog.ProjectResourceRoots.Inherited(project));
         }
         catch (ArgumentException)
         {

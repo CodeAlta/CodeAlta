@@ -208,6 +208,23 @@ public sealed partial class PluginContributionAdapterService
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<PluginLandingCardContribution, LandingReads> _landingReads = new();
 
     /// <summary>
+    /// Gets or sets what gives the folders a project inherits its setup from, by the identifier of the project (the
+    /// catalog of the host, as it last loaded the projects): the plugins of the folder of a repository apply to its
+    /// sub-projects. Null when the host gives none, where a plugin of a project applies to that project alone.
+    /// </summary>
+    public Func<string, IReadOnlyList<string>>? InheritedProjectRoots { get; set; }
+
+    /// <summary>
+    /// Gets or sets what gives the folders a project inherits its setup from, by the folder of the project, which the
+    /// plugins read through <see cref="IPluginWorkspaceService.GetInheritedProjectRoots"/>; null when the host gives none.
+    /// </summary>
+    public Func<string, IReadOnlyList<string>>? InheritedProjectRootsOfFolder { get; set; }
+
+    // The folders the project of an operation inherits from; empty for none.
+    private IReadOnlyList<string> InheritedRootsOf(PluginAdapterOperationOptions? options)
+        => options?.ProjectId is { Length: > 0 } projectId && InheritedProjectRoots is { } inherited ? inherited(projectId) : [];
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="PluginContributionAdapterService"/> class.
     /// </summary>
     /// <param name="registry">The contribution registry.</param>
@@ -636,7 +653,8 @@ public sealed partial class PluginContributionAdapterService
         var diagnostics = new List<PluginRuntimeDiagnostic>();
         var isDelta = template.Event is AgentContentDeltaEvent;
         // Eligibility is not liveness: stale supplied candidates must receive explicit Closing admission.
-        foreach (var active in activePlugins.Where(plugin => plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath)))
+        var inheritedRoots = InheritedRootsOf(options);
+        foreach (var active in activePlugins.Where(plugin => plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath, inheritedRoots)))
         {
             // A plugin that does not look at events, or not at deltas, is not called for them.
             if (!active.ObservesAgentEvents || (isDelta && !active.ObservesContentDeltas))
@@ -1112,11 +1130,14 @@ public sealed partial class PluginContributionAdapterService
 
     // The space first, then the project: a project cannot bring into a space a plugin the space does not have.
     private IReadOnlyList<PluginContributionRegistration> GetRegistrations(PluginPoint point, PluginAdapterOperationOptions? options)
-        => _registry.GetSnapshot()
+    {
+        var inheritedRoots = InheritedRootsOf(options);
+        return _registry.GetSnapshot()
             .Where(registration => registration.Handle.Point == point
                 && IsAvailableInSpace(registration.PluginId, registration.Scope, options?.SpaceId)
-                && PluginContributionRegistry.AppliesToProject(registration, options?.ProjectId, options?.ProjectPath))
+                && PluginContributionRegistry.AppliesToProject(registration, options?.ProjectId, options?.ProjectPath, inheritedRoots))
             .ToArray();
+    }
 
     private static bool TryGetActivePlugin(IReadOnlyList<ActivePluginInstance> activePlugins, PluginContributionRegistration registration, out ActivePluginInstance active)
     {
@@ -1125,9 +1146,12 @@ public sealed partial class PluginContributionAdapterService
     }
 
     private IEnumerable<ActivePluginInstance> GetApplicableActivePlugins(IReadOnlyList<ActivePluginInstance> activePlugins, PluginAdapterOperationOptions? options)
-        => activePlugins.Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
+    {
+        var inheritedRoots = InheritedRootsOf(options);
+        return activePlugins.Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
             && IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId), plugin.RuntimeContext.Scope, options?.SpaceId)
-            && plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath));
+            && plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath, inheritedRoots));
+    }
 
     private static bool ToolApplies(PluginToolActivationPolicy policy, PluginAdapterOperationOptions? options)
     {

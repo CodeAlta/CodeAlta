@@ -19,6 +19,13 @@ public sealed record SandboxSessionFolders
     /// <summary>Gets more files and folders that stay read-only, or are not created, inside what the session writes.</summary>
     public IReadOnlyList<string> Protected { get; init; } = [];
 
+    /// <summary>
+    /// Gets the folders of the other projects inside what the session may write (the declared sub-projects of a
+    /// monorepo): their settings, the files of their coding agents and their git folder stay read-only as those of the
+    /// working directory do. A folder outside what the session writes changes nothing.
+    /// </summary>
+    public IReadOnlyList<string> ProjectFolders { get; init; } = [];
+
     /// <summary>Gets the scratchpad folder of the session, or null.</summary>
     public string? Scratchpad { get; init; }
 

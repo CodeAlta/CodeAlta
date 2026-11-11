@@ -172,7 +172,7 @@ public sealed partial class OwnedSessionCommandService
         var space = await _runtime.ResolveSpaceAsync(spaceId, project, cancellationToken).ConfigureAwait(false);
         lock (_gate) { if (_closed || _retained) return null; }
         cancellationToken.ThrowIfCancellationRequested();
-        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, _runtime.LoadSpaceFilter(space.Id)).Where(p => p.PromptName.Length <= 256).Take(MaximumPromptChoices)
+        var prompts = _runtime.ListOwnedPrompts(project, _runtime.LoadSpaceFilter(space.Id)).Where(p => p.PromptName.Length <= 256).Take(MaximumPromptChoices)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         return new(prompts, AgentPromptCatalog.ResolveNewSessionPromptId(null, [.. prompts.Select(static p => p.Id)], space), space.Id);
     }
@@ -199,7 +199,7 @@ public sealed partial class OwnedSessionCommandService
             : await _projects.GetByIdAsync(session.ProjectRef, cancellationToken).ConfigureAwait(false);
         // The prompts of the session's own space, whatever space the window shows.
         var space = await _runtime.GetSpaceFilterAsync(session.SpaceId, project, cancellationToken).ConfigureAwait(false);
-        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, space)
+        var prompts = _runtime.ListOwnedPrompts(project, space)
             .Where(p => p.PromptName.Length <= 256).Take(MaximumPromptChoices)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         var provider = session.ResolvedProviderKey;

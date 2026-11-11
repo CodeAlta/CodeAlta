@@ -179,9 +179,50 @@ public sealed class IssueViewStore
     /// <returns>The view, or null.</returns>
     /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
     public IssueView? ReadCurrent(string service, IssueViewKind kind, string projectRoot)
+        => ReadCurrent(service, kind, projectRoot, []);
+
+    /// <summary>
+    /// Reads the views of a kind of items of a tracker of a sub-project of a monorepo: its own, as
+    /// <see cref="ReadViews(string, IssueViewKind, string)"/> reads them, else those of the nearest folder it inherits its
+    /// setup from that has some (<see cref="ProjectResourceRoots.Inherited"/>), such as its repository.
+    /// </summary>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the views list.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="inheritedRoots">The folders it inherits from, the nearest first; empty for a project that is no sub-project.</param>
+    /// <returns>The views.</returns>
+    /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="inheritedRoots"/> is null.</exception>
+    public IReadOnlyList<IssueView> ReadViews(string service, IssueViewKind kind, string projectRoot, IReadOnlyList<string> inheritedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(inheritedRoots);
+        var own = ReadViews(service, kind, projectRoot);
+        if (own.Count > 0) return own;
+        foreach (var root in inheritedRoots)
+        {
+            if (string.IsNullOrWhiteSpace(root)) continue;
+            var views = ReadViews(service, kind, root);
+            if (views.Count > 0) return views;
+        }
+
+        return own;
+    }
+
+    /// <summary>
+    /// Reads the view the tab of a sub-project uses for a kind of items, as <see cref="ReadCurrent(string, IssueViewKind, string)"/>
+    /// does, among the views <see cref="ReadViews(string, IssueViewKind, string, IReadOnlyList{string})"/> gives it.
+    /// </summary>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the views list.</param>
+    /// <param name="projectRoot">The folder of the project, whose user's file keeps the view the user chose.</param>
+    /// <param name="inheritedRoots">The folders it inherits from, the nearest first; empty for a project that is no sub-project.</param>
+    /// <returns>The view, or null.</returns>
+    /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="inheritedRoots"/> is null.</exception>
+    public IssueView? ReadCurrent(string service, IssueViewKind kind, string projectRoot, IReadOnlyList<string> inheritedRoots)
     {
         var personal = ReadFile(IssueViewSource.Personal, Table(service, kind), projectRoot);
-        var views = ReadViews(service, kind, projectRoot);
+        var views = ReadViews(service, kind, projectRoot, inheritedRoots);
         return (personal.Current is { } chosen ? views.FirstOrDefault(view => string.Equals(view.Name, chosen, StringComparison.Ordinal)) : null) ?? views.FirstOrDefault();
     }
 

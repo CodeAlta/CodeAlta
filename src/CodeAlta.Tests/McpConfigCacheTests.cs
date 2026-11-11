@@ -257,6 +257,37 @@ public sealed partial class McpRuntimeServiceTests
         await plugin.DisposeAsync();
     }
 
+    [TestMethod]
+    public void ConfigCache_OfASubProject_ReadsTheServersOfItsRepositoryAfterItsOwn()
+    {
+        using var repository = TempDirectory.Create();
+        var billing = Directory.CreateDirectory(Path.Combine(repository.Path, "services", "billing")).FullName;
+        var own = McpConfigDiscovery.GetProjectConfigPath(billing);
+        var shared = McpConfigDiscovery.GetProjectConfigPath(repository.Path);
+        var common = Path.Combine(repository.Path, ".mcp.json");
+        WriteServers(own, "a");
+        WriteServers(shared, "a", "b");
+        WriteServers(common, "c");
+        Settle(own, shared, common);
+        var cache = new McpConfigCache { InheritedProjectDirectories = folder => string.Equals(folder, billing, StringComparison.OrdinalIgnoreCase) ? [repository.Path] : [] };
+        IReadOnlyDictionary<string, string> Servers(string folder) => cache.Discover(folder, _home.Path).EffectiveServers
+            .ToDictionary(static server => server.Definition.Key, static server => server.Definition.SourcePath);
+
+        var servers = Servers(billing);
+        CollectionAssert.AreEquivalent(new[] { "a", "b", "c" }, servers.Keys.ToArray(), "the servers of the repository with its own");
+        Assert.AreEqual(own, servers["a"], "its own server wins on a name");
+        Assert.AreEqual(shared, servers["b"]);
+        Assert.AreEqual(common, servers["c"]);
+        Assert.IsFalse(cache.Discover(billing, _home.Path).ExternalSources.Any(static source => source.IsWritable), "a file of the repository is never written from the sub-project");
+
+        WriteServers(shared, "a", "b", "d");
+        Settle(shared);
+        Assert.IsTrue(Servers(billing).ContainsKey("d"), "a change of the file of the repository is read");
+        CollectionAssert.AreEquivalent(new[] { "a", "b", "c", "d" }, Servers(repository.Path).Keys.ToArray(), "the repository reads its own files");
+        CollectionAssert.AreEquivalent(new[] { "a" }, new McpConfigCache().Discover(billing, _home.Path).EffectiveServers.Select(static server => server.Definition.Key).ToArray(),
+            "a host that tells no inherited folder reads the folder of the project alone");
+    }
+
     private static void WriteServers(string path, params string[] keys)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
