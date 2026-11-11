@@ -5522,32 +5522,47 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             && string.Equals(recorded.ProviderKey, session.ResolvedProviderKey, StringComparison.OrdinalIgnoreCase)
                 ? recorded.ProtocolFamily
                 : options.ProviderId.Value;
-        await store.UpsertSessionAsync(
-                new AgentSessionSummary
-                {
-                    SessionId = session.SessionId,
-                    ProviderId = new ModelProviderId(options.ProviderId.Value),
-                    ProtocolFamily = protocolFamily,
-                    ProviderKey = session.ResolvedProviderKey,
-                    ModelId = options.Model,
-                    ReasoningEffort = options.ReasoningEffort,
-                    AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
-                    WorkingDirectory = session.WorkingDirectory,
-                    WorktreeDirectory = NormalizeOptionalText(session.WorktreeDirectory),
-                    Title = title,
-                    TitleSource = titleSource,
-                    Summary = session.LatestSummary,
-                    ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
-                    CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId ?? session.ParentSessionId),
-                    NoParent = session.CreatedBy?.NoParent == true,
-                    ForkedFrom = session.ForkedFrom,
-                    RewindCount = session.RewindCount,
-                    CreatedAt = session.CreatedAt,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
+        var next = new AgentSessionSummary
+        {
+            SessionId = session.SessionId,
+            ProviderId = new ModelProviderId(options.ProviderId.Value),
+            ProtocolFamily = protocolFamily,
+            ProviderKey = session.ResolvedProviderKey,
+            ModelId = options.Model,
+            ReasoningEffort = options.ReasoningEffort,
+            AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
+            WorkingDirectory = session.WorkingDirectory,
+            WorktreeDirectory = NormalizeOptionalText(session.WorktreeDirectory),
+            Title = title,
+            TitleSource = titleSource,
+            Summary = session.LatestSummary,
+            ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
+            CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId ?? session.ParentSessionId),
+            NoParent = session.CreatedBy?.NoParent == true,
+            ForkedFrom = session.ForkedFrom,
+            RewindCount = session.RewindCount,
+            CreatedAt = session.CreatedAt,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        // Only metadata of the session changed (provider, model, title, working directory, worktree, parent, lineage):
+        // the preview and the rewind count of the recorded summary are the same. Keep its UpdatedAt so that the
+        // session list stays ordered by real conversation activity, not by attachments, project moves, or other
+        // metadata rewrites. A write is still made, so that the metadata reaches the journal and the cache.
+        if (IsMetadataOnlyChange(recorded, next))
+        {
+            next = next with { UpdatedAt = recorded!.UpdatedAt, Usage = recorded.Usage };
+        }
+
+        await store.UpsertSessionAsync(next, cancellationToken).ConfigureAwait(false);
     }
+
+    // Whether the next summary represents a metadata-only change compared to the recorded one. The preview (Summary)
+    // and the rewind count are the signals of real conversation activity in this write path: a turn or a rewind
+    // changes them; a provider attachment, a project-path reconciliation, or a title mode change does not.
+    private static bool IsMetadataOnlyChange(AgentSessionSummary? recorded, AgentSessionSummary next)
+        => recorded is not null
+           && string.Equals(recorded.Summary, next.Summary, StringComparison.Ordinal)
+           && recorded.RewindCount == next.RewindCount;
 
     /// <summary>The worktree a session records, while its folder exists; null otherwise.</summary>
     internal static string? ExistingWorktree(string? worktreeDirectory)

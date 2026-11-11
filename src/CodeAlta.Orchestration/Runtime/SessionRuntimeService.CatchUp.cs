@@ -202,11 +202,15 @@ public sealed partial class SessionRuntimeService
                         token).ConfigureAwait(false);
 
                     // The summary is written with the turns: what is written of them is written whole, with the preview
-                    // they give the session.
+                    // they give the session. UpdatedAt follows the written turns: re-ingestion whose preview does not
+                    // change (compaction-only or already-seen turns), and never-attached re-reads, keep the session
+                    // where the list ordered it, instead of moving it to the top on every attach or restart.
+                    var nextPreview = prepared.Preview ?? summary.Summary;
+                    var nextUpdatedAt = string.Equals(nextPreview, summary.Summary, StringComparison.Ordinal) ? summary.UpdatedAt : prepared.State.UpdatedAt;
                     IReadOnlyList<AgentEvent> events = prepared.Turns == 0
                         ? prepared.Events
                         : [.. prepared.Events, FileSystemAgentSessionStore.CreateSummarySnapshotEvent(
-                            summary with { Summary = prepared.Preview ?? summary.Summary, UpdatedAt = DateTimeOffset.UtcNow })];
+                            summary with { Summary = nextPreview, UpdatedAt = nextUpdatedAt })];
                     appending = true;
                     await store.AppendEventsAsync(summary.ProtocolFamily, summary.ProviderKey, sessionId, events, token).ConfigureAwait(false);
                 }
