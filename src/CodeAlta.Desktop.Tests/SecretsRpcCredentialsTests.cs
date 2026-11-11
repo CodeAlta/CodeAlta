@@ -108,6 +108,39 @@ public sealed class SecretsRpcCredentialsTests
             "where nothing verifies the user, a secret cannot ask before use");
     }
 
+    [TestMethod]
+    public async Task ASignIn_IsSaved_Listed_ItsSiteRevoked_AndRemoved()
+    {
+        using var vault = new FakeOp();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile });
+        var service = new SecretsService(new LocalSecretStore(vault.Profile), Epoch) { Credentials = broker, SetBy = "alex (CodeAlta Desktop)" };
+        Assert.AreEqual("ok", (await service.SaveProviderAsync(new CredentialProviderWriteRequest(Epoch, "personal", "1password", null, CredentialCacheDurations.UntilClosed, true,
+            [new CredentialSettingInput("path", vault.ProgramPath, null, null)]), CancellationToken.None)).Status);
+
+        Assert.AreEqual("invalid", service.SaveSignIn(new SignInWriteRequest(Epoch, null, "GitHub", "personal", ["https://github.com/login"], "op://P/G/username", "op://P/G/password", null)).Status,
+            "a site is an origin, without a path");
+        Assert.AreEqual("not_found", service.SaveSignIn(new SignInWriteRequest(Epoch, null, "GitHub", "nobody", ["github.com"], "op://P/G/username", "op://P/G/password", null)).Status);
+        var saved = service.SaveSignIn(new SignInWriteRequest(Epoch, null, "GitHub", "personal", ["github.com"], "op://P/G/username", "op://P/G/password", " "));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        Assert.AreEqual("ok", service.SaveSignIn(new SignInWriteRequest(Epoch, null, "GitHub", "personal", ["https://github.com"], "op://W/G/username", "op://W/G/password", null)).Status);
+
+        var signIns = (await service.ListAsync(new(Epoch), CancellationToken.None)).SignIns;
+        CollectionAssert.AreEqual(new[] { "github", "github-2" }, signIns.Select(static signIn => signIn.Id).ToArray(), "a new sign-in of the same name gets an id of its own");
+        var first = signIns[0];
+        Assert.AreEqual(("https://github.com", (string?)null, "1Password"), (first.Sites.Single(), first.Totp, first.ProviderName));
+
+        broker.SignIns.Grant("github", "https://github.com");
+        Assert.AreEqual("https://github.com", (await service.ListAsync(new(Epoch), CancellationToken.None)).SignIns[0].Grants.Single().Origin);
+        Assert.AreEqual("ok", service.RevokeSiteGrant(new SiteGrantRequest(Epoch, "github", "https://github.com")).Status);
+        Assert.IsEmpty((await service.ListAsync(new(Epoch), CancellationToken.None)).SignIns[0].Grants, "a revoked site is asked for again");
+
+        Assert.AreEqual("ok", service.SaveSignIn(new SignInWriteRequest(Epoch, "github", "GitHub (work)", "personal", ["https://github.com"], "op://W/G/username", "op://W/G/password", null)).Status);
+        Assert.AreEqual("GitHub (work)", broker.SignIns.List().Single(static signIn => signIn.Id == "github").Label, "an edit keeps its id");
+        Assert.AreEqual("ok", service.RemoveSignIn(new SignInRequest(Epoch, "github")).Status);
+        Assert.AreEqual("not_found", service.RemoveSignIn(new SignInRequest(Epoch, "github")).Status);
+        Assert.HasCount(1, broker.SignIns.List());
+    }
+
     /// <summary>The fake 1Password command line, signed out, under the name <c>op</c>, beside a profile root.</summary>
     private sealed class FakeOp : IDisposable
     {

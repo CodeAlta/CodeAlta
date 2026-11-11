@@ -6,7 +6,8 @@ import type { CredentialProviderRpcView, CredentialTypeView, SecretsList } from 
 import { ShellLanguageContext } from "../shellLanguage";
 import { CredentialProviders } from "./CredentialProviders";
 import { SecretsBody } from "./SecretsSettings";
-import { commandLine, draftsOf, isProviderId, isSecretReference, localSecret, missingSetting, noCredentials, pickedLabel, settingsOf, stateLabel, suggestedProviderId } from "./credentials";
+import { commandLine, draftsOf, isProviderId, isSecretReference, isSite, localSecret, missingSetting, noCredentials, pickedLabel, settingsOf, signInDraftProblem, siteList, stateLabel, suggestedProviderId } from "./credentials";
+import { SignInsCard } from "./SignIns";
 
 const never = () => assert.fail("rendering must not act");
 const render = (element: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
@@ -100,4 +101,28 @@ test("a secret kept in a vault shows its vault and item, its state and Ask befor
   assert.match(html, /aria-label="Ask before using ANTHROPIC_API_KEY"/);
   assert.doesNotMatch(html, />Rotate</);
   assert.doesNotMatch(html, /Version 2/);
+});
+test("a sign-in lists its sites as origins, and is saved only with a name, a vault, a user name and a password", () => {
+  assert.deepEqual(siteList("https://github.com\n  gitlab.com , \n"), ["https://github.com", "gitlab.com"]);
+  for (const site of ["https://github.com", "github.com", "https://github.com:8443", "http://localhost:5173"]) assert.ok(isSite(site), site);
+  for (const site of ["https://github.com/login", "http://github.com", "https://github.com?x=1", "ftp://github.com", "https://user@github.com", ""]) assert.ok(!isSite(site), site);
+  const draft = { id: null, label: "GitHub", provider: "personal", sites: ["https://github.com"], username: "op://Private/GitHub/username", password: "op://Private/GitHub/password", totp: "" };
+  assert.equal(signInDraftProblem(draft), null);
+  assert.equal(signInDraftProblem({ ...draft, label: " " }), "A sign-in needs a name.");
+  assert.equal(signInDraftProblem({ ...draft, sites: ["https://github.com/login"] }), "A site is an address such as https://github.com, without a path.");
+  assert.equal(signInDraftProblem({ ...draft, password: "" }), "A sign-in needs the user name and the password of an item.");
+});
+
+test("a sign-in shows its vault, its sites and the sites allowed until a date; never a value", () => {
+  const html = render(createElement(SignInsCard, {
+    signIns: [{ id: "github", label: "GitHub", provider: "personal", sites: ["https://github.com"], username: "op://Private/GitHub/username", password: "op://Private/GitHub/password",
+      totp: null, providerName: "1Password", icon: "1password", grants: [{ origin: "https://github.com", until: "2026-12-12T09:00:00Z" }] }],
+    providers: [provider({})], types: [], busy: false, run: never, actions: { save: never, remove: never, revoke: never, browse: never },
+  }));
+  assert.match(html, /Sign-ins of websites/);
+  assert.match(html, /1Password · https:\/\/github\.com/);
+  assert.match(html, /Allowed on github\.com until/);
+  assert.doesNotMatch(html, /One-time code/, "a sign-in without a one-time code says nothing of it");
+  const empty = render(createElement(SignInsCard, { signIns: [], providers: [], types: [], busy: false, run: never, actions: { save: never, remove: never, revoke: never, browse: never } }));
+  assert.match(empty, /Add a vault first/);
 });

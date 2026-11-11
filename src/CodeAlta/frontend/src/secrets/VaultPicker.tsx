@@ -62,10 +62,11 @@ export function VaultBindingDialog({ providers, types, names, localNames, initia
   </Dialog>;
 }
 
-/** The entries of a vault, opened one level at a time; a field is picked by a click. */
-function VaultBrowser({ provider, hint, browse, picked, onPick, typed, onType }: {
+/** The entries of a vault, opened one level at a time; a field is picked by a click. Without its typed input, a vault that lists nothing says so. */
+export function VaultBrowser({ provider, hint, browse, picked, onPick, typed, onType, typedInput = true }: {
   provider: CredentialProviderRpcView; hint: string | null; browse: (provider: string, parent: string | null) => Promise<CredentialBrowseResult>;
   picked: { reference: string; label: string } | null; onPick: (pick: { reference: string; label: string } | null) => void; typed: string; onType: (text: string) => void;
+  typedInput?: boolean;
 }) {
   const { t } = useShellLanguage();
   const [trail, setTrail] = useState<{ id: string; label: string }[]>([]);
@@ -108,8 +109,9 @@ function VaultBrowser({ provider, hint, browse, picked, onPick, typed, onType }:
       </div>
       {picked && <p className="vault-browser-picked"><AppIcon name="check" size={14} />{picked.label}</p>}
     </>}
-    <FormGroup label={typedOnly ? t("Reference in the vault") : t("Or type the reference")} labelFor="vault-binding-reference" helperText={hint ? t("Such as {example}", { example: hint }) : undefined}>
+    {typedOnly && !typedInput && <p className="vault-browser-problem">{page?.message ?? t("This vault lists nothing: type the reference.")}</p>}
+    {typedInput && <FormGroup label={typedOnly ? t("Reference in the vault") : t("Or type the reference")} labelFor="vault-binding-reference" helperText={hint ? t("Such as {example}", { example: hint }) : undefined}>
       <InputGroup id="vault-binding-reference" value={typed} placeholder={hint ?? undefined} onChange={event => { onType(event.currentTarget.value); if (event.currentTarget.value) onPick(null); }} />
-    </FormGroup>
+    </FormGroup>}
   </div>;
 }

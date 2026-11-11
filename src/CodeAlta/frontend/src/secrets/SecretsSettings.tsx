@@ -9,11 +9,12 @@ import { CredentialIcon } from "./CredentialIcon";
 import { CredentialProviders } from "./CredentialProviders";
 import { askDurations, stateLabel } from "./credentials";
 import { ProviderDialog } from "./ProviderDialog";
+import { SignInsCard } from "./SignIns";
 import { VaultBindingDialog } from "./VaultPicker";
 import { isSecretName, referenceOf, secretNameProblem } from "./secrets";
 
 type SecretsApi = Pick<typeof secrets, "list" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable" | "saveProvider" | "removeProvider"
-  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse">;
+  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant">;
 type Result = Promise<{ status: string; message?: string | null }>;
 
 /** What the body of the page does: each call writes one change and says how it went. */
@@ -85,6 +86,13 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
           runInTerminal,
         }} />
         <SecretsBody listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} vaults={vaults} />
+        {listing.types.length > 0 && <SignInsCard signIns={listing.signIns} providers={listing.providers} types={listing.types} busy={busy} run={run} actions={{
+          save: draft => api.saveSignIn({ expectedEpoch, id: draft.id, label: draft.label, provider: draft.provider, sites: [...draft.sites],
+            username: draft.username, password: draft.password, totp: draft.totp.trim() || null }),
+          remove: id => api.removeSignIn({ expectedEpoch, id }),
+          revoke: (id, origin) => api.revokeSiteGrant({ expectedEpoch, id, origin }),
+          browse,
+        }} />}
         {listing.uses.length > 0 && <RecentUses listing={listing} />}
       </>}
     {providerDialog && listing && <ProviderDialog types={listing.types} providers={listing.providers} editing={providerDialog.editing} busy={busy}

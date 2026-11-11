@@ -49,6 +49,9 @@ const listing: SecretsList = {
   verification: { available: true, reason: null },
   canPrompt: true,
   configurationProblems: [],
+  signIns: [{ id: "github", label: "GitHub", provider: "personal", sites: ["https://github.com"], username: "op://Private/GitHub/username",
+    password: "op://Private/GitHub/password", totp: "op://Private/GitHub/one-time password?attribute=otp", providerName: "1Password", icon: "1password",
+    grants: [{ origin: "https://github.com", until: "2026-12-12T09:00:00Z" }] }],
 };
 const ok = async () => ({ status: "ok", message: null });
 const api = {
@@ -59,6 +62,8 @@ const api = {
   browse: async () => ({ status: "ok", message: null, path: null, entries: [{ id: "vault:v1:Private", label: "Private", kind: "folder", reference: null, detail: null }] }),
   bindSecret: async () => ({ status: "ok", message: null, provider: null }), setAskBeforeUse: async () => ({ status: "ok", message: null, provider: null }),
   confirmUse: async () => ({ status: "ok", message: null, provider: null }), declineUse: async () => ({ status: "ok", message: null, provider: null }),
+  saveSignIn: async () => ({ status: "ok", message: null, provider: null }), removeSignIn: async () => ({ status: "ok", message: null, provider: null }),
+  revokeSiteGrant: async () => ({ status: "ok", message: null, provider: null }),
 };
 // The width of the page of the Settings window: about 1250 CSS pixels in a window of 1600, about 430 in one of 900.
 function Fixture() {

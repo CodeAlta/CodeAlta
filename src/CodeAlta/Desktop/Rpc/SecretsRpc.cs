@@ -143,6 +143,9 @@ internal sealed record SecretsList(string Status, string? Protection, SecretView
 
     /// <summary>What is wrong with the tables of the configuration that were left out.</summary>
     public string[] ConfigurationProblems { get; init; } = [];
+
+    /// <summary>The sign-ins of websites the browser of a session types, with the sites the user allowed.</summary>
+    public SignInView[] SignIns { get; init; } = [];
 }
 
 /// <summary>A secret as the page shows it: never its value.</summary>

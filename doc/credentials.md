@@ -87,6 +87,14 @@ the page of Settings asks again. The broker records the recent uses (secret, use
 
 It is a check of CodeAlta, not encryption: a program that runs as the user is stopped by the vault, not by CodeAlta.
 
+## Sign-ins of websites
+
+A sign-in (`SignIns`, members `sign_ins` and `site_grants` of `bindings.json`) names the vault references of a user
+name, a password and a one-time code, and the origins they are typed on; a site grant lets one origin go without the
+card for 30 days. `CredentialBroker.ReadSignInAsync` reads them without a prompt, masks each value first and keeps
+none: the `SignInValues` it returns is disposed once the fields are typed. How the browser types them is in
+[browser](browser.md#sign-ins).
+
 ## Agents
 
 Agents see names and states, never a value nor the item a secret names (`alta secret list|test|uses`,

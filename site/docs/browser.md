@@ -122,6 +122,20 @@ Safari always runs its automation in a private window of its own: it has the iso
 3. Sign in to the sites in the window that opens, then close it.
 4. Choose that profile in **Profile of the sessions**, or ask an agent to use it (`alta browser activate --profile persistent:work`).
 
+## Sign in with a vault item
+
+An agent can sign in to a site without ever seeing a password: the user name, the password and the one-time code are typed from an item of your [vault](secrets/vaults.md), on the sites you chose.
+
+1. In **Settings > Secrets**, under **Sign-ins of websites**, click **Add a sign-in…**. Give it a name, its sites (`https://github.com`), its vault, and the fields of the item: **User name**, **Password** and, for a site that asks one, **One-time code**. **Choose…** picks each one in the vault.
+2. When an agent comes to the sign-in form of that site, it calls `fill_login`. CodeAlta reads the site from the browser, not from the agent, and asks you on the card of the session: **Sign in to github.com with GitHub?** with **Allow for this site for 30 days**, **Allow once** or **Deny**.
+3. CodeAlta types the values into the fields of the page and submits them. The agent gets a status only, such as `signed_in`, and the values are masked in what it reads afterwards.
+
+- A sign-in is typed only on its sites, exactly: not on a look-alike address, another port or a subdomain. A field that is hidden, in a frame of another site, or in a form that sends to another site is never filled.
+- While CodeAlta types, the other tools of the session wait. When the site refuses the sign-in, the fields are cleared.
+- No permission mode answers the card. The sites you allowed for 30 days are listed under the sign-in in **Settings > Secrets**: remove one to be asked again.
+- A locked vault is not unlocked for the agent: it tells you to unlock it in **Settings > Secrets**.
+- It works in the isolated and persistent profiles of Chrome and Edge. Not in your own browser, which has the extension of your vault, not in Firefox yet, and never in a sandboxed session.
+
 ## Your own browser
 
 The agent then acts with your sign-ins. CodeAlta asks you three times:
@@ -166,6 +180,7 @@ On a Mac with Safari 27 or later, Safari's own MCP server (`safaridriver --mcp`)
 | `take_screenshot` | Takes a picture of the page or of one element. `filePath` saves it to a file. |
 | `click`, `click_at`, `hover`, `drag` | Use the pointer. |
 | `fill`, `fill_form`, `type_text`, `press_key`, `upload_file` | Write text, choose options, press keys, give a file to a file input. |
+| `fill_login` | Signs in to the site of the page with a [sign-in of your vault](#sign-in-with-a-vault-item), after you allow it. |
 | `handle_dialog`, `wait_for` | Answer an alert or a confirmation, wait for a text. |
 | `evaluate_script` | Runs JavaScript in the page. It can be turned off in Settings. |
 | `list_console_messages`, `get_console_message`, `list_network_requests`, `get_network_request` | Read the console and the requests of the page, with their bodies. |

@@ -225,6 +225,102 @@ internal sealed partial class SecretsService
         return new("ok", null);
     }
 
+    /// <summary>Adds or changes a sign-in of websites: the vault items of its user name, password and one-time code, and its sites.</summary>
+    [NeoRpcMethod("saveSignIn")]
+    public CredentialActionResult SaveSignIn(SignInWriteRequest request)
+    {
+        if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (Credentials!.GetProvider(request!.Provider ?? string.Empty) is null) return new("not_found", "No credential provider has this id.");
+        var label = request.Label?.Trim() ?? string.Empty;
+        if (label.Length == 0) return new("invalid", "A sign-in needs a name.");
+        if (request.Sites is not { Length: > 0 } sites || sites.Any(static site => SignIns.NormalizeSite(site) is null))
+            return new("invalid", "A site is an address such as https://github.com, without a path.");
+        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password)) return new("invalid", "A sign-in needs the user name and the password of an item.");
+        try
+        {
+            var existing = Credentials.SignIns.List();
+            var id = request.Id is { Length: > 0 } given && existing.Any(signIn => signIn.Id == given) ? given : NewSignInId(label, existing);
+            Credentials.SignIns.Save(new SignIn(id, label, request.Provider!, sites, request.Username, request.Password,
+                string.IsNullOrWhiteSpace(request.Totp) ? null : request.Totp), SetBy);
+            return new("ok", null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)
+        {
+            return new(exception is ArgumentException ? "invalid" : "write_failed", exception.Message);
+        }
+    }
+
+    /// <summary>Removes a sign-in and the sites the user allowed it on; nothing changes in the vault.</summary>
+    [NeoRpcMethod("removeSignIn")]
+    public CredentialActionResult RemoveSignIn(SignInRequest request)
+    {
+        if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        try
+        {
+            return new(Credentials!.SignIns.Remove(request!.Id ?? string.Empty) ? "ok" : "not_found", null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new("write_failed", exception.Message);
+        }
+    }
+
+    /// <summary>Ends what the user allowed: a sign-in on a site is asked for again.</summary>
+    [NeoRpcMethod("revokeSiteGrant")]
+    public CredentialActionResult RevokeSiteGrant(SiteGrantRequest request)
+    {
+        if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        try
+        {
+            return new(Credentials!.SignIns.Revoke(request!.Id ?? string.Empty, string.IsNullOrWhiteSpace(request.Origin) ? null : request.Origin) ? "ok" : "not_found", null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new("write_failed", exception.Message);
+        }
+    }
+
+    // An id from the name, such as github or github-2: lowercase letters, digits and -, starting with a letter.
+    private static string NewSignInId(string label, IReadOnlyList<SignIn> existing)
+    {
+        var text = new System.Text.StringBuilder();
+        foreach (var character in label.ToLowerInvariant())
+        {
+            if (char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) && text.Length > 0) text.Append(character);
+            else if (text.Length > 0 && text[^1] != '-') text.Append('-');
+            if (text.Length >= 40) break;
+        }
+
+        var stem = text.ToString().Trim('-');
+        if (stem.Length == 0) stem = "sign-in";
+        var id = stem;
+        for (var index = 2; existing.Any(signIn => signIn.Id == id); index++) id = stem + "-" + index.ToString(CultureInfo.InvariantCulture);
+        return id;
+    }
+
+    // The sign-ins and their grants; a damaged file shows none, and the page says why through its list.
+    private static SignInView[] SignInsOf(CredentialBroker broker, IReadOnlyDictionary<string, CredentialProviderView> providers)
+    {
+        try
+        {
+            var grants = broker.SignIns.ListGrants();
+            return [.. broker.SignIns.List().Select(signIn =>
+            {
+                var provider = providers.GetValueOrDefault(signIn.Provider);
+                return new SignInView(signIn.Id, signIn.Label, signIn.Provider, [.. signIn.Sites], signIn.Username, signIn.Password, signIn.Totp)
+                {
+                    ProviderName = provider?.DisplayName,
+                    Icon = provider?.Icon,
+                    Grants = [.. grants.Where(grant => grant.SignIn == signIn.Id).Select(static grant => new SiteGrantView(grant.Origin, Format(grant.Until)))],
+                };
+            })];
+        }
+        catch (InvalidDataException)
+        {
+            return [];
+        }
+    }
+
     // What the list adds for the vaults.
     private async Task<SecretsList> WithCredentialsAsync(SecretsList list, CancellationToken cancellationToken)
     {
@@ -260,6 +356,7 @@ internal sealed partial class SecretsService
             Verification = new VerificationView(verification.Available, verification.Reason),
             CanPrompt = broker.CanPrompt,
             ConfigurationProblems = [.. broker.ConfigurationProblems],
+            SignIns = SignInsOf(broker, providers),
         };
     }
 
@@ -509,6 +606,53 @@ internal sealed record SecretBindRequest(string ExpectedEpoch, string Name, stri
 /// <param name="Name">The secret.</param>
 /// <param name="Duration">How long a confirmation lasts; empty to stop asking.</param>
 internal sealed record SecretAskRequest(string ExpectedEpoch, string Name, string? Duration);
+
+/// <summary>A sign-in of websites as the page shows and edits it: the references of its items in the vault, never a value.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Label">Its name.</param>
+/// <param name="Provider">The id of the provider of its vault.</param>
+/// <param name="Sites">The origins it is typed on.</param>
+/// <param name="Username">The reference of the user name.</param>
+/// <param name="Password">The reference of the password.</param>
+/// <param name="Totp">The reference of the one-time code; null for none.</param>
+internal sealed record SignInView(string Id, string Label, string Provider, string[] Sites, string Username, string Password, string? Totp)
+{
+    /// <summary>The name of its provider.</summary>
+    public string? ProviderName { get; init; }
+
+    /// <summary>The icon of its provider.</summary>
+    public string? Icon { get; init; }
+
+    /// <summary>The sites the user allowed it on without being asked, until when.</summary>
+    public SiteGrantView[] Grants { get; init; } = [];
+}
+
+/// <summary>A site the user allowed a sign-in on.</summary>
+/// <param name="Origin">The site.</param>
+/// <param name="Until">When it is asked for again, in ISO 8601.</param>
+internal sealed record SiteGrantView(string Origin, string Until);
+
+/// <summary>A sign-in the page saves.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Id">The sign-in it changes; null for a new one.</param>
+/// <param name="Label">Its name.</param>
+/// <param name="Provider">The id of the provider of its vault.</param>
+/// <param name="Sites">The sites it is typed on.</param>
+/// <param name="Username">The reference of the user name.</param>
+/// <param name="Password">The reference of the password.</param>
+/// <param name="Totp">The reference of the one-time code; null or empty for none.</param>
+internal sealed record SignInWriteRequest(string ExpectedEpoch, string? Id, string Label, string? Provider, string[]? Sites, string Username, string Password, string? Totp);
+
+/// <summary>A sign-in the page names.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Id">The sign-in.</param>
+internal sealed record SignInRequest(string ExpectedEpoch, string Id);
+
+/// <summary>A site the user allowed, which the page ends.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Id">The sign-in.</param>
+/// <param name="Origin">The site; null for all of them.</param>
+internal sealed record SiteGrantRequest(string ExpectedEpoch, string Id, string? Origin);
 
 /// <summary>A use the page confirms or declines.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

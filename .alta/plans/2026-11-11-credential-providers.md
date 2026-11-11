@@ -318,10 +318,10 @@ sequenceDiagram
 
 ### Phase 4: sign in to websites
 
-- [ ] 29. **Sign-ins** (`SecretBindings`, RPC, Settings > Secrets): a binding with its sites, and the sites the user allowed with their expiry.
-- [ ] 30. **Providers read a sign-in**: user name, password and one-time code of an item, for 1Password, Bitwarden and KeePassXC, never kept in memory beyond the fill.
-- [ ] 31. **`fill_login`** (`src/CodeAlta.Browser/Tools`, `src/CodeAlta.Plugin.Browser`): the site read from the browser, the card, the tab held, the fields checked, typed and submitted, cleared on failure, a status as its only result. Chromium first, then Firefox.
-- [ ] 32. **Tests, documentation and validation of phase 4** (`CodeAlta.Browser.Tests` with local pages: a look-alike site, a hidden field, a frame of another site, a form that posts elsewhere, a failed submit); `site/docs/browser.md` and `doc/browser.md`.
+- [x] 29. **Sign-ins** (`SecretBindings`, RPC, Settings > Secrets): a binding with its sites, and the sites the user allowed with their expiry. *Sign-ins and site grants in the members `sign_ins` and `site_grants` of `bindings.json` (`SignIns`); the card **Sign-ins of websites** of Settings > Secrets adds, edits and removes them and revokes a site.*
+- [x] 30. **Providers read a sign-in**: user name, password and one-time code of an item, for 1Password, Bitwarden and KeePassXC, never kept in memory beyond the fill. *Through the references of the item read by the provider of its vault (`CredentialBroker.ReadSignInAsync`), so any vault that reads a field and a one-time code works.*
+- [x] 31. **`fill_login`** (`src/CodeAlta.Browser/Tools`, `src/CodeAlta.Plugin.Browser`): the site read from the browser, the card, the tab held, the fields checked, typed and submitted, cleared on failure, a status as its only result. Chromium first, then Firefox. *Chromium only: Firefox answers `unsupported`. Statuses `failed` and `choose_sign_in` were added.*
+- [x] 32. **Tests, documentation and validation of phase 4** (`CodeAlta.Browser.Tests` with local pages: a look-alike site, a hidden field, a frame of another site, a form that posts elsewhere, a failed submit); `site/docs/browser.md` and `doc/browser.md`. *Docs and tests done; the fill in a frame of the same site has no test.*
 
 ## How it is verified
 

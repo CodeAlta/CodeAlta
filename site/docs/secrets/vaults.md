@@ -148,6 +148,10 @@ The program is found on the `PATH` and run without a shell, in a folder of its o
 
 Plugins add other kinds of vaults: see [Credential providers](../plugins/developers.md#credential-providers).
 
+## Sign-ins of websites
+
+A sign-in is the user name, the password and the one-time code of an item, with the sites they are typed on. The browser of a session types them on those sites after you allow it, and the agent never sees them: see [Sign in with a vault item](../browser.md#sign-in-with-a-vault-item). **Sign-ins of websites**, in **Settings > Secrets**, adds, changes and removes them, and lists under each one the sites you allowed for 30 days.
+
 ## Agents and vaults
 
 Agents see the providers and the state of each secret, and propose changes you approve. They never get a value, nor the item a secret names.

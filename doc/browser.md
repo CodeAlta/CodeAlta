@@ -76,6 +76,18 @@ at the next call; its choice stays until it gives the tools back.
   frame, a load no request gate sees. The browser process runs outside the container, as plugin tools do, so the tools follow the
   sandbox themselves (`AdditionalToolsFollowSandbox`); a session whose sandbox changes loses its browser.
 
+## Sign-ins
+
+`fill_login` types a sign-in of the user's vault (`doc/credentials.md`) without the model giving or getting a value:
+the origin is read from the top frame of the tab, never from the model; the host (`BrowserPluginHost.SignIn`, set by the
+desktop to `DesktopSignIns`) finds the sign-ins of that exact origin, asks the user on an `AgentCredentialPermissionRequest`
+of action `sign_in` unless a site grant of 30 days holds, and reads the values without a prompt, masked before the tool
+gets them. The tool checks the fields before it asks and again before each value (visible, editable, in the top frame or
+a frame of the same origin, in a form that sends to that origin), types with the browser's own input after focusing the
+field, submits, and clears the fields of a refused sign-in. It holds the tool lock of the session until the navigation
+ends, so no other tool reads the page while a value is in a field. Its result is a status only. It is refused in the
+user's own browser, in Firefox for now, and in a sandboxed session.
+
 ## One target per session
 
 The browser tools and the UI tools of the window have the same names: activating one gives the other back

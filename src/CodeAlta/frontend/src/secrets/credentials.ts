@@ -103,11 +103,41 @@ export function providerOf(secret: SecretView, providers: readonly CredentialPro
 }
 
 /** What a listing without vaults holds of them: a machine of the fleet, a host without a broker. */
-export const noCredentials = { providers: [], types: [], pending: [], uses: [], verification: null, canPrompt: false, configurationProblems: [] } as const;
+export const noCredentials = { providers: [], types: [], pending: [], uses: [], verification: null, canPrompt: false, configurationProblems: [], signIns: [] } as const;
 
 /** A secret of this computer as a listing gives it, from what every secret has. */
 export function localSecret(secret: Pick<SecretView, "name" | "version" | "setBy" | "setAt">): SecretView {
   return { ...secret, provider: null, providerName: null, icon: null, label: null, askBeforeUse: null, state: "ready", stateMessage: null };
+}
+
+/** A sign-in as its dialog edits it: references of the vault, never a value. */
+export type SignInDraft = Readonly<{ id: string | null; label: string; provider: string; sites: readonly string[]; username: string; password: string; totp: string }>;
+
+/** The sites typed in the dialog of a sign-in, one a line or separated by commas, without the empty ones. */
+export function siteList(text: string): string[] {
+  return text.split(/[\r\n,]+/).map(line => line.trim()).filter(line => line.length > 0);
+}
+
+/** Whether a text is a site as a sign-in lists it: an origin, https (http only for this computer), without a path. */
+export function isSite(text: string): boolean {
+  const value = text.includes("://") ? text : `https://${text}`;
+  try {
+    const url = new URL(value);
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    return (url.protocol === "https:" || url.protocol === "http:" && loopback) && !url.username && !url.password
+      && (url.pathname === "/" || url.pathname === "") && !url.search && !url.hash && !/\/[^/]/.test(value.replace(/^[a-z]+:\/\//i, ""));
+  } catch {
+    return false;
+  }
+}
+
+/** What keeps a sign-in from being saved; null when it can be. */
+export function signInDraftProblem(draft: SignInDraft): MessageKey | null {
+  if (!draft.label.trim()) return "A sign-in needs a name.";
+  if (draft.sites.length === 0 || !draft.sites.every(isSite)) return "A site is an address such as https://github.com, without a path.";
+  if (!draft.provider) return "Add a vault first: a sign-in is an item of a vault.";
+  if (!draft.username.trim() || !draft.password.trim()) return "A sign-in needs the user name and the password of an item.";
+  return null;
 }
 
 /** A command line as the terminal takes it: each word quoted when it holds a space. */
