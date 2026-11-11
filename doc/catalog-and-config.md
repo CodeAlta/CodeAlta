@@ -57,6 +57,7 @@ tool output, paths and credentials: they are private user data.
 | `issues.toml`, `local/issues.toml` | Views of the issues and of the pull requests (`[<service>.pull_requests]`), and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
 | `mcp.json`, `plugins/`, `plugin-data/`, `skills/`, `prompts/` | Project MCP servers, plugins, plugin data, skills, prompts. |
 | `plans/`, `tasks/` | Plans and follow-up tasks, Markdown with a front matter. |
+| `projects.toml` | The project map of a repository: its sub-projects and their labels (see Projects below). |
 | `worktrees/` | Worktrees kept inside the repository when the user chose so (git-ignored). |
 
 Skills are also read from `.agents/skills/` of the project and of the home folder.
@@ -165,6 +166,28 @@ is offered as an in-memory project until a session is created for it. A filesyst
 
 The working directory of a session ties it to its project; a session in a git worktree records the worktree beside it
 (`worktreeDirectory` of its summary).
+
+**Sub-projects.** A repository declares folders of it as projects in its project map, `<project>/.alta/projects.toml`
+(`ProjectManifest`): keys, relative paths, labels, `optional`, `write`. `ProjectCatalog.LoadAsync` reads the map of
+every project no other map declares and adds its sub-projects; they are computed, not copied.
+
+- **Identity.** The id of a sub-project derives from the id of its repository and its key
+  (`DeriveSubProjectId`), so it is the same before and after its file is written, and a folder that moves keeps it.
+  Nothing is written to `projects/` until the user uses a sub-project or sets something of it (a session, hide,
+  sandbox, a label); a folder added by hand is recognized by its path and keeps its file and id.
+- **Overlay, not copy.** What the map gives (parent, sub-path, labels of the map, the repository's spaces, sandbox and
+  added skill folders as fallbacks, the folders it inherits its setup from) are computed properties of
+  `ProjectDescriptor`; a save writes the user's values (`ForFile`), so the file never freezes what the map says.
+- **Any folder.** The repository is the folder of the map, not the git top level: a sub-project can be a git
+  submodule, whose git operations (worktrees, Changes) are its own.
+- **Bounded reads.** The map is parsed once per text (`ParsedFileCache`) and the state of its folders is kept for that
+  text; only missing folders are looked at again. A load walks no repository. A map with mistakes costs the entries
+  at fault (`Problems`), never the load.
+- **One owner.** A folder two maps declare belongs to the nearer repository, and the map of a declared folder is not
+  read: one group per folder in the Explorer.
+- Labels of a map are served by `LabelCatalog` beside the user's, read-only, with ids `<repository slug>.<key>`.
+  `ProjectManifestEditor` edits the map one table at a time (`ConfigTableSyntax`) under `ConfigFileLock`, and refuses a
+  change that would add a problem.
 
 ## Spaces
 

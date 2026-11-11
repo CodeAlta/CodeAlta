@@ -55,6 +55,8 @@ A space created from the title bar is shown at once. An empty space has an **Add
 
 A folder you add with the `+` of the Explorer, or with [Open project](workspace/readme.md#open-a-project), joins the space the window shows, also when it is already a project of another space.
 
+The sub-projects of a [monorepo](monorepos.md) are in the spaces of their repository: add or move the repository, and they follow.
+
 ## Organize spaces
 
 **Settings > Spaces** opens with **Organize spaces…** in the space switch, or `/spaces`. Its **Overview** is a map of your setups:

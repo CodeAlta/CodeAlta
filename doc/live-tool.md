@@ -76,7 +76,7 @@ services the host registered. Nothing is shared between invocations.
 | Group | Purpose |
 | --- | --- |
 | `version`, `tool` | Host version, live-tool status and command capabilities. |
-| `project`, `space`, `label` | The project catalog, the spaces that group projects, and the labels that group them inside a space ([catalog and config](catalog-and-config.md)). |
+| `project`, `space`, `label` | The project catalog, the spaces that group projects, and the labels that group them inside a space ([catalog and config](catalog-and-config.md)). `project manifest` edits the project map of a repository, a file of the repository: agents cannot write under `.alta` with their file tools, a sandbox only reads it, and a change that would add a problem to the map is refused. |
 | `session` | Create, send, queue, steer, abort, compact, inspect, report, fork, rewind, archive; peer `message` and `request`. |
 | `provider`, `model` | Configured providers, model refs (`provider:model@effort`), tiers. |
 | `prompt`, `skill` | File-backed agent and system prompts; skills ([skills](skills.md)). |

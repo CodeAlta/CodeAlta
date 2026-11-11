@@ -189,9 +189,9 @@ alta project manifest label <key> [--name <n>] [--parent <l>] [--icon <i>] [--co
 - [x] 1. `ProjectManifest` and its reader in `src/CodeAlta.Catalog/` (Tomlyn): the model, the bounds, path validation with links resolved, problems reported and never thrown. Tests in `CodeAlta.Catalog.Tests`.
 - [x] 2. `ProjectCatalog`: read the maps of the listed projects through a `ParsedFileCache`, add the declared sub-projects (derived id and slug, `ParentId`, `SubPath`, spaces of the repository), link a project file of the same folder, keep the id when `EnsurePersistedAsync` writes the file. `ProjectDescriptor.Copy` carries the new properties. Tests: identity before and after a file, a folder added by hand, an entry removed, a moved folder, an archived repository, a read-only catalog (`altacli`).
 - [ ] 3. Sandbox and skill folders of the user fall back to the repository project (`SandboxScopes`, `SkillCatalogQuery.ForSession`). Tests.
-- [ ] 4. `LabelCatalog`: serve the labels of the maps, read-only, hidden in a space where they hold no project; `alta label` and `LabelsRpc` refuse to change them. Tests.
-- [ ] 5. `alta project list --parent/--declared`, `show` and the record fields (`AltaScriptAnnotations` included). Tests beside `AltaSpaceCommandsTests.cs`.
-- [ ] 6. `WorkspaceProject` gains `parentId` and `subPath`; `projectRailGroups` builds the repository group, with its labels and the flat-mode prefix. Unit tests in `projectRailGroups.test.ts`, rendering in `ProjectRailRows`.
+- [x] 4. `LabelCatalog`: serve the labels of the maps, read-only, hidden in a space where they hold no project; `alta label` and `LabelsRpc` refuse to change them. Tests.
+- [x] 5. `alta project list --parent/--declared`, `show` and the record fields (`AltaScriptAnnotations` included). Tests beside `AltaSpaceCommandsTests.cs`.
+- [x] 6. `WorkspaceProject` gains `parentId` and `subPath`; `projectRailGroups` builds the repository group, with its labels and the flat-mode prefix. Unit tests in `projectRailGroups.test.ts`, rendering in `ProjectRailRows`.
 - [ ] 7. The Runtime Context line, byte-stable. Test in `SystemPromptInfrastructureTests`.
 
 **Phase 2: one setup for the repository**
@@ -201,9 +201,9 @@ alta project manifest label <key> [--name <n>] [--parent <l>] [--icon <i>] [--co
 
 **Phase 3: set up and maintain**
 
-- [ ] 10. `alta project manifest` (`BuiltInAltaCommandContributor.Manifest.cs`) with a writer that edits the file under `ConfigFileLock` and keeps its comments; policies (mutating, refused in a sandbox). Tests.
-- [ ] 11. The skill `src/CodeAlta.Catalog/BuiltinSkills/codealta-monorepo/SKILL.md`.
-- [ ] 12. Desktop: **Sub-projects…** dialog, the notice when a repository with a map is added, **Set up as a monorepo…**, the Workspace chip. Browser tests.
+- [x] 10. `alta project manifest` (`BuiltInAltaCommandContributor.Manifest.cs`) with a writer that edits the file under `ConfigFileLock` and keeps its comments; policies (mutating, refused in a sandbox). Tests.
+- [x] 11. The skill `src/CodeAlta.Catalog/BuiltinSkills/codealta-monorepo/SKILL.md`.
+- [x] 12. Desktop: **Sub-projects…** dialog, the notice when a repository with a map is added, **Set up as a monorepo…**, the Workspace chip. Browser tests.
 - [ ] 13. Docs: a new `site/docs/monorepos.md` (in `menu.yml`, linked from `labels.md`, `spaces.md` and `worktrees.md`), `doc/catalog-and-config.md` (Projects, project-local state), `doc/skills.md` (precedence), the command table of `doc/live-tool.md`, a line in `readme.md`.
 
 ## How it is verified

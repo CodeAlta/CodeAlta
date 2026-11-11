@@ -12,6 +12,8 @@ A label groups projects inside a [space](spaces.md): **Infra**, **Helm charts**,
 - A label is in one space, or in every space. A label under another one is in the space of the label above it.
 - Labels side by side have different names. Two spaces can each have a top-level label of the same name, such as **Infra**: they never show together. A label of every space shows in each space, so no top-level label there may share its name.
 
+A repository can also give labels to its sub-projects in its project map: those nest under the repository in the Explorer, and are changed in the map ([Monorepos](monorepos.md)).
+
 CodeAlta TUI lists the projects without their labels, and keeps them.
 
 <figure class="alta-figure my-4">

@@ -120,6 +120,7 @@ A worktree started on an issue is on the branch named in the [Issues tab](issues
 - When a worktree is removed, its sessions continue in the project folder.
 - The code editor of a project shows the project folder. To edit the files of a worktree, use the code editor button of the **Workspace** chip, **Open editor** in the **Workspace** popover, or the button of its row in the Worktrees window: it opens a tab named after the worktree.
 - A branch with commits that are in no other branch is always kept.
+- A worktree of a sub-project of a [monorepo](monorepos.md) is a checkout of its repository, and the session works in the folder of the sub-project in it. A sub-project that is a git submodule gets worktrees of the submodule.
 - A session started by an agent that works in a worktree works in the same worktree.
 - An agent can start sessions in worktrees. Ask in your own words, for example:
 
