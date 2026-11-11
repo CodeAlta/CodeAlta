@@ -135,9 +135,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
         _spaceCatalog = new SpaceCatalog(projectCatalog);
-        _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
-        Permissions = new SessionPermissionService(autoApproveOwnedPermissions)
+        // The policy of the organization can turn off what approves everything: the host's own approval included.
+        Func<bool> approve = () => autoApproveOwnedPermissions() && !_managedPolicies.Current.BypassPermissionsDisabled;
+        _autoApproveOwnedPermissions = approve;
+        Permissions = new SessionPermissionService(approve)
         {
+            BypassRefused = () => _managedPolicies.Current.BypassPermissionsDisabled,
             // A request outside a send asks on the attachment of its session, which is live while it runs: a turn the
             // owner did not send (where sessions have a mode of their own), and a command of a session that asks the user.
             SessionReviewTarget = sessionId => _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
@@ -150,6 +153,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         instructionTemplateProvider.CodeModeOf = (sessionId, providerKey, modelId) => ScriptRuns?.CodeModeOf(sessionId, providerKey, modelId) ?? "off";
         instructionTemplateProvider.RunDeadline = () => RunDeadline;
         _events.Published = PulseSettlement;
+        _managedPolicies.Changed += OnManagedPolicyChanged;
     }
 
     // A state written to a journal (a prompt queued or sent, a mode, an archive) is in the row of its session: the listing
@@ -158,6 +162,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         => _ = _agentSessionCatalog.InvalidateAsync(sessionId, CancellationToken.None);
 
     private readonly Func<bool> _autoApproveOwnedPermissions;
+    private readonly ManagedPolicyState _managedPolicies = new();
     private readonly bool _sessionPermissionModes;
     private readonly bool _fullTrust;
 
@@ -266,10 +271,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <returns>The policy, read now: where sessions have a mode of their own, a send reads it again at each request.</returns>
     public SessionPermissionPolicy GetPermissionPolicy(string sessionId)
     {
-        if (_fullTrust) return SessionPermissionPolicy.Approve;
+        if (_fullTrust && !_managedPolicies.Current.BypassPermissionsDisabled) return SessionPermissionPolicy.Approve;
         var reviewByDefault = !_autoApproveOwnedPermissions();
         return _sessionPermissionModes && !string.IsNullOrWhiteSpace(sessionId) && _entries.TryGetValue(sessionId, out var entry)
-            ? Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), reviewByDefault)
+            ? Runtime.SessionPermissionModes.Policy(ModeOrDefaults(entry.PermissionMode, entry.ProviderKey), reviewByDefault)
             : Runtime.SessionPermissionModes.Policy(null, reviewByDefault);
     }
 
@@ -280,7 +285,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <param name="providerKey">The key of the provider.</param>
     /// <returns>A permission mode.</returns>
     public string GetDefaultPermissionMode(string? providerKey)
-        => ConfiguredPermissionMode(providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+        => ModeOrDefaults(null, providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
 
     /// <summary>
     /// Gets or initializes whether a session that another session creates takes the permission mode of its creator,
@@ -309,7 +314,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var reviewByDefault = !_autoApproveOwnedPermissions();
         var configured = ConfiguredPermissionMode(providerKey);
         if (InheritPermissionMode?.Invoke() != true)
-            return configured is null && reviewByDefault ? Runtime.SessionPermissionModes.Bypass : null;
+            return Governed(configured is null && reviewByDefault ? Runtime.SessionPermissionModes.Bypass : null, providerKey);
         // A mode of the provider that reviews (Claude Code's auto, dontAsk) is kept as it is where the new session's
         // provider has it too: the host reviews it the same way, and the provider decides the rest as for its creator.
         if (_entries.TryGetValue(creatorSessionId, out var creator)
@@ -317,13 +322,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             && !Runtime.SessionPermissionModes.HostModes.Contains(own, StringComparer.Ordinal)
             && !OwnedSessionCommandService.ProviderOnlyPermissionModes.Contains(own)
             && OffersPermissionMode(providerKey, own))
-            return own;
+            return Governed(own, providerKey);
         // A mode that asks is saved with the session: it keeps asking when the policy of the host changes.
         return GetPermissionPolicy(creatorSessionId) switch
         {
             SessionPermissionPolicy.Review => Runtime.SessionPermissionModes.Ask,
             SessionPermissionPolicy.AcceptEdits => Runtime.SessionPermissionModes.AcceptEdits,
-            _ => Runtime.SessionPermissionModes.Policy(configured, reviewByDefault) == SessionPermissionPolicy.Approve ? null : Runtime.SessionPermissionModes.Bypass,
+            _ => Governed(Runtime.SessionPermissionModes.Policy(configured, reviewByDefault) == SessionPermissionPolicy.Approve ? null : Runtime.SessionPermissionModes.Bypass, providerKey),
         };
     }
 
@@ -344,7 +349,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // A session that is not attached has the mode saved with it.
         var policy = _entries.ContainsKey(target.SessionId)
             ? GetPermissionPolicy(target.SessionId)
-            : Runtime.SessionPermissionModes.Policy(NormalizeOptionalText(target.PermissionMode) ?? ConfiguredPermissionMode(target.ResolvedProviderKey), !_autoApproveOwnedPermissions());
+            : Runtime.SessionPermissionModes.Policy(ModeOrDefaults(target.PermissionMode, target.ResolvedProviderKey), !_autoApproveOwnedPermissions());
         return policy <= GetPermissionPolicy(senderSessionId);
     }
 
@@ -363,7 +368,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(senderSessionId)) return true;
         return _entries.TryGetValue(senderSessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
-            && Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), !_autoApproveOwnedPermissions()) == SessionPermissionPolicy.Approve;
+            && Runtime.SessionPermissionModes.Policy(ModeOrDefaults(entry.PermissionMode, entry.ProviderKey), !_autoApproveOwnedPermissions()) == SessionPermissionPolicy.Approve;
     }
 
     /// <summary>
@@ -381,12 +386,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 if (!string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase)) continue;
                 var own = provider.PermissionModes.Where(static mode => !OwnedSessionCommandService.ProviderOnlyPermissionModes.Contains(mode)).ToArray();
-                if (own.Length > 0) return own;
+                if (own.Length > 0) return [.. own.Where(mode => !_managedPolicies.Current.Refuses(mode))];
                 break;
             }
         }
 
-        return _sessionPermissionModes ? Runtime.SessionPermissionModes.HostModes : [];
+        return _sessionPermissionModes ? [.. Runtime.SessionPermissionModes.HostModes.Where(mode => !_managedPolicies.Current.Refuses(mode))] : [];
     }
 
     /// <summary>
@@ -452,9 +457,68 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <param name="providerKey">The provider.</param>
     /// <returns>The mode.</returns>
     public string GetNewSessionPermissionMode(string? providerKey)
-        => ConfiguredPermissionMode(providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+        => ModeOrDefaults(null, providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
 
-    private string? ConfiguredPermissionMode(string? providerKey)
+    /// <summary>
+    /// Gets the policies of the organization that narrow every session of this runtime, whatever its provider
+    /// (<see cref="ManagedPolicy"/>): the sources of the host, such as the managed settings of a Copilot enterprise, set
+    /// them. A change applies to the next decision, and narrows at once the sessions attached in a mode it refuses.
+    /// </summary>
+    public ManagedPolicyState ManagedPolicies => _managedPolicies;
+
+    // The modes a session of a provider can be given: its provider's own, else the host's.
+    private IReadOnlyCollection<string> OfferedPermissionModes(string? providerKey)
+        => SelectionProviderOf(providerKey) is { PermissionModes.Count: > 0 } provider ? provider.PermissionModes : Runtime.SessionPermissionModes.HostModes;
+
+    // A mode under the policy of the organization: the mode itself when it allows it, else the widest one below it that
+    // the session can be given.
+    private string? Governed(string? permissionMode, string? providerKey)
+        => _managedPolicies.Current.Narrow(permissionMode, OfferedPermissionModes(providerKey));
+
+    // The mode a session runs in before what no mode means on this host: its own, else the one its provider is
+    // configured with, else the default of the policy of the organization; each under that policy.
+    private string? ModeOrDefaults(string? own, string? providerKey)
+        => Governed(NormalizeOptionalText(own), providerKey) ?? ConfiguredPermissionMode(providerKey) ?? Governed(_managedPolicies.Current.DefaultPermissionMode, providerKey);
+
+    // The mode a provider is given for a session: its own; without one, a mode the provider is configured with that the
+    // policy refuses is replaced by the widest one it allows, since the provider would otherwise start in it.
+    private string? ProviderPermissionMode(string? own, string? providerKey)
+    {
+        if (Governed(NormalizeOptionalText(own), providerKey) is { } mode) return mode;
+        var configured = RawConfiguredPermissionMode(providerKey);
+        return _managedPolicies.Current.Refuses(configured) ? Governed(configured, providerKey) : null;
+    }
+
+    // A policy that now refuses the mode of an attached session narrows it at once, as a change of its mode by the user
+    // would: its provider is told, and the mode it is saved with no longer asks less than the policy allows.
+    private void OnManagedPolicyChanged(ManagedPolicy policy)
+    {
+        foreach (var entry in _entries.Values)
+        {
+            if (entry.IsTerminated || entry.Attachment.IsRetiring || !HasOwnedCommandDefaults(entry)) continue;
+            var own = NormalizeOptionalText(entry.PermissionMode);
+            if (!policy.Refuses(own) && (own is not null || !policy.Refuses(RawConfiguredPermissionMode(entry.ProviderKey)))) continue;
+            _ = NarrowAttachedPermissionModeAsync(entry.SessionId, own);
+        }
+    }
+
+    private async Task NarrowAttachedPermissionModeAsync(string sessionId, string? own)
+    {
+        try
+        {
+            if (await ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } session)
+                await SetOwnedPermissionModeAsync(session, own).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or SessionInUseException or IOException)
+        {
+            // The session went away or closes: its next attachment reads its mode under the policy.
+        }
+    }
+
+    // The mode a provider is configured with, under the policy of the organization.
+    private string? ConfiguredPermissionMode(string? providerKey) => Governed(RawConfiguredPermissionMode(providerKey), providerKey);
+
+    private string? RawConfiguredPermissionMode(string? providerKey)
     {
         if (string.IsNullOrWhiteSpace(providerKey)) return null;
         foreach (var provider in _agentHub.SelectionProviders)
@@ -2232,7 +2296,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The permission mode is the one saved with the session: what attaches it does not have to know it. So is
         // how the session titles itself, which is the setting unless the session has a mode of its own.
         var savedLocalState = startNewSession ? null : await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
-        var permissionMode = NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode);
+        var permissionMode = Governed(NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode), options.ProviderKey ?? session.ResolvedProviderKey);
         // So is the sandbox chosen for the session; its scopes are read again at each command.
         var ownSandbox = NormalizeOptionalText(startNewSession ? session.Sandbox : savedLocalState?.Sandbox);
         // A session does not leave its sandbox by changing model, as by changing provider: when its new model would not
@@ -2273,7 +2337,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             FastMode = AgentSessionOptions.Of(session.Options).FastMode,
             // Nobody reads the reasoning of a headless run: its summaries are not asked for.
             OmitReasoningSummaries = Headless,
-            PermissionMode = permissionMode,
+            PermissionMode = ProviderPermissionMode(permissionMode, options.ProviderKey ?? session.ResolvedProviderKey),
             Streaming = true,
             WorkingDirectory = options.WorkingDirectory,
             WorktreeDirectory = worktree,
@@ -2791,7 +2855,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     internal Task SetOwnedPermissionModeAsync(SessionViewDescriptor session, string? permissionMode)
     {
         ArgumentNullException.ThrowIfNull(session);
-        permissionMode = NormalizeOptionalText(permissionMode);
+        permissionMode = Governed(NormalizeOptionalText(permissionMode), session.ResolvedProviderKey);
         return AdmitAsync(async () =>
         {
             using var lease = HoldForWrite(session.SessionId);
@@ -2809,7 +2873,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         throw new InvalidOperationException("Cannot change configuration of an externally owned attachment.");
                     if (entry is not null)
                     {
-                        await _agentHub.SetPermissionModeAsync(entry.SessionHandleId, permissionMode, actorCancellationToken).ConfigureAwait(false);
+                        await _agentHub.SetPermissionModeAsync(entry.SessionHandleId, ProviderPermissionMode(permissionMode, entry.ProviderKey), actorCancellationToken).ConfigureAwait(false);
                         entry.PermissionMode = permissionMode;
                     }
                     var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);

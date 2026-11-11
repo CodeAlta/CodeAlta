@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace CodeAlta.Agent;
 
 /// <summary>
@@ -13,7 +15,7 @@ public sealed record ManagedPolicy
     private const string AcceptEdits = "acceptEdits";
     private const string Assisted = "auto";
     private const string Bypass = "bypassPermissions";
-    private static readonly string[] HostModes = [Ask, AcceptEdits, Bypass];
+    private static readonly FrozenSet<string> HostModes = FrozenSet.Create(StringComparer.Ordinal, Ask, AcceptEdits, Bypass);
 
     /// <summary>Gets the policy that says nothing.</summary>
     public static ManagedPolicy None { get; } = new();
@@ -36,8 +38,14 @@ public sealed record ManagedPolicy
     /// <summary>Gets the mode a new session runs in when it is given none, <c>default</c>, <c>acceptEdits</c> or <c>bypassPermissions</c>; null to leave it to the settings.</summary>
     public string? DefaultPermissionMode { get; init; }
 
-    /// <summary>Gets whether every session runs in the sandbox.</summary>
+    /// <summary>Gets whether every session runs in the sandbox, where the sandbox can run on this computer.</summary>
     public bool SandboxRequired { get; init; }
+
+    /// <summary>
+    /// Gets whether, with <see cref="SandboxRequired"/>, a computer where the sandbox cannot run runs no command of any
+    /// session, rather than run them without it.
+    /// </summary>
+    public bool SandboxUnavailableBlocks { get; init; }
 
     /// <summary>Gets whether no command of a sandboxed session may run outside its sandbox.</summary>
     public bool RunOutsideSandboxDisallowed { get; init; }
@@ -109,7 +117,7 @@ public sealed record ManagedPolicy
     public bool Equals(ManagedPolicy? other)
         => other is not null && Source == other.Source && Account == other.Account && BypassPermissionsDisabled == other.BypassPermissionsDisabled
             && AssistedPermissionsDisabled == other.AssistedPermissionsDisabled && DefaultPermissionMode == other.DefaultPermissionMode
-            && SandboxRequired == other.SandboxRequired && RunOutsideSandboxDisallowed == other.RunOutsideSandboxDisallowed
+            && SandboxRequired == other.SandboxRequired && SandboxUnavailableBlocks == other.SandboxUnavailableBlocks && RunOutsideSandboxDisallowed == other.RunOutsideSandboxDisallowed
             && FreshPolicyMissing == other.FreshPolicyMissing && SupportUrl == other.SupportUrl && ReadAt == other.ReadAt
             && ManagedKeys.SequenceEqual(other.ManagedKeys, StringComparer.Ordinal);
 
@@ -159,6 +167,7 @@ public sealed record ManagedPolicy
             AssistedPermissionsDisabled = list.Any(static policy => policy.AssistedPermissionsDisabled),
             DefaultPermissionMode = defaultMode,
             SandboxRequired = list.Any(static policy => policy.SandboxRequired),
+            SandboxUnavailableBlocks = list.Any(static policy => policy.SandboxRequired && policy.SandboxUnavailableBlocks),
             RunOutsideSandboxDisallowed = list.Any(static policy => policy.RunOutsideSandboxDisallowed),
             FreshPolicyMissing = list.Any(static policy => policy.FreshPolicyMissing),
             SupportUrl = list.Select(static policy => policy.SupportUrl).FirstOrDefault(static url => url is not null),

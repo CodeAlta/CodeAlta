@@ -68,8 +68,7 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         if (_entries.ContainsKey(sessionId)) return GetEffectivePermissionMode(sessionId);
         var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        return NormalizeOptionalText(session?.PermissionMode) ?? ConfiguredPermissionMode(session?.ResolvedProviderKey)
-            ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+        return ModeOrDefaults(session?.PermissionMode, session?.ResolvedProviderKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
     }
 
     /// <summary>Gets what a profile of this computer confines: the floor of a session started elsewhere in that sandbox.</summary>

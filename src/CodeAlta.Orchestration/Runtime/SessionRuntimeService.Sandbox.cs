@@ -173,11 +173,20 @@ public sealed partial class SessionRuntimeService
             Space = space?.Settings.NewSessions?.Sandbox,
             AllSessions = allSessions,
         });
+        // The policy of the organization requires the sandbox: a session that no scope sandboxes, or whose scope turns
+        // it off, runs in the profile CodeAlta sandboxes sessions with by default; where the sandbox cannot run, it runs
+        // no command when the policy says so, else it runs without it.
+        var policy = _managedPolicies.Current;
+        if (policy.SandboxRequired && choice.Profile is null && (policy.SandboxUnavailableBlocks || SandboxCanRun()))
+            choice = new(SandboxProfiles.Workspace, SandboxScope.Organization);
         var projectSetsSandbox = project is not null && _configStore.ProjectSetsSandbox(project.ProjectPath);
         if (choice.Profile is not { } name) return new(choice, null, null, projectSetsSandbox);
         try
         {
-            return new(choice, SandboxProfiles.Resolve(name, profiles), null, projectSetsSandbox);
+            var resolved = SandboxProfiles.Resolve(name, profiles);
+            // Nor may a command leave it, when the policy says so, whatever the profile allows.
+            if (policy.RunOutsideSandboxDisallowed && resolved.Outside != SandboxOutside.Never) resolved = resolved with { Outside = SandboxOutside.Never };
+            return new(choice, resolved, null, projectSetsSandbox);
         }
         catch (SandboxProfileException exception)
         {

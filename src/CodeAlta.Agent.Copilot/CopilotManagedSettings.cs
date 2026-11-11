@@ -35,6 +35,9 @@ public sealed record CopilotManagedSettings
     /// <summary>Gets whether the sandbox is required (<c>sandbox.enabled</c>, or the runtime's fallback while the policy is undetermined).</summary>
     public bool SandboxEnabled { get; init; }
 
+    /// <summary>Gets whether no command runs where the sandbox cannot (<c>sandbox.failIfUnavailable</c>).</summary>
+    public bool SandboxFailIfUnavailable { get; init; }
+
     /// <summary>Gets whether a user may run a command outside the sandbox (<c>sandbox.allowBypass</c>); true when the policy does not say.</summary>
     public bool SandboxBypassAllowed { get; init; } = true;
 
@@ -69,6 +72,7 @@ public sealed record CopilotManagedSettings
             AssistedPermissionsDisabled = Read(settings, "permissions", "disableAssistedPermissionsMode") is { ValueKind: JsonValueKind.True },
             DefaultMode = Read(settings, "permissions", "defaultMode") is { ValueKind: JsonValueKind.String } mode ? mode.GetString()?.Trim() : null,
             SandboxEnabled = Read(settings, "sandbox", "enabled") is { ValueKind: JsonValueKind.True } || resolved.SandboxEnabledByUndeterminedPolicy == true,
+            SandboxFailIfUnavailable = Read(settings, "sandbox", "failIfUnavailable") is { ValueKind: JsonValueKind.True },
             SandboxBypassAllowed = Read(settings, "sandbox", "allowBypass") is not { ValueKind: JsonValueKind.False },
             ForceRemoteSettingsRefresh = Read(settings, "forceRemoteSettingsRefresh") is { ValueKind: JsonValueKind.True },
             SupportUrl = result.Values?.Communication?.Support?.Url is { Length: > 0 } url ? url.Trim() : null,

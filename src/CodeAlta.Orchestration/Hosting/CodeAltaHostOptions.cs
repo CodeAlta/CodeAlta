@@ -330,6 +330,13 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public Action<ModelProviderRegistry>? ConfigureModelProviders { get; init; }
 
+    /// <summary>
+    /// Gets an optional callback, called once the runtime exists and before the host is returned, that starts the sources of
+    /// the policies of the organization (<see cref="SessionRuntimeService.ManagedPolicies"/>), such as the managed settings of
+    /// the Copilot accounts of the computer; what it returns is disposed with the host.
+    /// </summary>
+    public Func<CodeAlta.Agent.ManagedPolicyState, IAsyncDisposable?>? StartManagedPolicies { get; init; }
+
     /// <summary>Gets what gives the transport of a provider that names a model server; null for a host without model servers.</summary>
     public Func<string, HttpMessageHandler?>? ModelServerTransports { get; init; }
 

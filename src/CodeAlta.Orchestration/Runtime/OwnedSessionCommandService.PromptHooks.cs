@@ -18,6 +18,12 @@ public sealed partial class OwnedSessionCommandService
     /// </summary>
     public const string PluginCancelledCode = "plugin_cancelled";
 
+    /// <summary>
+    /// The code of a send that the policy of the organization refused (<see cref="CodeAlta.Agent.ManagedPolicy.SendRefusal"/>):
+    /// the receipt is cancelled, nothing was sent to the agent, and <see cref="OwnedSessionCommandResult.Message"/> says why.
+    /// </summary>
+    public const string ManagedPolicyRefusedCode = "policy_refused";
+
     // The key of PluginPromptAttachment.Metadata that names an attachment, so that a plugin that replaces the prompt can
     // keep, drop or reorder the attachments it was given.
     private const string PromptAttachmentIdKey = "id";

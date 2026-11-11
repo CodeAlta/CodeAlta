@@ -4113,6 +4113,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     ? $"--reasoning is one of the efforts of the model '{model.Id}': {List(model.Efforts.Select(AltaModelRef.ToWireName))}."
                     : "--reasoning is not an effort of that model.", commandPath),
             OwnedSelectionCheck.InvalidPrompt => NotFound(context, "prompt.notFound", $"The session cannot run the agent prompt '{options.PromptId}'."),
+            OwnedSelectionCheck.InvalidMode when runtime.ManagedPolicies.Current.Refusal(options.PermissionMode) is { } policy => UsageError(context, "usage.invalidPermissionMode",
+                check.Choices?.PermissionModes is { Count: > 0 } allowed ? $"{policy} --permission-mode is one of: {List(allowed)}." : policy, commandPath),
             OwnedSelectionCheck.InvalidMode => UsageError(context, "usage.invalidPermissionMode", check.Choices?.PermissionModes is not { Count: > 0 } modes
                 ? $"The provider '{provider}' offers no permission mode: leave --permission-mode out."
                 : $"--permission-mode is one of the modes of the provider '{provider}': {List(modes)}, or `provider` for the one it is configured with.", commandPath),

@@ -214,6 +214,9 @@ public sealed partial class OwnedSessionCommandService
         // CodeAlta, whose requests the host answers: where the mode of a session decides that, it offers the modes of the host.
         var modes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).Take(16).ToArray() ?? [];
         if (modes.Length == 0 && _runtime.SessionPermissionModes) modes = [.. SessionPermissionModes.HostModes];
+        // The modes the policy of the organization turns off are not offered.
+        var policy = _runtime.ManagedPolicies.Current;
+        modes = [.. modes.Where(mode => !policy.Refuses(mode))];
         return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
                 { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort,

@@ -328,6 +328,7 @@ internal sealed partial class SandboxSettingsService
         SandboxScope.Project => "project",
         SandboxScope.Space => "space",
         SandboxScope.AllSessions => "all_sessions",
+        SandboxScope.Organization => "organization",
         _ => "none",
     };
 

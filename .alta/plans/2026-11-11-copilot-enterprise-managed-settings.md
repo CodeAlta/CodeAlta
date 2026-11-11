@@ -95,12 +95,15 @@ and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
       test (`CODEALTA_COPILOT_POLICY_LIVE_TOKEN`) that passed with a personal account (no policy).
       *Not done*: the Copilot ACP provider's own sign-in (the runtime would have to read the user's Copilot CLI
       home); an ACP provider gets the policy of the direct providers and of the computer.
-- [ ] 4. **Permission modes** (`SessionRuntimeService`, `OwnedSessionCommandService`, `OwnedSessionSelection`,
-      `SessionFallbackCoordinator`, `AutomationRunner`, `FleetNodeService.Agents`): the ceiling and the default of the
-      table at every entry point, a running session narrowed when the policy arrives, refusals that name the policy;
-      tests per entry point.
-- [ ] 5. **Sandbox** (`SessionRuntimeService.Sandbox`, `SandboxScopes`): the floor (`off` and no scope give `workspace`),
-      no command outside, the refusal of sends for `forceRemoteSettingsRefresh`; tests.
+- [x] 4. **Permission modes**: `SessionRuntimeService.ManagedPolicies` (one `ManagedPolicyState` per runtime), filled by
+      `CodeAltaHostOptions.StartManagedPolicies`, which the desktop, the TUI, `altacli` and `altanode` set. The refused
+      modes are offered nowhere (choices, new sessions, `alta`), a session attached in one is narrowed at once, the mode
+      given to the provider is narrowed (a provider configured in a refused mode gets an explicit one), and the host's own
+      approval, full trust and the mode of created sessions approve nothing the policy refuses; `alta session create`
+      names the policy. Automations, model-tier fallback and fleet nodes go through these points. Tests.
+- [x] 5. **Sandbox**: `ResolveSandboxAsync` gives `workspace` (`SandboxScope.Organization`) to a session nothing sandboxes
+      where the sandbox can run (also where it cannot, with `failIfUnavailable`), and `Outside = Never` with
+      `allowBypass: false`; a send is settled `policy_refused` while a policy that must be read again was not. Tests.
 - [ ] 6. **CodeAlta Desktop**: the Agent chip and Settings > Permissions and Sandbox show what the policy locks (a lock
       and the organization's link, no extra prose); the Copilot provider's page shows the runtime (downloading, ready,
       failed with **Try again**) and the policy (none, or in force with its keys, last refresh, **Refresh**);

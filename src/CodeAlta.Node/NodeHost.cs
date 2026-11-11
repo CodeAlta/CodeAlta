@@ -225,6 +225,10 @@ public sealed class NodeHost : IAsyncDisposable
                 pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
                 pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), profile.GlobalRoot, includeDisabled: false);
             },
+            // The policy the organization of a Copilot account of this machine sets narrows every session; a test that gives
+            // its own providers reads none.
+            StartManagedPolicies = options.ConfigureModelProviders is not null ? null
+                : state => CopilotManagedPolicySource.Start(state, profile.GlobalRoot, new CodeAltaConfigStore(catalog)),
         };
     }
 

@@ -957,6 +957,62 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task ManagedPolicy_TurnsOffBypass_ForEverySession_AndNarrowsTheOneThatRunsInIt() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var runtime = f.Host.RuntimeService;
+        var provider = choices.Current.ProviderKey;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("bypass", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Bypass } }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.AreEqual(SessionPermissionPolicy.Approve, runtime.GetPermissionPolicy(f.SessionId));
+
+        // The organization turns Bypass off: the session that runs in it is narrowed at once.
+        runtime.ManagedPolicies.Set("copilot:test", new ManagedPolicy { Source = "GitHub Copilot", BypassPermissionsDisabled = true });
+        for (var attempt = 0; attempt < 400 && runtime.GetEffectivePermissionMode(f.SessionId) != SessionPermissionModes.AcceptEdits; attempt++) await Task.Delay(5);
+        Assert.AreEqual(SessionPermissionModes.AcceptEdits, runtime.GetEffectivePermissionMode(f.SessionId));
+        Assert.AreEqual(SessionPermissionPolicy.AcceptEdits, runtime.GetPermissionPolicy(f.SessionId));
+
+        // It is offered to no session any more, and choosing it is refused.
+        var governed = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        CollectionAssert.DoesNotContain(governed!.PermissionModes.ToArray(), SessionPermissionModes.Bypass);
+        CollectionAssert.DoesNotContain(f.Host.Commands.GetNewSessionPermissionModes(provider).Modes.ToArray(), SessionPermissionModes.Bypass);
+        Assert.AreEqual("invalid_mode", (await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, SessionPermissionModes.Bypass))).Status);
+
+        // Neither the host's own approval nor a session another one creates bypasses permissions.
+        f.ReviewByDefault = false;
+        Assert.AreEqual(SessionPermissionModes.Ask, runtime.GetNewSessionPermissionMode(provider));
+        f.ReviewByDefault = true;
+        Assert.AreEqual(SessionPermissionModes.AcceptEdits, runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+
+        // Once the policy is lifted, the mode is offered again; the narrowed session keeps the mode it was given.
+        runtime.ManagedPolicies.Remove("copilot:test");
+        CollectionAssert.Contains(f.Host.Commands.GetNewSessionPermissionModes(provider).Modes.ToArray(), SessionPermissionModes.Bypass);
+        Assert.AreEqual(SessionPermissionModes.AcceptEdits, runtime.GetEffectivePermissionMode(f.SessionId));
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
+    public Task ManagedPolicy_ThatMustBeReadAgain_LetsNoSessionSendUntilItIs() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ReleaseAll();
+        var policies = f.Host.RuntimeService.ManagedPolicies;
+        policies.Set("copilot:test", new ManagedPolicy { Source = "GitHub Copilot", BypassPermissionsDisabled = true, FreshPolicyMissing = true });
+
+        var refused = f.Accept(f.AdmitSend(new OwnedTextSendRequest("refused", f.SessionId, "input")));
+        var result = await f.Observe(refused.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Cancelled, result.Outcome);
+        Assert.AreEqual(OwnedSessionCommandService.ManagedPolicyRefusedCode, result.Code);
+        StringAssert.Contains(result.Message, "GitHub Copilot");
+
+        policies.Set("copilot:test", new ManagedPolicy { Source = "GitHub Copilot", BypassPermissionsDisabled = true });
+        var sent = f.Accept(f.AdmitSend(new OwnedTextSendRequest("sent", f.SessionId, "input")));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(sent.Completion)).Outcome);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task SessionPermissionModes_ASessionAnotherOneCreatesDoesNotAsk_UnlessItTakesTheModeOfItsCreator() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;

@@ -145,7 +145,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private async Task<AgentPermissionDecision> HandleOwnedDefaultAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return OnlyTheUserAllows(request) ? AgentPermissionDecision.DeniedUnattended(OnlyTheUserReason(request)) : new(AgentPermissionDecisionKind.AllowOnce);
+        if (Trusted) return OnlyTheUserAllows(request) ? AgentPermissionDecision.DeniedUnattended(OnlyTheUserReason(request)) : new(AgentPermissionDecisionKind.AllowOnce);
         if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
             return _autoApproveOwnedPermissions() && !AlwaysAsks(request) ? new(AgentPermissionDecisionKind.AllowOnce) : NotAsked(request);
         var policy = policyOf(request.SessionId);
@@ -198,7 +198,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return OnlyTheUserAllows(request) ? AgentPermissionDecision.DeniedUnattended(OnlyTheUserReason(request)) : new(AgentPermissionDecisionKind.AllowOnce);
+        if (Trusted) return OnlyTheUserAllows(request) ? AgentPermissionDecision.DeniedUnattended(OnlyTheUserReason(request)) : new(AgentPermissionDecisionKind.AllowOnce);
         if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return AgentPermissionDecision.DeniedUnattended(SessionNotOpenReason);
         request = request with { SessionId = sessionId, ProviderId = target.ProviderId };
         // A review of its own that asks whatever the mode of the session: it follows no policy.
@@ -249,6 +249,15 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// </summary>
     internal bool FullTrust { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether the policy of the organization turns off the mode that asks nothing (<see cref="CodeAlta.Agent.ManagedPolicy.BypassPermissionsDisabled"/>),
+    /// read at each request: full trust then grants nothing by itself. Default: never.
+    /// </summary>
+    internal Func<bool> BypassRefused { get; set; } = static () => false;
+
+    // Full trust, unless the policy of the organization refuses it.
+    private bool Trusted => FullTrust && !BypassRefused();
+
     // Whether the user may allow a request from now on: only the load of a skill whose files can be checked.
     private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot) => snapshot.Skill is { Dynamic: false } || snapshot.Browser is { Site: not null };
 
@@ -285,7 +294,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // automatic approval of the host, read now, decides until the send ends.
     internal AgentPermissionRequestHandler CreateSendDefaultPermissionHandler(SessionPermissionPolicy? policy)
     {
-        if (FullTrust || policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
+        if (Trusted || policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
         var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
         return (request, token) => Task.FromResult(
             token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)

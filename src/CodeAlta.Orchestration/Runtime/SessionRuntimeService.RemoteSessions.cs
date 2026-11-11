@@ -327,8 +327,7 @@ public sealed partial class SessionRuntimeService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         if (!_entries.TryGetValue(sessionId, out var entry)) return Runtime.SessionPermissionModes.Ask;
-        return NormalizeOptionalText(entry.PermissionMode) ?? ConfiguredPermissionMode(entry.ProviderKey)
-            ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+        return ModeOrDefaults(entry.PermissionMode, entry.ProviderKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
     }
 
     private async Task RouteToRemoteParentAsync(ParentNotificationWork notification)

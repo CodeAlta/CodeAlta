@@ -706,6 +706,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 options.FollowExternalSessions);
             // The markers written while no instance ran are read at once, beside the start of the frontend.
             host.ExternalSessions?.Start();
+            // The policies of the organization kept from the last start apply before the first session attaches.
+            host._managedPolicySources = options.StartManagedPolicies?.Invoke(runtimeService.ManagedPolicies);
             // The resumes after a limit that sessions waited for when the host last closed are armed again.
             host.Commands.Fallback.Time = options.TimeProvider ?? TimeProvider.System;
             host.Commands.Fallback.ResumeStore = new SessionResumeStore(applicationDatabase);
@@ -904,6 +906,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         _earlyCommandShutdown.Launch();
     }
 
+    private IAsyncDisposable? _managedPolicySources;
+
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
         // The scripts stop first: their calls run on the sessions that close next.
@@ -912,6 +916,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         if (_adaptiveCritics.IsValueCreated) await _adaptiveCritics.Value.DisposeAsync().ConfigureAwait(false);
         // Nothing is listed or followed any more while the sessions close.
         if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
+        // The policies the sources gave stay in force until the sessions closed; their readings stop.
+        if (_managedPolicySources is { } sources) await sources.DisposeAsync().ConfigureAwait(false);
         BeginShutdownControls();
         await DisposeOwnedWorkAsync(
             () => _earlyCommandShutdown.Reported,

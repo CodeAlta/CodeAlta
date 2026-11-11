@@ -23,6 +23,12 @@ public enum SandboxScope
 
     /// <summary>The choice made for the session itself.</summary>
     Session,
+
+    /// <summary>
+    /// The policy of the organization, which requires the sandbox: it applies to a session that no scope sandboxes, or
+    /// whose scope turns it off.
+    /// </summary>
+    Organization,
 }
 
 /// <summary>What each scope says of the sandbox of one session: a profile name, <see cref="SandboxProfiles.Off"/>, or null for nothing.</summary>

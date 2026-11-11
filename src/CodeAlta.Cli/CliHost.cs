@@ -191,6 +191,10 @@ internal sealed class CliHost : IAsyncDisposable
                     pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
                     pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, includeDisabled: false);
                 },
+                // The policy the organization of a Copilot account of this computer sets narrows every session, full trust
+                // included; a test that gives its own providers, or a run offline, reads none.
+                StartManagedPolicies = environment.ConfigureModelProviders is not null || request.Offline ? null
+                    : state => CopilotManagedPolicySource.Start(state, storage.GlobalRoot, new CodeAltaConfigStore(catalog)),
             }, cancellationToken).ConfigureAwait(false);
             var runtime = host.RuntimeService;
             browser.WorkFolder = async (sessionId, token) => await runtime.TryGetActiveSessionDescriptorAsync(sessionId, token).ConfigureAwait(false) is { } session

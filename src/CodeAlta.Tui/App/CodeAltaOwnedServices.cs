@@ -218,6 +218,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                             pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
                             providerDescriptors.AddRange(pluginProviderTypes.RegisterOrReplace(registry, configStore, homeRoot, includeDisabled: false));
                         },
+                        // The policy the organization of a Copilot account of this computer sets narrows every session.
+                        StartManagedPolicies = state => CopilotManagedPolicySource.Start(state, homeRoot, configStore),
                         PluginAgentEventFailurePolicy = (envelope, failure) => RuntimePluginAgentEventFailurePolicy.ReportAsync(
                             envelope.SessionId, failure,
                             (message, error) => CodeAltaApp.UiLogger.Error(error, message),

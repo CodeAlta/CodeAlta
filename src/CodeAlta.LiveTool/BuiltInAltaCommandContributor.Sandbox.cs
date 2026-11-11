@@ -61,6 +61,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         SandboxScope.Project => "project",
         SandboxScope.Space => "space",
         SandboxScope.AllSessions => "all_sessions",
+        SandboxScope.Organization => "organization",
         _ => "none",
     };
 

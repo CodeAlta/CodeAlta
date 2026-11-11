@@ -65,6 +65,38 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task ThePolicyOfTheOrganization_SandboxesEverySession_AndKeepsItsCommandsInside()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        var session = (await f.Runtime.ResolveOwnedSessionAsync("s", CancellationToken.None))!;
+        await f.Runtime.SetOwnedSandboxAsync(session, SandboxProfiles.Off);
+        Assert.IsFalse((await f.Runtime.GetSessionSandboxAsync("s")).IsSandboxed);
+
+        f.Runtime.ManagedPolicies.Set("copilot:test", new ManagedPolicy { SandboxRequired = true, RunOutsideSandboxDisallowed = true });
+        var required = await f.Runtime.GetSessionSandboxAsync("s");
+        Assert.AreEqual(new SandboxChoice(SandboxProfiles.Workspace, SandboxScope.Organization), required.Choice, "even the session that turned it off");
+        Assert.AreEqual(SandboxOutside.Never, required.Profile!.Outside, "and no command leaves it");
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+        await f.Runtime.SetOwnedSandboxAsync(session, null);
+        var own = await f.Runtime.GetSessionSandboxAsync("s");
+        Assert.AreEqual(new SandboxChoice(SandboxProfiles.Strict, SandboxScope.AllSessions), own.Choice, "a profile the user chose stays");
+        Assert.AreEqual(SandboxOutside.Never, own.Profile!.Outside);
+
+        // Where the sandbox cannot run, a session runs without it, unless the policy keeps it from running any command.
+        f.WriteConfig("");
+        backend.Available = false;
+        Assert.IsFalse((await f.Runtime.GetSessionSandboxAsync("s")).IsSandboxed);
+        f.Runtime.ManagedPolicies.Set("copilot:test", new ManagedPolicy { SandboxRequired = true, SandboxUnavailableBlocks = true });
+        Assert.AreEqual(SandboxScope.Organization, (await f.Runtime.GetSessionSandboxAsync("s")).Choice.Source);
+
+        f.Runtime.ManagedPolicies.Remove("copilot:test");
+        Assert.IsFalse((await f.Runtime.GetSessionSandboxAsync("s")).IsSandboxed, "lifted, the policy leaves the settings of the user");
+    }
+
+    [TestMethod]
     public async Task AConfigurationThatCannotBeRead_KeepsTheSandboxesReadLast()
     {
         await using var f = await Fixture.CreateAsync();

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net.Http.Headers;
@@ -50,16 +51,12 @@ public sealed class CopilotRuntimeInstaller : IDisposable
     private static readonly TimeSpan BusyTimeout = TimeSpan.FromMinutes(15);
 
     // What the SDK leaves out of the root of the package: the terminal CLI and what only it uses.
-    private static readonly HashSet<string> SkippedRootFiles = new(StringComparer.Ordinal)
-    {
+    private static readonly FrozenSet<string> SkippedRootFiles = FrozenSet.Create(StringComparer.Ordinal,
         "app.js", "changelog.json", "cli-main.js", "copilot", "copilot.exe", "index.js", "LICENSE.md", "npm-loader.js",
-        "package.json", "README.md", "sea-loader.js", "SHA256SUMS.txt",
-    };
+        "package.json", "README.md", "sea-loader.js", "SHA256SUMS.txt");
 
-    private static readonly HashSet<string> SkippedRootFolders = new(StringComparer.Ordinal)
-    {
-        "assets", "foundry-local-sdk", "napi-oop-runtime", "pvrecorder", "queries", "webview",
-    };
+    private static readonly FrozenSet<string> SkippedRootFolders = FrozenSet.Create(StringComparer.Ordinal,
+        "assets", "foundry-local-sdk", "napi-oop-runtime", "pvrecorder", "queries", "webview");
 
     private readonly string _root;
     private readonly PinnedDownloader _downloads;

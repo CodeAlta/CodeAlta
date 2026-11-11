@@ -111,6 +111,9 @@ public sealed partial class OwnedSessionCommandService
         var configured = SelectionProvider?.Invoke(new ModelProviderId(providerKey));
         IReadOnlyList<string> modes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).ToArray() ?? [];
         if (modes.Count == 0 && _runtime.SessionPermissionModes) modes = SessionPermissionModes.HostModes;
+        // The modes the policy of the organization turns off are not offered.
+        var policy = _runtime.ManagedPolicies.Current;
+        modes = [.. modes.Where(mode => !policy.Refuses(mode))];
         var defaultMode = _runtime.SessionPermissionModes ? _runtime.GetDefaultPermissionMode(providerKey) : configured?.DefaultPermissionMode;
         return (modes, defaultMode);
     }

@@ -91,6 +91,24 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
         _time = time;
     }
 
+    /// <summary>
+    /// Starts the source of a host: the Copilot providers of its configuration, read again at each reading, a moment after
+    /// the start so that the start-up does not wait for it.
+    /// </summary>
+    /// <param name="state">The policies of the host (<c>SessionRuntimeService.ManagedPolicies</c>).</param>
+    /// <param name="globalRoot">The global root of CodeAlta.</param>
+    /// <param name="store">The configuration store of that root.</param>
+    /// <returns>The started source, which the host disposes.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="globalRoot"/> is blank.</exception>
+    public static CopilotManagedPolicySource Start(ManagedPolicyState state, string globalRoot, CodeAltaConfigStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        var source = new CopilotManagedPolicySource(state, globalRoot, () => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        source.Start(TimeSpan.FromSeconds(5));
+        return source;
+    }
+
     /// <summary>Raised when <see cref="Status"/> changed.</summary>
     public event Action<CopilotManagedPolicyStatus>? StatusChanged;
 
@@ -192,6 +210,7 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
                 _ => null,
             },
             SandboxRequired = settings.SandboxEnabled,
+            SandboxUnavailableBlocks = settings.SandboxEnabled && settings.SandboxFailIfUnavailable,
             RunOutsideSandboxDisallowed = !settings.SandboxBypassAllowed,
             SupportUrl = settings.SupportUrl,
             ManagedKeys = settings.ManagedKeys,
@@ -332,6 +351,7 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
             writer.WriteBoolean("assistedPermissionsDisabled", policy.AssistedPermissionsDisabled);
             if (policy.DefaultPermissionMode is { } mode) writer.WriteString("defaultPermissionMode", mode);
             writer.WriteBoolean("sandboxRequired", policy.SandboxRequired);
+            writer.WriteBoolean("sandboxUnavailableBlocks", policy.SandboxUnavailableBlocks);
             writer.WriteBoolean("runOutsideSandboxDisallowed", policy.RunOutsideSandboxDisallowed);
             if (policy.SupportUrl is { } url) writer.WriteString("supportUrl", url);
             writer.WriteStartArray("managedKeys");
@@ -365,6 +385,7 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
                 AssistedPermissionsDisabled = Bool("assistedPermissionsDisabled"),
                 DefaultPermissionMode = Text(String("defaultPermissionMode")),
                 SandboxRequired = Bool("sandboxRequired"),
+                SandboxUnavailableBlocks = Bool("sandboxUnavailableBlocks"),
                 RunOutsideSandboxDisallowed = Bool("runOutsideSandboxDisallowed"),
                 SupportUrl = Text(String("supportUrl")),
                 ManagedKeys = root.TryGetProperty("managedKeys", out var keys) && keys.ValueKind == JsonValueKind.Array

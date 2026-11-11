@@ -460,6 +460,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
         if (worktreeDirectory is not null && (project is null || !Path.IsPathFullyQualified(worktreeDirectory)))
             throw new ArgumentException("A worktree is the absolute folder of a project session.", nameof(worktreeDirectory));
+        if (permissionMode is not null && _runtime.ManagedPolicies.Current.Refusal(permissionMode) is { } refusal)
+            throw new ArgumentException(refusal, nameof(permissionMode));
         if (permissionMode is not null && !OffersNewSessionPermissionMode(provider.ProviderId.Value, permissionMode))
             throw new ArgumentException($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{permissionMode}'.", nameof(permissionMode));
         lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
@@ -1102,6 +1104,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 : (await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false)).Id;
             // The plugins see the prompt as it was typed, before its references are resolved; one that answers it itself
             // settles the send here, before anything is saved or sent.
+            // A policy of the organization that must be read again at each start, and was not, lets no session run: the
+            // send is settled with why, before anything is saved or sent.
+            if (_runtime.ManagedPolicies.Current.SendRefusal is { } refusal)
+                return new Prepared(session, options, new AgentInput([]), new(OwnedSessionCommandOutcome.Cancelled, Code: ManagedPolicyRefusedCode) { Message = refusal });
             var prompt = await SubmitPromptAsync(operation, session, options, spaceId).ConfigureAwait(false);
             if (prompt.Settled is not null) return new Prepared(session, options, new AgentInput([]), prompt.Settled);
             var input = AgentInput.Text(prompt.Text);
