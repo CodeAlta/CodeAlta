@@ -34,6 +34,12 @@ public sealed partial class SessionRuntimeService
     /// <summary>Gets or initializes the folder where the sandboxes keep their data; null for <see cref="SandboxHostDiscovery.DefaultDataRoot"/>.</summary>
     public string? SandboxDataRoot { get; init; }
 
+    /// <summary>
+    /// Gets or initializes the values that never enter a sandbox, whatever the variable that carries them: the secrets kept in
+    /// vaults the shells of the sessions were given. It is read at each policy, so a collection that grows is followed. Null for none.
+    /// </summary>
+    public IReadOnlyCollection<string>? SandboxWithheldValues { get; init; }
+
     internal SessionSandboxWorkers SandboxWorkers
     {
         get
@@ -42,7 +48,8 @@ public sealed partial class SessionRuntimeService
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 return _sandboxWorkers ??= new SessionSandboxWorkers(SandboxBackend ?? new MxcSandboxBackend(), WorkerCommandLine,
-                    () => SandboxHostDiscovery.Current(SandboxDataRoot ?? SandboxHostDiscovery.DefaultDataRoot(), [_catalogOptions.GlobalRoot, _catalogOptions.StateRoot]),
+                    () => SandboxHostDiscovery.Current(SandboxDataRoot ?? SandboxHostDiscovery.DefaultDataRoot(), [_catalogOptions.GlobalRoot, _catalogOptions.StateRoot])
+                        with { WithheldValues = SandboxWithheldValues ?? [] },
                     ReservedSandboxPorts);
             }
         }

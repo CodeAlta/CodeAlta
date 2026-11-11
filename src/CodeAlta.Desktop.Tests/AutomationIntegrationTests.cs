@@ -20,6 +20,15 @@ public sealed class AutomationIntegrationTests
     private const string JiraSettings = """site = "${var:JIRA_SITE}", email = "bot@acme.test", token = "${secret:JIRA_TOKEN}" """;
 
     [TestMethod]
+    public void TheTriggersOfTheAutomationsOfAProject_AreAUseOfTheirOwn_ForASecretThatAsksBeforeUse()
+    {
+        var first = AutomationIntegrationOptions.TriggerUseOf("p1");
+        Assert.AreNotEqual(first, AutomationIntegrationOptions.TriggerUseOf("p2"), "a confirmation for the automations of one project is not one for another");
+        Assert.AreNotEqual(first, AutomationIntegrationOptions.TriggerUseOf(null));
+        StringAssert.Contains(first, "p1");
+    }
+
+    [TestMethod]
     public async Task AJiraQuery_StartsOnAnIssueThatStartsToMatch_OnceEach_AndCommentsTheAnswerOnIt()
     {
         await using var fixture = await Fixture.CreateAsync($$"""{ type = "jira_query", {{JiraSettings}}, jql = "project = PLAT AND labels = triage", reply = true }""");

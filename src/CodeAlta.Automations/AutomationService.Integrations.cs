@@ -67,10 +67,19 @@ internal sealed class AutomationIntegrationOptions
                 if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Automations").Warn(message);
             },
             Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot, new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false,
-                    null, bound, "triggers of automations")
+                    null, bound, TriggerUseOf(projectId))
                 .TryResolve(text, out var value, out var problem) ? (value, null) : (null, problem),
         };
     }
+
+    /// <summary>
+    /// Gets the use the triggers of the automations of a project are given their secrets for, as a secret that asks before use
+    /// names it: a confirmation given for the automations of one project never lets those of another have the secret.
+    /// </summary>
+    /// <param name="projectId">The project of the automation; null for an automation of the user's configuration.</param>
+    /// <returns>The use.</returns>
+    internal static string TriggerUseOf(string? projectId)
+        => string.IsNullOrWhiteSpace(projectId) ? "triggers of the automations of your configuration" : $"triggers of the automations of the project {projectId}";
 }
 
 /// <summary>Where the answer of a run goes back to: the event's source.</summary>

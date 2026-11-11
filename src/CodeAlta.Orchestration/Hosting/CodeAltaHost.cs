@@ -629,6 +629,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
             modelProviderRegistry.BoundSecrets = credentials;
             pluginRuntime.Secrets.AttachBound(credentials);
+            // The values of vaults given to the shells of the sessions, which never enter a sandbox under any name.
+            var shellSecrets = new ShellBoundSecrets(credentials);
             // A secret given to a provider (its key, a variable of its CLI) is masked from then on, before the provider gets it; so is
             // one a plugin gives out (an MCP server's variables and headers), told to the runtime of the plugins.
             modelProviderRegistry.SecretIssued = secretMasker.Retain;
@@ -691,7 +693,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
                         // Each secret is masked from the moment it is given, before the processes of the session take it.
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, credentials, "shell of a session").Read,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, shellSecrets, ShellUseOf(scope)).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
                         new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
@@ -699,6 +701,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,
+                SandboxWithheldValues = shellSecrets.Given,
                 DefaultSandbox = options.DefaultSandbox,
                 ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,
                 Leases = options.SessionLeaseOwner is { } leaseOwner
@@ -1186,5 +1189,59 @@ public sealed class CodeAltaHost : IAsyncDisposable
         }
 
         ExceptionDispatchInfo.Throw(creationFailure);
+    }
+
+    /// <summary>
+    /// Gets the use the shell of a session is given its secrets for, as a secret that asks before use names it: the session, so
+    /// that a confirmation given for the shell of one session never lets another session have the secret.
+    /// </summary>
+    /// <param name="scope">The work of the session; its run is the session.</param>
+    /// <returns>The use.</returns>
+    internal static string ShellUseOf(SecretScope scope)
+        => scope.RunId is { Length: > 0 } session ? $"shell of the session {session}" : "shell of a session";
+
+    /// <summary>
+    /// The secrets kept in vaults as the shells of the sessions are given them: each value given is noted, so that a sandbox,
+    /// which gets none of them, finds it in the variables of a session whatever their names.
+    /// </summary>
+    internal sealed class ShellBoundSecrets : IBoundSecretSource
+    {
+        private readonly IBoundSecretSource _inner;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _given = new(StringComparer.Ordinal);
+
+        /// <summary>Initializes a new instance of the <see cref="ShellBoundSecrets"/> class.</summary>
+        /// <param name="inner">The secrets kept in vaults the host holds.</param>
+        public ShellBoundSecrets(IBoundSecretSource inner)
+        {
+            ArgumentNullException.ThrowIfNull(inner);
+            _inner = inner;
+            Given = new Values(_given);
+        }
+
+        /// <summary>Gets the values given so far, as they are when they are read: a value given later is in it then.</summary>
+        public IReadOnlyCollection<string> Given { get; }
+
+        /// <inheritdoc />
+        public BoundSecretRead ReadBound(string name, string? use)
+        {
+            var read = _inner.ReadBound(name, use);
+            if (read.Value is { Length: > 0 } value) _given.TryAdd(value, 0);
+            return read;
+        }
+
+        /// <inheritdoc />
+        public string? AuthorizeUse(string name, string? use) => _inner.AuthorizeUse(name, use);
+
+        private sealed class Values(System.Collections.Concurrent.ConcurrentDictionary<string, byte> values) : IReadOnlyCollection<string>
+        {
+            public int Count => values.Count;
+
+            public IEnumerator<string> GetEnumerator()
+            {
+                foreach (var pair in values) yield return pair.Key;
+            }
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        }
     }
 }

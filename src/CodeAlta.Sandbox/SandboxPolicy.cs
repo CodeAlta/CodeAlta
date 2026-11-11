@@ -76,6 +76,12 @@ public sealed record SandboxHost
 
     /// <summary>Gets more folders that hold secrets of CodeAlta (its global and state roots when they are not <c>~/.alta</c>).</summary>
     public IReadOnlyList<string> SecretFolders { get; init; } = [];
+
+    /// <summary>
+    /// Gets the values that never enter a sandbox, whatever the variable of the session that carries them: the secrets kept in
+    /// vaults. It is read when a policy is built.
+    /// </summary>
+    public IReadOnlyCollection<string> WithheldValues { get; init; } = [];
 }
 
 /// <summary>

@@ -81,8 +81,10 @@ argument; its output bounded in size and time, the process killed after it.
 
 A secret with `ask_before_use` is given only after the system verified the user (`IUserPresenceVerifier`: Windows Hello
 through `IUserConsentVerifierInterop` with the handle of the window, Touch ID through `LAContext`). A confirmation is
-kept per secret and use (`provider anthropic`, `MCP server grafana`) for its duration, so that something new that asks
-for the same secret asks the user again. Without a user, the use is recorded as pending and the secret is not given;
+kept per secret and use for its duration, so that something new that asks for the same secret asks the user again. A use
+names what it is for, never a name another consumer can share: `provider <key>`, `MCP server <name> of <its file>` (and
+its space), `shell of the session <id>`, `triggers of the automations of the project <id>`. A confirmation of each use is
+taken by one operation: an MCP server reads its secrets once for its validation and its start. Without a user, the use is recorded as pending and the secret is not given;
 the page of Settings asks again. The broker records the recent uses (secret, use, time, outcome), never a value.
 
 It is a check of CodeAlta, not encryption: a program that runs as the user is stopped by the vault, not by CodeAlta.
@@ -104,7 +106,9 @@ Agents see names and states, never a value nor the item a secret names (`alta se
 both of which choose a program to run, and a setting that is a token names a local secret.
 
 A sandboxed session gets none of these commands (`AltaSandboxGate` is an allow list), and the session variables of
-vaults never enter its sandbox (`SandboxPolicyBuilder.IsVaultSessionName`), even when its profile names them. Outside the
+vaults never enter its sandbox (`SandboxPolicyBuilder.IsVaultSessionName`), even when its profile names them. Nor does a
+value of a vault given to the shells of the sessions, whatever the variable that carries it (`SandboxHost.WithheldValues`).
+An MCP server never gets a secret of a vault in its command line, which other programs read: only in `env` or `headers`. Outside the
 sandbox, `VaultCommandGuard` refuses a shell command of an agent that runs the program of a configured vault, unless
 the user allows it (`agent_vault_commands`): a guardrail against mistakes, not a wall, since a session that is not
 sandboxed runs as the user.

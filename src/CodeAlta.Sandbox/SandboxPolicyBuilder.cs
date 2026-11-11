@@ -217,11 +217,14 @@ public static class SandboxPolicyBuilder
         }
 
         // The session's own variables (its identity, CODEALTA_SESSION_ID...), but none named like a secret, nor one that
-        // carries a secret of the application under another name (an identity that sets `LEAK = "${env:OPENAI_API_KEY}"`).
+        // carries a secret of the application under another name (an identity that sets `LEAK = "${env:OPENAI_API_KEY}"`),
+        // nor one that carries a secret kept in a vault, whatever its name (`LEAK = "${secret:DEPLOY_KEY}"`).
         var secretValues = host.Environment.Where(static pair => IsSecretName(pair.Key) && pair.Value.Length >= 6).Select(static pair => pair.Value).ToList();
+        var withheld = host.WithheldValues.Where(static value => value.Length > 0).ToList();
         foreach (var (name, value) in sessionEnvironment)
         {
-            if (!IsSecretName(name) && !IsLoaderName(name) && !secretValues.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
+            if (!IsSecretName(name) && !IsLoaderName(name) && !secretValues.Any(secret => value.Contains(secret, StringComparison.Ordinal))
+                && !withheld.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
         }
 
         // What the profile passes on, by name, secrets included: the user named them.

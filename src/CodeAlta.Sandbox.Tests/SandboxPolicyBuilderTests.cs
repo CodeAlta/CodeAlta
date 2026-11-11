@@ -427,6 +427,28 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void ASecretKeptInAVault_NeverEntersTheSandbox_WhateverTheNameOfItsVariable()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        // An identity of a space that sets `LEAK = "${secret:DEPLOY_KEY}"`, DEPLOY_KEY kept in a vault, even with the profile naming it.
+        var profile = SandboxProfiles.Resolve("env", [new SandboxProfile { Name = "env", Extends = "workspace", Env = ["LEAK"] }]);
+        var policy = SandboxPolicyBuilder.Build(profile, new SandboxSessionFolders { WorkingDirectory = project },
+            new SandboxHost
+            {
+                DataRoot = temp.Folder("data"),
+                HomeDirectory = temp.Folder("home"),
+                Environment = new Dictionary<string, string> { ["PATH"] = "/bin" },
+                WithheldValues = ["vault-deploy-value"],
+            },
+            new Dictionary<string, string> { ["LEAK"] = "vault-deploy-value", ["WRAPPED"] = "token=vault-deploy-value;", ["GIT_AUTHOR_NAME"] = "Ada" }, "session-1");
+
+        Assert.IsFalse(policy.Environment.ContainsKey("LEAK"), "a value of a vault under an innocuous name");
+        Assert.IsFalse(policy.Environment.ContainsKey("WRAPPED"), "or inside another value");
+        Assert.AreEqual("Ada", policy.Environment["GIT_AUTHOR_NAME"]);
+    }
+
+    [TestMethod]
     public void TheCommandsOfAHomebrewPrefix_GetTheFoldersTheyLinkTo_ButNotTheDataOfItsServices()
     {
         if (OperatingSystem.IsWindows()) Assert.Inconclusive("Homebrew runs on macOS and Linux.");
