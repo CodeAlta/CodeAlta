@@ -30,14 +30,14 @@ export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
   const local = listing.secrets.filter(secret => !secret.provider).length;
   return <Card className="appearance-settings credential-providers" aria-labelledby="credential-providers-title">
     <div className="credential-providers-heading">
-      <h2 id="credential-providers-title">{t("Credential providers")}</h2>
-      <Button size="small" icon={<AppIcon name="plus" size={14} />} text={t("Add a provider…")} disabled={busy} onClick={onAdd} />
+      <h2 id="credential-providers-title">{t("Vaults")}</h2>
+      <Button size="small" icon={<AppIcon name="plus" size={14} />} text={t("Add a vault…")} disabled={busy} onClick={onAdd} />
     </div>
-    <p className="credential-providers-intro">{t("Where the values of the secrets are kept. A secret keeps its name; its value can come from an item of a vault.")}</p>
+    <p className="credential-providers-intro">{t("Where the values of the secrets are kept: this computer, or a vault CodeAlta reads through its program and never writes into.")}</p>
     {listing.configurationProblems.length > 0 && <ul className="credential-problems" role="alert">
       {listing.configurationProblems.map(problem => <li key={problem}>{problem}</li>)}
     </ul>}
-    <ul className="credential-provider-list" aria-label={t("Credential providers")}>
+    <ul className="credential-provider-list" aria-label={t("Vaults")}>
       <li className="credential-provider-row" data-provider="this-computer">
         <span className="credential-provider-icon"><AppIcon name="computer" size={18} /></span>
         <span className="credential-provider-name"><strong>{t("This computer")}</strong>

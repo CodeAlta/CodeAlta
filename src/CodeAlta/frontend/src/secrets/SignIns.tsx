@@ -106,7 +106,7 @@ function SignInDialog({ editing, providers, types, busy, browse, onSave, onClose
       <Button icon={<AppIcon name="folder" size={14} />} text={t("Choose…")} disabled={busy || !chosen} active={choosing === key}
         onClick={() => setChoosing(choosing === key ? null : key)} />
     </div>
-    {choosing === key && chosen && <VaultBrowser key={`${chosen.id}-${key}`} provider={chosen} hint={hint} browse={browse} picked={null} typedInput={false}
+    {choosing === key && chosen && <VaultBrowser key={`${chosen.id}-${key}`} provider={chosen} hint={hint} browse={browse} picked={null} typedInput={false} autoPick={false}
       onPick={pick => { if (!pick) return; setRefs(current => ({ ...current, [key]: pick.reference })); setLabels(current => ({ ...current, [key]: pick.label })); setChoosing(null); }}
       typed="" onType={() => { }} />}
   </FormGroup>;

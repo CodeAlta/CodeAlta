@@ -92,6 +92,35 @@ export function pickedLabel(path: readonly string[], field: string): string {
   return [...path, field].join(" › ");
 }
 
+/** Whether a name holds every word of a search, whatever their case and accents: `git hub` finds `GitHub`, `ecole` finds `École`. */
+export function matchesQuery(query: string, name: string): boolean {
+  const fold = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const words = fold(query).split(/\s+/).filter(word => word.length > 0);
+  if (words.length === 0) return true;
+  const folded = fold(name);
+  const joined = folded.replace(/[^\p{L}\p{N}]+/gu, "");
+  return words.every(word => folded.includes(word) || joined.includes(word.replace(/[^\p{L}\p{N}]+/gu, "")));
+}
+
+/**
+ * The name a secret is given from the field picked in a vault (`Private › GitHub › password`): the item and what the field is,
+ * as an environment variable is named, such as `GITHUB_PASSWORD` or `ANTHROPIC_API_KEY` for the credential of an API key.
+ */
+export function suggestedSecretName(label: string): string {
+  const parts = label.split(" › ").map(part => part.trim()).filter(part => part.length > 0);
+  const field = parts.at(-1) ?? "";
+  const item = parts.length > 1 ? parts.at(-2)! : "";
+  const words = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const kind = /credential|api.?key/i.test(field) ? "API_KEY"
+    : /password|passwort|mot de passe/i.test(field) ? "PASSWORD"
+    : /one.?time|otp|totp/i.test(field) ? "TOTP"
+    : /token/i.test(field) ? "TOKEN"
+    : /user.?name|login|e-?mail/i.test(field) ? "USERNAME"
+    : words(field);
+  const name = [words(item), kind].filter(part => part.length > 0).join("_").replace(/_+/g, "_") || "SECRET";
+  return /^[0-9]/.test(name) ? `SECRET_${name}` : name;
+}
+
 /** The secrets of the listing kept in a vault of a provider. */
 export function secretsOf(provider: string, secrets: readonly SecretView[]): SecretView[] {
   return secrets.filter(secret => secret.provider === provider);
