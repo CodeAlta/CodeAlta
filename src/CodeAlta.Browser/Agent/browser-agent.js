@@ -901,10 +901,10 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------------
-  // The fields of a sign-in, for fill_login. The host types the values with the input of the browser: this only finds
-  // the fields, checks them, focuses one, tells whether they still hold something, and clears them. No value of a field
-  // is ever read or returned. A field is one of a document of the site the host names (this document, or a frame of the
-  // same origin in it), visible, editable, in a form that sends to that site or in no form.
+  // The fields of a sign-in, for fill_login: this finds the fields, checks them and types in one the value the host gives
+  // in the same evaluation, checks a form again before the host submits it, tells whether the fields still hold something,
+  // and clears them. No value of a field is ever read or returned. A field is one of a document of the site the host names
+  // (this document, or a frame of the same origin in it), visible, editable, in a form that sends to that site or in no form.
   // ---------------------------------------------------------------------------------------------------------------
 
   const loginHandles = new Map();
@@ -969,20 +969,58 @@
     return isVisibleBox(element) && !element.readOnly && !(isDisabled(element) && element.getAttribute('aria-disabled') !== 'true');
   }
 
-  // Where a form sends what it holds: its action, or the one of its default button.
+  // The members of a form are read through the prototypes of this world: a control of the page named "elements",
+  // "getAttribute" or "ownerDocument" shadows those members on the form itself.
+  const formElementsOf = Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, 'elements').get;
+  const ownerDocumentOf = Object.getOwnPropertyDescriptor(Node.prototype, 'ownerDocument').get;
+  const attributeOf = Element.prototype.getAttribute;
+
+  // The controls of a form in tree order, those outside it that join it with their form attribute included.
+  function formControls(form) {
+    return Array.prototype.slice.call(formElementsOf.call(form));
+  }
+
+  function isSubmitControl(control) {
+    if (control.localName === 'button') return control.type === 'submit';
+    return control.localName === 'input' && (control.type === 'submit' || control.type === 'image');
+  }
+
+  // Where a form sends what it holds: its action, and the formaction of each of its submit buttons, wherever they are in
+  // the document. The first of them in tree order is the one Enter clicks, and the page can make any of them that one:
+  // a form one of whose buttons sends to another site is not filled.
   function formSendsTo(form, origin) {
-    const doc = form.ownerDocument;
-    const action = form.getAttribute('action');
+    const doc = ownerDocumentOf.call(form);
+    const action = attributeOf.call(form, 'action');
     if (originOfUrl(action === null || action.trim() === '' ? doc.URL : action, doc.baseURI) !== origin) return false;
-    const buttons = form.querySelectorAll('button,input[type=submit],input[type=image]');
-    for (let index = 0; index < buttons.length; index++) {
-      const button = buttons[index];
-      if (button.localName === 'button' && (button.getAttribute('type') || 'submit').toLowerCase() !== 'submit') continue;
-      const target = button.getAttribute('formaction');
+    const controls = formControls(form);
+    for (let index = 0; index < controls.length; index++) {
+      const control = controls[index];
+      if (!isSubmitControl(control)) continue;
+      const target = attributeOf.call(control, 'formaction');
       if (target !== null && target.trim() !== '' && originOfUrl(target, doc.baseURI) !== origin) return false;
-      break;
     }
     return true;
+  }
+
+  // Whether an element is in a document of the site: the document of this agent, or a frame of the same origin in it, each
+  // frame between them of that origin too.
+  function inSiteDocument(element, origin) {
+    let doc = element.ownerDocument;
+    for (let depth = 0; doc && depth < 8; depth++) {
+      let own = 'null';
+      try { own = doc.location ? doc.location.origin : 'null'; } catch (error) { own = 'null'; }
+      if (own !== origin) return false;
+      if (doc === document) return true;
+      let frame = null;
+      try { frame = doc.defaultView ? doc.defaultView.frameElement : null; } catch (error) { frame = null; }
+      doc = frame ? frame.ownerDocument : null;
+    }
+    return false;
+  }
+
+  // A field a value of the site may go in: visible, editable, in a document of the site, in a form that sends there or in none.
+  function isLoginTarget(element, origin) {
+    return !!element && isLoginEditable(element) && inSiteDocument(element, origin) && !(element.form && !formSendsTo(element.form, origin));
   }
 
   const usernamePattern = /user|login|email|e-mail|account|identifier|loginfmt|nick/i;
@@ -1038,7 +1076,7 @@
       if (!isLoginEditable(password)) { reason = reason || 'hidden'; continue; }
       const form = password.form;
       if (form && !formSendsTo(form, origin)) { reason = 'form-elsewhere'; continue; }
-      const scope = form ? Array.prototype.slice.call(form.elements) : inputsOf(password.ownerDocument, []);
+      const scope = form ? formControls(form) : inputsOf(password.ownerDocument, []);
       const visiblePasswords = scope.filter(function (item) { return item.localName === 'input' && (item.type || '').toLowerCase() === 'password' && !isOtpField(item) && isVisibleBox(item); });
       if (visiblePasswords.length > 1) { reason = 'several-passwords'; continue; }
       let username = null;
@@ -1078,19 +1116,39 @@
     return { reason: reason || 'no-password' };
   }
 
-  // Focuses a field before the host types in it, after checking it again, and selects what it holds so that the typing
-  // replaces it.
-  function loginFocus(options) {
+  // Checks a field again and types a value in it, in this one evaluation: no script of the page runs between the check, the
+  // focus and the typing, so a timer of the page cannot move the value to another frame or another document. The value goes in
+  // as typed text, with the input events of the browser, replacing what the field held; it is never kept nor returned.
+  function loginType(options) {
     const element = loginElement(options.field);
     const origin = String(options.origin);
-    if (!element || !isLoginEditable(element)) return { focused: false };
-    let own = 'null';
-    try { own = element.ownerDocument.location.origin; } catch (error) { own = 'null'; }
-    if (own !== origin || (element.form && !formSendsTo(element.form, origin))) return { focused: false };
+    if (!isLoginTarget(element, origin)) return { typed: false };
     scrollIntoViewIfNeeded(element);
     focusElement(element);
     try { element.select(); } catch (error) { /* an input type without a selection */ }
-    return { focused: deepActiveElement(document) === element || element.ownerDocument.activeElement === element };
+    if (deepActiveElement(document) !== element) return { typed: false };
+    const text = String(options.text);
+    let inserted = false;
+    try { inserted = element.ownerDocument.execCommand('insertText', false, text); } catch (error) { inserted = false; }
+    // The handlers of the page ran as the text went in: it is typed only while the field is still the one checked.
+    if (!isLoginTarget(element, origin)) return { typed: false };
+    if (!inserted || element.value.length === 0) {
+      // A field the editing commands do not reach is given its value as a script of the page would.
+      setNativeValue(element, text);
+      fireInput(element);
+      fireChange(element);
+    }
+    return { typed: element.value.length > 0 };
+  }
+
+  // Whether Enter in a field sends its form to the site only, checked right before the host presses it; the field is focused
+  // again when the page moved the focus.
+  function loginSubmits(options) {
+    const element = loginElement(options.field);
+    const origin = String(options.origin);
+    if (!element || !inSiteDocument(element, origin) || (element.form && !formSendsTo(element.form, origin))) return { submits: false };
+    if (deepActiveElement(document) !== element) focusElement(element);
+    return { submits: deepActiveElement(document) === element };
   }
 
   // Whether each field is still on the page, and whether it holds something: never what.
@@ -1122,7 +1180,7 @@
   const operations = {
     snapshot: takeSnapshot, point: point, prepareClick: prepareClick, frameBox: frameBox, rect: rectOf, prepareFill: prepareFill,
     focus: focus, hasText: hasText, waitForStableDom: waitForStableDom, info: info, remoteFrames: remoteFrames,
-    loginFields: loginFields, loginFocus: loginFocus, loginState: loginState, loginClear: loginClear,
+    loginFields: loginFields, loginType: loginType, loginSubmits: loginSubmits, loginState: loginState, loginClear: loginClear,
   };
 
   function errorResult(error) {

@@ -38,7 +38,7 @@ public sealed class LoginFillGrant : IDisposable
 {
     private string? _username;
     private string? _password;
-    private string? _totp;
+    private Func<CancellationToken, Task<string?>>? _code;
 
     private LoginFillGrant(LoginFillStatus status, string? message, IReadOnlyList<LoginFillChoice> choices)
     {
@@ -63,7 +63,7 @@ public sealed class LoginFillGrant : IDisposable
 
     internal string? Password => _password;
 
-    internal string? Totp => _totp;
+    internal bool HasCode => _code is not null;
 
     /// <summary>Creates the grant of a sign-in the user agreed to.</summary>
     /// <param name="label">The label of the sign-in.</param>
@@ -73,11 +73,34 @@ public sealed class LoginFillGrant : IDisposable
     /// <returns>The grant.</returns>
     /// <exception cref="ArgumentException">The user name or the password is empty.</exception>
     public static LoginFillGrant Granted(string label, string username, string password, string? totp)
+        => GrantedReadingCode(label, username, password, string.IsNullOrEmpty(totp) ? null : _ => Task.FromResult<string?>(totp));
+
+    /// <summary>
+    /// Creates the grant of a sign-in the user agreed to, whose one-time code is read when its field is reached: a code read
+    /// with the password may expire while a slow page asks for it on a later step.
+    /// </summary>
+    /// <param name="label">The label of the sign-in.</param>
+    /// <param name="username">The user name, masked already.</param>
+    /// <param name="password">The password, masked already.</param>
+    /// <param name="readCode">
+    /// Gives the one-time code to type now, masked already, or null when it cannot be read; null when the sign-in has none.
+    /// </param>
+    /// <returns>The grant.</returns>
+    /// <exception cref="ArgumentException">The user name or the password is empty.</exception>
+    public static LoginFillGrant GrantedReadingCode(string label, string username, string password, Func<CancellationToken, Task<string?>>? readCode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrEmpty(username);
         ArgumentException.ThrowIfNullOrEmpty(password);
-        return new LoginFillGrant(LoginFillStatus.Granted, null, []) { Label = label, _username = username, _password = password, _totp = string.IsNullOrEmpty(totp) ? null : totp };
+        return new LoginFillGrant(LoginFillStatus.Granted, null, []) { Label = label, _username = username, _password = password, _code = readCode };
+    }
+
+    // The one-time code to type now, or null when it cannot be read (or after the grant let go of its values).
+    internal async Task<string?> ReadCodeAsync(CancellationToken cancellationToken)
+    {
+        if (_code is not { } read) return null;
+        var code = await read(cancellationToken).ConfigureAwait(false);
+        return string.IsNullOrEmpty(code) ? null : code;
     }
 
     /// <summary>Creates the answer that no sign-in is for the site.</summary>
@@ -120,7 +143,7 @@ public sealed class LoginFillGrant : IDisposable
     {
         _username = null;
         _password = null;
-        _totp = null;
+        _code = null;
     }
 
     /// <inheritdoc />
@@ -228,86 +251,159 @@ internal static class BrowserLogin
         bool typedUser = false, typedPassword = false, typedOtp = false;
         var startWindow = TimeSpan.FromSeconds(2) * state.CpuMultiplier;
         var loadTimeout = call.Session.Options.NavigationTimeout * (state.NetworkMultiplier * state.CpuMultiplier);
-        for (var step = 0; step < MaximumSteps && !page.IsClosed && page.Dialog is null; step++)
+        // The requests the page sends from now on may carry the values: their bodies are never shown nor saved, until the
+        // fill ends, or until the document changes when the page may still hold a value in its fields.
+        page.Log.BeginSignIn();
+        var documentHoldsValues = false;
+        try
         {
-            if (OriginOf(page.Url) != origin) break;
-            var fields = await FieldsAsync(page, origin, cancellationToken).ConfigureAwait(false);
-            List<(string Field, string Value)> targets = [];
-            if (fields.Password is { } password && !typedPassword)
+            for (var step = 0; step < MaximumSteps && !page.IsClosed && page.Dialog is null; step++)
             {
-                if (fields.Username is { } user && !(typedUser && fields.UsernameFilled)) targets.Add((user, grant.Username!));
-                targets.Add((password, grant.Password!));
-                // A form that asks for the one-time code with the password gets it too.
-                if (fields.Otp is { } inForm && grant.Totp is { } sameForm && !typedOtp) targets.Add((inForm, sameForm));
-            }
-            else if (fields.Passwordless && fields.Username is { } first && !typedUser && !typedPassword)
-            {
-                targets.Add((first, grant.Username!));
-            }
-            else if (fields.Otp is { } otp && grant.Totp is { } code && !typedOtp && (typedPassword || fields.Passwordless))
-            {
-                targets.Add((otp, code));
-            }
-
-            if (targets.Count == 0)
-            {
-                if (step == 0) return (NoField, NoFieldMessage(fields.Reason));
-                break;
-            }
-
-            var typed = new List<string>(targets.Count);
-            foreach (var (field, value) in targets)
-            {
-                // Checked again before each value: the field, its document and its form, and the site of the tab.
-                var focused = await page.CallAgentAsync(page.MainFrame, "loginFocus", $$"""{"field":{{BrowserSession.JsonText(field)}},"origin":{{BrowserSession.JsonText(origin)}}}""", cancellationToken).ConfigureAwait(false);
-                if (OriginOf(page.Url) != origin || !(focused.TryGetProperty("focused", out var ok) && ok.ValueKind == JsonValueKind.True))
+                if (OriginOf(page.Url) != origin) break;
+                var fields = await FieldsAsync(page, origin, cancellationToken).ConfigureAwait(false);
+                // The document the fields were found in: a value is typed in no other.
+                var document = page.Navigations;
+                List<(string Field, LoginPart Part)> targets = [];
+                if (fields.Password is { } password && !typedPassword)
                 {
-                    await ClearAsync(page, typed, cancellationToken).ConfigureAwait(false);
-                    return (NoField, "A field of the sign-in changed before it was typed in: nothing was submitted. Call fill_login again.");
+                    if (fields.Username is { } user && !(typedUser && fields.UsernameFilled)) targets.Add((user, LoginPart.Username));
+                    targets.Add((password, LoginPart.Password));
+                    // A form that asks for the one-time code with the password gets it too.
+                    if (fields.Otp is { } inForm && grant.HasCode && !typedOtp) targets.Add((inForm, LoginPart.Code));
+                }
+                else if (fields.Passwordless && fields.Username is { } first && !typedUser && !typedPassword)
+                {
+                    targets.Add((first, LoginPart.Username));
+                }
+                else if (fields.Otp is { } otp && grant.HasCode && !typedOtp && (typedPassword || fields.Passwordless))
+                {
+                    targets.Add((otp, LoginPart.Code));
                 }
 
-                await page.InsertTextAsync(value, cancellationToken).ConfigureAwait(false);
-                typed.Add(field);
-                if (field == fields.Username) typedUser = true;
-                else if (field == fields.Password) typedPassword = true;
-                else if (field == fields.Otp) typedOtp = true;
+                if (targets.Count == 0)
+                {
+                    if (step == 0) return (NoField, NoFieldMessage(fields.Reason));
+                    break;
+                }
+
+                var typed = new List<string>(targets.Count);
+                foreach (var (field, part) in targets)
+                {
+                    // The one-time code is read as its field is reached: one read with the password may have expired since.
+                    var value = part switch
+                    {
+                        LoginPart.Username => grant.Username,
+                        LoginPart.Password => grant.Password,
+                        _ => await grant.ReadCodeAsync(cancellationToken).ConfigureAwait(false),
+                    };
+                    if (value is null)
+                    {
+                        await ClearAsync(page, typed, cancellationToken).ConfigureAwait(false);
+                        return (Failed, "The one-time code of the sign-in {label} could not be read from its vault: it was not typed, and the fields of this step were cleared. Ask the user to check the vault in Settings > Secrets of CodeAlta, then call fill_login again.");
+                    }
+
+                    // Checked again with each value, in the evaluation that types it: the field, its document and its form,
+                    // and the site of the tab.
+                    if (page.Navigations != document || OriginOf(page.Url) != origin || !await TypeInAsync(page, field, origin, value, cancellationToken).ConfigureAwait(false))
+                    {
+                        await ClearAsync(page, typed, cancellationToken).ConfigureAwait(false);
+                        return (NoField, "A field of the sign-in changed before it was typed in: nothing was submitted. Call fill_login again.");
+                    }
+
+                    documentHoldsValues = true;
+                    typed.Add(field);
+                    if (part == LoginPart.Username) typedUser = true;
+                    else if (part == LoginPart.Password) typedPassword = true;
+                    else typedOtp = true;
+                }
+
+                // Where Enter sends the form is checked again right before it is pressed: a script may have changed it.
+                if (page.Navigations != document || OriginOf(page.Url) != origin || !await SubmitsToAsync(page, typed[^1], origin, cancellationToken).ConfigureAwait(false))
+                {
+                    await ClearAsync(page, typed, cancellationToken).ConfigureAwait(false);
+                    return (NoField, "The sign-in form changed before it was submitted, and may send to another site: nothing was submitted, and its fields were cleared.");
+                }
+
+                var before = page.Navigations;
+                // Enter in the last field submits its form, as a user does: the default button of the form is clicked.
+                var enter = BrowserKeys.Resolve("Enter");
+                await page.KeyAsync(enter, down: true, 0, cancellationToken).ConfigureAwait(false);
+                await page.KeyAsync(enter, down: false, 0, cancellationToken).ConfigureAwait(false);
+                bool navigated;
+                try
+                {
+                    navigated = await page.WaitForNavigationAsync(before, startWindow, loadTimeout, cancellationToken).ConfigureAwait(false);
+                }
+                catch (BrowserToolException exception) when (exception.Code == "timeout")
+                {
+                    navigated = true;
+                }
+
+                // A new document holds none of the fields typed in.
+                if (navigated) documentHoldsValues = false;
+                await StableAsync(page, state, cancellationToken).ConfigureAwait(false);
+                if (navigated || page.IsClosed) continue;
+                // The page stayed: a page of scripts may have taken the values and shown the next step, or refused them and
+                // left the password or the code in its fields, which are cleared then. A user name the page keeps is no failure.
+                var secrets = typed.Where(field => field != fields.Username).ToArray();
+                if (secrets.Length == 0) continue;
+                var held = await page.CallAgentAsync(page.MainFrame, "loginState", $$"""{"fields":[{{string.Join(",", secrets.Select(BrowserSession.JsonText))}}]}""", cancellationToken).ConfigureAwait(false);
+                if (held.GetProperty("fields").EnumerateArray().Any(static item => item.GetProperty("present").GetBoolean() && item.GetProperty("filled").GetBoolean()))
+                {
+                    await ClearAsync(page, typed, cancellationToken).ConfigureAwait(false);
+                    return (Failed, "The page did not take the sign-in {label}: it was submitted, the page stayed, and its fields were cleared. Take a snapshot to read what the page says.");
+                }
             }
 
-            var before = page.Navigations;
-            // Enter in the last field submits its form, as a user does: the default button of the form is clicked.
-            var enter = BrowserKeys.Resolve("Enter");
-            await page.KeyAsync(enter, down: true, 0, cancellationToken).ConfigureAwait(false);
-            await page.KeyAsync(enter, down: false, 0, cancellationToken).ConfigureAwait(false);
-            bool navigated;
-            try
-            {
-                navigated = await page.WaitForNavigationAsync(before, startWindow, loadTimeout, cancellationToken).ConfigureAwait(false);
-            }
-            catch (BrowserToolException exception) when (exception.Code == "timeout")
-            {
-                navigated = true;
-            }
-
-            await StableAsync(page, state, cancellationToken).ConfigureAwait(false);
-            if (navigated || page.IsClosed) continue;
-            // The page stayed: a page of scripts may have taken the values and shown the next step, or refused them and
-            // left the password or the code in its fields, which are cleared then. A user name the page keeps is no failure.
-            var secrets = typed.Where(field => field != fields.Username).ToArray();
-            if (secrets.Length == 0) continue;
-            var held = await page.CallAgentAsync(page.MainFrame, "loginState", $$"""{"fields":[{{string.Join(",", secrets.Select(BrowserSession.JsonText))}}]}""", cancellationToken).ConfigureAwait(false);
-            if (held.GetProperty("fields").EnumerateArray().Any(static item => item.GetProperty("present").GetBoolean() && item.GetProperty("filled").GetBoolean()))
-            {
-                await ClearAsync(page, typed, cancellationToken).ConfigureAwait(false);
-                return (Failed, "The page did not take the sign-in {label}: it was submitted, the page stayed, and its fields were cleared. Take a snapshot to read what the page says.");
-            }
+            if (page.IsClosed) return (Submitted, "The sign-in {label} was submitted and the tab closed.");
+            if (!typedPassword) return (Submitted, "The user name of the sign-in {label} was submitted: the page asks for something else now. Take a snapshot to see what.");
+            var after = OriginOf(page.Url) is { } now ? await FieldsAsync(page, now, cancellationToken).ConfigureAwait(false) : default;
+            return after.Password is null && after.Otp is null
+                ? (SignedIn, "Signed in with {label}.")
+                : (Submitted, "The sign-in {label} was submitted, and the page still asks for something. Take a snapshot to read what it says.");
         }
+        finally
+        {
+            page.Log.EndSignIn(documentHoldsValues && !page.IsClosed);
+        }
+    }
 
-        if (page.IsClosed) return (Submitted, "The sign-in {label} was submitted and the tab closed.");
-        if (!typedPassword) return (Submitted, "The user name of the sign-in {label} was submitted: the page asks for something else now. Take a snapshot to see what.");
-        var after = OriginOf(page.Url) is { } now ? await FieldsAsync(page, now, cancellationToken).ConfigureAwait(false) : default;
-        return after.Password is null && after.Otp is null
-            ? (SignedIn, "Signed in with {label}.")
-            : (Submitted, "The sign-in {label} was submitted, and the page still asks for something. Take a snapshot to read what it says.");
+    private enum LoginPart
+    {
+        Username,
+        Password,
+        Code,
+    }
+
+    // Checks a field and types a value in it in one evaluation of the page, so that no script of the page runs between the
+    // check and the typing. The value is an argument of that call only: no answer nor error of the agent holds it.
+    private static async Task<bool> TypeInAsync(IBrowserPage page, string field, string origin, string value, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var typed = await page.CallAgentAsync(page.MainFrame, "loginType",
+                $$"""{"field":{{BrowserSession.JsonText(field)}},"origin":{{BrowserSession.JsonText(origin)}},"text":{{BrowserSession.JsonText(value)}}}""", cancellationToken).ConfigureAwait(false);
+            return typed.TryGetProperty("typed", out var ok) && ok.ValueKind == JsonValueKind.True;
+        }
+        catch (BrowserToolException)
+        {
+            // The document went away under the call.
+            return false;
+        }
+    }
+
+    // Whether Enter in the last field typed sends its form to the site only: its action and every submit button of the form.
+    private static async Task<bool> SubmitsToAsync(IBrowserPage page, string field, string origin, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var submits = await page.CallAgentAsync(page.MainFrame, "loginSubmits", $$"""{"field":{{BrowserSession.JsonText(field)}},"origin":{{BrowserSession.JsonText(origin)}}}""", cancellationToken).ConfigureAwait(false);
+            return submits.TryGetProperty("submits", out var ok) && ok.ValueKind == JsonValueKind.True;
+        }
+        catch (BrowserToolException)
+        {
+            return false;
+        }
     }
 
     private static async Task StableAsync(IBrowserPage page, BrowserPageState state, CancellationToken cancellationToken)

@@ -45,6 +45,12 @@ internal sealed class NetworkEntry
     /// <summary>Gets or sets why the request failed, or null.</summary>
     public string? Failure { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether the page sent it while <c>fill_login</c> typed a sign-in, or while the document may still hold one in
+    /// its fields: its body may carry a value of the user's vault, in any encoding, and the tools never show nor save it.
+    /// </summary>
+    public bool HoldsSignIn { get; set; }
+
     /// <summary>Gets the text of the status in a list: the code, <c>pending</c> or <c>failed - …</c>.</summary>
     public string StatusText => Failure is { } failure ? $"failed - {failure}" : Status is { } status ? status.ToString(System.Globalization.CultureInfo.InvariantCulture) : "pending";
 }
@@ -71,6 +77,15 @@ internal sealed class PageLog
     private readonly Dictionary<string, NetworkEntry> _requests = new(StringComparer.Ordinal);
     private int _nextMessage = 1;
     private int _nextRequest = 1;
+    private SignInTraffic _signIn;
+
+    // Whether the requests the page sends now may carry the values of a sign-in.
+    private enum SignInTraffic
+    {
+        None,
+        Filling,
+        UntilNavigation,
+    }
 
     public PageLog() => _navigations.AddLast(([], []));
 
@@ -78,6 +93,19 @@ internal sealed class PageLog
     public void StartNavigation()
     {
         lock (_gate) StartNavigationLocked();
+    }
+
+    /// <summary>A sign-in is being typed: every request the page sends from now on holds it (<see cref="NetworkEntry.HoldsSignIn"/>).</summary>
+    public void BeginSignIn()
+    {
+        lock (_gate) _signIn = SignInTraffic.Filling;
+    }
+
+    /// <summary>The sign-in was typed: the requests that follow hold it no more, or only until the document changes.</summary>
+    /// <param name="documentHoldsValues">Whether the document may still hold a value in its fields: it stayed after the last submission.</param>
+    public void EndSignIn(bool documentHoldsValues)
+    {
+        lock (_gate) _signIn = documentHoldsValues ? SignInTraffic.UntilNavigation : SignInTraffic.None;
     }
 
     /// <summary>Adds a console message.</summary>
@@ -100,7 +128,7 @@ internal sealed class PageLog
             var entry = new NetworkEntry
             {
                 Id = _nextRequest++, RequestId = requestId, Url = url, Method = method, ResourceType = resourceType, RequestHeaders = headers,
-                HasPostData = hasPostData, PostData = postData,
+                HasPostData = hasPostData, PostData = postData, HoldsSignIn = _signIn != SignInTraffic.None,
             };
             var current = _navigations.Last!.Value.Network;
             if (current.Count < MaximumEntries) current.Add(entry);
@@ -111,6 +139,7 @@ internal sealed class PageLog
 
     private void StartNavigationLocked()
     {
+        if (_signIn == SignInTraffic.UntilNavigation) _signIn = SignInTraffic.None;
         _navigations.AddLast(([], []));
         while (_navigations.Count > KeptNavigations)
         {

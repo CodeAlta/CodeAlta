@@ -11,7 +11,7 @@ namespace CodeAlta.Browser.Tests;
 public sealed class BrowserLoginTests
 {
     private const string Username = "octocat";
-    private const string Password = "hunter2-github";
+    private const string Password = TestSite.SignInPassword;
     private const string Code = "123456";
 
     private BrowserTestHost? _host;
@@ -32,7 +32,7 @@ public sealed class BrowserLoginTests
     }
 
     // The host of the tests: the sign-in of the site of the test pages, and the origins it was asked for.
-    private sealed class SignIns(string site, LoginFillStatus answer = LoginFillStatus.Granted)
+    private sealed class SignIns(string site, LoginFillStatus answer = LoginFillStatus.Granted, Func<CancellationToken, Task<string?>>? readCode = null)
     {
         public List<string> Asked { get; } = [];
 
@@ -41,6 +41,7 @@ public sealed class BrowserLoginTests
             Asked.Add(origin);
             return Task.FromResult(origin != site ? LoginFillGrant.NoSignIn() : answer switch
             {
+                LoginFillStatus.Granted when readCode is not null => LoginFillGrant.GrantedReadingCode("Demo", Username, Password, readCode),
                 LoginFillStatus.Granted => LoginFillGrant.Granted("Demo", Username, Password, Code),
                 LoginFillStatus.Denied => LoginFillGrant.Denied(),
                 LoginFillStatus.Locked => LoginFillGrant.Locked(),
@@ -62,6 +63,18 @@ public sealed class BrowserLoginTests
     private static void AssertHoldsNoValue(string text)
     {
         foreach (var value in new[] { Username, Password, Code }) Assert.DoesNotContain(value, text, $"the answer holds a value: {text}");
+        // The password as a form, an address or JSON writes it.
+        foreach (var encoded in new[] { "hunter+2%26gh%2Bub%21%C3%A9%22x", Uri.EscapeDataString(Password), System.Text.Json.JsonSerializer.Serialize(Password), "hunter" })
+        {
+            Assert.DoesNotContain(encoded, text, $"the answer holds the password encoded: {text}");
+        }
+    }
+
+    // The id of the request of the list whose line holds a text.
+    private static string RequestId(string requests, string text)
+    {
+        var line = requests.Split('\n').First(item => item.Contains(text, StringComparison.Ordinal));
+        return line["reqid=".Length..line.IndexOf(' ', StringComparison.Ordinal)];
     }
 
     [TestMethod]
@@ -74,7 +87,82 @@ public sealed class BrowserLoginTests
         StringAssert.Contains(text, "/welcome");
         CollectionAssert.AreEqual(new[] { Host.Site.Origin }, signIns.Asked, "the site is read from the browser, once");
         AssertHoldsNoValue(await session.OkAsync("take_snapshot"));
-        AssertHoldsNoValue(await session.OkAsync("list_network_requests"));
+        var requests = await session.OkAsync("list_network_requests", """{"includePreservedRequests":true}""");
+        AssertHoldsNoValue(requests);
+
+        // The bodies of the requests that carried the sign-in, a form that encodes the password, are neither shown nor saved.
+        foreach (var posted in new[] { "POST " + Host.Site.Url("/session"), "POST " + Host.Site.Url("/two-factor") })
+        {
+            var reqid = RequestId(requests, posted);
+            var detail = await session.OkAsync("get_network_request", $$"""{"reqid":{{reqid}}}""");
+            AssertHoldsNoValue(detail);
+            StringAssert.Contains(detail, "fill_login typed a sign-in");
+            var requestFile = Path.Combine(Host.Folder, $"sign-in-{reqid}.network-request");
+            var responseFile = Path.Combine(Host.Folder, $"sign-in-{reqid}.network-response");
+            var saved = await session.OkAsync("get_network_request", $$"""{"reqid":{{reqid}},"requestFilePath":{{System.Text.Json.JsonSerializer.Serialize(requestFile)}},"responseFilePath":{{System.Text.Json.JsonSerializer.Serialize(responseFile)}}}""");
+            AssertHoldsNoValue(saved);
+            StringAssert.Contains(saved, "Nothing was saved.");
+            Assert.IsFalse(File.Exists(requestFile), "the body of a sign-in is never written to a file");
+            Assert.IsFalse(File.Exists(responseFile), "nor what the server answered to it");
+        }
+
+        // A request of the page after the sign-in is shown as any other.
+        await session.OkAsync("evaluate_script", """{"function":"async () => (await fetch('/api/echo', { method: 'POST', body: 'after the sign-in' })).text()"}""");
+        var later = await session.OkAsync("list_network_requests");
+        StringAssert.Contains(await session.OkAsync("get_network_request", $$"""{"reqid":{{RequestId(later, "/api/echo")}}}"""), "after the sign-in");
+    }
+
+    [TestMethod]
+    public async Task A_form_whose_button_outside_it_sends_to_another_site_is_not_filled()
+    {
+        var signIns = new SignIns(Host.Site.Origin);
+        var (text, session) = await FillAsync("/login-external-button", signIns);
+        await using var _ = session;
+        StringAssert.Contains(text, "fill_login: no_field");
+        StringAssert.Contains(text, "another site");
+        Assert.IsEmpty(signIns.Asked, "nobody is asked for a form that may send elsewhere");
+        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => document.getElementById('password').value.length + document.getElementById('login').value.length"}"""), "0");
+    }
+
+    [TestMethod]
+    public async Task A_timer_that_moves_the_focus_into_a_frame_of_another_site_never_gets_a_value()
+    {
+        var signIns = new SignIns(Host.Site.Origin);
+        var (text, session) = await FillAsync("/login-focus-thief", signIns);
+        await using var _ = session;
+        StringAssert.Contains(text, "fill_login: submitted");
+        var state = await session.OkAsync("evaluate_script", """{"function":"async () => { await new Promise(done => setTimeout(done, 300)); return JSON.stringify({ typed: window.__typed, leaked: window.__leaked }); }"}""");
+        StringAssert.Contains(state.Replace("\\", string.Empty, StringComparison.Ordinal), $"\"typed\":[{Username.Length},{Password.Length}]", state);
+        StringAssert.Contains(state.Replace("\\", string.Empty, StringComparison.Ordinal), "\"leaked\":0", "the frame of the other site got nothing");
+    }
+
+    [TestMethod]
+    public async Task The_one_time_code_is_read_when_its_field_is_reached_after_the_password_was_sent()
+    {
+        var reads = new List<int>();
+        Task<string?> ReadCode(CancellationToken cancellationToken)
+        {
+            // The code is the right one only once the password reached the site: one read with the password would be too early.
+            reads.Add(Host.Site.SignInsPosted);
+            return Task.FromResult<string?>(Host.Site.SignInsPosted > 0 ? Code : "000000");
+        }
+
+        var signIns = new SignIns(Host.Site.Origin, readCode: ReadCode);
+        var (text, session) = await FillAsync("/login", signIns);
+        await using var _ = session;
+        StringAssert.Contains(text, "fill_login: signed_in");
+        CollectionAssert.AreEqual(new[] { 1 }, reads, "read once, as the field of the code was reached");
+    }
+
+    [TestMethod]
+    public async Task A_one_time_code_the_vault_no_longer_gives_is_not_typed()
+    {
+        var signIns = new SignIns(Host.Site.Origin, readCode: static _ => Task.FromResult<string?>(null));
+        var (text, session) = await FillAsync("/login", signIns);
+        await using var _ = session;
+        StringAssert.Contains(text, "fill_login: failed");
+        StringAssert.Contains(text, "one-time code");
+        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => location.pathname + ':' + document.getElementById('otp').value.length"}"""), "/two-factor:0");
     }
 
     [TestMethod]

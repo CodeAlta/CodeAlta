@@ -1069,7 +1069,15 @@ internal static class BrowserTools
         builder.Append("Resource type: ").Append(request.ResourceType).Append('\n');
         builder.Append("### Request Headers\n");
         foreach (var header in request.RequestHeaders) builder.Append("- ").Append(header.Key).Append(':').Append(header.Value).Append('\n');
-        if (bodies.Request is { } requestBody)
+        if (request.HoldsSignIn && (bodies.Request is not null || request.HasPostData))
+        {
+            // The body of a request sent while a sign-in was typed may carry its values, in an encoding no masking knows: it is
+            // neither shown nor saved.
+            builder.Append("### Request Body\n").Append(SignInBody);
+            if (call.OptionalString("requestFilePath") is not null) builder.Append(" Nothing was saved.");
+            builder.Append('\n');
+        }
+        else if (bodies.Request is { } requestBody)
         {
             builder.Append("### Request Body\n");
             if (call.OptionalString("requestFilePath") is { } requestPath)
@@ -1090,7 +1098,13 @@ internal static class BrowserTools
         if (bodies.Response is { } responseBody)
         {
             builder.Append("### Response Body\n");
-            if (call.OptionalString("responseFilePath") is { } responsePath)
+            if (request.HoldsSignIn && call.OptionalString("responseFilePath") is not null)
+            {
+                // What a server answers to a sign-in may repeat what it was sent: it is shown, masked, but never saved to a file,
+                // which no masking reaches.
+                builder.Append("Not saved: this request was sent while fill_login typed a sign-in. ").Append(responseBody.Length == 0 ? "<empty response>" : Body(responseBody)).Append('\n');
+            }
+            else if (call.OptionalString("responseFilePath") is { } responsePath)
             {
                 var path = files.ResolveWrite(responsePath, "responseFilePath");
                 await files.WriteAsync(path, responseBody, call.CancellationToken);
@@ -1102,6 +1116,8 @@ internal static class BrowserTools
         if (request.Failure is { } failure) builder.Append("### Request failed with\n").Append(failure).Append('\n');
         return builder.ToString().TrimEnd('\n');
     }
+
+    private const string SignInBody = "<not shown: this request was sent while fill_login typed a sign-in, and its body may hold it>";
 
     private static string Body(string body) => body.Length <= BodyLimit ? body : body[..BodyLimit] + "... <truncated>";
 

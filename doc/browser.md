@@ -82,11 +82,15 @@ at the next call; its choice stays until it gives the tools back.
 the origin is read from the top frame of the tab, never from the model; the host (`BrowserPluginHost.SignIn`, set by the
 desktop to `DesktopSignIns`) finds the sign-ins of that exact origin, asks the user on an `AgentCredentialPermissionRequest`
 of action `sign_in` unless a site grant of 30 days holds, and reads the values without a prompt, masked before the tool
-gets them. The tool checks the fields before it asks and again before each value (visible, editable, in the top frame or
-a frame of the same origin, in a form that sends to that origin), types with the browser's own input after focusing the
-field, submits, and clears the fields of a refused sign-in. It holds the tool lock of the session until the navigation
-ends, so no other tool reads the page while a value is in a field. Its result is a status only. It is refused in the
-user's own browser, in Firefox for now, and in a sandboxed session.
+gets them. The tool checks the fields before it asks (visible, editable, in the top frame or a frame of the same origin,
+in a form whose action and every submit button, those outside it included, send to that origin). It checks each field
+again in the evaluation of the page that types its value as text, so that no script of the page runs between the check
+and the typing, stops when the document changed, checks the form again right before it presses Enter, and clears the
+fields of a refused sign-in. The one-time code is read when its field is reached, since one read with the password may
+have expired on a later step. The requests the page sends while a value is typed, and until its document changes when
+the page stays, are marked in its log: the network tools never show nor save their bodies. It holds the tool lock of the
+session until the navigation ends, so no other tool reads the page while a value is in a field. Its result is a status
+only. It is refused in the user's own browser, in Firefox for now, and in a sandboxed session.
 
 ## One target per session
 

