@@ -1,0 +1,120 @@
+---
+title: Copilot enterprise managed settings (#411)
+status: in-progress
+created: 2026-11-11
+summary: Read the managed settings an enterprise gives its Copilot users through GitHub's official Copilot SDK, with its runtime downloaded on demand only for Copilot users, and enforce them in CodeAlta - no bypass mode, the sandbox required - for every session, whatever its provider.
+---
+
+# Copilot enterprise managed settings (#411)
+
+Issue [#411](https://github.com/CodeAlta/CodeAlta/issues/411): a Copilot Business enterprise turns off the "YOLO" mode
+and requires the sandbox through its managed settings ([reference](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings)),
+and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
+
+## What we know
+
+- **The policy is set on GitHub** (a `.github-private` repository of the enterprise, `copilot/managed-settings.json`),
+  or on the computer by IT (`%ProgramFiles%\GitHubCopilot\managed-settings.json`, `HKLM\SOFTWARE\Policies\GitHubCopilot`,
+  the `com.github.copilot` domain on macOS, `/etc/github-copilot/managed-settings.json`). The reporter's is on GitHub.
+- **No public REST API gives a user the policy that applies to them**: the AI-controls and team-customization
+  endpoints are for enterprise owners and org maintainers. VS Code reads `GET api.github.com/copilot_internal/managed_settings`,
+  an internal endpoint: not used here.
+- **The official way is the Copilot SDK** (`GitHub.Copilot.SDK`, MIT, already pinned in `src/Directory.Packages.props`
+  but referenced by no project). Without a session, `client.Rpc.ManagedSettings.ResolveAsync(selectionId, gitHubToken,
+  clientName, workingDirectory)` merges the device channels and the account's server policy, with the runtime's own
+  cache (a policy under an hour old is reused, a failed fetch falls back to one up to 24 hours old). Its result gives
+  `Resolved.BypassPermissionsDisabled`, `FailClosed`, `ServerManaged`, `DeviceManaged`, `ManagedKeys`,
+  `SandboxEnabledByUndeterminedPolicy`, the merged `Resolved.Settings`, typed `Values` with lock state (`Meta`), and a
+  `PermissionsContext` for `ManagedSettings.Permissions.EvaluateAsync`. `ReadAsync` gives the device channels alone.
+  The surface is marked experimental.
+- **It works with CodeAlta's own sign-in**: `ResolveAsync` takes the GitHub token of the direct Copilot provider
+  (`CopilotDirectAuth`, GitHub app `Iv1.b507a08c87ecfe98`). The user needs no Copilot CLI sign-in. A probe
+  (`dotnet run copilot-policy-probe.cs`, posted on the issue) resolved an account with no policy, as the default CLI
+  identity and as `clientName: "CodeAlta"`.
+- **Its runtime is the Copilot CLI**, 92-141 MB per platform (`github-copilot-<version>-<platform>.tgz` of the
+  `github/copilot-cli` release, with `SHA256SUMS.txt`). It is not embedded in CodeAlta: it is downloaded on demand, as
+  `ce866e05d` "Install Copilot CLI on demand" did before `0f68f5043` removed the SDK provider.
+- **Not known yet**: whether GitHub delivers an enterprise's policy to `clientName: "CodeAlta"` (the service can refuse a
+  client, HTTP 466). The reporter's probe answers it (slice 0).
+
+## Decisions taken here
+
+- **The SDK reads, CodeAlta enforces.** The runtime only answers policy questions; sessions stay with the direct Copilot
+  provider. CodeAlta applies the result with its own permission modes and sandbox, as fleet policies already narrow them
+  (`FleetPolicyGuard.NarrowerMode`, `SessionFleetFloor`).
+- **A policy narrows, never widens**, and applies to **every session of CodeAlta on the computer, whatever its provider**,
+  as long as a signed-in Copilot account has one, or the computer has a device policy. A policy limited to Copilot
+  sessions would be escaped by switching to Claude Code or Codex. *To confirm with the owner.*
+- **The runtime is downloaded on demand, without being asked**, when a Copilot provider is first signed in (or at start
+  when one is signed in and the runtime is missing). The version is the one the SDK pins, checked against `SHA256SUMS.txt`,
+  kept under `~/.alta/cache/copilot-runtime/<version>/`. Its progress and its failures show on the provider's page.
+  Nothing is downloaded for a user without a Copilot provider.
+- **The runtime process lives only while it answers**: started off the startup path, it resolves and exits; the policy
+  is refreshed at start, at sign-in and sign-out, about every hour, and from a **Refresh** button.
+- **The last policy is kept** beside the provider's credential and applies from the next start, offline included, until
+  a newer one replaces it. Several Copilot accounts: the most restrictive of their policies applies.
+- **CodeAlta follows the runtime's flags exactly** (`BypassPermissionsDisabled`, `SandboxEnabledByUndeterminedPolicy`,
+  `FailClosed`); it adds no stricter fallback of its own.
+- **`clientName` is `CodeAlta`.**
+
+## What phase 1 enforces
+
+| Managed setting | In CodeAlta |
+| --- | --- |
+| `permissions.disableBypassPermissionsMode: "disable"` | No mode of rank 4 (`bypassPermissions`): not offered, refused on `alta session create/send --permission-mode`, not given to sub-sessions (`GetCreatedSessionPermissionMode` returns `Bypass` today), not by full trust (`_fullTrust`), nor by the host's "approve" default (`_autoApproveOwnedPermissions`), nor by automations, model-tier fallback or fleet nodes. A session in that mode is narrowed to `acceptEdits` at once. |
+| `permissions.disableAssistedPermissionsMode: true` | Claude Code's `auto` (rank 3), the nearest to Copilot's assisted mode, is refused the same way. |
+| `permissions.defaultMode` | `manual` -> `default`, `allow-all` -> `bypassPermissions` when allowed, `assisted` -> `default` (CodeAlta has no assisted mode). The user can still choose another allowed mode. |
+| `sandbox.enabled: true` | Every session is sandboxed: a scope that says `off`, or none, gives the `workspace` profile; a profile of the user stays when it is set. |
+| `sandbox.allowBypass: false` | No command runs outside the sandbox (as **Run outside: Never**). |
+| `sandbox.failIfUnavailable: true` | Already CodeAlta's behavior: without a backend, a sandboxed session runs no command. Checked by a test. |
+| `forceRemoteSettingsRefresh: true` | While no fresh server policy could be read since the start, sends are refused with the reason. |
+| `communication.support.url` | The link of the organization on every locked control. |
+
+## Slices
+
+- [ ] 0. **Gate**: the reporter runs the probe posted on #411. If GitHub delivers their policy to `CodeAlta`, go on; if
+      only to the CLI identity, stop and decide with the owner (ask GitHub, or another identity). Slices 1-3 do not wait
+      for it; merging does.
+- [x] 1. **Runtime on demand** (`CodeAlta.Agent.Copilot`): `CopilotRuntimeInstaller` and `CopilotPinnedRuntime`, on the
+      model of today's `CodexAppServerInstaller` (`PinnedDownloader`: lock shared by both instances, `.partial` folder,
+      marker) rather than the removed `CopilotCliInstaller`. The pin (1.0.109, the `CopilotCliVersion` of SDK 1.0.31) has
+      the size and SHA-256 of each `github-copilot-<version>-<platform>.tgz` in source, as the Codex pin does, instead of
+      reading `SHA256SUMS.txt` at run time. It keeps what the SDK's targets keep (the files of `prebuilds/<platform>`
+      beside those of the root, without the terminal CLI); tests.
+- [ ] 2. **Neutral contract** (`CodeAlta.Orchestration`): `ManagedPolicy` (source, account, widest permission mode,
+      default mode, sandbox required, run outside allowed, fresh policy required, support URL, managed keys, last
+      refresh) and `IManagedPolicySource` (current policy, change event, refresh), merged most-restrictive across
+      sources; no static mutable state; tests.
+- [ ] 3. **The Copilot reader** (`CodeAlta.Agent.Copilot`): reference `GitHub.Copilot.SDK` (bump to the current release),
+      start the runtime from slice 1 per refresh, `ResolveAsync(gitHubToken, clientName: "CodeAlta")` per signed-in
+      direct provider, `ReadAsync` when none, map to `ManagedPolicy`, keep the last one beside the credential, the
+      refresh schedule; for a Copilot ACP provider, `ResolveAsync()` with the CLI's current account (verify that the
+      runtime sees the npm CLI's sign-in); tests with a fake runtime; a live test gated by an environment variable,
+      as `AcpLiveTests`.
+- [ ] 4. **Permission modes** (`SessionRuntimeService`, `OwnedSessionCommandService`, `OwnedSessionSelection`,
+      `SessionFallbackCoordinator`, `AutomationRunner`, `FleetNodeService.Agents`): the ceiling and the default of the
+      table at every entry point, a running session narrowed when the policy arrives, refusals that name the policy;
+      tests per entry point.
+- [ ] 5. **Sandbox** (`SessionRuntimeService.Sandbox`, `SandboxScopes`): the floor (`off` and no scope give `workspace`),
+      no command outside, the refusal of sends for `forceRemoteSettingsRefresh`; tests.
+- [ ] 6. **CodeAlta Desktop**: the Agent chip and Settings > Permissions and Sandbox show what the policy locks (a lock
+      and the organization's link, no extra prose); the Copilot provider's page shows the runtime (downloading, ready,
+      failed with **Try again**) and the policy (none, or in force with its keys, last refresh, **Refresh**);
+      `alta session choices` omits what is refused. The TUI gets the enforcement through orchestration, no new screen.
+      Checked in the developer instance in both themes and a narrow window.
+- [ ] 7. **Developer check without an enterprise**: an environment variable read only by `--dev` gives a managed
+      document that the runtime composes as a device layer (`ManagedSettings.ComposeAsync`), so that the whole path
+      runs; it can only narrow.
+- [ ] 8. **Documentation**: the user guide (a section on the organization's policy in the Copilot provider's page,
+      linked from permission modes and the sandbox), `doc/runtime.md` (a managed policy as a source of limits: read in
+      the host, narrows only, applies to every session), `readme.md` feature list.
+- [ ] 9. **Validation**: .NET tests, `npm test`, `lunet build`; the reporter confirms on their enterprise.
+
+## Not in this plan
+
+- `permissions.allow/ask/deny` rules (through `ManagedSettings.Permissions.EvaluateAsync` on each request of
+  `SessionPermissionService`), `allowedMcpServers`/`deniedMcpServers`, the sandbox's `userPolicy` paths and network,
+  `model`/`effortLevel` defaults: a phase 2 plan once phase 1 is confirmed on a real enterprise.
+- An assisted mode of CodeAlta's own (the issue's side request): its own issue.
+- `enabledPlugins`, marketplaces, `telemetry` (OpenTelemetry export), `remoteControl`, `features.computerUse`,
+  `sandboxMcpServers`, `sandboxLspServers`, `auth.git/gh`: Copilot-specific or with no counterpart in CodeAlta yet.

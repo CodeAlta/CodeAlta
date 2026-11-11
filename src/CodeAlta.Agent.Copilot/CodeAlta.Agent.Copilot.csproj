@@ -16,6 +16,7 @@
     <ProjectReference Include="..\CodeAlta.Agent.Anthropic\CodeAlta.Agent.Anthropic.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
+    <ProjectReference Include="..\CodeAlta.NativeEngines\CodeAlta.NativeEngines.csproj" />
   </ItemGroup>
 
   <ItemGroup>
