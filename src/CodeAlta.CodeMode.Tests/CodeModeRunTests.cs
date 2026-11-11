@@ -278,6 +278,51 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task WhatOtherCodeAllocatesWhileTheScriptAwaits_IsNotTheScripts()
+    {
+        // The script resumes after an await on a thread of the pool, which ran other code meanwhile: here calls that
+        // allocate, as the sessions a script awaits do. A thread's allocation counter counts that code too.
+        var limits = CodeModeLimits.Default with { MemoryBytes = 2_000_000 };
+        var handler = Handler().On("tools.slow", (_, _) =>
+        {
+            for (var allocated = 0L; allocated < 3 * limits.MemoryBytes; allocated += 64 * 1024)
+            {
+                GC.KeepAlive(new byte[64 * 1024]);
+            }
+
+            return Task.FromResult(CodeModeCallResult.Text("settled"));
+        });
+
+        // The thread the script resumes on is the pool's choice: many awaits make it meet the thread it last started on.
+        var result = await RunAsync("let s = 0; for (let n = 0; n < 300; n++) { await tools.slow(); s += n; } return s;", handler, new() { Limits = limits });
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        Assert.AreEqual("44850", result.ValueJson);
+    }
+
+    [TestMethod]
+    public async Task TheMemoryLimit_CountsEachSliceAlone()
+    {
+        // Each slice allocates less than the limit, all of them together much more.
+        var limits = CodeModeLimits.Default with { MemoryBytes = 16_000_000 };
+        var slices = await RunAsync("""
+            let kept = 0;
+            for (let n = 0; n < 12; n++) {
+              await tools.echo({ n });
+              const a = [];
+              for (let i = 0; i < 10000; i++) a.push({ x: 'abc' + i });
+              kept += a.length;
+            }
+            return kept;
+            """, options: new() { Limits = limits });
+        var greedy = await RunAsync("await tools.echo({}); const a = []; for (;;) a.push({ x: 'abc' + a.length });", options: new() { Limits = limits });
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, slices.Status, slices.Error?.Message);
+        Assert.AreEqual("120000", slices.ValueJson);
+        Assert.AreEqual(CodeModeErrorKind.Memory, greedy.Error?.Kind, "A slice after an await still has its limit.");
+    }
+
+    [TestMethod]
     public async Task ASlowRegularExpression_EndsWithItsOwnMessage()
     {
         var result = await RunAsync("return /(a+)+$/.test('a'.repeat(40) + '!');", options: new() { Limits = CodeModeLimits.Default with { RegexTimeout = TimeSpan.FromMilliseconds(100) } });
