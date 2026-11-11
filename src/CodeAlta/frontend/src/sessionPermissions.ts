@@ -209,12 +209,24 @@ function validCommand(entry: SessionPermissionCommand, session: string): boolean
     && typeof entry.shortened === "boolean";
 }
 /**
- * Whether a request may be allowed from now on: the load of a skill of an MCP server whose files can be checked, or a
- * site to open in the user's own browser.
+ * Whether a request may be allowed from now on: the load of a skill of an MCP server whose files can be checked, a
+ * site to open in the user's own browser, or a sign-in to a website (for that site, for 30 days).
  */
 export function offersAllowAlways(entry: SessionPermissionCommand): boolean {
   return entry.kind === "skill" ? !!entry.skill && entry.skill.dynamic === false
+    : entry.kind === "credential" ? !!entry.credential && entry.credential.action === "sign_in"
     : entry.kind === "browser" && !!entry.browser && typeof entry.browser.site === "string";
+}
+/**
+ * The site and the sign-in a request to sign in to a website names, for its card: the host of its origin, and the label of
+ * the sign-in from its detail, "With <label> of <provider>".
+ */
+export function signInOf(subject: string, detail: string): { site: string; label: string } {
+  let site = subject;
+  try { site = new URL(subject).host || subject; } catch { /* not an address: shown as it is */ }
+  const rest = detail.startsWith("With ") ? detail.slice(5) : detail;
+  const of = rest.lastIndexOf(" of ");
+  return { site, label: of > 0 ? rest.slice(0, of) : rest };
 }
 // Each kind carries its own complete shape and nothing of the others': a command has its command line and its
 // folder, a file change has the root it asks to write under, a skill has the skill of an MCP server it asks to load,
@@ -234,7 +246,7 @@ function shaped(entry: SessionPermissionCommand): boolean {
   }
   if (entry.kind === "credential") {
     const credential = entry.credential;
-    return !!credential && ["bind", "unbind", "add_provider", "remove_provider"].includes(credential.action) && identity(credential.subject)
+    return !!credential && ["bind", "unbind", "add_provider", "remove_provider", "sign_in"].includes(credential.action) && identity(credential.subject)
       && text(credential.detail, 1024, true) && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null
       && entry.skill == null && entry.browser == null;
   }

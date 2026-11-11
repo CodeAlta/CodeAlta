@@ -284,6 +284,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (await AskCredentialAsync(context, "remove_provider", view.Id, view.Secrets == 0 ? $"{view.DisplayName}; nothing changes in the vault."
                 : $"{view.DisplayName} and its {view.Secrets} secrets; nothing changes in the vault.").ConfigureAwait(false) is { } refused) return refused;
             var names = broker.Store.Bindings.UnbindProvider(view.Id);
+            broker.SignIns.RemoveProvider(view.Id);
             broker.Lock(view.Id);
             broker.Settings.Remove(view.Id);
             AltaJsonlWriter.WriteRecord(context.Stdout, new { type = "alta.credential.removed", version = 1, correlationId = context.CorrelationId, provider = view.Id, secrets = names.ToArray() });

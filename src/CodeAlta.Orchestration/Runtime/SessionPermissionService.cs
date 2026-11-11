@@ -239,6 +239,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private static string OnlyTheUserReason(AgentPermissionRequest request)
         => IsOutsideSandbox(request)
             ? "only the user can let a command run outside the sandbox of the session, and this run has no user"
+            : request is AgentCredentialPermissionRequest { Action: AgentCredentialPermissionRequest.SignInAction }
+            ? "only the user can let a session sign in to a website with their sign-in, and this run has no user"
             : request is AgentCredentialPermissionRequest
             ? "only the user can change where their secrets are kept, and this run has no user"
             : "only the user can let a session use their own browser, and this run has no user";
@@ -271,8 +273,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // Full trust, unless the policy of the organization refuses it.
     private bool Trusted => FullTrust && !BypassRefused();
 
-    // Whether the user may allow a request from now on: only the load of a skill whose files can be checked.
-    private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot) => snapshot.Skill is { Dynamic: false } || snapshot.Browser is { Site: not null };
+    // Whether the user may allow a request from now on: the load of a skill whose files can be checked, a site of the user's
+    // browser, and a sign-in to a site (for that site, for 30 days).
+    private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot)
+        => snapshot.Skill is { Dynamic: false } || snapshot.Browser is { Site: not null } || snapshot.Credential is { Action: AgentCredentialPermissionRequest.SignInAction };
 
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
@@ -699,7 +703,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 && ValidOwnedText(browser.Profile, OwnedIdentityLimit, required: true)
                 && ValidOwnedText(browser.Site, OwnedIdentityLimit, required: false, identity: browser.Site is not null),
             AgentCredentialPermissionRequest credential => request.Kind == AgentCredentialPermissionRequest.CredentialKind
-                && credential.Action is "bind" or "unbind" or "add_provider" or "remove_provider"
+                && credential.Action is "bind" or "unbind" or "add_provider" or "remove_provider" or AgentCredentialPermissionRequest.SignInAction
                 && ValidOwnedText(credential.Subject, OwnedIdentityLimit, required: true, identity: true)
                 && ValidOwnedText(credential.Detail, OwnedReasonLimit, required: true),
             _ => false,

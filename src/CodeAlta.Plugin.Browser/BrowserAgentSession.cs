@@ -192,8 +192,21 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
                 PageAdded = page => Annotations?.Attach(page),
                 // Where the user browses too, "this page" is the tab they look at: the tools follow it.
                 FollowFrontTab = () => _openedByUser,
+                SignIn = SignInAsync,
             });
         }
+    }
+
+    // The sign-in of a site for fill_login. The user's own browser fills its sign-ins with its own password manager, and a
+    // sandboxed session gets no value of a vault.
+    private async Task<LoginFillGrant> SignInAsync(string origin, string? signInId, CancellationToken cancellationToken)
+    {
+        if (IsUserProfile) return LoginFillGrant.Unsupported("This session browses in the user's own browser, which signs in with its own password manager: ask the user to sign in there.");
+        var sandbox = Sandbox ?? (_host.Sandbox is { } read ? await read(SessionId, cancellationToken).ConfigureAwait(false) : null);
+        if (sandbox is not null) return LoginFillGrant.Unsupported($"This session is sandboxed (profile '{sandbox.Profile}'): it cannot sign in with the sign-ins of the user. Ask the user to sign in.");
+        if (!_host.HasUser) return LoginFillGrant.Denied("Only the user can let a session sign in to a website, and this run has no user.");
+        if (_host.SignIn is not { } signIn) return LoginFillGrant.Unsupported("This CodeAlta keeps no sign-ins of websites.");
+        return await signIn(SessionId, origin, signInId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Closes the tabs of the session when no tool was called for a while; the next call opens them again.</summary>

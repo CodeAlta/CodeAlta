@@ -900,9 +900,229 @@
     return elementForUid(options.uid).contentWindow;
   }
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // The fields of a sign-in, for fill_login. The host types the values with the input of the browser: this only finds
+  // the fields, checks them, focuses one, tells whether they still hold something, and clears them. No value of a field
+  // is ever read or returned. A field is one of a document of the site the host names (this document, or a frame of the
+  // same origin in it), visible, editable, in a form that sends to that site or in no form.
+  // ---------------------------------------------------------------------------------------------------------------
+
+  const loginHandles = new Map();
+  let nextLoginHandle = 1;
+
+  function originOfUrl(text, base) {
+    try { return new URL(text, base).origin; } catch (error) { return 'null'; }
+  }
+
+  // The documents of the site this agent reaches: its own, and the frames of the same origin in it, visible.
+  function loginDocuments(origin) {
+    const documents = [];
+    const visit = function (doc, depth) {
+      let own = 'null';
+      try { own = doc.location ? doc.location.origin : 'null'; } catch (error) { own = 'null'; }
+      if (own !== origin) return;
+      documents.push(doc);
+      if (depth >= 3) return;
+      const frames = doc.querySelectorAll('iframe,frame');
+      for (let index = 0; index < frames.length; index++) {
+        const frame = frames[index];
+        if (!isVisibleBox(frame)) continue;
+        let inner = null;
+        try { inner = frame.contentDocument; } catch (error) { inner = null; }
+        if (inner) visit(inner, depth + 1);
+      }
+    };
+    visit(document, 0);
+    return documents;
+  }
+
+  // The inputs of a document, those of open shadow roots included.
+  function inputsOf(root, into) {
+    const all = root.querySelectorAll('*');
+    for (let index = 0; index < all.length; index++) {
+      const element = all[index];
+      if (element.localName === 'input') into.push(element);
+      if (element.shadowRoot) inputsOf(element.shadowRoot, into);
+    }
+    return into;
+  }
+
+  // Seen by the user: rendered, not transparent, with a box of some size on the document, and the frames around it too.
+  function isVisibleBox(element) {
+    if (!element.isConnected) return false;
+    const own = styleOf(element);
+    if (own && (own.visibility === 'hidden' || own.visibility === 'collapse')) return false;
+    for (let current = element; current && current.nodeType === 1; current = parentOf(current)) {
+      const style = styleOf(current);
+      if (style && (style.display === 'none' || parseFloat(style.opacity) < 0.1)) return false;
+    }
+    const rect = element.getBoundingClientRect();
+    if (!(rect.width >= 5 && rect.height >= 5)) return false;
+    const view = viewOf(element);
+    if (rect.right + view.scrollX <= 0 || rect.bottom + view.scrollY <= 0) return false;
+    let frame = null;
+    try { frame = view.frameElement; } catch (error) { frame = null; }
+    return !frame || isVisibleBox(frame);
+  }
+
+  function isLoginEditable(element) {
+    return isVisibleBox(element) && !element.readOnly && !(isDisabled(element) && element.getAttribute('aria-disabled') !== 'true');
+  }
+
+  // Where a form sends what it holds: its action, or the one of its default button.
+  function formSendsTo(form, origin) {
+    const doc = form.ownerDocument;
+    const action = form.getAttribute('action');
+    if (originOfUrl(action === null || action.trim() === '' ? doc.URL : action, doc.baseURI) !== origin) return false;
+    const buttons = form.querySelectorAll('button,input[type=submit],input[type=image]');
+    for (let index = 0; index < buttons.length; index++) {
+      const button = buttons[index];
+      if (button.localName === 'button' && (button.getAttribute('type') || 'submit').toLowerCase() !== 'submit') continue;
+      const target = button.getAttribute('formaction');
+      if (target !== null && target.trim() !== '' && originOfUrl(target, doc.baseURI) !== origin) return false;
+      break;
+    }
+    return true;
+  }
+
+  const usernamePattern = /user|login|email|e-mail|account|identifier|loginfmt|nick/i;
+  const otpPattern = /otp|totp|one.?time|2fa|mfa|two.?factor|verification.?code|auth.?code|security.?code|^code$|app_otp/i;
+
+  function nameOfField(element) {
+    return (element.getAttribute('name') || '') + ' ' + (element.id || '') + ' ' + (element.getAttribute('autocomplete') || '');
+  }
+
+  function isOtpField(element) {
+    const type = (element.type || 'text').toLowerCase();
+    if (!/^(text|tel|number|password)$/.test(type)) return false;
+    return /one-time-code/i.test(element.getAttribute('autocomplete') || '') || otpPattern.test((element.getAttribute('name') || '') + ' ' + (element.id || ''));
+  }
+
+  function isUsernameField(element, loose) {
+    const type = (element.type || 'text').toLowerCase();
+    if (!/^(text|email|tel)$/.test(type) || isOtpField(element)) return false;
+    const autocomplete = (element.getAttribute('autocomplete') || '').toLowerCase();
+    if (/\b(username|email)\b/.test(autocomplete) || type === 'email') return true;
+    return loose || usernamePattern.test(nameOfField(element));
+  }
+
+  function rememberLogin(element) {
+    const handle = 'login-' + nextLoginHandle++;
+    loginHandles.set(handle, hasWeakRef ? new WeakRef(element) : element);
+    return handle;
+  }
+
+  function loginElement(handle) {
+    const reference = loginHandles.get(String(handle));
+    if (!reference) return null;
+    const element = hasWeakRef ? reference.deref() : reference;
+    return element && element.isConnected ? element : null;
+  }
+
+  // The fields of a sign-in on the page: the password, the user name before it in the same form, and a one-time code;
+  // or, on a page that asks for the user name first, that field alone. A reason says why there are none.
+  function loginFields(options) {
+    const origin = String(options.origin);
+    loginHandles.clear();
+    const documents = loginDocuments(origin);
+    if (!documents.length) return { reason: 'other-origin' };
+    let passwords = [];
+    let reason = null;
+    for (let index = 0; index < documents.length; index++) {
+      const inputs = inputsOf(documents[index], []);
+      for (let position = 0; position < inputs.length; position++) if ((inputs[position].type || '').toLowerCase() === 'password') passwords.push(inputs[position]);
+    }
+    for (let index = 0; index < passwords.length; index++) {
+      const password = passwords[index];
+      if (isOtpField(password)) continue;
+      if (!isLoginEditable(password)) { reason = reason || 'hidden'; continue; }
+      const form = password.form;
+      if (form && !formSendsTo(form, origin)) { reason = 'form-elsewhere'; continue; }
+      const scope = form ? Array.prototype.slice.call(form.elements) : inputsOf(password.ownerDocument, []);
+      const visiblePasswords = scope.filter(function (item) { return item.localName === 'input' && (item.type || '').toLowerCase() === 'password' && !isOtpField(item) && isVisibleBox(item); });
+      if (visiblePasswords.length > 1) { reason = 'several-passwords'; continue; }
+      let username = null;
+      for (let position = 0; position < scope.length; position++) {
+        const item = scope[position];
+        if (item === password) break;
+        if (item.localName !== 'input' || !isLoginEditable(item) || !isUsernameField(item, true)) continue;
+        // The last one before the password, unless an earlier one says it is the user name.
+        if (!username || !/username/i.test(username.getAttribute('autocomplete') || '')) username = item;
+      }
+      let otp = null;
+      for (let position = 0; position < scope.length; position++) {
+        const item = scope[position];
+        if (item !== password && item.localName === 'input' && isOtpField(item) && isLoginEditable(item)) { otp = item; break; }
+      }
+      return {
+        password: rememberLogin(password),
+        username: username ? rememberLogin(username) : null,
+        usernameFilled: !!username && username.value.length > 0,
+        otp: otp ? rememberLogin(otp) : null,
+      };
+    }
+    if (passwords.length) return { reason: reason || 'hidden' };
+    // No password on the page: a page that asks for the user name first, or for a one-time code.
+    for (let index = 0; index < documents.length; index++) {
+      const inputs = inputsOf(documents[index], []);
+      let otp = null, username = null;
+      for (let position = 0; position < inputs.length; position++) {
+        const item = inputs[position];
+        if (!isLoginEditable(item) || (item.form && !formSendsTo(item.form, origin))) continue;
+        if (!otp && isOtpField(item)) otp = item;
+        else if (!username && isUsernameField(item, false)) username = item;
+      }
+      if (otp) return { otp: rememberLogin(otp), passwordless: true };
+      if (username) return { username: rememberLogin(username), usernameFilled: username.value.length > 0, passwordless: true };
+    }
+    return { reason: reason || 'no-password' };
+  }
+
+  // Focuses a field before the host types in it, after checking it again, and selects what it holds so that the typing
+  // replaces it.
+  function loginFocus(options) {
+    const element = loginElement(options.field);
+    const origin = String(options.origin);
+    if (!element || !isLoginEditable(element)) return { focused: false };
+    let own = 'null';
+    try { own = element.ownerDocument.location.origin; } catch (error) { own = 'null'; }
+    if (own !== origin || (element.form && !formSendsTo(element.form, origin))) return { focused: false };
+    scrollIntoViewIfNeeded(element);
+    focusElement(element);
+    try { element.select(); } catch (error) { /* an input type without a selection */ }
+    return { focused: deepActiveElement(document) === element || element.ownerDocument.activeElement === element };
+  }
+
+  // Whether each field is still on the page, and whether it holds something: never what.
+  function loginState(options) {
+    const fields = options.fields || [];
+    return {
+      fields: fields.map(function (handle) {
+        const element = loginElement(handle);
+        return { present: !!element && isVisibleBox(element), filled: !!element && element.value.length > 0 };
+      }),
+    };
+  }
+
+  // Empties fields the host typed in, after a sign-in the page did not take.
+  function loginClear(options) {
+    const fields = options.fields || [];
+    let cleared = 0;
+    for (let index = 0; index < fields.length; index++) {
+      const element = loginElement(fields[index]);
+      if (!element) continue;
+      setNativeValue(element, '');
+      fireInput(element);
+      fireChange(element);
+      cleared++;
+    }
+    return { cleared: cleared };
+  }
+
   const operations = {
     snapshot: takeSnapshot, point: point, prepareClick: prepareClick, frameBox: frameBox, rect: rectOf, prepareFill: prepareFill,
     focus: focus, hasText: hasText, waitForStableDom: waitForStableDom, info: info, remoteFrames: remoteFrames,
+    loginFields: loginFields, loginFocus: loginFocus, loginState: loginState, loginClear: loginClear,
   };
 
   function errorResult(error) {

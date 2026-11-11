@@ -84,6 +84,12 @@ internal sealed class BrowserSessionOptions
     /// user browses too, so that the tools act on the tab they look at; null for never.
     /// </summary>
     public Func<bool>? FollowFrontTab { get; init; }
+
+    /// <summary>
+    /// Gets what gives <c>fill_login</c> the sign-in the user shared for a site, after asking the user; null where this
+    /// browser signs in nowhere (the tool then answers <c>unsupported</c>).
+    /// </summary>
+    public BrowserSignIn? SignIn { get; init; }
 }
 
 /// <summary>

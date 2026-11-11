@@ -36,6 +36,26 @@ public sealed class SessionPermissionServiceTests
     }
 
     [TestMethod]
+    public async Task CredentialRequest_WaitsUnderAutoApproveAndOnlyASignInIsAllowedForItsSite()
+    {
+        await using var service = new SessionPermissionService();
+        AgentCredentialPermissionRequest Credential(string interaction, string action, string subject) => new(new ModelProviderId("browser"), "session", DateTimeOffset.UnixEpoch, null, interaction, action, subject, "With GitHub of 1Password");
+        var bind = await service.RegisterAsync("session", Credential("bind", "bind", "TOKEN"), true, CancellationToken.None);
+        var signIn = await service.RegisterAsync("session", Credential("sign-in", AgentCredentialPermissionRequest.SignInAction, "https://github.com"), true, CancellationToken.None);
+        Assert.IsTrue(bind.IsPending && signIn.IsPending, "No permission mode answers a request about the vaults.");
+        Assert.AreEqual(new SessionPermissionCredential("sign_in", "https://github.com", "With GitHub of 1Password"), signIn.Snapshot.Credential);
+        Assert.IsFalse(await service.ResolveAsync(bind.Snapshot.Handle, AgentPermissionDecisionKind.AllowAlways), "A change of the vaults is allowed once only.");
+        Assert.IsTrue(await service.ResolveAsync(signIn.Snapshot.Handle, AgentPermissionDecisionKind.AllowAlways));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowAlways, (await signIn.Completion).Kind);
+        Assert.IsTrue(await service.ResolveAsync(bind.Snapshot.Handle, AgentPermissionDecisionKind.Deny));
+
+        await using var trusted = new SessionPermissionService { FullTrust = true };
+        var unattended = await trusted.RequestForSessionAsync("session", Credential("headless", AgentCredentialPermissionRequest.SignInAction, "https://github.com"), CancellationToken.None);
+        Assert.AreEqual((AgentPermissionDecisionKind.Deny, AgentPermissionDecisionSource.Unattended), (unattended.Kind, unattended.Source));
+        StringAssert.Contains(unattended.DescribeDenial(), "sign in to a website");
+    }
+
+    [TestMethod]
     public async Task BrowserRequest_IsDeniedByAHostThatTrustsItsSessions_ForNobodyIsThereToAgree()
     {
         await using var service = new SessionPermissionService { FullTrust = true };

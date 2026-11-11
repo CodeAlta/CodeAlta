@@ -170,17 +170,18 @@ public sealed record AgentBrowserPermissionRequest(
 
 /// <summary>
 /// Permission request of an agent to change where the secrets of the user are kept: bind a secret to an item of a vault, add
-/// or remove a credential provider. It is asked in every permission mode: no mode answers it for the user, and a host without
-/// a user denies it.
+/// or remove a credential provider; or to sign in to a website with a sign-in the user shared. It is asked in every permission
+/// mode: no mode answers it for the user, and a host without a user denies it. Only a sign-in can be allowed from now on: for
+/// that site, for 30 days.
 /// </summary>
 /// <param name="ProviderId">The model provider identifier.</param>
 /// <param name="SessionId">The session identifier.</param>
 /// <param name="Timestamp">The event timestamp.</param>
 /// <param name="RunId">Optional run identifier.</param>
 /// <param name="InteractionId">Stable interaction identifier.</param>
-/// <param name="Action">What the agent asks: <c>bind</c>, <c>unbind</c>, <c>add_provider</c> or <c>remove_provider</c>.</param>
-/// <param name="Subject">What it is about: the name of the secret, or the id of the provider.</param>
-/// <param name="Detail">What happens, in a sentence: the vault and the item, or the type of the provider. Never a value.</param>
+/// <param name="Action">What the agent asks: <c>bind</c>, <c>unbind</c>, <c>add_provider</c>, <c>remove_provider</c> or <c>sign_in</c>.</param>
+/// <param name="Subject">What it is about: the name of the secret, the id of the provider, or the origin of the site to sign in to.</param>
+/// <param name="Detail">What happens, in a sentence: the vault and the item, the type of the provider, or the sign-in and its vault. Never a value.</param>
 public sealed record AgentCredentialPermissionRequest(
     ModelProviderId ProviderId,
     string SessionId,
@@ -194,6 +195,9 @@ public sealed record AgentCredentialPermissionRequest(
 {
     /// <summary>The kind of the request.</summary>
     public const string CredentialKind = "credential";
+
+    /// <summary>The action of a sign-in to a website, which the user can allow for that site.</summary>
+    public const string SignInAction = "sign_in";
 }
 
 /// <summary>
@@ -390,8 +394,9 @@ public enum AgentPermissionDecisionKind
 
     /// <summary>
     /// Allow the action from now on, also in other sessions: the one who asked keeps the approval. Only a request that
-    /// offers it (<see cref="AgentSkillPermissionRequest"/> of a skill whose files can be checked, or
-    /// <see cref="AgentBrowserPermissionRequest"/> of a site) is answered so.
+    /// offers it (<see cref="AgentSkillPermissionRequest"/> of a skill whose files can be checked,
+    /// <see cref="AgentBrowserPermissionRequest"/> of a site, or the sign-in of an <see cref="AgentCredentialPermissionRequest"/>,
+    /// allowed for that site) is answered so.
     /// </summary>
     AllowAlways,
 }

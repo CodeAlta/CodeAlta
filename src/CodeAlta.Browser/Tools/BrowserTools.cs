@@ -166,6 +166,10 @@ internal static class BrowserTools
                     await MaybeSnapshotAsync(call, state);
                 }),
 
+            Tool("fill_login", "input", BrowserLogin.Description, false,
+                BrowserToolSchema.ForPage().String("signInId", "Only after an answer choose_sign_in: the id of the sign-in to use, from its list."),
+                async call => await BrowserLogin.FillAsync(call, await PageAsync(call))),
+
             Tool("handle_dialog", "input", "If a browser dialog was opened, use this command to handle it", false,
                 BrowserToolSchema.ForPage().Enum("action", "Whether to dismiss or accept the dialog", ["accept", "dismiss"], required: true).String("promptText", "Optional prompt text to enter into the dialog."),
                 async call =>

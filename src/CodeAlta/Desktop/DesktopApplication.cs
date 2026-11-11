@@ -1082,6 +1082,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 browserHost.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
                 browserHost.Sandbox = async (sessionId, token) => DesktopBrowser.Sandbox(await host.RuntimeService.GetSandboxReachAsync(sessionId, token).ConfigureAwait(false));
                 browserHost.RequestPermission = async (sessionId, request, token) => await host.RuntimeService.Permissions.RequestForSessionAsync(sessionId, request, token).ConfigureAwait(false);
+                // fill_login types a sign-in the user shared for the site of the tab, after the card of the session.
+                browserHost.SignIn = (sessionId, origin, signInId, token) =>
+                    DesktopSignIns.FillAsync(host.Credentials, host.RuntimeService.Permissions.RequestForSessionAsync, sessionId, origin, signInId, token);
                 var mcpPort = Mcp.DesktopMcpEndpoint.For(options).Port;
                 browserHost.ReservedPorts = () => DesktopBrowser.ReservedPorts(mcpPort);
                 // The UI tools and the browser tools have the same names: a session has one set or the other.

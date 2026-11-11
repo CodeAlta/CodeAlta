@@ -46,6 +46,13 @@ internal sealed class TestSite : IAsyncDisposable
             using var reader = new StreamReader(request.Body);
             return Results.Content("echo:" + await reader.ReadToEndAsync(), "text/plain");
         });
+        // The sign-in of the fill_login tests: octocat with its password, then a one-time code, then a welcome page.
+        app.MapPost("/session", async (HttpRequest request) =>
+        {
+            var form = await request.ReadFormAsync();
+            return form["login"] == "octocat" && form["password"] == "hunter2-github" ? Results.Redirect("/two-factor") : Results.Redirect("/login?error=1");
+        });
+        app.MapPost("/two-factor", async (HttpRequest request) => (await request.ReadFormAsync())["otp"] == "123456" ? Results.Redirect("/welcome") : Results.Redirect("/two-factor?error=1"));
         await app.StartAsync();
         return new TestSite(app, port);
     }
@@ -75,6 +82,56 @@ internal sealed class TestSite : IAsyncDisposable
             <div id="keys" tabindex="0">keys:</div>
             <script>document.getElementById('keys').addEventListener('keydown', e => document.getElementById('keys').textContent += ' ' + (e.ctrlKey ? 'Control+' : '') + e.key);</script>
             </body></html>
+            """),
+        ("/login", """
+            <!doctype html><html><head><title>Sign in to Demo</title></head><body>
+            <form method="post" action="/session">
+              <label>Username or email <input id="login" name="login" autocomplete="username"></label>
+              <label>Password <input id="password" name="password" type="password" autocomplete="current-password"></label>
+              <button type="submit">Sign in</button>
+            </form></body></html>
+            """),
+        ("/two-factor", """
+            <!doctype html><html><head><title>Two-factor</title></head><body>
+            <form method="post" action="/two-factor"><label>Code <input id="otp" name="otp" autocomplete="one-time-code" inputmode="numeric"></label><button type="submit">Verify</button></form>
+            </body></html>
+            """),
+        ("/welcome", """
+            <!doctype html><html><head><title>Welcome</title></head><body><h1>Welcome back</h1></body></html>
+            """),
+        // The password field is out of the page: a user would never see what is typed there.
+        ("/login-hidden", """
+            <!doctype html><html><head><title>Hidden</title></head><body>
+            <form method="post" action="/session">
+              <label>Username <input id="login" name="login" autocomplete="username"></label>
+              <input id="password" name="password" type="password" style="position:absolute;left:-9999px">
+              <button type="submit">Sign in</button>
+            </form></body></html>
+            """),
+        // The form sends to another site than the page.
+        ("/login-elsewhere", """
+            <!doctype html><html><head><title>Elsewhere</title></head><body>
+            <form method="post" action="OTHER/session">
+              <label>Username <input id="login" name="login" autocomplete="username"></label>
+              <label>Password <input id="password" name="password" type="password"></label>
+              <button type="submit">Sign in</button>
+            </form></body></html>
+            """),
+        // The sign-in form is in a frame of another site.
+        ("/login-frame", """
+            <!doctype html><html><head><title>Framed</title></head><body>
+            <h1>Sign in below</h1>
+            <iframe id="other" src="OTHER/login" style="width:400px;height:200px"></iframe>
+            </body></html>
+            """),
+        // A page of scripts that refuses the sign-in and keeps what was typed.
+        ("/login-script", """
+            <!doctype html><html><head><title>Scripted</title></head><body>
+            <form id="form" onsubmit="event.preventDefault(); document.getElementById('error').textContent = 'Incorrect username or password.';">
+              <label>Username <input id="login" name="login" autocomplete="username"></label>
+              <label>Password <input id="password" name="password" type="password"></label>
+              <button type="submit">Sign in</button>
+            </form><p id="error"></p></body></html>
             """),
         ("/second", """
             <!doctype html><html><head><title>Second page</title></head><body><h1>The second page</h1><p>Welcome.</p></body></html>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionPermissionCommand, SessionPermissionResolution, SessionPermissionsPage } from "#neoastra";
-import { createPermissionReviewer, offersAllowAlways, type PermissionReviewState } from "./sessionPermissions";
+import { createPermissionReviewer, offersAllowAlways, signInOf, type PermissionReviewState } from "./sessionPermissions";
 import { testLimit } from "./testTime";
 
 const epoch = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -643,3 +643,12 @@ test("a shown entry is checked without changing what is shown, and the check say
   assert.equal(await f.wait(selection.waits(shown)), null, "Another selection says nothing");
   assert.equal(calls, 4, "and reads nothing");
 }));
+
+test("a sign-in to a website is allowed once or for its site, and its card names the site and the sign-in", () => {
+  const signIn = (action: string): SessionPermissionCommand => ({ ...command(), kind: "credential", command: null, workingDirectory: null,
+    credential: { action, subject: "https://github.com", detail: "With GitHub (work) of 1Password (personal)" } });
+  assert.equal(offersAllowAlways(signIn("sign_in")), true);
+  assert.equal(offersAllowAlways(signIn("bind")), false, "a change of the vaults is allowed once only");
+  assert.deepEqual(signInOf("https://github.com", "With GitHub (work) of 1Password (personal)"), { site: "github.com", label: "GitHub (work)" });
+  assert.deepEqual(signInOf("http://127.0.0.1:8080", "With Local of Vault of mine"), { site: "127.0.0.1:8080", label: "Local of Vault" });
+});

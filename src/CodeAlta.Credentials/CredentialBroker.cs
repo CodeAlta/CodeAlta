@@ -137,6 +137,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private readonly CredentialProviderTypes _types;
     private readonly CredentialProviderSettings _settings;
     private readonly LocalSecretStore _store;
+    private readonly SignIns _signIns;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, ProviderEntry> _providers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Held> _held = new(StringComparer.OrdinalIgnoreCase);
@@ -162,6 +163,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         _types = options.Types ?? new CredentialProviderTypes(new VaultCommandRunner());
         _settings = new CredentialProviderSettings(Path.Combine(options.GlobalRoot, "config.toml"));
         _store = new LocalSecretStore(options.GlobalRoot);
+        _signIns = new SignIns(_store.Bindings, options.Time);
         // The values that expire (a duration of the memory, a one-time code) are read again, without a prompt.
         _expiry = options.Time.CreateTimer(_ => _ = RefreshExpiredAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
@@ -177,6 +179,9 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
     /// <summary>Gets the secrets of this machine and their bindings.</summary>
     public LocalSecretStore Store => _store;
+
+    /// <summary>Gets the sign-ins of websites of this machine and the sites the user allowed them on.</summary>
+    public SignIns SignIns => _signIns;
 
     /// <summary>Gets whether this host can show the prompt of a vault.</summary>
     public bool CanPrompt => _options.CanPrompt;
@@ -454,6 +459,61 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             entry.Gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Reads the user name, the password and the one-time code of a sign-in now, without a prompt, for one fill of a page.
+    /// Each value is told to the masking of the host before it is given, and none is kept: the caller disposes the result as
+    /// soon as the values are typed.
+    /// </summary>
+    /// <param name="id">The id of the sign-in.</param>
+    /// <param name="cancellationToken">A token to stop.</param>
+    /// <returns>The values, for the fill only.</returns>
+    /// <exception cref="KeyNotFoundException">No sign-in has that id.</exception>
+    /// <exception cref="CredentialProviderException">
+    /// The provider cannot read them: the vault is locked (<see cref="CredentialFailure.Locked"/>), the item is missing, or the
+    /// provider is not configured. The message names no value.
+    /// </exception>
+    public async Task<SignInValues> ReadSignInAsync(string id, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        if (!_signIns.TryGet(id, out var signIn)) throw new KeyNotFoundException($"No sign-in is named '{id}'.");
+        Synchronize();
+        ProviderEntry entry;
+        lock (_gate)
+        {
+            entry = _providers.GetValueOrDefault(signIn.Provider)
+                ?? throw new CredentialProviderException(CredentialFailure.Failed, $"The sign-in {signIn.Label} names the credential provider '{signIn.Provider}', which is not configured.");
+        }
+
+        var provider = entry.Provider ?? throw new CredentialProviderException(CredentialFailure.Failed, entry.Status.Message ?? "This provider cannot be used.");
+        await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(40));
+            var username = await ReadFieldAsync(provider, signIn.Username, timeout.Token).ConfigureAwait(false);
+            var password = await ReadFieldAsync(provider, signIn.Password, timeout.Token).ConfigureAwait(false);
+            var totp = signIn.Totp is null ? null : await ReadFieldAsync(provider, signIn.Totp, timeout.Token).ConfigureAwait(false);
+            return new SignInValues(username.Value, password.Value, totp?.Value, totp?.ExpiresAt);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new CredentialProviderException(CredentialFailure.Failed, $"The vault did not give the sign-in {signIn.Label} in time.");
+        }
+        finally
+        {
+            entry.Gate.Release();
+        }
+    }
+
+    // Reads one field of a sign-in, never with a prompt, and masks it before anything else gets it.
+    private async Task<CredentialValue> ReadFieldAsync(ICredentialProvider provider, string reference, CancellationToken cancellationToken)
+    {
+        var value = await provider.ReadAsync(reference, interactive: false, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(value.Value)) throw new CredentialProviderException(CredentialFailure.NotFound, "The vault gave an empty value.");
+        _options.Mask(value.Value);
+        return value;
     }
 
     /// <summary>

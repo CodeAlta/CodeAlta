@@ -71,6 +71,8 @@ internal sealed partial class SecretsService
         try
         {
             var names = Credentials!.Store.Bindings.UnbindProvider(request!.Id);
+            // Its sign-ins of websites go with it, and the sites allowed for them.
+            Credentials.SignIns.RemoveProvider(request.Id);
             Credentials.Lock(request.Id);
             if (!Credentials.Settings.Remove(request.Id) && names.Count == 0) return new("not_found", null);
             Changed(names);

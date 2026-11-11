@@ -58,6 +58,7 @@ public sealed class BrowserPluginHost
     private Func<string, AgentPermissionRequest, CancellationToken, ValueTask<AgentPermissionDecision>>? _requestPermission;
     private Action<string>? _activated;
     private Func<IReadOnlyList<int>>? _reservedPorts;
+    private Func<string, string, string?, CancellationToken, Task<CodeAlta.Browser.Tools.LoginFillGrant>>? _signIn;
 
     /// <summary>Creates what a host gives the plugin.</summary>
     /// <param name="stateRoot">The state root of the application: the browser keeps its profiles and files under <c>browser/</c> there.</param>
@@ -122,6 +123,19 @@ public sealed class BrowserPluginHost
     {
         get => Volatile.Read(ref _reservedPorts);
         set => Volatile.Write(ref _reservedPorts, value);
+    }
+
+    /// <summary>
+    /// Gets or sets what gives the tool <c>fill_login</c> of a session the sign-in the user shared for a site: it gets the
+    /// session, the origin of the top frame of the tab (read from the browser, never from the agent) and the sign-in the
+    /// agent chose among several (or null); it finds the sign-ins of that origin, asks the user on the card of the session
+    /// unless the user allowed that site already, and reads the values from the vault, masked. Null where the host keeps no
+    /// sign-ins: the tool then answers <c>unsupported</c>. It is never called for the user's own browser or a sandboxed session.
+    /// </summary>
+    public Func<string, string, string?, CancellationToken, Task<CodeAlta.Browser.Tools.LoginFillGrant>>? SignIn
+    {
+        get => Volatile.Read(ref _signIn);
+        set => Volatile.Write(ref _signIn, value);
     }
 
     private BrowserPlugin? _plugin;

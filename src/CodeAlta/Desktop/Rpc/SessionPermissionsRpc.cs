@@ -75,7 +75,8 @@ internal sealed class SessionPermissionsService
                         && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Skill is null,
                     "skill" => value.Skill is { } skill && Identity(skill.Server) && Identity(skill.Name) && Text(skill.Uri, 1024, true)
                         && skill.FileCount >= 0 && skill.TotalBytes is >= 0 and <= int.MaxValue && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Browser is null,
-                    "credential" => value.Credential is { } credential && Identity(credential.Action) && Identity(credential.Subject) && Text(credential.Detail, 1024, true)
+                    "credential" => value.Credential is { } credential && credential.Action is "bind" or "unbind" or "add_provider" or "remove_provider" or AgentCredentialPermissionRequest.SignInAction
+                        && Identity(credential.Subject) && Text(credential.Detail, 1024, true)
                         && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Skill is null && value.Browser is null,
                     _ => false,
                 };
@@ -117,8 +118,8 @@ internal sealed class SessionPermissionsService
         var decision = request.Decision switch
         {
             "allow_once" => AgentPermissionDecisionKind.AllowOnce,
-            // Only the load of a skill whose files can be checked, and a site of the user's browser, accept it: the owner
-            // refuses it for anything else.
+            // Only the load of a skill whose files can be checked, a site of the user's browser, and a sign-in to a site
+            // accept it: the owner refuses it for anything else.
             "allow_always" => AgentPermissionDecisionKind.AllowAlways,
             "deny" => AgentPermissionDecisionKind.Deny,
             _ => AgentPermissionDecisionKind.Cancel,

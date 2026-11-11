@@ -4,7 +4,7 @@ import type { SessionPermissionCommand, sessionPermissions } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { PaneObservingContext } from "./hostReadsContext";
 import { formatFileSize } from "./editor/editorDocuments";
-import { offersAllowAlways, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
+import { offersAllowAlways, signInOf, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
 
 // How often the pending requests of a running session are read while none is shown.
@@ -168,9 +168,12 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
   // is the Stop button of the composer. A skill whose files can be checked can also be allowed from now on.
   // A command outside the sandbox is allowed once at most: the next one is asked again. The user's browser is allowed
-  // for the session, and a site of it for the session or from now on.
-  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Always allow this site" | "Allow for this session" | "Allow once" | "Deny"])[] =
-    entry.kind === "browser"
+  // for the session, and a site of it for the session or from now on. A sign-in to a website is allowed once or for that
+  // site for 30 days.
+  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Always allow this site" | "Allow for this site for 30 days" | "Allow for this session" | "Allow once" | "Deny"])[] =
+    entry.kind === "credential" && entry.credential?.action === "sign_in"
+      ? [["allow_always", "Allow for this site for 30 days"], ["allow_once", "Allow once"], ["deny", "Deny"]]
+      : entry.kind === "browser"
       ? offersAllowAlways(entry)
         ? [["allow_always", "Always allow this site"], ["allow_once", "Allow for this session"], ["deny", "Deny"]]
         : [["allow_once", "Allow for this session"], ["deny", "Deny"]]
@@ -208,6 +211,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       ? entry.browser.site
         ? t("Open {site} in your browser {browser}?", { site: entry.browser.site, browser: entry.browser.browser })
         : t("Let the agent use your browser {browser}?", { browser: entry.browser.browser })
+      : entry.kind === "credential" && entry.credential?.action === "sign_in"
+      ? t("Sign in to {site} with {label}?", signInOf(entry.credential.subject, entry.credential.detail))
       : entry.kind === "credential" && entry.credential
       ? t(entry.credential.action === "bind" ? "Keep the secret {name} in a vault?" : entry.credential.action === "unbind" ? "Stop keeping the secret {name} in a vault?"
         : entry.credential.action === "add_provider" ? "Add the credential provider {name}?" : "Remove the credential provider {name}?", { name: entry.credential.subject })
@@ -241,8 +246,12 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       </>
       : entry.kind === "credential" && entry.credential
       ? <>
-        <p className="detail" data-permission-credential>{entry.credential.detail}</p>
-        <p className="detail">{t("An agent asks to change where your secrets are kept. It never reads a value.")}</p>
+        <p className="detail" data-permission-credential>{entry.credential.action === "sign_in"
+          ? <><code data-permission-site>{entry.credential.subject}</code> · {entry.credential.detail}</>
+          : entry.credential.detail}</p>
+        <p className="detail">{t(entry.credential.action === "sign_in"
+          ? "CodeAlta types the user name and the password of this item on this site, and submits the form. The agent never reads them."
+          : "An agent asks to change where your secrets are kept. It never reads a value.")}</p>
       </>
       : entry.kind === "commandExecution"
       ? <><pre data-permission-command>{entry.command}</pre>
