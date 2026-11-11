@@ -41,7 +41,7 @@ Open it with **Sub-projects…** in the **⋯** menu of the repository row, or t
 | --- | --- |
 | Hide a sub-project you do not use | Turn its switch off. It leaves your Explorer only: the map stays as it is, and its sessions are kept. |
 | Add an optional sub-project | Turn its switch on. An optional sub-project is listed only for those who add it. |
-| Rename it, move its folder, describe it | Select it, change its form, **Save**. A folder that moves keeps its project and its sessions: the key of the entry is its identity. A folder you had added as a project before it was in the map keeps its own identity: after a move, add it again. |
+| Rename it, move its folder, describe it | Select it, change its form, **Save**. A folder that moves keeps its project and its sessions: the key of the entry is its identity. A folder you had added as a project before it was in the map keeps its own identity, and its file remembers which entry it is from its next session on. |
 | Give it labels of the map | Tick them in its form. |
 | Keep its sessions in its folder | **Its sessions write only its folder**. Otherwise they may write the whole repository: a change in a monorepo often crosses folders. |
 | Remove it from the map | **Remove from the map…**. Its folder stays; once it has sessions, it stays a project of its own. |
@@ -79,13 +79,13 @@ A session of a sub-project works in its folder, and gets the setup of the reposi
 | Skills | Its own, then those of the repository; the nearest wins on a name |
 | Agent prompts | Its own, then those of the repository |
 | MCP servers | Both; its own wins on a name |
-| `.alta/config.toml` | For its plugins, skills and MCP servers, the repository's, then its own on top: what the repository turns off stays off. Its other settings (search, command line profiles, default provider) are its own. |
-| Plugins | Project plugins load from the folder CodeAlta starts in: started in the repository, its plugins apply to its sub-projects too |
+| `.alta/config.toml` | The repository's, then its own on top: what the repository turns off stays off. Changes are written to its own file. |
+| Plugins | Those of the repository; a plugin of its own with the same id takes its place |
 | Plans, tasks, automations | Its own only |
 | Issue views | Its own, else those of the repository |
 | Spaces, sandbox, added folders of skills | Those of the repository, unless you chose others for the sub-project |
 
-A sub-project is in the [spaces](spaces.md) of its repository. A session that works in its folder writes the whole repository unless the map says **write = "folder"**, and never the `.alta`, `.claude` and `.git` folders of any project in it. A session in a worktree writes the folder of the sub-project in that worktree. A [worktree](worktrees.md) of a sub-project is a checkout of its repository, and the session works in the same folder of it; a sub-project that is a git submodule gets worktrees of the submodule.
+A sub-project is in the [spaces](spaces.md) of its repository. Its sessions write the whole repository unless the map says **write = "folder"**, and never the `.alta`, `.claude` and `.git` folders of any project in it. A session in a worktree writes the repository in that worktree; a sub-project that is a git submodule has worktrees of its own repository. A [worktree](worktrees.md) of a sub-project is a checkout of its repository, and the session works in the same folder of it; a sub-project that is a git submodule gets worktrees of the submodule.
 
 ## Agents and the map
 

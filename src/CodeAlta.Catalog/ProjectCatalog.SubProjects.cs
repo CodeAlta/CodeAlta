@@ -360,7 +360,10 @@ public sealed partial class ProjectCatalog
 
                 // A project file of this sub-project whose folder moved: the key names it. Its file is told the new
                 // folder before the first edit that needs it (GetEditableAsync).
-                if (byId.TryGetValue(DeriveSubProjectId(repository.Id, entry.Key), out var moved))
+                // A project added by hand before the map declared its folder keeps its own identifier: its file names the entry.
+                var binding = BindingOf(repository, entry.Key);
+                if (byId.TryGetValue(DeriveSubProjectId(repository.Id, entry.Key), out var moved)
+                    || (moved = projects.FirstOrDefault(other => other.SourcePath is not null && string.Equals(other.DeclaredAs, binding, StringComparison.OrdinalIgnoreCase))) is not null)
                 {
                     if (claims.ContainsKey(moved.ProjectPath) || Directory.Exists(moved.ProjectPath)) continue; // Two folders, one identity: the file keeps it.
                     moved.MovedFrom = moved.ProjectPath;
@@ -378,6 +381,33 @@ public sealed partial class ProjectCatalog
         }
 
         return result;
+    }
+
+    // How the file of a project added by hand names the entry of a map it was recognized as.
+    private static string BindingOf(ProjectDescriptor repository, string key) => $"{repository.Id}/{key}";
+
+    // Writes in the file of a project added by hand the entry of the map it is, so that a move of its folder keeps it;
+    // only the `declared_as` entry of its front matter, every other byte kept. A sub-project the map made needs none.
+    private async Task WriteBindingAsync(ProjectDescriptor project, CancellationToken cancellationToken)
+    {
+        if (IsReadOnly || project is not { IsSubProject: true, SourcePath: { } sourcePath, ParentId: { } parentId, DeclaredKey: { } key }) return;
+        var binding = $"{parentId}/{key}";
+        if (string.Equals(project.Id, DeriveSubProjectId(parentId, key), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(project.DeclaredAs, binding, StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            var snapshot = await _projectNameFiles.LoadAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+            if (_serializer.DeserializeProjectMarkdown(snapshot.Text).Id != project.Id) return;
+            if (ReplaceEntry(snapshot.Text, "declared_as", $"declared_as: \"{binding}\"") is not { } updated) return;
+            if (_serializer.DeserializeProjectMarkdown(updated).DeclaredAs != binding) return;
+            var result = await SaveSourceAsync(new TextFileSaveRequest(sourcePath, updated, snapshot.Encoding, snapshot.HasByteOrderMark, snapshot.Revision),
+                cancellationToken).ConfigureAwait(false);
+            if (!result.IsConflict) project.DeclaredAs = binding;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or SharpYaml.YamlException)
+        {
+            // The binding is a help for a later move: a file that cannot take it now gets it at another edit.
+        }
     }
 
     // An optional sub-project the user adds: what its file holds; the next load links it to the folders above it.

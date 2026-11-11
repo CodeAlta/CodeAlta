@@ -163,7 +163,15 @@ public sealed partial class CodeAltaConfigStore
     public Search.SearchSettings LoadGlobalSearchSettings()
         => Search.SearchSettings.Read(ReadSharedGlobalDocument().Search);
 
-    /// <summary>Reads whether a project's own configuration keeps it out of search (<c>[search] enabled = false</c>).</summary>
+    // The configuration of a project as its sessions read it: for a sub-project, those of the folders it inherits from
+    // (its repository) under its own, as CatalogOptions.InheritedProjectRoots tells them; read, never written.
+    private CodeAltaConfigDocument ReadEffectiveProjectDocument(string projectRoot)
+    {
+        var inherited = _options.InheritedProjectRoots?.Invoke(projectRoot) ?? [];
+        return inherited.Count == 0 ? ReadSharedDocument(GetProjectConfigPath(projectRoot)) : LoadProject(projectRoot, inherited);
+    }
+
+    /// <summary>Reads whether a project's configuration keeps it out of search (<c>[search] enabled = false</c>), its repository's under its own for a sub-project.</summary>
     /// <param name="projectRoot">The folder of the project.</param>
     /// <returns>True when the project file turns search off for the project.</returns>
     public bool IsProjectExcludedFromSearch(string? projectRoot)
@@ -171,7 +179,7 @@ public sealed partial class CodeAltaConfigStore
         if (string.IsNullOrWhiteSpace(projectRoot)) return false;
         try
         {
-            return ReadSharedDocument(GetProjectConfigPath(projectRoot)).Search?.Enabled == false;
+            return ReadEffectiveProjectDocument(projectRoot).Search?.Enabled == false;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -192,7 +200,7 @@ public sealed partial class CodeAltaConfigStore
         TomlTable? identity;
         try
         {
-            identity = ReadSharedDocument(GetProjectConfigPath(projectRoot)).Identity;
+            identity = ReadEffectiveProjectDocument(projectRoot).Identity;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -1341,7 +1349,7 @@ public sealed partial class CodeAltaConfigStore
     public string? GetEffectiveDefaultProvider(string? projectRoot = null)
     {
         var global = ReadSharedGlobalDocument();
-        var project = ReadSharedProjectDocument(projectRoot);
+        var project = string.IsNullOrWhiteSpace(projectRoot) ? ReadSharedProjectDocument(projectRoot) : ReadEffectiveProjectDocument(projectRoot);
         return NormalizeProviderKey(project.Chat?.DefaultProvider)
             ?? NormalizeProviderKey(global.Chat?.DefaultProvider);
     }

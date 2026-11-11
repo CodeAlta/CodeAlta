@@ -324,7 +324,9 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         }
 
         var roots = BuildRoots(options).Where(static root => Directory.Exists(root.RootPath)).ToArray();
-        var packages = roots.SelectMany(static root => new SourcePluginDiscoveryService().Discover(root)).ToArray();
+        // The roots come in order of precedence: a package of the project wins over the one of the same id of a folder it
+        // inherits from, and the nearer folder over the farther.
+        var packages = WithoutInheritedShadows(roots.SelectMany(static root => new SourcePluginDiscoveryService().Discover(root)));
         var plan = new PluginStartupPlanner().PlanSourceBuilds(packages, globalConfig, projectConfig, options.SafeMode);
         diagnostics.AddRange(plan.Diagnostics);
 
@@ -447,7 +449,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                 .ToDictionary(static entry => (string)entry.Key, static entry => entry.Value?.ToString(), StringComparer.OrdinalIgnoreCase),
         };
 
-    private static IReadOnlyList<PluginRoot> BuildRoots(PluginRuntimeManagerOptions options)
+    internal static IReadOnlyList<PluginRoot> BuildRoots(PluginRuntimeManagerOptions options)
     {
         var roots = new List<PluginRoot>
         {
@@ -466,7 +468,32 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             });
         }
 
+        // A sub-project started in its own folder: the plugins of the folders it inherits from (its repository) apply
+        // to it, each scoped to its folder, the nearest first.
+        foreach (var inherited in options.ProjectContext?.InheritedRoots ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(inherited)) continue;
+            var root = Path.Combine(inherited, ".alta", "plugins");
+            if (roots.Any(known => SameDirectory(known.RootPath, root))) continue;
+            roots.Add(new PluginRoot { RootPath = root, Scope = PluginScope.Project, ProjectPath = inherited, Inherited = true });
+        }
+
         return roots;
+    }
+
+    // Drops a package of a folder the project inherits from when a package of the same id comes before it.
+    internal static SourcePluginPackage[] WithoutInheritedShadows(IEnumerable<SourcePluginPackage> packages)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var kept = new List<SourcePluginPackage>();
+        foreach (var package in packages)
+        {
+            var known = !string.IsNullOrWhiteSpace(package.PackageId) && package.Root.Scope == PluginScope.Project && !seen.Add(package.PackageId);
+            if (known && package.Root.Inherited) continue;
+            kept.Add(package);
+        }
+
+        return [.. kept];
     }
 
     private static bool SameDirectory(string left, string right)

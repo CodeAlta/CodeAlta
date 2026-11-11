@@ -65,6 +65,11 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("skill_folders")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? SkillFolders { get; set; }
+
+        // The entry of a project map a project added by hand was recognized as: <repository id>/<key>.
+        [JsonPropertyName("declared_as")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? DeclaredAs { get; set; }
     }
 
     private sealed class LabelFrontMatter
@@ -392,6 +397,7 @@ public sealed class CatalogYamlSerializer
             Archived = frontMatter.Archived ?? false,
             Sandbox = SpaceNewSessions.IsSandboxName(frontMatter.Sandbox?.Trim()) ? frontMatter.Sandbox!.Trim() : null,
             SkillFolders = [.. ProjectDescriptor.NormalizeSkillFolders(frontMatter.SkillFolders ?? [])],
+            DeclaredAs = string.IsNullOrWhiteSpace(frontMatter.DeclaredAs) ? null : frontMatter.DeclaredAs.Trim(),
             Checkout = new CheckoutRule
             {
                 PathTemplate = frontMatter.Checkout?.PathTemplate ?? string.Empty,
@@ -427,6 +433,7 @@ public sealed class CatalogYamlSerializer
             Labels = LabelDescriptor.NormalizeIds(descriptor.Labels) is { Count: > 0 } labels ? labels : null,
             Sandbox = SpaceNewSessions.IsSandboxName(descriptor.Sandbox?.Trim()) ? descriptor.Sandbox!.Trim() : null,
             SkillFolders = ProjectDescriptor.NormalizeSkillFolders(descriptor.SkillFolders) is { Count: > 0 } skillFolders ? [.. skillFolders] : null,
+            DeclaredAs = string.IsNullOrWhiteSpace(descriptor.DeclaredAs) ? null : descriptor.DeclaredAs.Trim(),
         };
 
         return SerializeMarkdown(frontMatter, descriptor.MarkdownBody, descriptor.DisplayName);

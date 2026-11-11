@@ -36,4 +36,31 @@ public static class ProjectResourceRoots
     public static IReadOnlyList<string> WriteRoots(ProjectDescriptor? project)
         => project is { IsSubProject: true, WriteScope: ProjectWriteScope.Repository, RepositoryPath: { } repository, SubPath: { } subPath }
             && ProjectManifest.ResolveFolder(repository, subPath).State == ProjectManifestFolderState.Ok ? [repository] : [];
+
+    /// <summary>
+    /// Gets the folders a session of a sub-project writes besides its own folder when it works in a git worktree: the
+    /// folder of its repository in that checkout, as <see cref="WriteRoots"/> gives it in the folder of the project. A
+    /// sub-project that is a git submodule has a worktree of its own repository: it writes the root of that checkout.
+    /// </summary>
+    /// <param name="project">The project; null for none.</param>
+    /// <param name="worktreeFolder">The folder the session works in: the folder of the sub-project in its worktree.</param>
+    /// <returns>The folders; empty for a project that is no sub-project, one that writes its own folder only, or a folder in no checkout.</returns>
+    public static IReadOnlyList<string> WorktreeWriteRoots(ProjectDescriptor? project, string? worktreeFolder)
+    {
+        if (project is not { IsSubProject: true, WriteScope: ProjectWriteScope.Repository, RepositoryPath: { } repository } || string.IsNullOrWhiteSpace(worktreeFolder))
+            return [];
+        var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktreeFolder));
+        if (Worktrees.GitWorktreeService.FindCheckoutRoot(folder) is not { } found) return [];
+        var checkout = Path.TrimEndingDirectorySeparator(Path.GetFullPath(found));
+        // Where the repository is in this checkout: at the same place from the folder of the sub-project.
+        var mapped = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(folder, Path.GetRelativePath(project.ProjectPath, repository))));
+        var root = IsSameOrInside(mapped, checkout) ? mapped : checkout;
+        return PathsEqual(root, folder) ? [] : [root];
+    }
+
+    private static bool PathsEqual(string left, string right)
+        => string.Equals(left, right, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static bool IsSameOrInside(string path, string root)
+        => PathsEqual(path, root) || path.StartsWith(root + Path.DirectorySeparatorChar, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

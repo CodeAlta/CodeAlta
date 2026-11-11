@@ -91,6 +91,14 @@ public sealed class ProjectDescriptor
     public List<string> SkillFolders { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets the entry of a project map a project added by hand was recognized as, <c>&lt;repository id&gt;/&lt;key&gt;</c>,
+    /// kept in its file so that it stays that sub-project when the map moves its folder; null otherwise. A sub-project
+    /// the map made needs none: its identifier is derived from them.
+    /// </summary>
+    [JsonPropertyName("declared_as")]
+    public string? DeclaredAs { get; set; }
+
+    /// <summary>
     /// Gets or sets checkout settings.
     /// </summary>
     [JsonPropertyName("checkout")]
@@ -221,6 +229,7 @@ public sealed class ProjectDescriptor
         Archived = Archived,
         Sandbox = Sandbox,
         SkillFolders = [.. SkillFolders],
+        DeclaredAs = DeclaredAs,
         Checkout = new CheckoutRule
         {
             PathTemplate = Checkout.PathTemplate,

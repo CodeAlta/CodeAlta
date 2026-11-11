@@ -23,6 +23,27 @@ public sealed class SubProjectConfigTests
     }
 
     [TestMethod]
+    public void TheSettingsASessionReads_AreThoseOfTheRepositoryUnderItsOwn_WhenTheHostTellsTheInheritedFolders()
+    {
+        var repository = Path.Combine(_root, "contoso");
+        var billing = Directory.CreateDirectory(Path.Combine(repository, "services", "billing")).FullName;
+        Config(repository, "[search]\nenabled = false\n\n[chat]\ndefault_provider = \"codex\"\n\n[identity.cli.az]\nenv = { AZURE_CONFIG_DIR = \"~/.azure-contoso\" }\n");
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(_root, "alta") };
+        var store = new CodeAltaConfigStore(options);
+        Assert.IsFalse(store.IsProjectExcludedFromSearch(billing), "without the host, its own file alone");
+
+        options.InheritedProjectRoots = folder => string.Equals(folder, billing, StringComparison.OrdinalIgnoreCase) ? [repository] : [];
+        Assert.IsTrue(store.IsProjectExcludedFromSearch(billing), "the repository keeps its sub-projects out of search");
+        Assert.AreEqual("codex", store.GetEffectiveDefaultProvider(billing));
+        CollectionAssert.AreEqual(new[] { "az" }, store.LoadProjectCliProfiles(billing).Select(static profile => profile.Name).ToArray());
+
+        Config(billing, "[search]\nenabled = true\n\n[chat]\ndefault_provider = \"claude-code\"\n");
+        Assert.IsTrue(store.IsProjectExcludedFromSearch(billing), "what the repository turns off stays off");
+        Assert.AreEqual("claude-code", store.GetEffectiveDefaultProvider(billing));
+        Assert.IsFalse(File.ReadAllText(Path.Combine(billing, ".alta", "config.toml")).Contains("identity", StringComparison.Ordinal), "nothing is written to its file");
+    }
+
+    [TestMethod]
     public void ASubProjectReadsTheConfigurationOfItsRepository_ItsOwnOnTop_AndWhatTheRepositoryTurnsOffStaysOff()
     {
         var repository = Path.Combine(_root, "contoso");

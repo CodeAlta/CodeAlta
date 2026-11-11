@@ -307,6 +307,7 @@ public sealed partial class ProjectCatalog
         var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is { IsSubProject: true, SourcePath: null } && !IsReadOnly) await SaveAsync(project, null, cancellationToken).ConfigureAwait(false);
         else if (project is { MovedFrom: not null, SourcePath: not null } && !IsReadOnly) await WriteMovedPathAsync(project, cancellationToken).ConfigureAwait(false);
+        if (project is { IsSubProject: true, SourcePath: not null }) await WriteBindingAsync(project, cancellationToken).ConfigureAwait(false);
         return project;
     }
 

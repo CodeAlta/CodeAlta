@@ -43,6 +43,13 @@ public sealed class CatalogOptions
     /// </summary>
     public bool ReadOnlyGlobalState { get; set; }
 
+    /// <summary>
+    /// Gets or sets what tells the folders a project folder inherits its setup from, the nearest first (the repository of a
+    /// sub-project of a monorepo), as the project catalog of the host last listed them; null where nothing tells it. The
+    /// configuration stores read the settings of those folders under the project's own; they write only its own.
+    /// </summary>
+    public Func<string, IReadOnlyList<string>>? InheritedProjectRoots { get; set; }
+
     private CodeAltaConfigOptions _config = CodeAltaConfigOptions.Default;
 
     /// <summary>

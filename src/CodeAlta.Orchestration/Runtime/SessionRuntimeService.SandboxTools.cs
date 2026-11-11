@@ -313,7 +313,7 @@ public sealed partial class SessionRuntimeService
             var worktree = _entries.TryGetValue(sessionId, out var entry) ? entry.WorktreeDirectory : null;
             var anchor = Path.GetFullPath(worktree ?? project.ProjectPath);
             IReadOnlyList<string> folders = [.. declared.Select(folder => Path.GetFullPath(Path.Combine(anchor, Path.GetRelativePath(project.ProjectPath, folder))))];
-            return (worktree is null ? ProjectResourceRoots.WriteRoots(project) : [], folders);
+            return (worktree is null ? ProjectResourceRoots.WriteRoots(project) : ProjectResourceRoots.WorktreeWriteRoots(project, worktree), folders);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
         {

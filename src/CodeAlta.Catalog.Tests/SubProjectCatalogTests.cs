@@ -238,6 +238,53 @@ public sealed class SubProjectCatalogTests
     }
 
     [TestMethod]
+    public async Task AFolderAddedByHandThatMoves_KeepsItsProject_ByTheEntryItsFileNames()
+    {
+        using var fixture = new Fixture();
+        var root = Directory.CreateDirectory(Path.Combine(fixture.Root, "code", "contoso")).FullName;
+        var webFolder = Directory.CreateDirectory(Path.Combine(root, "apps", "web")).FullName;
+        var repository = await fixture.Projects.UpsertFromPathAsync(root);
+        var web = await fixture.Projects.UpsertFromPathAsync(webFolder);
+        await fixture.WriteMapAsync(root, "[projects.web]\npath = \"apps/web\"\n");
+        var linked = (await fixture.Projects.LoadAsync()).Single(project => project.Id == web.Id);
+        Assert.AreEqual(repository.Id, linked.ParentId);
+        Assert.AreNotEqual(ProjectCatalog.DeriveSubProjectId(repository.Id, "web"), web.Id, "It keeps the identifier it had.");
+
+        // Its next session writes which entry it is in its file.
+        await fixture.Projects.EnsurePersistedAsync(linked);
+        StringAssert.Contains(await File.ReadAllTextAsync(web.SourcePath!), $"declared_as: \"{repository.Id}/web\"");
+
+        var moved = Directory.CreateDirectory(Path.Combine(root, "frontend", "web")).FullName;
+        Directory.Delete(webFolder, recursive: true);
+        await fixture.WriteMapAsync(root, "[projects.web]\npath = \"frontend/web\"\n");
+        var projects = await fixture.Projects.LoadAsync();
+        var found = projects.Single(project => project.DeclaredKey == "web");
+        Assert.AreEqual((web.Id, moved), (found.Id, found.ProjectPath), "The move keeps the project, and so its sessions.");
+        Assert.AreEqual(projects.Count, projects.Select(static project => project.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [TestMethod]
+    public void AWorktreeSessionOfASubProject_WritesItsRepositoryInThatCheckout_AndASubmoduleItsOwnCheckout()
+    {
+        using var fixture = new Fixture();
+        var repository = Path.Combine(fixture.Root, "code", "contoso");
+        var worktree = Directory.CreateDirectory(Path.Combine(fixture.Root, "worktrees", "quiet-heron")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: x\n");
+        var billingInWorktree = Directory.CreateDirectory(Path.Combine(worktree, "services", "billing")).FullName;
+        var billing = new ProjectDescriptor { ProjectPath = Path.Combine(repository, "services", "billing"), ParentId = "r", SubPath = "services/billing",
+            InheritedRoots = [repository] };
+        CollectionAssert.AreEqual(new[] { worktree }, ProjectResourceRoots.WorktreeWriteRoots(billing, billingInWorktree).ToArray());
+        billing.WriteScope = ProjectWriteScope.Folder;
+        Assert.AreEqual(0, ProjectResourceRoots.WorktreeWriteRoots(billing, billingInWorktree).Count, "`write = folder` keeps it to its folder");
+
+        // A submodule has worktrees of its own repository: their root is the folder of the sub-project.
+        var submodule = Directory.CreateDirectory(Path.Combine(fixture.Root, "worktrees", "lib-tree")).FullName;
+        File.WriteAllText(Path.Combine(submodule, ".git"), "gitdir: y\n");
+        var lib = new ProjectDescriptor { ProjectPath = Path.Combine(repository, "vendor", "lib"), ParentId = "r", SubPath = "vendor/lib", InheritedRoots = [repository] };
+        Assert.AreEqual(0, ProjectResourceRoots.WorktreeWriteRoots(lib, submodule).Count, "Never above the checkout of its worktree.");
+    }
+
+    [TestMethod]
     public void LongSlugsAndKeys_StayValid_AndTellRepositoriesApart()
     {
         var slug = new string('a', 64);

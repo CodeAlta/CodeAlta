@@ -368,6 +368,11 @@ public sealed partial class ProjectCatalog
                 existing.Archived = false;
                 await SaveAsync(existing, origin, cancellationToken).ConfigureAwait(false);
             }
+            else if (existing.IsSubProject)
+            {
+                // A project added by hand that a map declares learns which entry it is, at its next session.
+                await WriteBindingAsync(existing, cancellationToken).ConfigureAwait(false);
+            }
 
             return existing;
         }

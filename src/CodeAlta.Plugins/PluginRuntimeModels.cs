@@ -166,6 +166,12 @@ public sealed record PluginRoot
 
     /// <summary>Gets the project path for project-scoped roots, when known.</summary>
     public string? ProjectPath { get; init; }
+
+    /// <summary>
+    /// Gets whether the root is the one of a folder the project CodeAlta started in inherits its setup from (the
+    /// repository of a sub-project): a package of the same id of the project, or of a nearer folder, takes its place.
+    /// </summary>
+    public bool Inherited { get; init; }
 }
 
 /// <summary>
