@@ -541,7 +541,24 @@ public sealed partial class PluginBuildService : IPluginBuildService
         startInfo.ArgumentList.Add(Path.GetRelativePath(package.PackageDirectory, package.EntryFilePath));
         startInfo.ArgumentList.Add("--nologo");
         startInfo.ArgumentList.Add("-v:minimal");
+        RemoveInheritedSdk(startInfo.Environment);
         return startInfo;
+    }
+
+    // What a dotnet command gives the processes it starts (dotnet test, dotnet run): where its own SDK and MSBuild are.
+    private static readonly string[] InheritedSdkVariables = ["MSBuildSDKsPath", "MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildLoadMicrosoftTargetsReadOnly"];
+
+    /// <summary>
+    /// Removes from the environment of a plugin build where the SDK of the command that started CodeAlta is: the build takes
+    /// the SDK the <c>global.json</c> of the plugin root names, and with the targets of another SDK it fails or never ends
+    /// (CodeAlta started by <c>dotnet test</c> of .NET 11, building a plugin pinned to .NET 10).
+    /// </summary>
+    /// <param name="environment">The environment of the build process.</param>
+    internal static void RemoveInheritedSdk(IDictionary<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        foreach (var name in environment.Keys.Where(static key => InheritedSdkVariables.Contains(key, StringComparer.OrdinalIgnoreCase)).ToArray())
+            environment.Remove(name);
     }
 
     private const string TargetPathMessagePrefix = "CodeAltaPluginTargetPath=";

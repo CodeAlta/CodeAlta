@@ -29,6 +29,26 @@ public sealed class PluginBuildServiceTests
         Assert.IsFalse(startInfo.UseShellExecute);
     }
 
+    // CodeAlta started by dotnet test of .NET 11 gave the plugin build where SDK 11 is, while the global.json of the plugin
+    // root names .NET 10: the build mixed both SDKs, and failed in the SDK resolver or never ended.
+    [TestMethod]
+    public void BuildTakesTheSdkOfItsGlobalJson_NotTheOneOfTheCommandThatStartedCodeAlta()
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["MSBuildSDKsPath"] = @"C:\Program Files\dotnet\sdk\11.0.100\Sdks",
+            ["MSBUILD_EXE_PATH"] = @"C:\Program Files\dotnet\sdk\11.0.100\MSBuild.dll",
+            ["MSBuildExtensionsPath"] = @"C:\Program Files\dotnet\sdk\11.0.100\",
+            ["MSBuildLoadMicrosoftTargetsReadOnly"] = "true",
+            ["PATH"] = @"C:\Program Files\dotnet",
+            ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
+        };
+
+        PluginBuildService.RemoveInheritedSdk(environment);
+
+        CollectionAssert.AreEquivalent(new[] { "PATH", "DOTNET_CLI_TELEMETRY_OPTOUT" }, environment.Keys.ToArray(), "the rest of the environment stays");
+    }
+
     [TestMethod]
     public async Task BuildAsyncReportsMissingSdkFromGlobalJsonMismatch()
     {
