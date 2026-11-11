@@ -176,7 +176,8 @@ public sealed class CodeModeRunStoreTests
     public async Task ARunCodeAltaClosesWhileItSleeps_IsInterrupted_AndResumesByItselfOnceItWakes_Once()
     {
         using var folder = new TemporaryFolder();
-        const string Code = """await sleep("3s"); return 1;""";
+        // An hour: the script cannot wake before the first CodeAlta closes, however slow the machine.
+        const string Code = """await sleep("1h"); return 1;""";
         string runId;
         await using (var before = new CodeModeRunRegistry(null))
         {
@@ -187,6 +188,9 @@ public sealed class CodeModeRunStoreTests
             runId = run.Id;
             await WaitForAsync(() => new CodeModeRunStore(folder.Path).TryLoad(runId)?.SleepingUntil is not null);
         }
+
+        // The hour passed while CodeAlta was closed, but for a moment: the last wake time a sleep records is the one it keeps.
+        File.AppendAllLines(Path.Combine(folder.Path, runId, "sleeps.jsonl"), [$$"""{"key":"sleep#0","wakeAt":"{{DateTimeOffset.UtcNow.AddMilliseconds(500):O}}"}"""]);
 
         // CodeAlta closed while the script slept: the run is not over, and the next start schedules its resume.
         var kept = new CodeModeRunStore(folder.Path).TryLoad(runId)!;
