@@ -7,7 +7,11 @@ internal static class BuiltInVaults
 {
     public static IEnumerable<PluginCredentialProviderContribution> All(VaultCommandRunner runner)
     {
-        _ = runner;
-        yield break;
+        ArgumentNullException.ThrowIfNull(runner);
+        yield return BitwardenProvider.Contribution(runner);
+        yield return BitwardenSecretsProvider.Contribution(runner);
+        yield return KeePassXcProvider.Contribution(runner);
+        yield return PassProvider.Contribution(runner);
+        yield return KeychainProvider.Contribution(runner);
     }
 }

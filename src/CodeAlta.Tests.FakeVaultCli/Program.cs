@@ -24,8 +24,169 @@ return args switch
     ["env", var name] => Print(Environment.GetEnvironmentVariable(name) ?? "(unset)"),
     ["--version"] => Print("2.42.0"),
     _ when program == "op" => Op(args),
+    _ when program == "bw" => Bw(args),
+    _ when program == "bws" => Bws(args),
+    _ when program == "keepassxc-cli" => KeePassXc(args),
+    _ when program is "pass" or "gopass" => Pass(args, program == "gopass"),
     _ => Fail("unknown command", 64),
 };
+
+// bw: state "bw" = { status: "unauthenticated" | "locked", email, masterPassword, sessionKey, items: [the items as bw writes them] }.
+// The vault is unlocked for a call whose BW_SESSION is the session key.
+int Bw(string[] arguments)
+{
+    var bw = state["bw"]?.AsObject() ?? [];
+    var loggedIn = bw["status"]?.GetValue<string>() != "unauthenticated";
+    var unlocked = loggedIn && Environment.GetEnvironmentVariable("BW_SESSION") is { Length: > 0 } session && session == bw["sessionKey"]?.GetValue<string>();
+    var items = bw["items"]?.AsArray() ?? [];
+    JsonNode? Item(string id) => items.FirstOrDefault(item => Same(item!["id"], id));
+    switch (arguments)
+    {
+        case ["status"]:
+            return Print(new JsonObject
+            {
+                ["serverUrl"] = null, ["userEmail"] = loggedIn ? bw["email"]?.GetValue<string>() : null,
+                ["status"] = !loggedIn ? "unauthenticated" : unlocked ? "unlocked" : "locked",
+            }.ToJsonString());
+        case ["unlock", "--raw", "--passwordenv", var variable]:
+            if (!loggedIn) return Fail("You are not logged in.", 1);
+            if (Environment.GetEnvironmentVariable(variable) != bw["masterPassword"]?.GetValue<string>()) return Fail("Invalid master password.", 1);
+            Console.Out.Write(bw["sessionKey"]!.GetValue<string>());
+            return 0;
+    }
+
+    if (!loggedIn) return Fail("You are not logged in.", 1);
+    if (!unlocked) return Fail("Vault is locked.", 1);
+    switch (arguments)
+    {
+        case ["list", "items"]:
+            return Print(items.ToJsonString());
+        case ["get", "item", var id]:
+            return Item(id) is { } item ? Print(item.ToJsonString()) : Fail("Not found.", 1);
+        case ["get", var field, var id]:
+        {
+            if (Item(id) is not { } entry) return Fail("Not found.", 1);
+            var login = entry["login"];
+            var value = field switch
+            {
+                "password" => login?["password"]?.GetValue<string>(),
+                "username" => login?["username"]?.GetValue<string>(),
+                "totp" => login?["totp"] is not null ? "123456" : null,
+                "notes" => entry["notes"]?.GetValue<string>(),
+                "uri" => login?["uris"]?.AsArray().FirstOrDefault()?["uri"]?.GetValue<string>(),
+                _ => null,
+            };
+            if (value is null) return Fail(field == "totp" ? "No TOTP available for this login." : "Not found.", 1);
+            Console.Out.Write(value);
+            return 0;
+        }
+
+        default:
+            return Fail("Invalid command", 1);
+    }
+}
+
+// bws: state "bws" = { token, secrets: [{ id, key, value }] }; the token is BWS_ACCESS_TOKEN.
+int Bws(string[] arguments)
+{
+    var bws = state["bws"]?.AsObject() ?? [];
+    if (Environment.GetEnvironmentVariable("BWS_ACCESS_TOKEN") != bws["token"]?.GetValue<string>())
+        return Fail("Error: \n   0: Access token is not in a valid format: Doesn't contain a decryption key", 1);
+    var secrets = bws["secrets"]?.AsArray() ?? [];
+    switch (arguments)
+    {
+        case ["project", "list", "--output", "json"]:
+            return Print("[]");
+        case ["secret", "list", "--output", "json"]:
+            return Print(secrets.ToJsonString());
+        case ["secret", "get", var id, "--output", "json"]:
+            return secrets.FirstOrDefault(secret => Same(secret!["id"], id)) is { } found
+                ? Print(found.ToJsonString())
+                : Fail("Error: \n   0: Received error message from server: [404 Not Found] {\"message\":\"Resource not found.\"}", 1);
+        default:
+            return Fail("error: unrecognized subcommand", 2);
+    }
+}
+
+// keepassxc-cli: state "keepassxc" = { password, keyFile (its file name), noPassword, groups: ["Work/"], entries: [{ path, attributes: {}, totp }] }.
+// The password is the first line of the standard input, unless --no-password.
+int KeePassXc(string[] arguments)
+{
+    var kp = state["keepassxc"]?.AsObject() ?? [];
+    var flags = new HashSet<string>(StringComparer.Ordinal);
+    string? attribute = null, keyFile = null;
+    var positional = new List<string>();
+    for (var index = 1; index < arguments.Length; index++)
+    {
+        switch (arguments[index])
+        {
+            case "-a": attribute = arguments[++index]; break;
+            case "-k": keyFile = arguments[++index]; break;
+            case var option when option.StartsWith('-'): flags.Add(option); break;
+            default: positional.Add(arguments[index]); break;
+        }
+    }
+
+    if (positional.Count == 0 || !File.Exists(positional[0])) return Fail($"Failed to open database file {(positional.Count == 0 ? "" : positional[0])}: not found", 1);
+    var password = flags.Contains("--no-password") ? null : Console.In.ReadLine();
+    var credentialsOk = kp["noPassword"]?.GetValue<bool>() == true ? flags.Contains("--no-password") : password == kp["password"]?.GetValue<string>();
+    if (kp["keyFile"]?.GetValue<string>() is { } expected && (keyFile is null || Path.GetFileName(keyFile) != expected)) credentialsOk = false;
+    if (!credentialsOk) return Fail($"Error while reading the database {positional[0]}: Invalid credentials were provided, please try again.", 1);
+
+    var entries = kp["entries"]?.AsArray() ?? [];
+    switch (arguments[0])
+    {
+        case "ls":
+            if (!flags.Contains("-R")) return Print(string.Join('\n', entries.Select(entry => entry!["path"]!.GetValue<string>()).Where(path => !path.Contains('/'))));
+            var lines = new List<string>();
+            lines.AddRange(entries.Select(entry => entry!["path"]!.GetValue<string>()));
+            lines.AddRange((kp["groups"]?.AsArray() ?? []).Select(group => group!.GetValue<string>()));
+            return Print(string.Join('\n', lines));
+        case "show" when positional.Count == 2:
+        {
+            var entry = entries.FirstOrDefault(item => Same(item!["path"], positional[1].TrimStart('/')));
+            if (entry is null) return Fail($"Could not find entry with path {positional[1]}.", 1);
+            if (flags.Contains("-t")) return entry["totp"]?.GetValue<bool>() == true ? Print("123456") : Fail($"Entry with path {positional[1]} has no TOTP set up.", 1);
+            var value = attribute is null ? null : entry["attributes"]?.AsObject().FirstOrDefault(pair => string.Equals(pair.Key, attribute, StringComparison.OrdinalIgnoreCase)).Value;
+            return value is null ? Fail($"ERROR: unknown attribute {attribute}.", 1) : Print(value.GetValue<string>());
+        }
+
+        default:
+            return Fail("Invalid command", 1);
+    }
+}
+
+// pass and gopass: state "pass" = { entries: { "web/github": "the text of the file" }, store (the PASSWORD_STORE_DIR it requires), hang }.
+int Pass(string[] arguments, bool gopass)
+{
+    var pass = state["pass"]?.AsObject() ?? [];
+    if (pass["hang"]?.GetValue<bool>() == true)
+    {
+        // A pinentry that waits for somebody.
+        Thread.Sleep(TimeSpan.FromMinutes(2));
+        return 2;
+    }
+
+    if (pass["store"]?.GetValue<string>() is { } store && Environment.GetEnvironmentVariable("PASSWORD_STORE_DIR") != store) return Fail("Error: the password store is not initialized.", 1);
+    var entries = pass["entries"]?.AsObject() ?? [];
+    string? Text(string path) => entries.FirstOrDefault(pair => pair.Key == path).Value?.GetValue<string>();
+    switch (arguments)
+    {
+        case ["show", var path] when !gopass:
+            return Text(path) is { } text ? Print(text) : Fail($"Error: {path} is not in the password store.", 1);
+        case ["show", "-o", var path] when gopass:
+            return Text(path) is { } secret ? Print(secret.Split('\n')[0]) : Fail($"Entry '{path}' not found. Did you mean (none)?", 11);
+        case ["show", var path, var key] when gopass:
+        {
+            if (Text(path) is not { } content) return Fail($"Entry '{path}' not found. Did you mean (none)?", 11);
+            var line = content.Split('\n').Skip(1).FirstOrDefault(item => item.StartsWith(key + ":", StringComparison.OrdinalIgnoreCase));
+            return line is null ? Fail($"failed to show key '{key}': key not found", 11) : Print(line[(key.Length + 1)..].Trim());
+        }
+
+        default:
+            return Fail("Error: unknown command", 1);
+    }
+}
 
 int Op(string[] arguments)
 {
