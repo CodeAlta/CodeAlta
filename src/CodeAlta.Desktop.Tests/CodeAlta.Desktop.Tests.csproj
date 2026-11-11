@@ -14,6 +14,8 @@
     <ProjectReference Include="../CodeAlta.Server/CodeAlta.Server.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="../CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
+    <!-- The fake command line of a vault, copied beside the tests, for the vaults of Settings > Secrets. -->
+    <ProjectReference Include="../CodeAlta.Tests.FakeVaultCli/CodeAlta.Tests.FakeVaultCli.csproj" ReferenceOutputAssembly="false" OutputItemType="Content" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <!-- Resolves the temporary directory of the test process, which macOS places below a symbolic link. -->

@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Plugin.Jira;
@@ -82,8 +83,16 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
     /// <summary>Creates the checks of this machine, whose CLI profiles read the secrets and variables of a profile.</summary>
     /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
     internal SpaceIdentityChecks(string root)
-        : this(RunAsync, new HttpClientHandler(), SecretReferenceResolver.ForMachine(root).Read, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows(),
-            RunShellAsync)
+        : this(root, null)
+    {
+    }
+
+    /// <summary>Creates the checks of this machine, whose CLI profiles read the secrets and variables of a profile and the secrets kept in vaults.</summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="bound">The secrets kept in vaults the host holds; null for a host without them.</param>
+    internal SpaceIdentityChecks(string root, IBoundSecretSource? bound)
+        : this(RunAsync, new HttpClientHandler(), SecretReferenceResolver.ForMachine(root, null, bound, "check of the command line tools of a space").Read,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows(), RunShellAsync)
     {
     }
 

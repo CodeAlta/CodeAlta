@@ -1292,7 +1292,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     });
                     builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch));
                     builder.AddSubProjectsService(new SubProjectsService(host.ProjectCatalog, spaceView, epoch));
-                    builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
+                    builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch,
+                        new Spaces.SpaceIdentityChecks(host.SpaceCatalog.Projects.Options.GlobalRoot, host.Credentials)));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     // A round the user submits on their own goes to a session as a prompt, queued when the session is busy.
