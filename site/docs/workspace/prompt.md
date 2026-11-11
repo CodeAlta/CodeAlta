@@ -80,6 +80,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 </figure>
 
 - **Agent prompt**: built-in prompts, then yours and the project's (see [Agent Prompts](../prompts.md)). A new session starts with the agent prompt of its [space](../spaces.md), **Default** unless you changed it; a prompt you pick, such as **Plan**, is for that session only.
+- **Provider**: type part of a name, key or type in the search box and press `Enter`. The [favorite providers](../model-providers/readme.md) of **Settings > Providers** come first, then the others, each group by name; each provider shows its logo, and its key and type beside its name when they say more.
 - **Model**: type part of a name or id in the search box and press `Enter`. The models are in the order of the provider. When its **Model order** sorts them by name, the latest version of each model family comes first, such as Gemini 4 Argon and Gemini 3.8 Flash, and the older versions come after **Other models**; both parts keep the models of each vendor together and list the highest version first. [Model tiers](../model-tiers.md) come first, with the model each gives now, then [Adaptive](../model-tiers.md#adaptive) and its levels, where CodeAlta runs each turn on the models of a level and has its changes reviewed. **Settings > Models** sets how many models the list shows.
 - **Reasoning effort**: the efforts of the model. For Claude Code, Copilot and the Anthropic API, a model that lists none has none. With other providers, an effort the model does not list is marked **Unverified**.
 - **Model options**, for a model whose provider offers some, such as **Context** and **Fast** for Cursor's models: a list or a switch under the reasoning effort. An option belongs to the model: it applies to every session of the provider that uses this model.
@@ -92,6 +93,11 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
   Until you use the switch, it shows what the provider does: off for Claude Code and the Anthropic API, the [`service_tier`](../model-providers/setup.md#fast-routing) of the Codex provider, and for the OpenAI API the default tier of your project, once a response names it. Fast and standard speed do not share the prompt cache of Anthropic: turning fast mode on in the middle of a conversation reads it again, at the fast price.
 
   **Context size**, for a model that offers several, sets the [input limit](../model-providers/readme.md#context-and-compaction) of the session. The section opens by itself when an option is not its default, and a struck-through mark on the chip shows a session without sub-sessions.
+
+<figure class="alta-figure my-4" style="max-width: 24rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-provider-search.webp" alt="The provider list of the picker of CodeAlta Desktop: a search box, the favorite providers first, then the other providers by name, each with its logo, key and type" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The favorite providers come first in the provider list.</figcaption>
+</figure>
 
 <figure class="alta-figure my-4" style="max-width: 24rem;">
   <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop: the Complex, Standard and Quick tiers and Adaptive at the top, then the models filtered by a search box" loading="lazy">

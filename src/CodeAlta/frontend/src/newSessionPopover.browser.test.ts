@@ -149,7 +149,10 @@ test("a new session is created from a form beside the row of its project or of t
     await until("newSessionFixture.permissionReads.includes('fixture')", "the permission modes of the provider were read");
     assert.equal(await shown("#composer-permission-create"), false, "no Permissions row for a provider without modes");
     assert.equal(await shown(`${chip} .composer-selection-permission`), false);
-    await select(".composer-selection-form select[aria-label='Provider for new session']", "alternate");
+    await press("#composer-provider-create");
+    await until("!!document.querySelector('.composer-provider-picker [data-provider-id=alternate]')", "the list of providers");
+    await press(".composer-provider-picker [data-provider-id=alternate]");
+    await gone(".composer-provider-picker", "a provider was taken");
     await until("!document.querySelector('#composer-model-create').disabled", "the models of the other provider");
     assert.deepEqual(await remembered(), { [projectScope]: { providerKey: "alternate" } },
       "what was chosen, and nothing else: the agent prompt is for the session of this form only");

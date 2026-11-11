@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { HTMLSelect } from "@blueprintjs/core";
 import { sessionOperations, type SessionProviderChoices } from "#neoastra";
+import { ComposerProviderPicker } from "./ComposerProviderPicker";
 import { useShellLanguage } from "./shellLanguage";
 import { modalDialogOpen } from "./modalDialogs";
 
@@ -73,13 +73,10 @@ export function ProviderChooser({ epoch, sessionId, providerKey, disabled, curre
   }
   const refusal = status ? providerSelectionMessage(status) : null;
   return <span className="provider-chooser">
-    <HTMLSelect fill className="current-provider" aria-label={t("Change provider")} value={providerKey} disabled={disabled || busy}
-      title={t("History and draft are kept. The provider connects on your next Send.")}
-      onFocus={() => { if (!choices && !busy) void load(); }} onChange={event => void select(event.currentTarget.value)}>
-      {/* A provider the session can no longer use (removed, turned off, out of its space) is named, and any other can be chosen. */}
-      {!choices?.providers.some(provider => provider.id === providerKey) && <option value={providerKey}>{choices ? `${providerKey} · ${t("Unavailable")}` : providerKey}</option>}
-      {choices?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-    </HTMLSelect>
+    {/* A provider the session can no longer use (removed, turned off, out of its space) is named, and any other can be chosen. */}
+    <ComposerProviderPicker id={`composer-provider-${sessionId}`} value={providerKey} providers={choices?.providers ?? []} disabled={disabled || busy}
+      loading={!choices && !status} unlisted={t("Unavailable")} title={t("History and draft are kept. The provider connects on your next Send.")}
+      onOpen={() => { if (!choices && !busy) void load(); }} onChange={provider => void select(provider)} />
     {busy && <span role="status">{t("Switching provider…")}</span>}
     {status && <span role="alert">{refusal ? t(refusal) : t("Provider selection unavailable ({status}).", { status })}</span>}
   </span>;

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { HTMLSelect } from "@blueprintjs/core";
 import type { SandboxSessionResponse, SessionPermissionModeChoice, SessionPromptChoice } from "#neoastra";
 import { ComposerModelPicker } from "../ComposerModelPicker";
+import { ComposerProviderPicker } from "../ComposerProviderPicker";
 import { ComposerSelectionFields, ReasoningSlider } from "../ComposerSelection";
 import { PermissionModeSelect } from "../PermissionModeSelect";
 import { ReviewBeforeCommitSelect } from "../ReviewBeforeCommitSelect";
@@ -93,8 +94,6 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
   const agentName = choices.prompts.find(prompt => prompt.id === agentId)?.name ?? agentId ?? t(choices.loadingPrompts ? "Loading…" : "Default");
   // Without a default provider in the settings, the first enabled one is used: the list says so.
   const anyDefault = providers.some(candidate => candidate.isDefault);
-  const providerLabel = (candidate: RunProvider) => candidate.isDefault ? t("{name} (default)", { name: candidate.name || candidate.id })
-    : !anyDefault && candidate === providers[0] ? t("{name} (first enabled)", { name: candidate.name || candidate.id }) : candidate.name || candidate.id;
   const permission = choices.permissionModes.length > 0 ? value.permissionMode ?? choices.defaultPermissionMode : undefined;
   const permissionName = (mode: string | null) => mode === null ? t("The setting of the CLI") : permissionModeName(mode) ? t(permissionModeName(mode)!) : mode;
   return <ComposerSelectionFields sessionId={id} disabled={disabled}
@@ -116,12 +115,9 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
       {choices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>
         {prompt.id === choices.defaultPromptId && prompt.name !== t("Default") ? `${prompt.name} · ${t("Default")}` : prompt.name}</option>)}
     </HTMLSelect>}
-    provider={<HTMLSelect fill id={`composer-provider-${id}`} aria-label={t("Provider")} value={shown.providerId ?? ""} disabled={locked}
-      onChange={event => onChange(chooseProvider(value, event.target.value))}>
-      {!shown.providerId && <option value="">{t("No provider")}</option>}
-      {shown.providerId && !provider && <option value={shown.providerId}>{`${shown.providerId} · ${t("Unverified")}`}</option>}
-      {providers.map(candidate => <option key={candidate.id} value={candidate.id}>{providerLabel(candidate)}</option>)}
-    </HTMLSelect>}
+    provider={<ComposerProviderPicker id={`composer-provider-${id}`} value={shown.providerId} disabled={locked}
+      providers={providers.map(candidate => ({ id: candidate.id, name: candidate.name, isDefault: candidate.isDefault, firstEnabled: !anyDefault && candidate === providers[0] }))}
+      onChange={providerId => onChange(chooseProvider(value, providerId))} />}
     model={<ComposerModelPicker id={`composer-model-${id}`} value={shown.modelId} models={models.map(candidate => ({ ...candidate, name: modelName(candidate)! }))}
       order={choices.modelsOrder} providerKey={shown.providerId} disabled={locked || !provider} loading={choices.loadingModels} onChange={modelId => onChange(chooseModel(value, modelId, shown))} />}
     reasoning={<ReasoningSlider value={shown.reasoningEffort} efforts={model ? model.efforts : null} complete={!!model?.effortsComplete} model={modelName(model)} disabled={locked}

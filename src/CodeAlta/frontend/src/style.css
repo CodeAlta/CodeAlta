@@ -782,7 +782,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .owned-session .prompt-options { margin: 0; border: 0; background: transparent; }
 .ide-shell .session-workspace > .composer-region > .owned-session { margin-top: 0; }
 .ide-shell .prompt-options { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; flex: 1; overflow-x: auto; }
-.ide-shell .current-provider { flex: 1; min-width: 0; }
 .ide-shell .composer-toolbar .history-controls { flex-wrap: nowrap; gap: 4px; }
 .ide-shell .composer-notice { margin: 2px 0; }
 @media (max-width: 875px) {
@@ -853,7 +852,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .composer-toolbar { flex-wrap: wrap; gap: 4px; }
 .ide-shell .prompt-options { flex-wrap: wrap; overflow: visible; max-width: none; }
 .ide-shell .prompt-options > * { flex: initial; }
-.ide-shell .current-provider { display: flex; align-items: center; gap: 4px; }
 .ide-shell .composer-toolbar .history-controls { margin-left: auto; flex-wrap: wrap; gap: var(--bp-surface-spacing); }
 .ide-shell .history-controls > button:not(.bp6-button) { width: 30px; height: 30px; padding: 4px; border-radius: var(--bp-surface-border-radius); }
 .ide-shell .owned-session { box-shadow: none !important; }
@@ -1113,7 +1111,6 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .scheme-color:not([data-chosen]) .scheme-color-text .bp6-input { color: var(--muted); }
 .scheme-color-reset.bp6-button:disabled { visibility: hidden; }
 .scheme-editor-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.ide-shell .current-provider { display: inline-block; max-width: 20ch; }
 .provider-chooser { display: inline-flex; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; gap: 5px; }
 .provider-chooser [role="alert"] { color: var(--red); font-size: 11px; }
 .file-dialog-summary { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
@@ -1139,7 +1136,6 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .automation-runs-with .composer-selection.bp6-button, .work-runs-with .composer-selection.bp6-button { border-color: var(--line); }
 .composer-selection-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .composer-selection-form .provider-chooser { display: flex; }
-.composer-selection-form .current-provider { flex: 1 1 auto; max-width: none; }
 /* The model of the next Send: a button as wide as its field, and a searchable list that shows the chosen number of models. */
 .composer-model-target { min-width: 0; }
 .composer-model-select .bp6-button-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1149,6 +1145,7 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-model-picker .bp6-menu-item-label { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .composer-model-picker p { margin: 4px 2px; color: var(--muted); }
 .composer-model-separator { list-style: none; margin: 4px 0 2px; padding: 6px 7px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.composer-model-separator:first-child { margin-top: 0; padding-top: 2px; border-top: 0; }
 /* The tiers of models at the top of the list: one button each, with the model it gives now. */
 .composer-tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .composer-tier.bp6-button { display: grid; justify-items: start; gap: 0; min-width: 0; padding: 3px 6px; text-align: start; }

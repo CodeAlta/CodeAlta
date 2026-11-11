@@ -139,6 +139,7 @@ import { useNewSessionChoices } from "./newSessionChoices";
 import { providersInSpace } from "./newSessionPreferences";
 import { resourceSpacesOf } from "./spaces/SpaceChips";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { ComposerProviderPicker } from "./ComposerProviderPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
 import { validSelection } from "./sessionSelection";
@@ -5131,11 +5132,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", next: string) => {
       invalidateCreation(); draftChoices.change(field, next);
     };
-    const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || !owned} onChange={event => change("providerKey", event.target.value)}>
-      {!usedProvider && <option value="">{t("No provider")}</option>}
-      {usedProvider && !providers.some(provider => provider.id === usedProvider) && <option value={usedProvider} disabled>{usedProvider}</option>}
-      {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.id }) : provider.id}</option>)}
-    </HTMLSelect>;
+    const select = <ComposerProviderPicker id={`composer-provider-${inPopover ? "create" : "new"}`} value={usedProvider || null} providers={providers}
+      disabled={creatingBusy || !owned} onChange={next => change("providerKey", next)} />;
     const locked = creatingBusy || !owned;
     const value = draftChoices.value;
     const draftModel = draftContextModel;
