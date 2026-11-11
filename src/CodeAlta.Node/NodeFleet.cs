@@ -210,6 +210,8 @@ internal sealed class NodeFleet : IAsyncDisposable
             _ = RecoverMovesAsync(service);
             var fleet = new NodeFleet(identity, service, listener, addresses, file, new Fleet.ModelServerProviderRefresh(node.Host, modelServers));
             fleet._configurationWatch = providers.WatchConfiguration();
+            // `alta provider refresh` applies the configuration with the providers that watch it.
+            if (node.ProviderConfiguration is { } configuration) configuration.Providers = providers;
             return fleet;
         }
         catch

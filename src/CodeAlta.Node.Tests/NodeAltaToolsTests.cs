@@ -58,6 +58,42 @@ public sealed class NodeAltaToolsTests
         Assert.IsTrue(reminders.Success, Text(reminders));
     }
 
+    // An agent of the node that edited config.toml does not wait for the watch of the file: alta provider refresh applies the
+    // providers changed in it, then tests them; a file that does not read is refused and nothing is tested.
+    [TestMethod]
+    public async Task ProviderRefresh_AppliesTheConfigurationOfTheNode()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var path = node.Host.CatalogOptions.ConfigPath;
+
+        var early = await node.Alta.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli, cancellationToken: token);
+        Assert.AreEqual(AltaExitCodes.Failure, early.ExitCode, "the providers of the node are not started yet");
+        StringAssert.Contains(early.Transcript, "provider.configurationFailed");
+
+        var providers = new NodeProviders(node.Host, null);
+        using var watch = providers.WatchConfiguration();
+        node.ProviderConfiguration!.Providers = providers;
+        File.WriteAllText(path, "[providers.local]\ntype = \"openai-chat\"\napi_url = \"http://127.0.0.1:9/v1\"\napi_key = \"test-key\"\n");
+
+        var refreshed = await node.Alta.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli, cancellationToken: token);
+
+        Assert.AreEqual(AltaExitCodes.Success, refreshed.ExitCode, refreshed.Transcript);
+        var records = refreshed.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(static line => JsonDocument.Parse(line).RootElement).ToArray();
+        Assert.IsTrue(records.Any(static record => record.GetProperty("type").GetString() == "alta.provider.state" && record.GetProperty("providerKey").GetString() == "local"),
+            "the provider written by hand is tested at once: " + refreshed.Stdout);
+        var summary = records.Single(static record => record.GetProperty("type").GetString() == "alta.provider.refreshed");
+        Assert.IsTrue(summary.GetProperty("configurationApplied").GetBoolean());
+
+        File.WriteAllText(path, "[providers.local]\ntype = \"openai-chat\"\napi_key \"sk-secret-0123456789\"\n");
+        var broken = await node.Alta.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli, cancellationToken: token);
+        Assert.AreEqual(AltaExitCodes.Failure, broken.ExitCode);
+        StringAssert.Contains(broken.Transcript, "line 3");
+        Assert.IsFalse(broken.Transcript.Contains("sk-secret", StringComparison.Ordinal), broken.Transcript);
+        Assert.IsFalse(broken.Stdout.Contains("alta.provider.state", StringComparison.Ordinal), "nothing is tested");
+    }
+
     [TestMethod]
     public async Task ScriptQuestions_AreNotAnswered()
     {

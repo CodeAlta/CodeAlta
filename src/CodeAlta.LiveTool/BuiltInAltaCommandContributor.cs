@@ -132,7 +132,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("tool list", supportsCatalogOnlyContext: true),
         Read("tool capability list", supportsCatalogOnlyContext: true),
         Read("provider list"),
+        // They register the providers again or start their CLIs and agents to test them: what sessions can use changes.
+        Mutating("provider refresh"),
         Read("provider model list"),
+        Mutating("provider model refresh"),
         Read("model list"),
         Read("model show"),
         Read("model resolve"),
@@ -1772,12 +1775,49 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static Command CreateProviderCommand(AltaCommandContext context)
     {
-        var group = Group("provider", "Inspect registered providers.");
-        var model = Group("model", "Inspect provider models.");
+        var group = Group("provider", "Inspect registered providers, and test them again.");
+        var model = Group("model", "Inspect provider models, and read them again.");
         model.Add(CreateModelListCommand(context, providerGroupAlias: true));
+        model.Add(CreateProviderModelRefreshCommand(context));
         group.Add(CreateProviderListCommand(context));
+        group.Add(CreateProviderRefreshCommand(context));
         group.Add(model);
         return group;
+    }
+
+    private static Command CreateProviderRefreshCommand(AltaCommandContext context)
+    {
+        string? provider = null;
+        var command = Leaf("refresh", "Read the providers of the configuration again and test them, as Save and apply then Test selected provider do in Settings > Providers.");
+        command.Add("<provider-id>?", "Only test this provider; every enabled provider otherwise.", value =>
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                provider = value;
+            }
+        });
+        command.Add("provider=", "Only test this provider.", value => provider = value);
+        command.Add(async (_, _) => await HandleProviderRefreshAsync(context, provider).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "Use it once the configuration (`config.toml`) changed, the CLI or the agent of a provider was updated, or its account signed in: the providers are registered again as the configuration gives them, each with a new runtime, then tested. Sessions that run go on.",
+            "altanode applies the providers changed in its configuration; a host that does not read the configuration again (altacli, CodeAlta TUI) only tests the providers it has: `configurationApplied` of the summary says which.",
+            "Writes one `alta.provider.state` record per provider tested (availability, ready, modelCount, statusMessage), then an `alta.provider.refreshed` summary.",
+            "Examples: `alta provider refresh`; `alta provider refresh copilot`.");
+        return command;
+    }
+
+    private static Command CreateProviderModelRefreshCommand(AltaCommandContext context)
+    {
+        var options = new ModelListOptions { Refresh = true };
+        var command = Leaf("refresh", "Ask the providers for their models again, then list them as `alta provider model list` does.");
+        AddModelListOptions(command, options);
+        command.Add(async (_, _) => await HandleModelListAsync(context, options).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "Use it when a provider has new models (a model released, a local server that loaded another one): the provider is asked again, without reading the configuration again.",
+            "Examples: `alta provider model refresh --provider copilot`; `alta provider model refresh --provider anthropic --detailed`.");
+        return command;
     }
 
     private static Command CreateProviderListCommand(AltaCommandContext context)
@@ -1803,15 +1843,20 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     {
         var options = new ModelListOptions();
         var command = Leaf("list", providerGroupAlias ? "List models for registered providers." : "List models for registered providers.");
+        AddModelListOptions(command, options);
+        command.Add(async (_, _) => await HandleModelListAsync(context, options).ConfigureAwait(false));
+        AddHelpText(command, "Examples: `alta model list --provider anthropic --contains sonnet`; `alta model list --provider codex --reasoning low`; `alta model list --provider anthropic --detailed`.");
+        return command;
+    }
+
+    private static void AddModelListOptions(Command command, ModelListOptions options)
+    {
         command.Add("provider=", "Provider id filter.", value => options.Provider = value);
         command.Add("contains=", "Substring filter over model id, display name, and model ref.", value => options.Contains = value);
         command.Add("reasoning=", "Only include models supporting this reasoning effort.", value => options.ReasoningEffort = ParseReasoningOption(value));
         command.Add("supports-tools", "Only include models that report tool-call support.", value => options.SupportsTools = value is not null);
         command.Add("detailed", "Emit one detailed metadata record per model instead of the compact modelRefs array.", value => options.Detailed = value is not null);
         command.Add("refs", "Compatibility alias for the default compact modelRefs array.", _ => { });
-        command.Add(async (_, _) => await HandleModelListAsync(context, options).ConfigureAwait(false));
-        AddHelpText(command, "Examples: `alta model list --provider anthropic --contains sonnet`; `alta model list --provider codex --reasoning low`; `alta model list --provider anthropic --detailed`.");
-        return command;
     }
 
     private static Command CreateModelShowCommand(AltaCommandContext context)
@@ -5099,6 +5144,125 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
+    private static async ValueTask<int> HandleProviderRefreshAsync(AltaCommandContext context, string? provider)
+    {
+        if (!context.TryGetRequired<IModelProviderInitializationService>(nameof(IModelProviderInitializationService), out var service))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        int? registered = null;
+        if (context.Services.Get<IAltaProviderConfiguration>() is { } configuration)
+        {
+            // A provider being prepared cannot be registered again: its preparation ends first.
+            var preparing = service.CurrentStates
+                .Where(static state => state.Availability == ModelProviderAvailability.Probing)
+                .Select(static state => state.ProviderId)
+                .ToArray();
+            await RefreshProvidersAsync(context, service, preparing).ConfigureAwait(false);
+            try
+            {
+                registered = await configuration.ApplyAsync(context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+            {
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "provider.configurationFailed", AltaExitCodes.Failure,
+                    $"The providers of the configuration were not applied: {exception.Message}");
+                return AltaExitCodes.Failure;
+            }
+        }
+
+        // A provider named is tested even when it is disabled, which its state then says; otherwise every enabled one.
+        var registry = context.Services.Get<IModelProviderRegistry>();
+        var named = !string.IsNullOrWhiteSpace(provider);
+        var providers = (registry?.ListProviders(includeDisabled: named).Select(static descriptor => descriptor.ProviderId)
+                ?? service.CurrentStates.Where(state => named || state.Descriptor.IsEnabled).Select(static state => state.ProviderId))
+            .Where(id => !named || string.Equals(id.Value, provider!.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(static id => id.Value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (named && providers.Length == 0)
+        {
+            return NotFound(context, "provider.notFound", $"Provider '{provider}' was not found.");
+        }
+
+        var failures = await RefreshProvidersAsync(context, service, providers).ConfigureAwait(false);
+        var states = service.CurrentStates;
+        var ready = 0;
+        foreach (var id in providers)
+        {
+            var failure = failures.FirstOrDefault(entry => string.Equals(entry.Provider.Value, id.Value, StringComparison.OrdinalIgnoreCase)).Message;
+            var state = states.FirstOrDefault(candidate => string.Equals(candidate.ProviderId.Value, id.Value, StringComparison.OrdinalIgnoreCase));
+            if (state?.Availability == ModelProviderAvailability.Ready && failure is null)
+            {
+                ready++;
+            }
+
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.provider.state",
+                version = 1,
+                correlationId = context.CorrelationId,
+                providerKey = id.Value,
+                displayName = state?.Descriptor.DisplayName,
+                availability = (state?.Availability ?? ModelProviderAvailability.Unknown).ToString().ToLowerInvariant(),
+                ready = state?.Availability == ModelProviderAvailability.Ready && failure is null,
+                modelCount = state?.Models.Count ?? 0,
+                hiddenModelCount = state?.HiddenModels.Count ?? 0,
+                // What the provider said, or why it was not tested again.
+                statusMessage = failure ?? state?.StatusMessage,
+                errorCategory = failure is null ? state?.ErrorCategory : "refreshFailed",
+                observedAt = state?.ObservedAt,
+            });
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.provider.refreshed",
+            version = 1,
+            correlationId = context.CorrelationId,
+            count = providers.Length,
+            ready,
+            // Whether the configuration was read again: a host that cannot only tests the providers it has.
+            configurationApplied = registered is not null,
+            registered,
+        });
+        return AltaExitCodes.Success;
+    }
+
+    // The most providers tested at the same time, as the window prepares them: each can start a CLI or an agent.
+    private const int ProviderRefreshConcurrency = 3;
+
+    // Tests the providers again and waits for them; returns those that could not be, with why. A test that fails is no
+    // failure here: the state of the provider says it.
+    private static async Task<IReadOnlyList<(ModelProviderId Provider, string Message)>> RefreshProvidersAsync(AltaCommandContext context,
+        IModelProviderInitializationService service, IReadOnlyList<ModelProviderId> providers)
+    {
+        if (providers.Count == 0)
+        {
+            return [];
+        }
+
+        using var slots = new SemaphoreSlim(ProviderRefreshConcurrency, ProviderRefreshConcurrency);
+        var results = await Task.WhenAll(providers.Select(async provider =>
+        {
+            await slots.WaitAsync(context.CancellationToken).ConfigureAwait(false);
+            try
+            {
+                await service.RefreshProviderAsync(provider, context.CancellationToken).ConfigureAwait(false);
+                return ((ModelProviderId Provider, string Message)?)null;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or AggregateException)
+            {
+                return (provider, exception.Message);
+            }
+            finally
+            {
+                slots.Release();
+            }
+        })).ConfigureAwait(false);
+        return [.. results.Where(static result => result is not null).Select(static result => result!.Value)];
+    }
+
     private static async ValueTask<int> HandleModelListAsync(AltaCommandContext context, ModelListOptions options)
     {
         if (!context.TryGetRequired<IModelProviderInitializationService>(nameof(IModelProviderInitializationService), out var providerInitializationService))
@@ -5116,6 +5280,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (!string.IsNullOrWhiteSpace(options.Provider) && providers.Length == 0)
         {
             return NotFound(context, "provider.notFound", $"Provider '{options.Provider}' was not found.");
+        }
+
+        if (options.Refresh)
+        {
+            foreach (var (provider, message) in await RefreshProvidersAsync(context, providerInitializationService, providers).ConfigureAwait(false))
+            {
+                AltaJsonlWriter.WriteWarning(context.Stderr, context.CorrelationId, "provider.refreshFailed", $"Provider '{provider.Value}' was not asked again: {message}");
+            }
         }
 
         var count = 0;
@@ -8015,6 +8187,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public bool SupportsTools { get; set; }
 
         public bool Detailed { get; set; }
+
+        // Whether the providers are asked for their models again before they are listed.
+        public bool Refresh { get; init; }
     }
 
     private enum SessionMetricsScope

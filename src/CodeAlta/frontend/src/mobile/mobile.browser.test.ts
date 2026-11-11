@@ -401,6 +401,23 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.deepEqual(await texts("#sheet-effort .reasoning-labels button"), ["low", "high"], "the efforts of the tier's model");
     await click("#model-done");
     assert.equal(await evaluate("document.getElementById('new-space').textContent"), "Work", "the space the session goes to, beside its project");
+    // The agent prompt, on the right of the label of the project: a list of the prompts, kept in step with the "⋯" options.
+    assert.equal(await evaluate("document.getElementById('new-prompt-name').textContent"), "Default");
+    const promptRow = await evaluate<{ label: number; chip: number; right: number; edge: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
+      return { label: r("new-space").right, chip: r("new-prompt").left, right: r("new-prompt").right, edge: r("new-project").right }; })()`);
+    assert.ok(promptRow.chip >= promptRow.label && Math.abs(promptRow.right - promptRow.edge) <= 12, `the prompt chip is at the right of the project label (${JSON.stringify(promptRow)})`);
+    await click("#new-prompt");
+    await waitFor(shown("#prompt-sheet"), "the prompt sheet");
+    assert.deepEqual(await texts("#prompt-list button"), ["Default", "Plan"]);
+    await evaluate("[...document.querySelectorAll('#prompt-list button')].find(b => b.textContent === 'Plan').click()");
+    await waitFor(`!(${shown("#prompt-sheet")}) && document.getElementById('new-prompt-name').textContent === "Plan"`, "the picked prompt on its chip");
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.mobile.newSessionPreferences.v1')).p1.agentPromptId"), "plan", "remembered for the project");
+    await click("#new-more");
+    await waitFor(shown("#new-more-sheet"), "the options of the new session");
+    assert.equal(await evaluate("document.getElementById('new-agent').value"), "plan", "the options show the prompt of the chip");
+    await evaluate(`(() => { const select = document.getElementById("new-agent"); select.value = "default"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    assert.equal(await evaluate("document.getElementById('new-prompt-name').textContent"), "Default", "the chip follows the options");
+    await click("#new-more-done");
     assert.ok(await evaluate<boolean>("document.getElementById('new-start').getBoundingClientRect().bottom <= innerHeight"), "Start is on the screen without scrolling");
     server.state.createAnswer = { sendError: "The provider is busy." };
     await typeInto("#new-text", "Make it faster");

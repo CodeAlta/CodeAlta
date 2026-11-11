@@ -515,6 +515,12 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 #create { padding-top: .75rem; }
 .composer-form { display: flex; flex-direction: column; gap: .75rem; }
 .field-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; }
+.field-lead { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+/* The agent prompt, on the right of the label of the project: it opens the list of the prompts. Its 44 px target overlaps the
+   space around the row instead of making it taller. */
+.prompt-chip { flex: 0 1 auto; max-width: 60%; margin: -10px -8px -10px 0; font-weight: normal; letter-spacing: normal; text-transform: none; font-size: .875rem; }
+.pick-chip .prompt-icon { width: 15px; height: 15px; }
+#prompt-list { max-height: 60vh; overflow: auto; }
 .space-tag { min-width: 0; overflow: hidden; color: var(--text); font-size: .8125rem; font-weight: normal; letter-spacing: normal; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .create-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: .25rem;
   padding: .5rem calc(.75rem + var(--safe-right)) calc(.5rem + env(safe-area-inset-bottom)) calc(.75rem + var(--safe-left)); background: var(--panel); border-top: 1px solid var(--line); }

@@ -1063,7 +1063,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Servers = fleetServers, Moves = fleet.Moves, Automations = automations, Placement = placement, Host = host,
                     }, releaseNotes,
                     // `alta llama`: the llama.cpp servers of this computer and of the machines it manages.
-                    modelServers is null ? null : ModelServers.DesktopAltaModelServers.Of(modelServers, host.RuntimeService));
+                    modelServers is null ? null : ModelServers.DesktopAltaModelServers.Of(modelServers, host.RuntimeService),
+                    // `alta provider refresh`: the providers of config.toml, applied again as Save and apply does.
+                    new DesktopAltaProviderConfiguration(new CodeAltaConfigStore(host.CatalogOptions), host.ModelProviderRegistry, options.CatalogRoot!,
+                        pluginProviderTypes, modelsDev, () => _copilotPolicies?.RefreshSoon()));
                 // A script of an automation without a model runs with these commands, as the automation allows them.
                 if (automationRunner is not null) automationRunner.Unattended = DesktopUnattendedScripts.Create(altaCommands, host);
                 search.AttachCommands(altaCommands);
