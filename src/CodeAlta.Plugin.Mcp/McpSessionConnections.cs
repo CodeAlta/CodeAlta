@@ -66,7 +66,10 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     /// <summary>Gets or sets what is told each value of a secret the servers of the sessions are given (the masking of the host); null tells nothing.</summary>
     internal Action<string>? SecretIssued { get; set; }
 
-    internal McpRuntimeService CreateRuntime(McpHome home) => new(home, ConfigCache, AdvertiseApps, LoadsSkills) { SecretIssued = SecretIssued };
+    /// <summary>Gets or sets what gives the secrets kept in vaults the host holds; null for a host without them.</summary>
+    internal Func<CodeAlta.Agent.Runtime.IBoundSecretSource?>? BoundSecrets { get; set; }
+
+    internal McpRuntimeService CreateRuntime(McpHome home) => new(home, ConfigCache, AdvertiseApps, LoadsSkills) { SecretIssued = SecretIssued, BoundSecrets = BoundSecrets };
 
     /// <summary>The number of sessions that hold connections.</summary>
     internal int Count { get { lock (_gate) return _entries.Count; } }

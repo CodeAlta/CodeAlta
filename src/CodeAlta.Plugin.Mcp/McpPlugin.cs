@@ -57,7 +57,7 @@ public sealed partial class McpPlugin : PluginBase
         LoadsSkills = options.LoadsSkills;
         ReadOnlyConfiguration = options.ReadOnlyConfiguration;
         // What the servers are given of the secrets of the store is masked by the host from then on.
-        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills) { SecretIssued = MaskSecret };
+        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills) { SecretIssued = MaskSecret, BoundSecrets = BoundSecretsOfHost };
         // What the presentation saves through it is read again at once by the runtime and the prompt.
         _managementService = new McpManagementService(home, _configCache, options.ShowsApps, options.LoadsSkills);
         _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(home)), new McpSkillContentCache()) : null;
@@ -79,6 +79,19 @@ public sealed partial class McpPlugin : PluginBase
         catch (InvalidOperationException)
         {
             return [];
+        }
+    }
+
+    // The secrets kept in vaults the host holds; none before the plugin runs in a host.
+    private CodeAlta.Agent.Runtime.IBoundSecretSource? BoundSecretsOfHost()
+    {
+        try
+        {
+            return Services.Secrets.BoundSecrets;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
         }
     }
 

@@ -11,6 +11,13 @@ public interface IPluginSecretService
     /// <param name="value">The value; one too short to mask is ignored.</param>
     /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
     void Mask(string value);
+
+    /// <summary>
+    /// Gets the values of the secrets kept in vaults that the host holds, and its confirmations of the secrets that ask before use,
+    /// for a plugin that resolves <c>${secret:NAME}</c> references itself (the MCP servers); null for a host without them, where such
+    /// secrets cannot be read.
+    /// </summary>
+    CodeAlta.Agent.Runtime.IBoundSecretSource? BoundSecrets => null;
 }
 
 /// <summary>The secret service of a host that masks nothing a plugin tells it (a host written before plugins could).</summary>

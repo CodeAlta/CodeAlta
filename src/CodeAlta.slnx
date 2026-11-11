@@ -32,6 +32,7 @@
   <Folder Name="/libs/">
     <Project Path="CodeAlta.Acp/CodeAlta.Acp.csproj" />
     <Project Path="CodeAlta.Automations/CodeAlta.Automations.csproj" />
+    <Project Path="CodeAlta.Credentials/CodeAlta.Credentials.csproj" />
     <Project Path="CodeAlta.Agent.Anthropic/CodeAlta.Agent.Anthropic.csproj" />
     <Project Path="CodeAlta.Agent.Claude/CodeAlta.Agent.Claude.csproj" />
     <Project Path="CodeAlta.NativeEngines/CodeAlta.NativeEngines.csproj" />
@@ -78,6 +79,8 @@
     <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
+    <Project Path="CodeAlta.Credentials.Tests/CodeAlta.Credentials.Tests.csproj" />
+    <Project Path="CodeAlta.Tests.FakeVaultCli/CodeAlta.Tests.FakeVaultCli.csproj" />
     <Project Path="CodeAlta.Fleet.Tests/CodeAlta.Fleet.Tests.csproj" />
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />
     <Project Path="CodeAlta.CodeMode.Tests/CodeAlta.CodeMode.Tests.csproj" />

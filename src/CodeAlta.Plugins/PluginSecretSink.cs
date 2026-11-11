@@ -34,6 +34,18 @@ public sealed class PluginSecretSink : IPluginSecretService
     }
 
     /// <inheritdoc />
+    public CodeAlta.Agent.Runtime.IBoundSecretSource? BoundSecrets { get; private set; }
+
+    /// <summary>Attaches the secrets kept in vaults the host holds, which the plugins that resolve references read.</summary>
+    /// <param name="source">The source.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
+    public void AttachBound(CodeAlta.Agent.Runtime.IBoundSecretSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        BoundSecrets = source;
+    }
+
+    /// <inheritdoc />
     public void Mask(string value)
     {
         ArgumentNullException.ThrowIfNull(value);

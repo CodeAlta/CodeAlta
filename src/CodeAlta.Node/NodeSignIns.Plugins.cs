@@ -215,7 +215,7 @@ internal sealed partial class NodeSignIns
             var settings = PluginModelProviderTypes.CreateSettings(provider, Store.GetEffectiveDefaultProvider());
             if (!settings.IsEnabled) return;
             var registry = host.ModelProviderRegistry;
-            if (types.TryCreateProviderRegistration(settings, Root, registry.SecretIssued, out var descriptor, out var createRuntime)) registry.RegisterOrReplace(descriptor, createRuntime);
+            if (types.TryCreateProviderRegistration(settings, Root, registry.SecretIssued, registry.BoundSecrets, out var descriptor, out var createRuntime)) registry.RegisterOrReplace(descriptor, createRuntime);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or InvalidDataException)
         {

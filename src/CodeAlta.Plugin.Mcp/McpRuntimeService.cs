@@ -822,7 +822,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         var key = effective.Definition.Key;
         if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) return null;
         // The list answers only for a start with the same values: the same variables and headers, the same session variables.
-        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), ReaderOf(context.Request.Home), out var definition, out _)) return null;
+        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), ReaderOf(context.Request.Home, key), out var definition, out _)) return null;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
         var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
         var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
@@ -973,10 +973,11 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
         // The tokens of a server are kept under its address as the file writes it, also when a variable is part of it.
         var tokenUrl = effective.Definition.Url;
-        var read = ReaderOf(context.Request.Home);
+        var read = ReaderOf(context.Request.Home, key);
         if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), read, out var definition, out var missing))
         {
-            return Cache(cacheKey, ServerRuntimeState.Failed(missing));
+            // Not kept: a secret kept in a vault that is locked, or that waits for a confirmation, is read again at the next request.
+            return ServerRuntimeState.Failed(missing);
         }
 
         var validation = ValidateRuntimeDefinition(definition, read);
@@ -1084,13 +1085,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 Command = definition.Command!,
                 Arguments = definition.Args.ToArray(),
                 WorkingDirectory = definition.Cwd,
-                EnvironmentVariables = StdioEnvironment(definition, request.Environment, ReaderOf(request.Home)),
+                EnvironmentVariables = StdioEnvironment(definition, request.Environment, ReaderOf(request.Home, definition.Key)),
                 ShutdownTimeout = CreateStdioShutdownTimeout(timeoutMs),
             };
             return new ObservingClientTransport(new StdioClientTransport(options, NullLoggerFactory.Instance));
         }
 
-        var headers = ExpandDictionary(definition.Headers, ReaderOf(request.Home)).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+        var headers = ExpandDictionary(definition.Headers, ReaderOf(request.Home, definition.Key)).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
         var httpOptions = new HttpClientTransportOptions
         {
             Name = definition.Key,
@@ -1584,7 +1585,12 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     // Reads a variable of the environment by its name (or env:NAME), and a secret or a variable of the store of the
     // profile by secret:NAME or var:NAME: ${secret:NAME} and ${var:NAME} are resolved as ${NAME} is.
     // Each secret read is told to the masking of the host (SecretIssued) before the server gets it.
-    private Func<string, string?> ReaderOf(McpHome home) => SecretReferenceResolver.ForMachine(home.Root, SecretIssued).Read;
+    // A secret kept in a vault is given from what the host holds, for the use of this server, which a secret that asks before use names.
+    private Func<string, string?> ReaderOf(McpHome home, string server)
+        => SecretReferenceResolver.ForMachine(home.Root, SecretIssued, BoundSecrets?.Invoke(), $"MCP server {server}").Read;
+
+    /// <summary>Gets or sets what gives the secrets kept in vaults the host holds; null for a host without them.</summary>
+    internal Func<CodeAlta.Agent.Runtime.IBoundSecretSource?>? BoundSecrets { get; set; }
 
     /// <summary>Gets or sets what is told each value of a secret given to a server before it gets it (the masking of the host); null tells nothing.</summary>
     internal Action<string>? SecretIssued { get; set; }

@@ -41,7 +41,20 @@ public interface ISecretLookup
 /// <param name="SetBy">Who set its current value.</param>
 /// <param name="SetAt">When its current value was set.</param>
 /// <param name="Scope">Where it is kept, <see cref="LocalSecretStore.MachineScope"/> for this machine.</param>
-public sealed record SecretInfo(string Name, int Version, string SetBy, DateTimeOffset SetAt, string Scope);
+public sealed record SecretInfo(string Name, int Version, string SetBy, DateTimeOffset SetAt, string Scope)
+{
+    /// <summary>Gets the id of the credential provider whose vault keeps the value; null for a value kept on this computer.</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>Gets what the user picked in the vault, as the list shows it; null for a value kept on this computer.</summary>
+    public string? Label { get; init; }
+
+    /// <summary>Gets what the provider reads, such as <c>op://Private/Anthropic/credential</c>; never shown to agents. Null for a value kept on this computer.</summary>
+    public string? VaultReference { get; init; }
+
+    /// <summary>Gets how long a confirmation of the secret lasts when it asks before use (<see cref="SecretAskDurations"/>); null when it does not ask.</summary>
+    public string? AskBeforeUse { get; init; }
+}
 
 /// <summary>A variable: a named value that is not secret.</summary>
 /// <param name="Name">Its name, such as <c>GRAFANA_URL</c>.</param>
@@ -78,6 +91,7 @@ public sealed partial class LocalSecretStore : ISecretLookup
 
     private readonly ISecretProtector? _givenProtector;
     private readonly Lock _gate = new();
+    private SecretBindings? _bindings;
     private ISecretProtector? _protector;
     private Snapshot? _snapshot;
 
@@ -105,6 +119,18 @@ public sealed partial class LocalSecretStore : ISecretLookup
 
     /// <summary>Gets the folder of the store.</summary>
     public string FolderPath { get; }
+
+    /// <summary>Gets the secrets of this machine kept in vaults, and those that ask before use (<c>bindings.json</c>).</summary>
+    public SecretBindings Bindings => _bindings ??= new SecretBindings(FolderPath);
+
+    /// <summary>
+    /// Gets the values of the secrets kept in vaults that the host holds, and its confirmations; null in a host without a
+    /// credential broker, where a secret kept in a vault, or one that asks before use, cannot be read.
+    /// </summary>
+    public IBoundSecretSource? BoundSecrets { get; init; }
+
+    /// <summary>Gets what the values read through this instance are for, such as <c>provider anthropic</c>; null for a use nobody names.</summary>
+    public string? Use { get; init; }
 
     /// <inheritdoc />
     public string Scope => MachineScope;
@@ -146,9 +172,39 @@ public sealed partial class LocalSecretStore : ISecretLookup
     /// <summary>Lists the secrets, by name, without their values.</summary>
     /// <returns>The secrets, in the order of their names.</returns>
     /// <exception cref="InvalidDataException">The file of the store is damaged.</exception>
+    /// <remarks>A secret kept in a vault is listed with its provider; a binding wins over a value an older build kept here under its name.</remarks>
     public IReadOnlyList<SecretInfo> ListSecrets()
-        => [.. Read().Document.Secrets.Select(static entry => new SecretInfo(entry.Key, entry.Value.Version, entry.Value.SetBy ?? string.Empty, entry.Value.SetAt, MachineScope))
+    {
+        var bindings = Bindings.List();
+        var asks = Bindings.ListAskBeforeUse();
+        var bound = bindings.Select(static binding => binding.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return [.. Read().Document.Secrets.Where(entry => !bound.Contains(entry.Key))
+                .Select(entry => new SecretInfo(entry.Key, entry.Value.Version, entry.Value.SetBy ?? string.Empty, entry.Value.SetAt, MachineScope) { AskBeforeUse = asks.GetValueOrDefault(entry.Key) })
+            .Concat(bindings.Select(binding => new SecretInfo(binding.Name, binding.Version, binding.SetBy, binding.SetAt, MachineScope)
+            {
+                Provider = binding.Provider, Label = binding.Label, VaultReference = binding.Reference, AskBeforeUse = asks.GetValueOrDefault(binding.Name),
+            }))
             .OrderBy(static secret => secret.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Keeps the value of a secret in a vault: binds its name to what a credential provider reads. A value this machine kept
+    /// under the name is taken away (it stays masked, as after a rotation).
+    /// </summary>
+    /// <param name="name">The name of the secret.</param>
+    /// <param name="provider">The id of the credential provider.</param>
+    /// <param name="reference">What the provider reads.</param>
+    /// <param name="label">What the list shows.</param>
+    /// <param name="setBy">Who binds it.</param>
+    /// <returns>The binding.</returns>
+    /// <exception cref="ArgumentException">A value is not valid.</exception>
+    /// <exception cref="InvalidOperationException">The store holds the most secrets kept in vaults already.</exception>
+    public SecretBinding Bind(string name, string provider, string reference, string label, string setBy)
+    {
+        var binding = Bindings.Bind(name, provider, reference, label, setBy);
+        RemoveLocal(name);
+        return binding;
+    }
 
     /// <summary>Lists the variables, with their values.</summary>
     /// <returns>The variables, in the order of their names.</returns>
@@ -165,7 +221,13 @@ public sealed partial class LocalSecretStore : ISecretLookup
     /// <exception cref="ArgumentException">The name or the value is not valid.</exception>
     /// <exception cref="InvalidOperationException">The store holds the most secrets already.</exception>
     /// <exception cref="SecretStoreUnavailableException">The value cannot be protected.</exception>
-    public SecretInfo SetSecret(string name, string value, string setBy) => WriteSecret(name, value, setBy, mustExist: false);
+    /// <remarks>A secret kept in a vault under the name is then kept on this computer: its binding is removed.</remarks>
+    public SecretInfo SetSecret(string name, string value, string setBy)
+    {
+        var info = WriteSecret(name, value, setBy, mustExist: false);
+        Bindings.Unbind(name);
+        return info;
+    }
 
     /// <summary>Rotates a secret: gives it a new value and a new version.</summary>
     /// <param name="name">Its name.</param>
@@ -180,9 +242,18 @@ public sealed partial class LocalSecretStore : ISecretLookup
     /// <summary>Deletes a secret.</summary>
     /// <param name="name">Its name.</param>
     /// <returns><see langword="true"/> when it was set.</returns>
+    /// <remarks>A secret kept in a vault loses its binding, and a secret that asks before use stops asking; nothing is changed in the vault.</remarks>
     public bool DeleteSecret(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
+        var removed = RemoveLocal(name);
+        removed |= Bindings.Unbind(name);
+        if (IsName(name)) Bindings.SetAskBeforeUse(name, null);
+        return removed;
+    }
+
+    private bool RemoveLocal(string name)
+    {
         return Change(document =>
         {
             if (!document.Secrets.Remove(name, out var removed)) return false;
@@ -240,14 +311,34 @@ public sealed partial class LocalSecretStore : ISecretLookup
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A secret kept in a vault is given from what the host holds (<see cref="BoundSecrets"/>), and a secret that asks before use only
+    /// for a use the user confirmed; otherwise the exception says why, naming the secret and its vault.
+    /// </remarks>
     public bool TryGetSecret(string name, [NotNullWhen(true)] out string? value)
     {
         ArgumentNullException.ThrowIfNull(name);
+        if (Bindings.TryGet(name, out var binding))
+        {
+            var read = BoundSecrets?.ReadBound(binding.Name, Use)
+                ?? throw new SecretStoreUnavailableException($"{binding.Name} is kept in a vault (the credential provider '{binding.Provider}'), which this application does not read.");
+            value = read.Value ?? throw new SecretStoreUnavailableException(read.Problem ?? $"{binding.Name} cannot be read from its vault now.");
+            return true;
+        }
+
         var snapshot = Read();
         if (!snapshot.Document.Secrets.ContainsKey(name))
         {
             value = null;
             return false;
+        }
+
+        if (Bindings.AskBeforeUse(name) is not null)
+        {
+            var problem = BoundSecrets is null
+                ? $"{name} asks before use: this application cannot ask for a confirmation."
+                : BoundSecrets.AuthorizeUse(name, Use);
+            if (problem is not null) throw new SecretStoreUnavailableException(problem);
         }
 
         value = Values(snapshot)[name];

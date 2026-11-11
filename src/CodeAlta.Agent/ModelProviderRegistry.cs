@@ -38,6 +38,12 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public Action<string>? SecretIssued { get; set; }
 
     /// <summary>
+    /// Gets or sets the secrets kept in vaults the host holds, and its confirmations of the secrets that ask before use, which the
+    /// providers registered here are given for their own use (<c>provider &lt;key&gt;</c>); null for a host without them.
+    /// </summary>
+    public Runtime.IBoundSecretSource? BoundSecrets { get; set; }
+
+    /// <summary>
     /// Gets or sets what gives the transport of a provider that names a model server (<c>server = "&lt;machine&gt;/&lt;server&gt;"</c>):
     /// the host knows where its servers and the servers of its machines are. Null knows none.
     /// </summary>

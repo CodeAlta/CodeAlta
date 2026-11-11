@@ -230,6 +230,14 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginScriptContribution> GetScripts() => [];
 
     /// <summary>
+    /// Gets the types of credential providers the plugin brings: the vaults the secrets of the user can be kept in. A
+    /// <c>[credentials.&lt;id&gt;]</c> of the user's configuration names one by its <see cref="PluginCredentialProviderContribution.Type"/>.
+    /// Only the built-in plugins and the plugins of the user contribute them; those of a project folder are left out.
+    /// </summary>
+    /// <returns>Credential provider contributions.</returns>
+    public virtual IEnumerable<PluginCredentialProviderContribution> GetCredentialProviders() => [];
+
+    /// <summary>
     /// A hook that observes or transforms a prompt when it is submitted.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>

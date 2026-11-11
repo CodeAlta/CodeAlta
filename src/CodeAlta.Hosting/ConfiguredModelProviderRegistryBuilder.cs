@@ -99,7 +99,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued, modelProviderRegistry.ModelServerTransports))
+                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports))
             {
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
@@ -176,7 +176,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued, modelProviderRegistry.ModelServerTransports))
+                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports))
             {
                 continue;
             }
@@ -251,7 +251,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null,
+        ProviderSecretAccess? issued = null,
         Func<string, HttpMessageHandler?>? modelServerTransports = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -284,7 +284,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued,
+        ProviderSecretAccess? issued,
         Func<string, HttpMessageHandler?>? modelServerTransports)
     {
         switch (definition.ProviderType)
@@ -328,7 +328,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -403,7 +403,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -484,7 +484,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null,
+        ProviderSecretAccess? issued = null,
         Func<string, HttpMessageHandler?>? modelServerTransports = null)
     {
         var responses = string.Equals(definition.Api, "responses", StringComparison.Ordinal);
@@ -556,7 +556,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -619,7 +619,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var providerId = new ModelProviderId(definition.ProviderKey);
         var displayName = ResolveProviderDisplayName(definition);
@@ -688,7 +688,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var authSource = NormalizeText(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;
         var githubTokenEnv = NormalizeText(definition.GitHubTokenEnv);
@@ -772,7 +772,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var authSource = NormalizeText(definition.AuthSource) ?? XaiAuthSources.XaiBrowserOAuth;
         if (authSource != XaiAuthSources.XaiBrowserOAuth && authSource != XaiAuthSources.XaiDeviceFlow)
@@ -868,7 +868,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         AgentProviderProcesses? providerProcesses,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         if (ResolveEnvironment(definition, stateRootPath, issued) is not { } environmentVariables)
         {
@@ -920,7 +920,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -1003,7 +1003,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -1033,7 +1033,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         return TryCreateGoogleProvider(
             definition,
@@ -1114,7 +1114,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        ProviderSecretAccess? issued = null)
     {
         // Mistral Vibe takes the key its sign-in stored, read for each request: a provider signed out is registered,
         // and signs in from its form.
@@ -1230,7 +1230,7 @@ public static class ConfiguredModelProviderRegistryBuilder
     // the provider out with a warning that names it: never an empty key, never a key of another source.
     // The key read from the store is told to the masking of the host (issued) as the provider is given it, normalized, at the reading that
     // gives it: never another reading, which a rotation between the two would make another value.
-    private static string? ResolveSecret(CodeAltaProviderDocument definition, string stateRootPath, Action<string>? issued)
+    private static string? ResolveSecret(CodeAltaProviderDocument definition, string stateRootPath, ProviderSecretAccess? issued)
     {
         var literal = NormalizeText(definition.ApiKey);
         try
@@ -1238,13 +1238,13 @@ public static class ConfiguredModelProviderRegistryBuilder
             if (!string.IsNullOrWhiteSpace(literal))
             {
                 return SecretReferences.TryParseLone(literal, out var reference)
-                    ? Issued(NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(reference)), reference.Kind == SecretReferenceKind.Secret ? issued : null)
+                    ? Issued(NormalizeText(ProviderSecretAccess.Resolver(issued, stateRootPath, definition.ProviderKey).Get(reference)), reference.Kind == SecretReferenceKind.Secret ? issued : null)
                     : literal;
             }
 
             if (NormalizeText(definition.ApiKeySecret) is { } secret)
             {
-                return Issued(NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(new SecretReference(SecretReferenceKind.Secret, secret))), issued);
+                return Issued(NormalizeText(ProviderSecretAccess.Resolver(issued, stateRootPath, definition.ProviderKey).Get(new SecretReference(SecretReferenceKind.Secret, secret))), issued);
             }
         }
         catch (SecretReferenceException exception)
@@ -1265,18 +1265,18 @@ public static class ConfiguredModelProviderRegistryBuilder
     // The variables a provider starts its CLI with, their references (${secret:NAME}, ${var:NAME}, ${env:NAME}) resolved;
     // null with a warning that names what is not set.
     // A value given as read: the masking of the host is told it before the provider gets it.
-    private static string? Issued(string? value, Action<string>? issued)
+    private static string? Issued(string? value, ProviderSecretAccess? issued)
     {
-        if (value is not null) issued?.Invoke(value);
+        if (value is not null) issued?.Issued?.Invoke(value);
         return value;
     }
 
     // Each secret a variable refers to is told to the masking of the host as it is read for it, before the CLI gets it.
-    private static Dictionary<string, string>? ResolveEnvironment(CodeAltaProviderDocument definition, string stateRootPath, Action<string>? issued)
+    private static Dictionary<string, string>? ResolveEnvironment(CodeAltaProviderDocument definition, string stateRootPath, ProviderSecretAccess? issued)
     {
         var variables = new Dictionary<string, string>(StringComparer.Ordinal);
         if (definition.Env is not { Count: > 0 } written) return variables;
-        var resolver = SecretReferenceResolver.ForMachine(stateRootPath, issued);
+        var resolver = ProviderSecretAccess.Resolver(issued, stateRootPath, definition.ProviderKey, tellIssued: true);
         foreach (var (name, value) in written)
         {
             if (!resolver.TryResolve(value, out var resolved, out var problem))

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Catalog.Secrets;
 
@@ -185,9 +186,20 @@ public sealed class SecretReferenceResolver
     /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
     /// <param name="issued">Told each value of a secret before it is given; null for none.</param>
     /// <returns>The resolver.</returns>
-    public static SecretReferenceResolver ForMachine(string root, Action<string>? issued)
+    public static SecretReferenceResolver ForMachine(string root, Action<string>? issued) => ForMachine(root, issued, null, null);
+
+    /// <summary>
+    /// Gets a resolver for what runs on the host side, as <see cref="ForMachine(string, Action{string}?)"/> does, that also gives the
+    /// secrets kept in vaults the host holds, and the secrets that ask before use for a use the user confirmed.
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="issued">Told each value of a secret before it is given; null for none.</param>
+    /// <param name="bound">The secrets kept in vaults the host holds, and its confirmations; null for a host without them.</param>
+    /// <param name="use">What gets the values, such as <c>provider anthropic</c>; null for a use nobody names.</param>
+    /// <returns>The resolver.</returns>
+    public static SecretReferenceResolver ForMachine(string root, Action<string>? issued, IBoundSecretSource? bound, string? use)
     {
-        var store = new LocalSecretStore(root);
+        var store = new LocalSecretStore(root) { BoundSecrets = bound, Use = use };
         return new(Environment.GetEnvironmentVariable, [store, store.FleetScope(FleetSecretScopes.Person, null, shell: false)]) { Issued = issued };
     }
 
@@ -209,10 +221,24 @@ public sealed class SecretReferenceResolver
     /// <param name="used">Told each value of the fleet given, for the record of its uses; null for none.</param>
     /// <returns>The resolver.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="scope"/> is null.</exception>
-    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used)
+    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used) => ForScope(root, scope, shell, used, (IBoundSecretSource?)null, null);
+
+    /// <summary>
+    /// Gets a resolver for the work of a run, as <see cref="ForScope(string, SecretScope, bool, Action{FleetSecretCopyInfo}?)"/> does,
+    /// that also gives the secrets kept in vaults the host holds, and the secrets that ask before use for a use the user confirmed.
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="scope">The work of the run.</param>
+    /// <param name="shell">Whether the values go to the agent's shell, which never gets a host-only secret.</param>
+    /// <param name="used">Told each value of the fleet given, for the record of its uses; null for none.</param>
+    /// <param name="bound">The secrets kept in vaults the host holds; null for a host without them.</param>
+    /// <param name="use">What gets the values; null for a use nobody names.</param>
+    /// <returns>The resolver.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is null.</exception>
+    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used, IBoundSecretSource? bound, string? use)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        var store = new LocalSecretStore(root);
+        var store = new LocalSecretStore(root) { BoundSecrets = bound, Use = use };
         var sources = new List<ISecretLookup>(5);
         if (scope.OwnerWork) sources.Add(store);
         if (!string.IsNullOrWhiteSpace(scope.Environment)) sources.Add(store.FleetScope(FleetSecretScopes.Environment, scope.Environment, shell, used));
@@ -245,8 +271,25 @@ public sealed class SecretReferenceResolver
     /// <returns>The resolver.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="scope"/> is null.</exception>
     public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used, Action<string>? issued)
+        => ForScope(root, scope, shell, used, issued, null, null);
+
+    /// <summary>
+    /// Gets a resolver for the work of a run that tells each value of a secret before it gives it, and also gives the secrets kept in
+    /// vaults the host holds (<see cref="ForScope(string, SecretScope, bool, Action{FleetSecretCopyInfo}?, IBoundSecretSource?, string?)"/>).
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="scope">The work of the run.</param>
+    /// <param name="shell">Whether the values go to the agent's shell, which never gets a host-only secret.</param>
+    /// <param name="used">Told each value of the fleet given, for the record of its uses; null for none.</param>
+    /// <param name="issued">Told each value of a secret before it is given; null for none.</param>
+    /// <param name="bound">The secrets kept in vaults the host holds; null for a host without them.</param>
+    /// <param name="use">What gets the values; null for a use nobody names.</param>
+    /// <returns>The resolver.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is null.</exception>
+    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used, Action<string>? issued,
+        IBoundSecretSource? bound, string? use)
     {
-        var resolver = ForScope(root, scope, shell, used);
+        var resolver = ForScope(root, scope, shell, used, bound, use);
         return new SecretReferenceResolver(resolver._environment, resolver._sources) { Issued = issued };
     }
 
