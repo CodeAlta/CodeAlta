@@ -37,6 +37,41 @@ public sealed class SecretMaskingTests
     }
 
     [TestMethod]
+    public void AValueRetained_IsMaskedEncodedAsAFormAnAddressOrAJsonBodySendIt()
+    {
+        // A password a browser posts, as the network tools of a session read the bodies of its requests.
+        const string password = "hunter 2&gh+ub!é\"x";
+        var masker = new AgentSecretMasker(() => []);
+        masker.Retain(password);
+
+        var bodies = new[]
+        {
+            // A form as a browser posts it (application/x-www-form-urlencoded), and with lowercase digits.
+            "login=octocat&password=hunter+2%26gh%2Bub%21%C3%A9%22x",
+            "login=octocat&password=hunter+2%26gh%2bub%21%c3%a9%22x",
+            "login=octocat&password=" + Uri.EscapeDataString(password),
+            "login=octocat&password=" + System.Net.WebUtility.UrlEncode(password),
+            "/session?password=" + Uri.EscapeDataString(password).Replace("%20", "+", StringComparison.Ordinal),
+            JsonSerializer.Serialize(new { login = "octocat", password }),
+            JsonSerializer.Serialize(new { login = "octocat", password }, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }),
+        };
+        foreach (var body in bodies)
+        {
+            Assert.IsTrue(masker.Contains(body), body);
+            var masked = masker.MaskText(body);
+            StringAssert.Contains(masked, "***", body);
+            Assert.DoesNotContain("hunter", masked, body);
+            // The answer of a tool that shows the body is written in the JSON of the events: masked there too.
+            Assert.DoesNotContain("hunter", masker.MaskJson(JsonSerializer.Serialize(new { text = body })), body);
+        }
+
+        // The JavaScript form of encodeURIComponent, which leaves !'()*~ as they are.
+        Assert.AreEqual("p=***", masker.MaskText("p=hunter%202%26gh%2Bub!%C3%A9%22x"));
+        var line = "[INF] posted password=hunter+2%26gh%2Bub%21%C3%A9%22x".ToCharArray();
+        Assert.AreEqual("[INF] posted password=***", new string(line, 0, masker.MaskInPlace(line)));
+    }
+
+    [TestMethod]
     public void InPlace_ShortensTheText()
     {
         var masker = new AgentSecretMasker(() => [Secret]);

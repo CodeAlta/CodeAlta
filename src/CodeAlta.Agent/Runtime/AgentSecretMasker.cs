@@ -14,7 +14,8 @@ namespace CodeAlta.Agent.Runtime;
 /// comes in parts (the deltas of a stream) is masked through <see cref="CreateStream"/>, which holds back the end of a
 /// part that could begin a secret until the next part tells. A value it masked once stays masked for as long as it lives,
 /// also once the store no longer gives it (a rotation, a deletion, a value taken away, the bounded and dated values the store keeps
-/// for masking): a process or a stream of this host that took it may still write it.
+/// for masking): a process or a stream of this host that took it may still write it. A value is masked as it is, escaped as
+/// JSON writes it, and percent-encoded as a form, an address or a script sends it (the body of a sign-in a browser posted).
 /// </remarks>
 public sealed class AgentSecretMasker
 {
@@ -384,31 +385,78 @@ public sealed class AgentSecretMasker
                 if (value is { Length: >= MinimumLength }) _seen.Add(value);
             }
 
-            return count == _seen.Count && _patterns.Plain.Length == count ? _patterns : _patterns = Patterns.Of(_seen);
+            return count == _seen.Count && _patterns.Sources == count ? _patterns : _patterns = Patterns.Of(_seen);
         }
     }
 
-    // The values to mask, the longest first so that a secret that holds another is masked whole; and their forms as
-    // the JSON of the events writes them.
-    private sealed class Patterns(string[] plain, string[] json)
+    // The values to mask in each form a text can hold them in, the longest first so that a secret that holds another is
+    // masked whole; and those forms as the JSON of the events writes them.
+    private sealed class Patterns(string[] plain, string[] json, int sources)
     {
-        public static Patterns Empty { get; } = new([], []);
+        // How a value is percent-encoded where it is sent: the characters each encoder leaves as they are besides the ASCII
+        // letters and digits, and whether it writes a space as +. A form (application/x-www-form-urlencoded, URLSearchParams),
+        // encodeURIComponent, Uri.EscapeDataString, WebUtility.UrlEncode.
+        private static readonly (string Kept, bool PlusForSpace)[] UrlEncodings = [("*-._", true), ("-_.!~*'()", false), ("-_.~", false), ("-_.!*()", true)];
+
+        public static Patterns Empty { get; } = new([], [], 0);
 
         public string[] Plain { get; } = plain;
 
         public string[] Json { get; } = json;
+
+        // How many values the forms are of.
+        public int Sources { get; } = sources;
 
         // The characters a secret starts with: a text is searched for them, not read character by character.
         public System.Buffers.SearchValues<char> FirstCharacters { get; } = System.Buffers.SearchValues.Create([.. plain.Select(static value => value[0]).Distinct()]);
 
         public static Patterns Of(IReadOnlyCollection<string> values)
         {
-            var plain = values.Where(static value => value is { Length: >= MinimumLength }).Distinct(StringComparer.Ordinal)
-                .OrderByDescending(static value => value.Length).ToArray();
-            if (plain.Length == 0) return Empty;
+            var sources = values.Where(static value => value is { Length: >= MinimumLength }).Distinct(StringComparer.Ordinal).ToArray();
+            if (sources.Length == 0) return Empty;
+            var plain = sources.SelectMany(Forms).Distinct(StringComparer.Ordinal).OrderByDescending(static value => value.Length).ToArray();
             var json = plain.SelectMany(static value => Encoders.Select(encoder => JsonEncodedText.Encode(value, encoder).Value).Append(value))
                 .Distinct(StringComparer.Ordinal).OrderByDescending(static value => value.Length).ToArray();
-            return new Patterns(plain, json);
+            return new Patterns(plain, json, sources.Length);
+        }
+
+        // A value as a text can hold it: as it is, escaped in JSON (the body of a request, an answer of a server), and
+        // percent-encoded as a form, an address or a script sends it, with uppercase or lowercase hexadecimal digits. Each
+        // form is at least as long as the value, so that a mask is never longer than what it replaces.
+        private static IEnumerable<string> Forms(string value)
+        {
+            yield return value;
+            foreach (var encoder in Encoders) yield return JsonEncodedText.Encode(value, encoder).Value;
+            byte[] bytes;
+            try
+            {
+                bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetBytes(value);
+            }
+            catch (EncoderFallbackException)
+            {
+                // A value that is not text (a lone surrogate) is sent by no form.
+                yield break;
+            }
+
+            foreach (var (kept, plusForSpace) in UrlEncodings)
+            {
+                yield return PercentEncode(bytes, kept, plusForSpace, "0123456789ABCDEF");
+                yield return PercentEncode(bytes, kept, plusForSpace, "0123456789abcdef");
+            }
+        }
+
+        private static string PercentEncode(byte[] bytes, string kept, bool plusForSpace, string digits)
+        {
+            var builder = new StringBuilder(bytes.Length * 3);
+            foreach (var item in bytes)
+            {
+                var ch = (char)item;
+                if (item < 0x80 && (char.IsAsciiLetterOrDigit(ch) || kept.Contains(ch, StringComparison.Ordinal))) builder.Append(ch);
+                else if (ch == ' ' && plusForSpace) builder.Append('+');
+                else builder.Append('%').Append(digits[item >> 4]).Append(digits[item & 0xF]);
+            }
+
+            return builder.ToString();
         }
     }
 }
