@@ -1,6 +1,6 @@
 ---
 title: Credential providers for secrets kept in 1Password, Bitwarden and other vaults (#413)
-status: in-progress
+status: done
 created: 2026-11-11
 summary: A secret of CodeAlta keeps its name and gains a source - this computer, or an item of a vault read through a pluggable credential provider - and can ask the user to confirm each use. Values stay out of models, configuration files and sandboxed sessions.
 ---
