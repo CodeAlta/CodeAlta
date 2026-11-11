@@ -55,7 +55,9 @@ flowchart LR
   percent-encoded as a form or an address sends it.
 - **Memory**: a value stays until the duration of its provider ends (`cache`: until CodeAlta closes, or 15 minutes to
   8 hours), the user locks the provider, or CodeAlta closes. Nothing is written to disk: no value, no master password,
-  no session key.
+  no session key. A lock is a barrier: each provider has a generation that a lock increments, a read or an unlock that
+  began before it drops its result, and a provider the user locked is neither checked nor read until the user unlocks
+  it, since the lock of some vaults (pass, a keychain) forgets nothing.
 - **Prompts**: only a host with a user (`CanPrompt`, the normal desktop instance) asks a vault to unlock, once at start
   for the providers whose `unlock_at_start` is on and whose vault prompts by itself, then on a click. The developer
   instance, `altacli` and `altanode` read only what a vault gives without a prompt.
@@ -76,7 +78,10 @@ user, never from the plugin of a project folder: a cloned repository cannot brin
 `VaultCommandRunner` holds the rules every program of a vault is run with: its full path and an argument array, never a
 shell; a folder of its own, never the folder of a project; the session variables of vaults (`BW_SESSION`, `OP_SESSION_*`)
 removed from its environment; a password or a token on its standard input or in its own environment, never in an
-argument; its output bounded in size and time, the process killed after it.
+argument; its output bounded in size and time, the process killed after it, from its start to its end. What a program
+writes on its error output can hold a value the masking does not know yet: a provider gives a classified message, and the
+raw line only in `Detail`, which Settings shows the user and nothing gives an agent or a log. A password the user types
+to unlock is given to the masking before the program starts.
 
 ## Ask before use
 
