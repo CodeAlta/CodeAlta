@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using CodeAlta.Catalog.Reviews;
+using CodeAlta.Catalog.Worktrees;
 
 namespace CodeAlta.Catalog.Tests;
 
@@ -351,6 +352,15 @@ public sealed class ReviewServiceTests
         Assert.HasCount(2, (await service.ListAsync(scope, null, null, false, default)).Threads);
         Assert.IsEmpty(Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp"), "No staged file is left beside the reviews.");
         Assert.HasCount(2, (await new ReviewService(temp.State, text).ListAsync(scope, null, null, false, default)).Threads, "The second comment is in the file.");
+    }
+
+    [TestMethod]
+    public void AnIndexGitCannotReplace_IsToldWhateverTheCaseOfItsMessage()
+    {
+        // Git 2.39 says "Unable to write new index file"; later versions say it in lower case.
+        Assert.IsTrue(GitSnapshot.IsUnwritableIndex(new GitRun(128, string.Empty, "fatal: Unable to write new index file\n")));
+        Assert.IsTrue(GitSnapshot.IsUnwritableIndex(new GitRun(128, string.Empty, "fatal: unable to write new index file\n")));
+        Assert.IsFalse(GitSnapshot.IsUnwritableIndex(new GitRun(128, string.Empty, "fatal: not a git repository\n")));
     }
 
     [TestMethod]
