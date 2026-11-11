@@ -265,7 +265,8 @@ public sealed class DesktopWorktreeTests
             Assert.AreEqual("discarded", service.DiscardWorktree(new(Epoch, early)).Status);
             var branch = (await ReadyAsync(service, unused)).Branch!;
             Assert.AreEqual("discarded", service.DiscardWorktree(new(Epoch, unused)).Status);
-            await WaitUntilAsync(async () => (await worktrees.ListAsync(repository.Root))!.Count == 3);
+            // The worktree goes first and its branch after it: both are waited for.
+            await WaitUntilAsync(async () => (await worktrees.ListAsync(repository.Root))!.Count == 3 && repository.Git("branch", "--list", branch).Trim().Length == 0);
             Assert.AreEqual("", repository.Git("branch", "--list", branch).Trim());
             // Neither a discarded worktree nor an unknown one is used: the session gets a new one.
             var instead = await service.CreateSessionAsync(request with { PreparedWorktreeId = unused }, CancellationToken.None);
