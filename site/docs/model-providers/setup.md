@@ -206,6 +206,24 @@ auth_source = "github_device_flow"
 
 Sign in with **Sign in with the browser** or **Sign in with a device code**. Where nobody can sign in, set `auth_source` to read a GitHub token or a Copilot token from an environment variable (see [Codex, Copilot and xAI](configuration.md#codex-copilot-and-xai)). Each model is called through the endpoint Copilot lists for it: Messages for Claude, Responses for GPT and Grok, chat completions otherwise.
 
+### Policy of your organization
+
+An enterprise can set a policy for its Copilot users, on GitHub or on the computer ([enterprise managed settings](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings)). CodeAlta reads the policy of the account each Copilot provider is signed in with, and the one of the computer, and applies it to every session, whatever its provider:
+
+| The policy sets | In CodeAlta |
+| --- | --- |
+| `permissions.disableBypassPermissionsMode` | No session runs in **Bypass permissions**: the mode is not offered, a session in it goes to **Accept edits** (or **Auto** for Claude Code), and a session an agent creates asks too. |
+| `permissions.disableAssistedPermissionsMode` | The **Auto** mode of Claude Code is turned off too. |
+| `permissions.defaultMode` | The mode of a new session that has none. |
+| `sandbox.enabled` | Every session runs in the [sandbox](../sessions/sandbox.md), in `workspace` when nothing else sandboxes it. With `failIfUnavailable`, a computer where the sandbox cannot run runs no command. |
+| `sandbox.allowBypass` set to `false` | No command runs outside the sandbox. |
+| `forceRemoteSettingsRefresh` | After a start, no session runs until the policy is read again. |
+
+- The first time a Copilot provider is set up, CodeAlta downloads the Copilot runtime that reads the policy, about 100 MB. Nothing is downloaded without a Copilot provider.
+- The policy is read again about every hour. The last one read applies from the next start, offline too.
+- In CodeAlta Desktop, the page of the provider shows the policy, how its reading goes, and **Refresh the policy**. **Settings > Permissions** and **Settings > Sandbox** show a lock on what it decides, with **Who to ask** when your organization names a page.
+- CodeAlta TUI applies the same policy.
+
 ## xAI Grok
 
 The `xai` provider uses the xAI API at `https://api.x.ai/v1`. Its sign-in unlocks SuperGrok and Grok Heavy on accounts that subscribed.

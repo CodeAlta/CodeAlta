@@ -194,6 +194,15 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
   each call by the `IAgentBuiltInToolRouter` of its attachment, and what it does with `alta`, plugins and MCP servers is
   limited to what keeps it there ([sandbox](sandbox.md)). The permissions above still apply inside the sandbox; the
   sandbox is what holds when a permission was given to a prompt injected into the session.
+- **Policy of the organization.** `SessionRuntimeService.ManagedPolicies` holds the `ManagedPolicy` each source of the
+  host gives (`CodeAltaHostOptions.StartManagedPolicies`), combined most-restrictive. It narrows and never widens: the
+  modes it refuses are offered to no session, a session attached in one is narrowed at once, the mode given to a
+  provider is narrowed too (a provider configured in a refused mode is given an explicit one), the host's own approval
+  and full trust approve nothing it refuses, it can require the sandbox and keep commands in it, and it can refuse every
+  send until it is read again. It applies to every session whatever its provider, since a policy one provider escaped
+  would hold nothing. The source of Copilot (`CopilotManagedPolicySource`, in the hosting) reads the enterprise managed
+  settings of the accounts of the Copilot providers through the Copilot SDK, whose runtime it downloads only when a
+  Copilot provider exists, and keeps the last policy for the next start.
 - **Calls of scripts.** A tool call may call the other tools of its run through `AgentToolInvocation.Tools`
   (`IAgentRunToolInvoker`): the call takes the run's own handler, so every rule above applies to it as to a call of the
   model. It is recorded as an activity of the calling call (`ParentActivityId`), never as a message of the

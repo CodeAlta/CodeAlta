@@ -45,6 +45,8 @@ When several say something, the most specific wins: the session, then its model,
 
 The chip shows a small mark on a sandboxed session; its tooltip names the profile and where it comes from.
 
+The [policy of your organization](../model-providers/setup.md#policy-of-your-organization) for Copilot can require the sandbox: every session then runs in it, whatever these settings say, and **Every session** shows a lock.
+
 In CodeAlta TUI, the sandbox follows the same settings; it is set in CodeAlta Desktop, in `config.toml`, or with `alta session`.
 
 ## Profiles

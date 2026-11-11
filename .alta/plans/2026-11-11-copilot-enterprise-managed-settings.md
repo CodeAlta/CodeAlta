@@ -104,17 +104,17 @@ and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
 - [x] 5. **Sandbox**: `ResolveSandboxAsync` gives `workspace` (`SandboxScope.Organization`) to a session nothing sandboxes
       where the sandbox can run (also where it cannot, with `failIfUnavailable`), and `Outside = Never` with
       `allowBypass: false`; a send is settled `policy_refused` while a policy that must be read again was not. Tests.
-- [ ] 6. **CodeAlta Desktop**: the Agent chip and Settings > Permissions and Sandbox show what the policy locks (a lock
-      and the organization's link, no extra prose); the Copilot provider's page shows the runtime (downloading, ready,
-      failed with **Try again**) and the policy (none, or in force with its keys, last refresh, **Refresh**);
-      `alta session choices` omits what is refused. The TUI gets the enforcement through orchestration, no new screen.
-      Checked in the developer instance in both themes and a narrow window.
-- [ ] 7. **Developer check without an enterprise**: an environment variable read only by `--dev` gives a managed
-      document that the runtime composes as a device layer (`ManagedSettings.ComposeAsync`), so that the whole path
-      runs; it can only narrow.
-- [ ] 8. **Documentation**: the user guide (a section on the organization's policy in the Copilot provider's page,
-      linked from permission modes and the sandbox), `doc/runtime.md` (a managed policy as a source of limits: read in
-      the host, narrows only, applies to every session), `readme.md` feature list.
+- [x] 6. **CodeAlta Desktop**: the `managedPolicy` RPC service; the Copilot provider's page has **Policy of your
+      organization** (what it enforces, the download of the runtime, a failure with **Try again**, **Refresh the policy**,
+      **Who to ask**); Settings > Permissions and Sandbox show a lock on what it decides; the Agent chip and
+      `alta session choices` do not offer the refused modes (from the runtime); a refused prompt says why
+      (`policy_refused`). Checked in the developer instance (dark theme); the TUI gets the enforcement, no new screen.
+- [x] 7. **Developer check without an enterprise**: `CODEALTA_DEV_COPILOT_MANAGED_SETTINGS`, read only with `--dev`,
+      names a `managed-settings.json` the runtime composes as the server layer (`ManagedSettings.ComposeAsync`), combined
+      most-restrictive with what the accounts resolve, never kept on disk: it can only narrow. Checked with the user's
+      Copilot account: the runtime was downloaded, the policy read and every lock shown.
+- [x] 8. **Documentation**: "Policy of your organization" in `site/docs/model-providers/setup.md`, linked from the
+      permission modes and the sandbox; `doc/runtime.md` (tools and permissions); `readme.md`.
 - [ ] 9. **Validation**: .NET tests, `npm test`, `lunet build`; the reporter confirms on their enterprise.
 
 ## Not in this plan
