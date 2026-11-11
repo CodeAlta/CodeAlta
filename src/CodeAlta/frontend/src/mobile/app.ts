@@ -1218,6 +1218,9 @@ export function startMobile(window: Window & typeof globalThis) {
     store.set(preferencesKey, JSON.stringify(all));
   }
   const option = (value: string, label: string, selected: boolean) => { const item = make("option", null, label); item.value = value; item.selected = selected; return item; };
+  // The first choice of the projects: a chat, in no project. No project id has a control character.
+  const chatChoice = "\u0000chat";
+  const isChat = () => newProject.value === chatChoice;
   const offeredModes = () => options?.permissionModes?.[choice.provider] ?? [];
   const rememberNew = () => remember(rememberChoice(newAgent.value || undefined, choice, newPermission || undefined));
 
@@ -1279,8 +1282,10 @@ export function startMobile(window: Window & typeof globalThis) {
     $("new-prompt-name").textContent = agent;
     $("new-prompt").setAttribute("aria-label", `Agent prompt: ${agent}`);
     const modes = offeredModes();
-    tagsOf($("new-more-text"), [...(newWorktree.checked ? [["branch", null] as const] : []), ...(newPermission ? [["shield", null] as const] : [])]);
-    $("new-more").setAttribute("aria-label", ["More options", newWorktree.checked && "new worktree",
+    // A chat has no folder to make a worktree of.
+    const worktree = newWorktree.checked && !isChat();
+    tagsOf($("new-more-text"), [...(worktree ? [["branch", null] as const] : []), ...(newPermission ? [["shield", null] as const] : [])]);
+    $("new-more").setAttribute("aria-label", ["More options", worktree && "new worktree",
       newPermission && `permissions ${modeName(newPermission, modes)}`].filter(Boolean).join(", "));
     if (modelSheet.shown && modelSheetFor === null) renderNewModels();
     if (newMoreSheet.shown) renderNewMore();
@@ -1372,6 +1377,7 @@ export function startMobile(window: Window & typeof globalThis) {
     $("new-mode-field").hidden = modes.length === 0;
     newMode.replaceChildren(option("", modeName(null), !newPermission), ...modes.map(m => option(m.id, modeName(m.id, modes), m.id === newPermission)));
     $("new-mode-text").textContent = modeDescription(newPermission || null, modes);
+    newWorktree.closest("label")!.hidden = isChat();
   }
   $("new-more").addEventListener("click", () => {
     if (!options) return;
@@ -1413,17 +1419,17 @@ export function startMobile(window: Window & typeof globalThis) {
       ? `The ${tierLabel(tier.tier)} tier is not ready: ${tier.error || "it has no model"}.` : "");
   }
 
-  // The projects of the form are those the list keeps to, all of them without a filter. The one chosen is `preferred` (the
-  // project of the viewed session, or the one of the form), else the last one, while the list keeps to them; else the first
-  // one the filter keeps, or without a filter the default project.
+  // The projects of the form are "None (Chat)", first, then those the list keeps to, all of them without a filter. The one
+  // chosen is `preferred` (the project of the viewed session, or the one of the form), else the last one, while the list
+  // keeps to them; else the first one the filter keeps, or without a filter the default project.
   function updateNewProjects(preferred: string | null) {
     if (!projects) return;
     const filter = sessions.filter;
     const eligible = projects.projects.filter(p => !filter.length || filter.includes(p.id));
-    const available = (id: string | null) => id && eligible.some(p => p.id === id) ? id : null;
+    const available = (id: string | null) => id && (id === chatChoice || eligible.some(p => p.id === id)) ? id : null;
     const selected = available(preferred) ?? available(store.get(lastProjectKey))
       ?? (filter.length ? eligible[0]?.id : available(projects.default) ?? eligible[0]?.id);
-    newProject.replaceChildren(...eligible.map(p => option(p.id, p.name, p.id === selected)));
+    newProject.replaceChildren(option(chatChoice, "None (Chat)", selected === chatChoice), ...eligible.map(p => option(p.id, p.name, p.id === selected)));
     initForm();
   }
 
@@ -1457,8 +1463,8 @@ export function startMobile(window: Window & typeof globalThis) {
     newNote.textContent = "Starting…";
     try {
       const created = await api.create({
-        project: newProject.value, text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
-        ...(newPermission ? { permissionMode: newPermission } : {}), worktree: newWorktree.checked,
+        ...(isChat() ? { chat: true } : { project: newProject.value, worktree: newWorktree.checked }), text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
+        ...(newPermission ? { permissionMode: newPermission } : {}),
         ...(held.length ? { attachments: held } : {}),
       });
       store.set(lastProjectKey, newProject.value);
@@ -1641,7 +1647,8 @@ export function startMobile(window: Window & typeof globalThis) {
     if (id) bottomBar().append(foot);
     else if (creating) $("create-bar").append(foot);
     else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
-    if (creating) void openCreate(detail.id ? sessions.view(detail.id)?.projectId ?? null : null);
+    // The viewed session gives its project to the form, or the chats when it is one.
+    if (creating) { const viewed = detail.id ? sessions.view(detail.id) : undefined; void openCreate(viewed ? viewed.projectId ?? chatChoice : null); }
     if (id && id !== detail.id) openDetail(id);
     if (!id && detail.id) closeDetail();
     // Back on the list, the cards are in their latest order at once.

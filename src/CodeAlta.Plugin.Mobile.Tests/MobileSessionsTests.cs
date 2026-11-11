@@ -328,6 +328,29 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
+    public async Task Create_AChat_MakesAGlobalSessionInASpaceOfThePlugin()
+    {
+        var alta = new FakeAlta()
+            .Answer("session create", new JsonObject { ["type"] = "alta.session.created", ["sessionId"] = "chat-1" })
+            .Answer("session send", new JsonObject { ["type"] = "alta.session.submitted", ["sessionId"] = "chat-1" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+
+        var created = await api.CreateAsync(new JsonObject { ["chat"] = true, ["text"] = "What is a monad?", ["tier"] = "quick", ["worktree"] = true }, default);
+
+        Assert.AreEqual(("chat-1", null), ((string?)created["id"], (string?)created["error"]));
+        CollectionAssert.AreEqual(new[] { "session", "create", "--global", "--space", "personal", "--tier", "quick" }, alta.CallsOf("session create").Single(),
+            "No project and no worktree: a chat has no folder.");
+        Assert.AreEqual(0, alta.CallsOf("project list").Length, "A chat needs no project read.");
+
+        var everywhere = new FakeAlta().Answer("session create", new JsonObject { ["type"] = "alta.session.created", ["sessionId"] = "chat-2" })
+            .Answer("session send", new JsonObject { ["type"] = "alta.session.submitted", ["sessionId"] = "chat-2" });
+        await new MobileApi(everywhere, new MobileSessions(everywhere, new FakeSpaces(), new MobileLive())).CreateAsync(new JsonObject { ["chat"] = true, ["text"] = "Hi" }, default);
+        CollectionAssert.AreEqual(new[] { "session", "create", "--global", "--space", "default" }, everywhere.CallsOf("session create").Single(),
+            "A plugin in every space puts a chat in the default space.");
+        Assert.AreEqual("A project and a prompt are needed.", (string?)(await api.CreateAsync(new JsonObject { ["text"] = "Hi" }, default))["error"], "Neither a project nor a chat.");
+    }
+
+    [TestMethod]
     public async Task Prompt_SendsSteersOrQueues_AndDoesNotWaitForTheTurn()
     {
         var alta = new FakeAlta()

@@ -153,30 +153,41 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
         return await CreateAsync(parsed, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Creates a session in a project with the chosen model, effort and agent, then sends its first prompt and its files.</summary>
+    /// <summary>
+    /// Creates a session in a project, or a chat (`chat`: in no project), with the chosen model, effort and agent, then sends
+    /// its first prompt and its files.
+    /// </summary>
     internal async Task<JsonObject> CreateAsync(MobilePromptBody body, CancellationToken cancellationToken)
     {
         var fields = body.Fields;
+        var chat = MobileAlta.Flag(fields, "chat");
         var project = Option(fields, "project");
         var (text, textError) = Prompt(fields);
         if (textError is not null) return Error(textError);
         var (files, attachmentError) = CheckAttachments(body.Attachments);
         if (attachmentError is not null) return Error(attachmentError);
-        if (project is null || (text is null && files is null)) return Error("A project and a prompt are needed.");
+        if ((!chat && project is null) || (text is null && files is null)) return Error("A project and a prompt are needed.");
         var tier = Option(fields, "tier");
         if (tier is not null && !Tiers.Contains(tier, StringComparer.Ordinal)) return Error("Unknown tier.");
-        var (projects, _) = await ReadProjectsAsync(cancellationToken).ConfigureAwait(false);
-        if (projects.FirstOrDefault(known => string.Equals(known.Id, project, StringComparison.OrdinalIgnoreCase)) is not { } chosen) return Error("Unknown project.");
 
-        // The session goes to a space of the plugin that has the project: without one alta would put it in the space the window
-        // shows, which the phone may not see.
-        List<string> args = ["session", "create", "--project", chosen.Id, "--space", chosen.Space];
+        // The session goes to a space of the plugin (one that has the project): without one alta would put it in the space the
+        // window shows, which the phone may not see. A chat goes to the first space of the plugin, or the default one.
+        List<string> args;
+        if (chat) args = ["session", "create", "--global", "--space", sessions.Spaces.FirstOrDefault() ?? "default"];
+        else
+        {
+            var (projects, _) = await ReadProjectsAsync(cancellationToken).ConfigureAwait(false);
+            if (projects.FirstOrDefault(known => string.Equals(known.Id, project, StringComparison.OrdinalIgnoreCase)) is not { } chosen) return Error("Unknown project.");
+            args = ["session", "create", "--project", chosen.Id, "--space", chosen.Space];
+        }
+
         if (tier is not null) args.AddRange(["--tier", tier]);
         else if (Option(fields, "provider") is { } provider && Option(fields, "model") is { } model) args.AddRange(["--provider", provider, "--model", model]);
         if (Option(fields, "reasoning") is { } reasoning) args.AddRange(["--reasoning", reasoning]);
         if (Option(fields, "prompt") is { } prompt) args.AddRange(["--prompt-id", prompt]);
         if (Option(fields, "permissionMode") is { } permissionMode) args.AddRange(["--permission-mode", permissionMode]);
-        if (MobileAlta.Flag(fields, "worktree")) args.Add("--worktree");
+        // A chat has no folder of a project to make a worktree of.
+        if (!chat && MobileAlta.Flag(fields, "worktree")) args.Add("--worktree");
         // Not tied to the request: a phone that gives up must not leave a session half made.
         var created = await MobileAlta.RunAsync(alta, args, null, CancellationToken.None).ConfigureAwait(false);
         var id = created.OfType("alta.session.created").Select(static record => MobileAlta.Text(record, "sessionId")).FirstOrDefault(static value => value is not null);
