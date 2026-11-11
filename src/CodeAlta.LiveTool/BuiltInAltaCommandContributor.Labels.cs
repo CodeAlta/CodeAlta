@@ -208,6 +208,10 @@ internal sealed partial class BuiltInAltaCommandContributor
         };
     }
 
+    // The labels of a project: those of the user, then those the map of its repository gives a sub-project.
+    private static IEnumerable<string> ProjectLabelIds(ProjectDescriptor project)
+        => project.DeclaredLabels.Count == 0 ? project.Labels : project.Labels.Concat(project.DeclaredLabels);
+
     private static string NormalizeLabelPath(string path)
         => string.Join('/', path.Split(['/', '›'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
@@ -254,6 +258,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         record["favorite"] = label.Favorite;
         if (label.Space is not null) record["space"] = label.Space;
         record["order"] = label.Order;
+        // A label the map of a repository declares: read-only here, changed with `alta project manifest label`.
+        if (label.Repository is not null) record["repository"] = label.Repository;
         if (projectCount is not null) record["projectCount"] = projectCount.Value;
         return record;
     }
@@ -359,10 +365,10 @@ internal sealed partial class BuiltInAltaCommandContributor
         var labels = await spaces.Labels.LoadAsync(context.CancellationToken).ConfigureAwait(false);
         var tree = LabelCatalog.Subtree(label.Id, labels);
         var projects = (await spaces.Projects.LoadAsync(context.CancellationToken).ConfigureAwait(false))
-            .Where(project => (includeArchived || !project.Archived) && project.Labels.Any(tree.Contains))
+            .Where(project => (includeArchived || !project.Archived) && ProjectLabelIds(project).Any(tree.Contains))
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var record = LabelRecord(context, type, label, labels, projects.Count(project => project.Labels.Contains(label.Id, StringComparer.Ordinal)));
+        var record = LabelRecord(context, type, label, labels, projects.Count(project => ProjectLabelIds(project).Contains(label.Id, StringComparer.Ordinal)));
         record["subLabels"] = tree.Skip(1).ToArray();
         record["projects"] = projects.Select(project => new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -371,7 +377,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["name"] = project.DisplayName,
             ["path"] = project.ProjectPath,
             ["archived"] = project.Archived,
-            ["labels"] = project.Labels.Where(tree.Contains).ToArray(),
+            ["labels"] = ProjectLabelIds(project).Where(tree.Contains).ToArray(),
         }).ToArray();
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
     }

@@ -92,11 +92,22 @@ public sealed class LabelCatalog
 
     private static LabelChange ReadOnlyChange() => new(LabelChangeStatus.Refused, Message: ReadOnlyMessage);
 
-    /// <summary>Loads the labels, in the order of their tree.</summary>
+    /// <summary>
+    /// Loads the labels, in the order of their tree: those of the user, then those the maps of the repositories declare
+    /// (<see cref="LabelDescriptor.IsDeclared"/>), each map after the other.
+    /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The labels; each one owned by the caller.</returns>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public async Task<IReadOnlyList<LabelDescriptor>> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        var labels = await LoadOwnAsync(cancellationToken).ConfigureAwait(false);
+        var declared = await LoadDeclaredAsync(cancellationToken).ConfigureAwait(false);
+        return declared.Count == 0 ? labels : [.. labels, .. declared];
+    }
+
+    // The labels of the user, the files of the catalog.
+    private async Task<List<LabelDescriptor>> LoadOwnAsync(CancellationToken cancellationToken)
     {
         var labels = new List<LabelDescriptor>();
         foreach (var path in LabelFiles())
@@ -108,6 +119,39 @@ public sealed class LabelCatalog
 
         return Arranged(labels);
     }
+
+    // The labels the maps of the repositories declare, read-only, with identifiers of their own (`<slug>.<key>`) and in
+    // every space: they are shown with the projects of their repository, which carry its spaces.
+    private async Task<List<LabelDescriptor>> LoadDeclaredAsync(CancellationToken cancellationToken)
+    {
+        var labels = new List<LabelDescriptor>();
+        foreach (var (repository, map) in await Projects.LoadRepositoryMapsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var label in map.Labels)
+            {
+                labels.Add(new LabelDescriptor
+                {
+                    Id = ProjectCatalog.DeclaredLabelId(repository.Slug, label.Key),
+                    Name = label.Name,
+                    Description = label.Description,
+                    Icon = label.Icon,
+                    Color = label.Color,
+                    Order = label.Order,
+                    Parent = label.Parent is null ? null : ProjectCatalog.DeclaredLabelId(repository.Slug, label.Parent),
+                    Repository = repository.Id,
+                    DeclaredKey = label.Key,
+                });
+            }
+        }
+
+        return labels;
+    }
+
+    // Why a change of a label of a map is not made here; null for a label of the user or none.
+    private static LabelChange? DeclaredRefusal(IReadOnlyList<LabelDescriptor> labels, string? id)
+        => labels.FirstOrDefault(label => label.Id == id) is { IsDeclared: true } declared
+            ? new(LabelChangeStatus.Refused, Message: $"The label '{declared.Name}' is declared by the project map of its repository (.alta/{ProjectManifest.FileName}): change it there, or with `alta project manifest label`.")
+            : null;
 
     /// <summary>Gets one label.</summary>
     /// <param name="id">The identifier of the label.</param>
@@ -129,7 +173,7 @@ public sealed class LabelCatalog
         var projects = (await Projects.LoadAsync(cancellationToken).ConfigureAwait(false))
             .Where(project => includeArchived || !project.Archived).ToArray();
         return labels.Select(label => new LabelMembers(label, projects
-            .Where(project => project.Labels.Contains(label.Id, StringComparer.Ordinal))
+            .Where(project => (label.IsDeclared ? project.DeclaredLabels : project.Labels).Contains(label.Id, StringComparer.Ordinal))
             .Select(static project => project.Id).ToArray())).ToArray();
     }
 
@@ -154,9 +198,10 @@ public sealed class LabelCatalog
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var labels = (await LoadAsync(cancellationToken).ConfigureAwait(false)).ToList();
-            if (labels.Count >= MaximumLabels) return new(LabelChangeStatus.Refused, Message: $"There are already {MaximumLabels} labels.");
             parent = Optional(parent);
+            if (DeclaredRefusal(await LoadAsync(cancellationToken).ConfigureAwait(false), parent) is { } declared) return declared;
+            var labels = await LoadOwnAsync(cancellationToken).ConfigureAwait(false);
+            if (labels.Count >= MaximumLabels) return new(LabelChangeStatus.Refused, Message: $"There are already {MaximumLabels} labels.");
             LabelDescriptor? above = null;
             if (parent is not null)
             {
@@ -218,7 +263,8 @@ public sealed class LabelCatalog
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var labels = await LoadAsync(cancellationToken).ConfigureAwait(false);
+            if (DeclaredRefusal(await LoadAsync(cancellationToken).ConfigureAwait(false), id) is { } declared) return declared;
+            var labels = await LoadOwnAsync(cancellationToken).ConfigureAwait(false);
             var label = labels.FirstOrDefault(value => value.Id == id);
             if (label is null) return new(LabelChangeStatus.NotFound, Message: $"No label has the id '{id}'.");
             if (edit.Name is not null) label.Name = edit.Name.Trim();
@@ -260,10 +306,12 @@ public sealed class LabelCatalog
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var labels = await LoadAsync(cancellationToken).ConfigureAwait(false);
+            parent = Optional(parent);
+            var all = await LoadAsync(cancellationToken).ConfigureAwait(false);
+            if ((DeclaredRefusal(all, id) ?? DeclaredRefusal(all, parent)) is { } declared) return declared;
+            var labels = await LoadOwnAsync(cancellationToken).ConfigureAwait(false);
             var label = labels.FirstOrDefault(value => value.Id == id);
             if (label is null) return new(LabelChangeStatus.NotFound, Message: $"No label has the id '{id}'.");
-            parent = Optional(parent);
             LabelDescriptor? above = null;
             if (parent is not null)
             {
@@ -311,7 +359,8 @@ public sealed class LabelCatalog
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var labels = await LoadAsync(cancellationToken).ConfigureAwait(false);
+            if (DeclaredRefusal(await LoadAsync(cancellationToken).ConfigureAwait(false), id) is { } declared) return declared;
+            var labels = await LoadOwnAsync(cancellationToken).ConfigureAwait(false);
             var label = labels.FirstOrDefault(value => value.Id == id);
             if (label?.SourcePath is null) return new(LabelChangeStatus.NotFound, Message: $"No label has the id '{id}'.");
             cancellationToken.ThrowIfCancellationRequested();
@@ -362,7 +411,11 @@ public sealed class LabelCatalog
         remove ??= [];
         if (string.IsNullOrWhiteSpace(projectId)) return new(LabelChangeStatus.NotFound, Message: "A project is required.");
         if (IsReadOnly) return ReadOnlyChange();
-        var known = (await LoadAsync(cancellationToken).ConfigureAwait(false)).Select(static label => label.Id).ToHashSet(StringComparer.Ordinal);
+        var all = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        // The map of its repository gives a sub-project its labels: the user gives their own.
+        if (add.Concat(remove).FirstOrDefault(id => all.Any(label => label.Id == id && label.IsDeclared)) is { } mapped)
+            return DeclaredRefusal(all, mapped)!;
+        var known = all.Select(static label => label.Id).ToHashSet(StringComparer.Ordinal);
         if (add.FirstOrDefault(id => !known.Contains(id)) is { } missing)
             return new(LabelChangeStatus.NotFound, Message: $"No label has the id '{missing}'.");
         var status = await Projects.UpdateLabelsAsync(projectId,
@@ -389,7 +442,7 @@ public sealed class LabelCatalog
         await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            var labels = await LoadAsync(CancellationToken.None).ConfigureAwait(false);
+            var labels = await LoadOwnAsync(CancellationToken.None).ConfigureAwait(false);
             var deleted = labels.Where(label => label.Space == spaceId).ToArray();
             foreach (var label in deleted)
             {

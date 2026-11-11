@@ -674,6 +674,17 @@ internal static class AltaScriptAnnotations
           /** The spaces of the project besides the default one, which holds every project. */
           spaces: string[];
           labels: string[];
+          /** For a sub-project: the repository project whose map (`.alta/projects.toml`) declares it. */
+          parentId?: string;
+          /** For a sub-project: its folder in the repository, such as `services/billing`. */
+          subPath?: string;
+          /** For a sub-project: its key in the map. */
+          key?: string;
+          /** For a sub-project: the labels the map gives it. */
+          declaredLabels?: string[];
+          optional?: boolean;
+          /** `folder` when its sessions write only its folder. */
+          write?: "folder";
         }
 
         interface ProjectResolution extends ProjectRecord { type: "alta.project.resolution"; }

@@ -56,6 +56,18 @@ public sealed class LabelDescriptor
     /// <summary>Gets or sets the file the label was read from; <see langword="null"/> before it is written.</summary>
     public string? SourcePath { get; set; }
 
+    /// <summary>
+    /// Gets or sets the repository project whose map (<c>.alta/projects.toml</c>) declares the label; <see langword="null"/>
+    /// for a label of the user. A label of a map is read-only here: the map is changed with <c>alta project manifest</c>.
+    /// </summary>
+    public string? Repository { get; set; }
+
+    /// <summary>Gets or sets the key of a label of a map in that map; <see langword="null"/> for a label of the user.</summary>
+    public string? DeclaredKey { get; set; }
+
+    /// <summary>Gets whether the label is one of a map of a repository, which the user does not change here.</summary>
+    public bool IsDeclared => Repository is not null;
+
     /// <summary>Tells whether the label is available in a space.</summary>
     /// <param name="spaceId">The space; <see langword="null"/> or empty for the default space.</param>
     /// <returns><see langword="true"/> when the label has no space, or this one.</returns>

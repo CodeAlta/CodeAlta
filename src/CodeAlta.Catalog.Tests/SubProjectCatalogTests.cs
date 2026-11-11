@@ -181,6 +181,35 @@ public sealed class SubProjectCatalogTests
     }
 
     [TestMethod]
+    public async Task TheLabelsOfAMap_AreServedReadOnly_BesideThoseOfTheUser()
+    {
+        using var fixture = new Fixture();
+        var repository = await fixture.RepositoryAsync(Map);
+        var labels = new SpaceCatalog(fixture.Projects).Labels;
+        var own = (await labels.CreateAsync("Infra")).Label!;
+
+        var all = await labels.LoadAsync();
+        CollectionAssert.AreEqual(new[] { "infra", "contoso.backend", "contoso.payments" }, all.Select(static label => label.Id).ToArray());
+        var payments = all.Single(static label => label.DeclaredKey == "payments");
+        Assert.AreEqual((repository.Id, "contoso.backend", null), (payments.Repository, payments.Parent, payments.Space));
+        Assert.AreEqual("Backend › Payments", LabelCatalog.PathOf(payments, all));
+        var members = await labels.LoadMembersAsync();
+        CollectionAssert.AreEqual(new[] { ProjectCatalog.DeriveSubProjectId(repository.Id, "billing") },
+            members.Single(static member => member.Label.Id == "contoso.payments").ProjectIds.ToArray());
+
+        Assert.AreEqual(LabelChangeStatus.Refused, (await labels.UpdateAsync("contoso.payments", new LabelEdit(Name: "Pay"))).Status);
+        Assert.AreEqual(LabelChangeStatus.Refused, (await labels.DeleteAsync("contoso.backend")).Status);
+        Assert.AreEqual(LabelChangeStatus.Refused, (await labels.MoveAsync("infra", "contoso.backend", 0)).Status);
+        Assert.AreEqual(LabelChangeStatus.Refused, (await labels.CreateAsync("Under", parent: "contoso.backend")).Status);
+        var web = ProjectCatalog.DeriveSubProjectId(repository.Id, "web");
+        Assert.AreEqual(LabelChangeStatus.Refused, (await labels.AssignAsync(web, ["contoso.payments"], null)).Status, "The map gives its labels.");
+        Assert.AreEqual(LabelChangeStatus.Ok, (await labels.AssignAsync(web, [own.Id], null)).Status, "The user gives their own, to a sub-project too.");
+        var project = (await fixture.Projects.LoadAsync()).Single(project => project.Id == web);
+        CollectionAssert.AreEqual(new[] { "infra" }, project.Labels);
+        Assert.IsNotNull(project.SourcePath, "Its file was written for the label of the user.");
+    }
+
+    [TestMethod]
     public async Task AMapThatCannotBeRead_ListsNoSubProject_AndTheOthersStay()
     {
         using var fixture = new Fixture();

@@ -159,6 +159,23 @@ public sealed partial class ProjectCatalog
         return (SubProjectShowStatus.Updated, project);
     }
 
+    /// <summary>Lists the repository projects whose map counts: projects that no other map declares, whose map declares something.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Each repository with its map, in the order of the catalog.</returns>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<IReadOnlyList<(ProjectDescriptor Repository, ProjectManifest Map)>> LoadRepositoryMapsAsync(CancellationToken cancellationToken = default)
+    {
+        var maps = new List<(ProjectDescriptor Repository, ProjectManifest Map)>();
+        foreach (var project in await LoadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (project.IsSubProject || !File.Exists(ProjectManifest.PathOf(project.ProjectPath))) continue;
+            var map = await ReadManifestAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
+            if (map.Projects.Count > 0 || map.Labels.Count > 0) maps.Add((project, map));
+        }
+
+        return maps;
+    }
+
     /// <summary>Reads the map of a repository folder as this catalog keeps it. A file that cannot be read is a map with that problem.</summary>
     /// <param name="repositoryPath">The folder of the repository project.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

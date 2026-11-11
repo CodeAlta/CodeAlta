@@ -143,7 +143,7 @@ internal sealed class LabelsService
 
     private static LabelItem Item(LabelDescriptor label, IReadOnlyList<LabelDescriptor> labels, IReadOnlyList<string> projectIds)
         => new(label.Id, label.Name, label.Description, label.Icon, label.Color, label.Order, label.Parent, label.Favorite, label.Space,
-            LabelCatalog.PathOf(label, labels), [.. projectIds]);
+            LabelCatalog.PathOf(label, labels), [.. projectIds]) { Repository = label.Repository };
 }
 
 /// <summary>Asks for the labels.</summary>
@@ -168,7 +168,13 @@ internal sealed record LabelsResponse(string Status, IReadOnlyList<LabelItem> La
 /// <param name="Path">The names of the labels above it and its own: <c>Infra › Helm charts</c>.</param>
 /// <param name="ProjectIds">The projects whose file names it, archived ones included.</param>
 internal sealed record LabelItem(string Id, string Name, string? Description, string? Icon, string? Color, int Order, string? Parent, bool Favorite,
-    string? Space, string Path, IReadOnlyList<string> ProjectIds);
+    string? Space, string Path, IReadOnlyList<string> ProjectIds)
+{
+    // The repository project whose map declares the label, which the window shows under that repository and does not
+    // change; absent for a label of the user.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Repository { get; init; }
+}
 
 /// <summary>Creates a label.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

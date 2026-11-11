@@ -360,6 +360,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (fleet) policies.AddRange(FleetAuditPolicies);
         if (fleet) policies.AddRange(FleetPolicyPolicies);
         if (secrets) policies.AddRange(SecretPolicies);
+        if (secrets) policies.AddRange(ManifestPolicies);
         if (llama) policies.AddRange(LlamaPolicies);
         return policies;
     }
@@ -462,9 +463,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateProjectArchiveCommand(context, archive: true));
         group.Add(CreateProjectArchiveCommand(context, archive: false));
         group.Add(CreateProjectRemoveCommand(context));
+        if (context.Services.Get<ProjectCatalog>() is not null) group.Add(CreateProjectManifestCommand(context));
         AddHelpText(
             group,
             "A project is a folder CodeAlta knows. Projects are grouped in spaces (`alta space --help`): `spaces` names the spaces of a project besides the default one, which holds every project.",
+            "A repository can declare folders of it as sub-projects, each a project of its own, in its project map (`alta project manifest --help`): `alta project list --parent <repository>` lists them.",
             "Examples: `alta project current`; `alta project list`; `alta project list --all`; `alta project show CodeAlta`; `alta project resolve --path C:/code/CodeAlta`; `alta project add C:/code/Tomlyn --space work`.");
         return group;
     }
@@ -766,6 +769,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var all = false;
         string? label = null;
         var direct = false;
+        string? parent = null;
+        var declared = false;
         var command = Leaf("list", "List the projects of the current space from the CodeAlta catalog.");
         command.Add("include-archived", "Include archived projects.", value => includeArchived = value is not null);
         command.Add("detailed", "Emit one detailed metadata record per project instead of the compact project refs array.", value => detailed = value is not null);
@@ -773,10 +778,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("all", "List every project, whatever its spaces.", value => all = value is not null);
         command.Add("label=", "List only the projects that have this label or one under it: id, name, path, or start of id.", value => label = value);
         command.Add("direct", "With --label, leave out the projects that have only a label under it.", value => direct = value is not null);
-        command.Add(async (_, _) => await HandleProjectListAsync(context, includeArchived, detailed, space, all, label, direct).ConfigureAwait(false));
+        command.Add("parent=", "List only the sub-projects of this repository project (id, slug or path), in every space unless --space is given.", value => parent = value);
+        command.Add("declared", "List only sub-projects: the projects the map of a repository (`.alta/projects.toml`) declares.", value => declared = value is not null);
+        command.Add(async (_, _) => await HandleProjectListAsync(context, includeArchived, detailed, space, all, label, direct, parent, declared).ConfigureAwait(false));
         AddHelpText(command,
             "Without --space or --all, the projects are those of the space the CodeAlta window shows; without a window, every project. `spaceId` names the space that was listed.",
-            "Examples: `alta project list`; `alta project list --all`; `alta project list --space work --detailed`; `alta project list --all --label infra`.");
+            "A sub-project is a folder of a repository that its map declares as a project of its own: its record names `parentId` (the repository project), `subPath` (its folder in the repository), `key` (its entry in the map) and `declaredLabels`. A hidden sub-project is archived.",
+            "Examples: `alta project list`; `alta project list --all`; `alta project list --space work --detailed`; `alta project list --all --label infra`; `alta project list --parent contoso --detailed`.");
         return command;
     }
 
@@ -2140,11 +2148,24 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     }
 
     private static async ValueTask<int> HandleProjectListAsync(AltaCommandContext context, bool includeArchived, bool detailed, string? spaceRef, bool all,
-        string? labelRef = null, bool direct = false)
+        string? labelRef = null, bool direct = false, string? parentRef = null, bool declared = false)
     {
         if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        ProjectDescriptor? parent = null;
+        if (NormalizeOptionalText(parentRef) is { } parentText)
+        {
+            parent = await ResolveProjectAsync(catalog, parentText, context, includeArchived: true).ConfigureAwait(false);
+            if (parent is null)
+            {
+                return NotFound(context, "project.notFound", $"Project '{parentText}' was not found.");
+            }
+
+            // The sub-projects of a repository are in its spaces: all of them unless a space is asked.
+            all |= NormalizeOptionalText(spaceRef) is null;
         }
 
         var (space, exitCode) = await ResolveProjectListSpaceAsync(context, spaceRef, all).ConfigureAwait(false);
@@ -2163,7 +2184,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var projects = await catalog.LoadAsync(context.CancellationToken).ConfigureAwait(false);
         var filtered = projects
             .Where(project => (includeArchived || !project.Archived) && (space is null || project.Spaces.Contains(space.Id, StringComparer.Ordinal))
-                && (labels is null || project.Labels.Any(labels.Contains)))
+                && (labels is null || ProjectLabelIds(project).Any(labels.Contains))
+                && (parent is null || string.Equals(project.ParentId, parent.Id, StringComparison.OrdinalIgnoreCase))
+                && (!declared || project.IsSubProject))
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (!detailed)
@@ -2207,7 +2230,37 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return NotFound(context, "project.notFound", $"Project '{reference}' was not found.");
         }
 
-        WriteProject(context, "alta.project.detail", project);
+        var record = ProjectRecord(context, "alta.project.detail", project);
+        // A repository names its sub-projects; a sub-project names its repository.
+        var projects = await catalog.LoadAsync(context.CancellationToken).ConfigureAwait(false);
+        if (project.ParentId is { } parentId && projects.FirstOrDefault(candidate => candidate.Id == parentId) is { } repository)
+        {
+            record["repository"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["projectId"] = repository.Id,
+                ["slug"] = repository.Slug,
+                ["displayName"] = repository.DisplayName,
+                ["projectPath"] = repository.ProjectPath,
+            };
+        }
+
+        var subProjects = projects.Where(candidate => candidate.ParentId == project.Id).OrderBy(static candidate => candidate.SubPath, StringComparer.Ordinal).ToArray();
+        if (subProjects.Length > 0 || File.Exists(ProjectManifest.PathOf(project.ProjectPath)))
+        {
+            record["manifestPath"] = ProjectManifest.PathOf(project.ProjectPath);
+            record["subProjects"] = subProjects.Take(500).Select(static sub => new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["projectId"] = sub.Id,
+                ["slug"] = sub.Slug,
+                ["displayName"] = sub.DisplayName,
+                ["subPath"] = sub.SubPath,
+                ["key"] = sub.DeclaredKey,
+                ["archived"] = sub.Archived,
+            }).ToArray();
+            record["subProjectCount"] = subProjects.Length;
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, record);
         return AltaExitCodes.Success;
     }
 
@@ -6846,6 +6899,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         record["tags"] = project.Tags;
         record["spaces"] = project.Spaces;
         record["labels"] = project.Labels;
+        // A sub-project: its repository project, its folder in it, its key and the labels of the map.
+        if (project.ParentId is not null)
+        {
+            record["parentId"] = project.ParentId;
+            record["subPath"] = project.SubPath;
+            record["key"] = project.DeclaredKey;
+            record["declaredLabels"] = project.DeclaredLabels;
+            if (project.DeclaredOptional) record["optional"] = true;
+            if (project.WriteScope == ProjectWriteScope.Folder) record["write"] = "folder";
+        }
+
         return record;
     }
 
