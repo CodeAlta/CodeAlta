@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, ProgressBar, Tag } from "@blueprintjs/core";
+import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, Tag } from "@blueprintjs/core";
+import { ProgramProgress } from "./ProgramProgress";
 import { machines, type MachineProviderOfferView, type MachineProviderOperationView, type MachineProviderTypeView, type MachineView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -86,7 +87,7 @@ export function ProviderPicker({ epoch, machine, api = machines, types, onClose 
     <DialogBody>
       {adding ? <div className="machine-provider-adding" role="status">
         <p><ActivitySpinner size={14} /> {progress?.message ?? t("{machine} adds {name}…", { machine: machine.name, name: adding.offer.name })}</p>
-        {progress?.fraction != null ? <ProgressBar intent="primary" value={progress.fraction} /> : <ProgressBar intent="primary" />}
+        <ProgramProgress message={null} fraction={progress?.fraction} />
       </div> : <>
         <InputGroup type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={filter} autoFocus placeholder={t("Filter the providers")} aria-label={t("Filter the providers")}
           onChange={event => setFilter(event.target.value)} />

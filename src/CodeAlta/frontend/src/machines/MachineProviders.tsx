@@ -4,6 +4,7 @@ import { machines, type MachineProviderOfferView, type MachineProviderSignInView
   type MachineView } from "#neoastra";
 import { ProviderIcon } from "../ProviderIcon";
 import { ProviderPicker, type ProviderPicked } from "./ProviderPicker";
+import { ProgramProgress } from "./ProgramProgress";
 import { programAction, programLabel } from "./providerOffers";
 import { SignInDialog, type MachineSignInsApi } from "./MachineSignIns";
 import { AppIcon } from "../AppIcon";
@@ -43,7 +44,7 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
   // The type whose key the form takes, chosen in the picker.
   const [keyFor, setKeyFor] = useState<MachineProviderOfferView | null>(null);
   // The provider whose program the machine installs or updates, and what it says of it.
-  const [installing, setInstalling] = useState<{ key: string; message: string | null } | null>(null);
+  const [installing, setInstalling] = useState<{ key: string; message: string | null; fraction: number | null } | null>(null);
   // Why an installation or an update failed: kept apart from the problem of the list, which its next read clears.
   const [actionProblem, setActionProblem] = useState<Problem>(null);
   const reload = useCallback(() => setGeneration(value => value + 1), []);
@@ -77,12 +78,12 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
 
   // Installs or updates the program a provider runs, and follows the machine until it ends.
   async function install(provider: MachineProviderStatusView) {
-    setInstalling({ key: provider.key, message: null });
+    setInstalling({ key: provider.key, message: null, fraction: null });
     setActionProblem(null);
     try {
       let state = await api.updateProvider({ expectedEpoch: epoch, machineId: machine.id, key: provider.key }, { timeoutMilliseconds: 60_000 });
       while (state.status === "ok" && state.state === "running" && state.id) {
-        setInstalling({ key: provider.key, message: state.message ?? null });
+        setInstalling({ key: provider.key, message: state.message ?? null, fraction: state.fraction ?? null });
         state = await api.providerOperationWait({ expectedEpoch: epoch, machineId: machine.id, id: state.id }, { timeoutMilliseconds: 40_000 });
       }
 
@@ -137,7 +138,7 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
             {provider.isDefault && <Tag minimal round>{t("Default")}</Tag>}</span>
           <small className="muted-text">{[provider.type, provider.model, provider.keySecret && t("key in the secret {name}", { name: provider.keySecret })].filter(Boolean).join(" · ")}</small>
           {program && <small className="muted-text machine-provider-program">{t(program.key, program.values)}</small>}
-          {installing?.key === provider.key && installing.message && <small className="muted-text" role="status">{installing.message}</small>}
+          {installing?.key === provider.key && <ProgramProgress message={installing.message} fraction={installing.fraction} />}
           {why && <small className="machine-provider-problem">{t(why.key, why.values)}</small>}
         </span>
         <span className="machine-provider-actions">

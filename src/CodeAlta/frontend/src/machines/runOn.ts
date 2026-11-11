@@ -57,6 +57,14 @@ export function remoteSelection(choices: Pick<MachineNewSessionChoices, "project
   return { projectId, settings };
 }
 
+/**
+ * Whether the new session on a machine offers to set a provider up there: the machine answered, and has no provider ready (#414).
+ * A machine that does not answer, or refuses this computer, says that instead.
+ */
+export function offersProviderSetup(choices: Pick<MachineNewSessionChoices, "status" | "providers"> | null): boolean {
+  return choices?.status === "ok" && choices.providers.length === 0;
+}
+
 /** Why a session cannot be started on the machine with that selection now; null when it can. `shownProvider` is the provider the Agent chip shows. */
 export function remoteStartBlocker(choices: Pick<MachineNewSessionChoices, "status" | "providers"> | null, selection: RemoteSelection, shownProvider: string | null): MessageKey | null {
   if (!choices) return "Reading the machine…";
