@@ -41,7 +41,9 @@ public sealed class DesktopArchitectureTests
                     // The safe file operations every project shares.
                     or "CodeAlta.Core"
                     // The vaults of Settings > Secrets, the verification of the user and the sign-ins of websites.
-                    or "CodeAlta.Credentials", reference.Name);
+                    or "CodeAlta.Credentials"
+                    // What the desktop answers the fill_login tool of a session's browser: the values of a sign-in, or why not.
+                    or "CodeAlta.Browser", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }
