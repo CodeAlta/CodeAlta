@@ -61,7 +61,7 @@ public sealed class CodeModeAgentsTests
         Assert.AreEqual("ok", moved.Status, string.Join(" ", moved.Warnings));
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Child answer."));
 
-        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-s" }, CancellationToken.None).WaitAsync(Hang);
+        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-s" }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsTrue(result.Succeeded, result.Failure);
         var child = await host.RuntimeService.TryGetResumableSessionAsync(result.SessionId!, CancellationToken.None);
