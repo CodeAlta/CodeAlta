@@ -164,6 +164,7 @@ Override only the methods the plugin needs. A `Get…()` method is called once w
 | `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
 | `GetResources()` | Skills shipped with the plugin | yes | yes |
 | `GetAutomationTriggers()` | Triggers of [automations](../automations.md#triggers-of-plugins): see [Automation triggers](#automation-triggers) | yes | no |
+| `GetCredentialProviders()` | Kinds of [vaults](../secrets/vaults.md) secrets are kept in: see [Credential providers](#credential-providers) | yes | yes |
 | `GetScripts()` | Scripts of the [library of Code Mode](../sessions/code-mode.md#scripts-of-the-library) | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
@@ -229,6 +230,36 @@ public override IEnumerable<PluginAutomationTriggerContribution> GetAutomationTr
 ```
 
 The `automation-trigger` [sample](#samples) is a complete one.
+
+### Credential providers
+
+`GetCredentialProviders()` adds a kind of [vault](../secrets/vaults.md) that secrets can be kept in. A `PluginCredentialProviderContribution` has a type with the plugin's own prefix (`acme.vault/secrets`, written `type = "acme.vault/secrets"` in a `[credentials.<id>]` table), its name, an icon (a brand or Lucide name in `Icon`, or an SVG in `IconSvg`), the settings the form of **Settings > Secrets** draws (text, a path, a list, a switch, or a `${secret:NAME}` of this computer for a token), the form of a reference in `ReferenceHint`, and `Create`, called for each provider of that type the user adds.
+
+The `ICredentialProvider` it creates only says whether it can answer and reads:
+
+- `GetStatusAsync` says whether the vault can be read now (ready, locked, sign-in needed, not installed, with how to install it), and never shows a prompt.
+- `UnlockAsync` is called when the user clicks **Unlock**: the vault shows its own prompt, or takes the password the page asked when `UnlockAsksPassword` is set.
+- `ReadAsync(reference, interactive)` reads one value. With `interactive` false it never shows a prompt, and throws a `CredentialProviderException` with `CredentialFailure.Locked` instead. A one-time code gives its `ExpiresAt`.
+- `BrowseAsync`, optional, lists vaults, items and fields by name for the picker, never a value. `Lock` forgets what it holds, such as a session key.
+
+CodeAlta does the rest: the secrets kept in the vault, the memory of what was read and its duration, the masking, Ask before use and the states shown. Run a program through the full path of its file and an array of arguments, never a shell, and give a password on its standard input or in its own environment, never in an argument. A value a provider reads in another way, such as a session key, goes through `context.Mask` before anything else gets it.
+
+Only built-in plugins and the plugins of `~/.alta/plugins` add credential providers; the plugin of a project folder does not.
+
+```csharp
+public override IEnumerable<PluginCredentialProviderContribution> GetCredentialProviders()
+{
+    yield return new PluginCredentialProviderContribution
+    {
+        Type = "acme.vault/secrets",
+        DisplayName = "Acme Vault",
+        Icon = "vault",
+        Settings = [new("address", "Address", PluginCredentialProviderSettingKind.Text) { Required = true }],
+        ReferenceHint = "team/item#field",
+        Create = context => new AcmeVaultProvider(context.GetString("address")!),
+    };
+}
+```
 
 The publisher keeps what it needs between starts with `host.ReadStateAsync` and `WriteStateAsync`, runs its background work with `host.Run`, and says a change with `host.ReportAsync`. A plugin reads the networks of this computer with `Services.PrivateNetworks`.
 

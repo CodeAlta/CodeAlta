@@ -26,7 +26,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `model` | Default model id. |
 | `reasoning_effort` | Default effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Each model offers its own values. |
 | `context_size` | Default [context size](readme.md#context-and-compaction), in input tokens, for the models that offer it. |
-| `api_key` / `api_key_secret` / `api_key_env` | The API key, the [secret](../secrets.md) of this computer that holds it, or the environment variable that holds it, in this order. Prefer `api_key_secret` or `api_key_env`. |
+| `api_key` / `api_key_secret` / `api_key_env` | The API key, the [secret](../secrets/readme.md) of this computer that holds it, or the environment variable that holds it, in this order. Prefer `api_key_secret` or `api_key_env`. |
 | `api_url` | Endpoint. Azure OpenAI, Codex and Copilot require HTTPS, except on localhost. |
 | `max_concurrent_requests` | The most requests the provider gets at once; the others wait their turn. See [Requests at once](#requests-at-once). Missing means no limit, 16 for `codex`. |
 | `network_timeout_seconds` | Network timeout of `openai-chat`, `openai-responses`, `azure-openai`, `codex` and `llama-cpp`; 100 seconds when unset. |

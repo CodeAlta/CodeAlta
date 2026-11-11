@@ -1,0 +1,102 @@
+# Credentials
+
+A secret is a name (`${secret:NAME}`, `api_key_secret`). Its value is on this computer, in the local store
+(`CodeAlta.Catalog/Secrets`, `store.json`), or in an item of a vault the user already uses: 1Password, Bitwarden,
+KeePassXC, a secret manager of a cloud, a command, a plugin. A *credential provider* reads one vault; the *credential
+broker* of a host owns the providers, the values they read and the confirmations of the secrets that ask before use.
+
+## The model
+
+- **A binding** maps a name to a vault item: `~/.alta/secrets/bindings.json` (`SecretBindings`), beside the store,
+  `{ bindings: { NAME: { provider, ref, label, version, set_by, set_at } }, ask_before_use: { NAME: duration } }`. It
+  holds no value. Members it does not know are kept, so that a part that owns another member (`ReadMember`,
+  `ChangeMember`) and an older CodeAlta on the same profile do not lose each other's data.
+- **A provider** is a table `[credentials.<id>]` of the user's own `config.toml` (`CredentialProviderSettings`): its
+  `type`, the settings of that type, `cache` and `unlock_at_start`. The configuration of a project never names a vault,
+  and a configuration file never names a vault item: only the user's own files choose what is read from a vault.
+- **`store.json` does not change.** A binding replaces the local value of its name (`LocalSecretStore.Bind`), and the
+  list of secrets shows both kinds, the binding first.
+
+Why a separate file: an older CodeAlta, such as the normal instance beside a developer instance, rewrites `store.json`
+whole and would drop a field it does not know.
+
+## The broker
+
+`CredentialBroker` (`src/CodeAlta.Credentials`) is one per host, built by `CodeAltaHost` before the model providers are
+registered, so CodeAlta Desktop, CodeAlta TUI, `altacli` and `altanode` work the same way.
+
+```mermaid
+flowchart LR
+    U["What uses a secret<br/>a model provider, an MCP server,<br/>the shell of a session, a trigger"]
+    R["SecretReferenceResolver<br/>synchronous"]
+    S["Local store<br/>store.json"]
+    B["CredentialBroker<br/>IBoundSecretSource"]
+    M["Memory of the broker<br/>masked on first read"]
+    P["ICredentialProvider<br/>op, bw, keepassxc-cli, a plugin"]
+    U --> R
+    R -->|local secret| S
+    R -->|bound secret| B
+    B --> M
+    B -.->|RefreshAsync, UnlockAsync| P
+    P -.-> M
+```
+
+- **Reading is split in two.** A vault can take seconds and may need the user, but `${secret:NAME}` is resolved
+  synchronously, in many places. So the broker reads ahead (`RefreshAsync` at start, within a time limit, then after an
+  unlock and when a value expires) and the resolution reads memory only (`IBoundSecretSource.ReadBound`). A bound secret
+  that is not in memory resolves to an error that names it and its vault, never to an empty value or the value of
+  another source.
+- **The broker reaches the resolvers through instances**, never a static: `ModelProviderRegistry.BoundSecrets` for model
+  providers and plugin provider types, `PluginSecretSink.AttachBound` for plugins and MCP servers, the resolver of the
+  identity of a session, the triggers of automations. A resolver built without a broker treats a bound secret as not
+  available.
+- **Every value is masked from its first read**: the broker gives it to the masking of the host (`Mask`,
+  `AgentSecretMasker.Retain`) before it keeps it.
+- **Memory**: a value stays until the duration of its provider ends (`cache`: until CodeAlta closes, or 15 minutes to
+  8 hours), the user locks the provider, or CodeAlta closes. Nothing is written to disk: no value, no master password,
+  no session key.
+- **Prompts**: only a host with a user (`CanPrompt`, the normal desktop instance) asks a vault to unlock, once at start
+  for the providers whose `unlock_at_start` is on and whose vault prompts by itself, then on a click. The developer
+  instance, `altacli` and `altanode` read only what a vault gives without a prompt.
+- **Changes**: `Changed` names the secrets that became readable or not. CodeAlta Desktop then registers the model
+  providers that were left out for one of them (and only those, so that no runtime in use is replaced); an MCP server
+  that did not start for a missing secret is not remembered as failed, and starts at its next use.
+
+## Providers
+
+`ICredentialProvider` and `PluginCredentialProviderContribution` (`CodeAlta.Plugins.Abstractions`) are the contract of
+every kind of vault, the built-in ones included (`Providers/`). A provider answers its status without a prompt, unlocks
+with the user present, reads one value (with `interactive` false it never prompts) and lists names for the picker,
+never values. The host owns the rest: bindings, memory, masking, confirmations, the states shown, the settings form.
+
+A plugin type is `<prefix>/<name>`, shadows no built-in type, and comes only from a built-in plugin or a plugin of the
+user, never from the plugin of a project folder: a cloned repository cannot bring code that reads the vaults.
+
+`VaultCommandRunner` holds the rules every program of a vault is run with: its full path and an argument array, never a
+shell; a folder of its own, never the folder of a project; the session variables of vaults (`BW_SESSION`, `OP_SESSION_*`)
+removed from its environment; a password or a token on its standard input or in its own environment, never in an
+argument; its output bounded in size and time, the process killed after it.
+
+## Ask before use
+
+A secret with `ask_before_use` is given only after the system verified the user (`IUserPresenceVerifier`: Windows Hello
+through `IUserConsentVerifierInterop` with the handle of the window, Touch ID through `LAContext`). A confirmation is
+kept per secret and use (`provider anthropic`, `MCP server grafana`) for its duration, so that something new that asks
+for the same secret asks the user again. Without a user, the use is recorded as pending and the secret is not given;
+the page of Settings asks again. The broker records the recent uses (secret, use, time, outcome), never a value.
+
+It is a check of CodeAlta, not encryption: a program that runs as the user is stopped by the vault, not by CodeAlta.
+
+## Agents
+
+Agents see names and states, never a value nor the item a secret names (`alta secret list|test|uses`,
+`alta credential types|list|status`). A change (`secret bind|unbind`, `credential add|remove`) is an
+`AgentCredentialPermissionRequest`, which no permission mode answers (`SessionPermissionService.AlwaysAsks`,
+`OnlyTheUserAllows`) and a host without a user denies. An agent never adds a provider of type `command` nor sets a path,
+both of which choose a program to run, and a setting that is a token names a local secret.
+
+A sandboxed session gets none of these commands (`AltaSandboxGate` is an allow list), and the session variables of
+vaults never enter its sandbox (`SandboxPolicyBuilder.IsVaultSessionName`), even when its profile names them. Outside the
+sandbox, `VaultCommandGuard` refuses a shell command of an agent that runs the program of a configured vault, unless
+the user allows it (`agent_vault_commands`): a guardrail against mistakes, not a wall, since a session that is not
+sandboxed runs as the user.

@@ -67,7 +67,7 @@ Microsoft terminates the tunnel's public TLS connection and forwards HTTP to the
 
 ## Secrets and credentials
 
-Each machine signs in to its providers itself; nothing is copied from your desktop. CodeAlta Desktop starts the sign-ins from the page of the machine ([Sign in on a machine](machines.md#sign-in-on-a-machine)), but the machine exchanges the code and keeps the token: the desktop sees a page and a code, never a token. The keys and tokens a machine needs are its own [secrets](../secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot open ([Secrets of your machines with a server](../secrets.md#secrets-of-your-machines-with-a-server)). Outputs and journals mask the values they meet.
+Each machine signs in to its providers itself; nothing is copied from your desktop. CodeAlta Desktop starts the sign-ins from the page of the machine ([Sign in on a machine](machines.md#sign-in-on-a-machine)), but the machine exchanges the code and keeps the token: the desktop sees a page and a code, never a token. The keys and tokens a machine needs are its own [secrets](../secrets/readme.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot open ([Secrets of your machines with a server](../secrets/readme.md#secrets-of-your-machines-with-a-server)). Outputs and journals mask the values they meet.
 
 ## Sign-in
 

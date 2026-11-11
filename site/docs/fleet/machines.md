@@ -188,7 +188,7 @@ On the machine of the node:
 
 Tags such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Machine tags**: type one or more, separated by commas or spaces, and **Add**; the cross of a tag removes it. On the machine itself, `altanode tags` lists them, `altanode tags add gpu prod` and `altanode tags remove gpu` change them, and `altanode tags set` replaces them all.
 
-A machine linked to a CodeAlta Server publishes its tags there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --tag gpu`, and an [environment](../secrets.md#environments) that names tags runs only on the machines with one of them. A tag is letters, digits, `-`, `_`, `.` and `:`.
+A machine linked to a CodeAlta Server publishes its tags there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --tag gpu`, and an [environment](../secrets/readme.md#environments) that names tags runs only on the machines with one of them. A tag is letters, digits, `-`, `_`, `.` and `:`.
 
 Tags were named labels before CodeAlta 4.2: `altanode labels` and `--label` still work.
 
@@ -244,7 +244,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Projects** | Clone a repository there, add a folder, remove a project; how many [worktrees](sessions.md#start-a-session-on-it) its sessions work in, and what they take on its disk |
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
 | **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in with an account, ACP agents, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
-| **Secrets** | Its [secrets and variables](../secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
+| **Secrets** | Its [secrets and variables](../secrets/readme.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
 | **Servers** | The servers it joined, and whether it is connected to each, or why not: a server only sees it offline. A server of this computer it is not on yet has **Join**: the machine joins it from itself, and this computer approves it, so that your other computers of that server see it |
 | **Start at boot** | Whether the node starts when the machine does, with nobody logged in, in the words of `altanode status`; when it does not, the command to run on the machine that makes it so |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |

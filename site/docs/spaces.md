@@ -215,7 +215,7 @@ A profile has a **Name** (such as `azure`), its **Variables**, and optionally a 
 
 - `~` at the start of a value, or of each path of a list such as `KUBECONFIG`, is your home folder.
 - `${env:NAME}` is the value of a variable of CodeAlta's environment. When that variable is not set, the tool keeps its own value, and **Check** and **Session info** say so.
-- `${secret:NAME}` and `${var:NAME}` are a [secret or a variable](secrets.md) of this computer. When one is not set, the tool keeps its own value, and **Check** says which.
+- `${secret:NAME}` and `${var:NAME}` are a [secret or a variable](secrets/readme.md) of this computer. When one is not set, the tool keeps its own value, and **Check** says which.
 - A variable named like a secret (token, password, secret or API key, such as `AWS_SECRET_ACCESS_KEY`) takes only `${secret:NAME}` or `${env:NAME}`. A name ending in `FILE`, `PATH`, `DIR` or `HOME` takes a path.
 - Git and GitHub variables (`GIT_AUTHOR_NAME`, `GIT_SSH_COMMAND`, `GH_CONFIG_DIR`…) are set by their cards, not by a profile.
 - Two profiles of a space cannot set the same variable.
