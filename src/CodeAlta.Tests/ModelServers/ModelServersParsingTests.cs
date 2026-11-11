@@ -395,6 +395,8 @@ public sealed class ModelServersParsingTests
     [TestMethod]
     public void ModelStore_ScansPlacesAndRemovesWithSharedBlobs()
     {
+        // A blob is shared through the links of the snapshots; without links each name gets a copy of its own.
+        TestLinks.RequireSymbolicLinks();
         using var temp = TestTempDirectory.Create();
         var store = new ModelStore(temp.Path);
         var source = Path.Combine(temp.Path, "src");

@@ -10,6 +10,7 @@ public sealed class ProjectFileServerTests
     [TestMethod]
     public async Task TheFilesOfVersionControlAndOfSecrets_AreNeverServed()
     {
+        TestLinks.RequireSymbolicLinks();
         using var folder = new BrowserPluginTests.TempFolder();
         var root = Directory.CreateDirectory(Path.Combine(folder.Path, "project")).FullName;
         var files = new Dictionary<string, string>
@@ -66,6 +67,7 @@ public sealed class ProjectFileServerTests
     [TestMethod]
     public async Task AFileReplacedByALinkAfterTheCheck_IsNotServed()
     {
+        TestLinks.RequireSymbolicLinks();
         using var folder = new BrowserPluginTests.TempFolder();
         var root = BrowserFiles.RealPath(Directory.CreateDirectory(Path.Combine(folder.Path, "project")).FullName);
         var outside = Directory.CreateDirectory(Path.Combine(folder.Path, "outside")).FullName;

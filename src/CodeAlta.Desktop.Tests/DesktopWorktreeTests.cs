@@ -866,6 +866,10 @@ public sealed class DesktopWorktreeTests
     public async Task RemoveMany_RemovesWhatCanGo_AndSaysWhyEachOtherStays()
     {
         using var repository = await Repository.CreateAsync();
+        // The last removal forgets a worktree whose folder and the folder above it are gone. Before 2.46, git for Windows
+        // does not find it by the path it is given, written with backslashes: "is not a working tree".
+        if (OperatingSystem.IsWindows() && repository.GitVersion() is var git && git < new Version(2, 46))
+            Assert.Inconclusive($"On Windows, git {git} cannot forget a worktree whose folder and the folder above it are gone; git 2.46 or later can.");
         var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
         var clean = await repository.Worktrees.CreateAsync(project);
         var dirty = await repository.Worktrees.CreateAsync(project);
@@ -1318,6 +1322,12 @@ public sealed class DesktopWorktreeTests
         }
 
         public string Git(params string[] arguments) => GitIn(Root, arguments);
+
+        // The version of git, from `git version 2.39.0.windows.2`.
+        public Version GitVersion()
+            => System.Text.RegularExpressions.Regex.Match(Git("--version"), @"\d+\.\d+\.\d+") is { Success: true } match
+                ? Version.Parse(match.Value)
+                : throw new InvalidOperationException("git gave no version.");
 
         public string GitIn(string folder, params string[] arguments)
         {

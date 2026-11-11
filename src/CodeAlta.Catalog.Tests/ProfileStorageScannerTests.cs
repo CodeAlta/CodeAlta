@@ -81,6 +81,7 @@ public sealed class ProfileStorageScannerTests
     [TestMethod]
     public async Task DirectoryReplacedByLinkAfterDiscoveryIsNotTraversed()
     {
+        TestLinks.RequireSymbolicLinks();
         var root = NewRoot();
         var outside = NewRoot();
         Directory.CreateDirectory(Path.Combine(root, "child"));
@@ -94,8 +95,7 @@ public sealed class ProfileStorageScannerTests
                 {
                     if (!isDirectory) return;
                     Directory.Delete(path);
-                    try { Directory.CreateSymbolicLink(path, outside); }
-                    catch (UnauthorizedAccessException) { Assert.Inconclusive("Creating symlinks requires platform permission."); }
+                    Directory.CreateSymbolicLink(path, outside);
                 },
             };
             var result = await scanner.ScanAsync(CancellationToken.None);
@@ -186,6 +186,7 @@ public sealed class ProfileStorageScannerTests
     [TestMethod]
     public async Task LinksAndLinkedRoots_AreSkipped()
     {
+        TestLinks.RequireSymbolicLinks();
         var root = NewRoot();
         var outside = NewRoot();
         Directory.CreateDirectory(root);
@@ -194,8 +195,7 @@ public sealed class ProfileStorageScannerTests
         {
             await File.WriteAllBytesAsync(Path.Combine(outside, "not-profile-data"), new byte[100]);
             var link = Path.Combine(root, "linked");
-            try { Directory.CreateSymbolicLink(link, outside); }
-            catch (UnauthorizedAccessException) { Assert.Inconclusive("Creating symlinks requires platform permission."); }
+            Directory.CreateSymbolicLink(link, outside);
             var snapshot = await new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }).ScanAsync(CancellationToken.None);
             Assert.AreEqual(0L, snapshot.TotalBytes);
             Assert.AreEqual(1L, snapshot.SkippedLinks);

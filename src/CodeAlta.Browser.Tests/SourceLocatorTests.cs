@@ -441,6 +441,7 @@ public sealed class SourceLocatorTests
     [TestMethod]
     public void AFolderReplacedByALinkAfterTheCheck_IsNotRead()
     {
+        TestLinks.RequireSymbolicLinks();
         var outside = Directory.CreateDirectory(_project + "-outside").FullName;
         try
         {

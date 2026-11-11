@@ -249,7 +249,8 @@ public static class GitSnapshot
         }
     }
 
-    // What git (run with LC_ALL=C) says when it cannot put the index it wrote in place of the one it read.
-    private static bool IsUnwritableIndex(GitRun run)
-        => run.Error.Contains("unable to write new index file", StringComparison.Ordinal);
+    // What git (run with LC_ALL=C) says when it cannot put the index it wrote in place of the one it read: "Unable" up to
+    // git 2.39, "unable" after.
+    internal static bool IsUnwritableIndex(GitRun run)
+        => run.Error.Contains("unable to write new index file", StringComparison.OrdinalIgnoreCase);
 }
