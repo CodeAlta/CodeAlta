@@ -604,9 +604,21 @@ internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogS
     private static string TypeName(string? type)
     {
         if (string.IsNullOrWhiteSpace(type)) return "Provider";
-        try { return CodeAltaConfigStore.CreateProviderTypeDefaults(type).DisplayName ?? type; }
-        catch (ArgumentException) { return type; }
+        try { return CodeAltaConfigStore.CreateProviderTypeDefaults(type).DisplayName ?? ReadableTypeName(type); }
+        catch (ArgumentException) { return ReadableTypeName(type); }
     }
+
+    // The name a type is shown with where its defaults name none: the API it speaks, as Settings > Providers names it.
+    private static string ReadableTypeName(string type) => type switch
+    {
+        "openai-responses" => "OpenAI",
+        "openai-chat" => "OpenAI-compatible API",
+        "anthropic" => "Anthropic",
+        "google-genai" => "Google Gemini",
+        "mistral" => "Mistral",
+        "copilot" => "GitHub Copilot",
+        _ => type,
+    };
 
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

@@ -27,7 +27,7 @@ export const machineSignInMessages = {
     "Solo un equipo emparejado con {name} inicia su sesión. Para hacerlo desde este, ejecuta altanode pair --manage en {name} y pega el enlace en Emparejar una máquina… aquí.",
     "Seul un ordinateur associé à {name} la connecte. Pour le faire depuis celui-ci, lancez altanode pair --manage sur {name}, puis collez le lien dans Associer une machine… ici.",
     "Nur ein mit {name} gekoppelter Computer meldet sie an. Um es von diesem aus zu tun, führe altanode pair --manage auf {name} aus und füge den Link hier in Maschine koppeln… ein.",
-    "{name} をサインインできるのは、{name} とペアリングしたコンピューターだけです。このコンピューターから行うには、{name} で altanode pair --manage を実行し、ここの「マシンをペアリング…」にリンクを貼り付けてください。",
+    "このマシンをサインインできるのは、{name} とペアリングしたコンピューターだけです。このコンピューターから行うには、{name} で altanode pair --manage を実行し、ここの「マシンをペアリング…」にリンクを貼り付けてください。",
     "只有与 {name} 配对的计算机才能为其登录。要从这台计算机操作，请在 {name} 上运行 altanode pair --manage，然后将链接粘贴到此处的“配对机器…”中。"],
   "The sign-in did not complete on the machine.": ["El inicio de sesión no se completó en la máquina.", "La connexion ne s’est pas terminée sur la machine.",
     "Die Anmeldung wurde auf der Maschine nicht abgeschlossen.", "マシンでサインインが完了しませんでした。", "登录未在该机器上完成。"],
