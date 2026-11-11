@@ -179,12 +179,14 @@ Open the context usage with `Ctrl+G Ctrl+U`. Press `Ctrl+F11` to compact an idle
 
 A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and says why. **Settings > Sandbox > Check** shows the step that fails:
 
-- **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network. On Ubuntu 24.04 and later, `bwrap` cannot create the user namespace of the sandbox (`setting up uid map: Permission denied`) until it has an AppArmor profile that allows it:
+- **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network. On Ubuntu 24.04 and later, AppArmor keeps `bwrap` from creating the user namespace of the sandbox (`setting up uid map: Permission denied`), and `unshare` from creating the namespaces that filter its network (`write failed /proc/self/uid_map: Operation not permitted`: a profile with a network, such as `workspace` or the `node` of a machine, cannot start), until each has a profile that allows them. Run this once, then restart CodeAlta or the node:
 
   ```bash
   sudo apt-get install -y bubblewrap slirp4netns
-  printf 'abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n\n  include if exists <local/bwrap>\n}\n' | sudo tee /etc/apparmor.d/bwrap > /dev/null
-  sudo apparmor_parser -r /etc/apparmor.d/bwrap
+  for p in bwrap unshare; do
+    printf 'abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile %s /usr/bin/%s flags=(unconfined) {\n  userns,\n\n  include if exists <local/%s>\n}\n' $p $p $p | sudo tee /etc/apparmor.d/$p > /dev/null
+    sudo apparmor_parser -r /etc/apparmor.d/$p
+  done
   ```
 - **The profile cannot be used**: a profile was removed or renamed while a provider, a space or a project still names it. Choose another one there.
 - **A host is refused**: the profile does not list it. `alta sandbox status --session <id>` names the hosts refused last; add them to the hosts of a profile of yours.

@@ -64,7 +64,7 @@ The link works once and expires after 10 minutes. Each computer is then listed a
    - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS; with **Always on**, a service that starts at boot;
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once (and manages the machine, when you ticked it). The six words of its key are shown.
    - **Join your server**, when this computer is connected to a [CodeAlta Server](server.md): the node joins it from itself (`altanode join`), and this computer approves the key it just paired with. Your other computers of that server then list the machine too. When this step fails, the machine stays paired: join it later from its page.
-3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
+3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). On Ubuntu 24.04 and later, its sessions need the sandbox set up once with `sudo` (see [Set up the sandbox on Linux](#set-up-the-sandbox-on-linux)): **Permissions** on that page says so.
 
 When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
 
@@ -101,6 +101,20 @@ dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o alt
 The node uses the same profile as CodeAlta Desktop and TUI, `~/.alta`: its providers, prompts, skills and projects. Set up its providers as you would for the desktop app (see [Model Providers](../model-providers/readme.md)): the sessions of a machine run with the accounts of that machine. Only one CodeAlta runs on a profile at a time, so on a computer where you also use CodeAlta Desktop, run the node only while the desktop app is closed, or give it a profile of its own with `--data-root <folder>` (a full path).
 
 The projects a session can start in on the machine are the projects of that profile: add them with `altanode projects` (see [Give it projects](#give-it-projects)).
+
+### Set up the sandbox on Linux
+
+The sessions of a machine run in a [sandbox](sessions.md#what-its-sessions-may-do), which needs Bubblewrap, and `slirp4netns` for its network. On Ubuntu 24.04 and later, AppArmor also keeps `bwrap` and `unshare` from making the namespaces of the sandbox until each has a profile that allows them. Run this once on the machine, then restart the node (`systemctl --user restart altanode` for the service of `altanode install`):
+
+```bash
+sudo apt-get install -y bubblewrap slirp4netns
+for p in bwrap unshare; do
+  printf 'abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile %s /usr/bin/%s flags=(unconfined) {\n  userns,\n\n  include if exists <local/%s>\n}\n' $p $p $p | sudo tee /etc/apparmor.d/$p > /dev/null
+  sudo apparmor_parser -r /etc/apparmor.d/$p
+done
+```
+
+Until then, **Permissions** on the page of the machine says that the sandbox cannot run, why, and the command to run; `altanode status` says it too. A machine added [over SSH](#over-ssh) needs it as well.
 
 ## Run it
 

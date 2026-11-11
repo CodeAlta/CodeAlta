@@ -108,9 +108,11 @@ public sealed class MxcSandboxBackend : ISandboxBackend
                 if (!backends.Any(static item => item.Backend == ContainmentBackend.Bubblewrap))
                     return SandboxAvailability.Unavailable(backend, "bubblewrap (`bwrap` 0.5 or later) is not installed or cannot create user namespaces.", SetupHint());
                 // Any network but none goes through slirp4netns, which mxc looks for on PATH.
-                var slirp = OnPath("slirp4netns");
-                return new(true, backend, slirp ? null : "Without `slirp4netns`, a sandbox has no network at all.", slirp ? null : "Install the `slirp4netns` package for the network of the profiles.",
-                    slirp ? new HashSet<SandboxNetwork> { SandboxNetwork.Off, SandboxNetwork.Hosts, SandboxNetwork.On } : new HashSet<SandboxNetwork> { SandboxNetwork.Off });
+                if (!OnPath("slirp4netns"))
+                    return new(true, backend, "Without `slirp4netns`, a sandbox has no network at all.", "Install the `slirp4netns` package for the network of the profiles.", new HashSet<SandboxNetwork> { SandboxNetwork.Off });
+                return LinuxNetworkNamespaces.Check(FindOnPath) is { } refused
+                    ? new(true, backend, refused.Reason, refused.Setup, new HashSet<SandboxNetwork> { SandboxNetwork.Off })
+                    : new(true, backend, null, null, new HashSet<SandboxNetwork> { SandboxNetwork.Off, SandboxNetwork.Hosts, SandboxNetwork.On });
             }
 
             return backends.Any(static item => item.Backend == ContainmentBackend.Seatbelt)
@@ -125,10 +127,12 @@ public sealed class MxcSandboxBackend : ISandboxBackend
 
     private static string? SetupHint()
         => OperatingSystem.IsWindows() ? "Install the Windows updates: Windows 11 24H2 or 25H2 with the August 2026 update (build 26100.9278 or 26200.9278) or later is needed."
-            : OperatingSystem.IsLinux() ? "Install `bubblewrap` (0.5 or later) and `slirp4netns`, and allow unprivileged user namespaces (on Ubuntu 24.04, an AppArmor profile for `bwrap`)."
+            : OperatingSystem.IsLinux() ? "Install `bubblewrap` (0.5 or later) and `slirp4netns`, and allow unprivileged user namespaces (on Ubuntu 24.04 and later, an AppArmor profile for `bwrap` and one for `unshare`: see A sandboxed session runs nothing in Troubleshooting)."
             : null;
 
-    private static bool OnPath(string program)
+    private static bool OnPath(string program) => FindOnPath(program) is not null;
+
+    private static string? FindOnPath(string program)
         => (System.Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Any(folder => File.Exists(Path.Combine(folder, program)));
+            .Select(folder => Path.Combine(folder, program)).FirstOrDefault(File.Exists);
 }

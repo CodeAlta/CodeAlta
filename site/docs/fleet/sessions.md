@@ -62,7 +62,7 @@ A machine runs agents for you while nobody sits at it, so its sessions bypass pe
 - Only the owner of the machine and the computers that manage it change it.
 - A [policy of the organization](policies-and-audit.md) with **Permission mode at most** narrows it, and a session an agent starts there has at most the mode of that agent ([Let agents start sessions on it](#let-agents-start-sessions-on-it)).
 - Where the [sandbox](../sessions/sandbox.md) can run, its sessions run in it by default, with the profile `node`: the package registries and the git hosts (GitHub, GitLab, Bitbucket, Azure DevOps), never the home folder, the credentials or the files of CodeAlta of the machine. They fetch, push and open pull requests over HTTPS without leaving it, with a token of the environment of the node that the profile names (see [On a machine of the fleet](../sessions/sandbox.md#on-a-machine-of-the-fleet)).
-- Where it cannot run, its sessions run without one, with the rights of the account of the node. **Permissions** on the page of the machine says why, and what to install (`altanode status` says it too).
+- Where it cannot run, its sessions run without one, with the rights of the account of the node. **Permissions** on the page of the machine says why, and what to install (`altanode status` says it too). On Ubuntu 24.04 and later, set it up once with `sudo` (see [Set up the sandbox on Linux](machines.md#set-up-the-sandbox-on-linux)).
 
 ### Let agents start sessions on it
 

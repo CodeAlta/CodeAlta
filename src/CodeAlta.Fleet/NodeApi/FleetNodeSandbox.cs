@@ -21,17 +21,38 @@ public static class FleetNodeSandbox
     public static FleetNodeSandboxStatus Describe(SessionRuntimeService runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
-        var availability = runtime.GetSandboxAvailability();
-        var profile = runtime.ReadSandboxSettings().AllSessions?.Trim();
-        return new FleetNodeSandboxStatus(
-            string.IsNullOrEmpty(profile) || profile.Equals(SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase) ? null : profile,
-            availability.IsAvailable, availability.Backend, availability.Reason, availability.Setup);
+        var (allSessions, profiles) = runtime.ReadSandboxSettings();
+        return Describe(runtime.GetSandboxAvailability(), allSessions, profiles);
+    }
+
+    // A sandbox that starts, but without the network of the profile its sessions run in, runs none of them: the page
+    // says so with what to set up, as when no sandbox starts (on Ubuntu 24.04, `unshare` refused by AppArmor).
+    internal static FleetNodeSandboxStatus Describe(SandboxAvailability availability, string? allSessions, IReadOnlyList<SandboxProfile> profiles)
+    {
+        var name = allSessions?.Trim();
+        var profile = string.IsNullOrEmpty(name) || name.Equals(SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase) ? null : name;
+        if (availability.IsAvailable && profile is not null && Network(profile, profiles) is { } network && !availability.Networks.Contains(network))
+            return new FleetNodeSandboxStatus(profile, false, availability.Backend,
+                availability.Reason ?? $"the sandbox cannot give the network '{network.ToString().ToLowerInvariant()}' of the profile '{profile}' here.", availability.Setup);
+        return new FleetNodeSandboxStatus(profile, availability.IsAvailable, availability.Backend, availability.Reason, availability.Setup);
+    }
+
+    private static SandboxNetwork? Network(string profile, IReadOnlyList<SandboxProfile> profiles)
+    {
+        try
+        {
+            return SandboxProfiles.Resolve(profile, profiles).Network;
+        }
+        catch (SandboxProfileException)
+        {
+            return null;
+        }
     }
 }
 
 /// <summary>The sandbox the sessions of a node run in by default, as it says it.</summary>
 /// <param name="Profile">The profile a session no scope sandboxes runs in; null when such a session runs without a sandbox.</param>
-/// <param name="Available">Whether the sandbox can run on the machine.</param>
+/// <param name="Available">Whether the sandbox can run on the machine, with the network of <paramref name="Profile"/>.</param>
 /// <param name="Backend">The sandbox of its system.</param>
 /// <param name="Reason">Why it cannot run; null when it can.</param>
 /// <param name="Setup">What to install or set up for it to run; null when nothing is known.</param>

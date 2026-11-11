@@ -22,4 +22,25 @@ public sealed class FleetNodeSandboxTests
         Assert.AreEqual(0, profile.Write.Count + profile.Read.Count + profile.Env.Count, "no folder or variable of the machine more");
         CollectionAssert.Contains(SandboxProfiles.Names([]).ToArray(), FleetNodeSandbox.ProfileName, "every computer knows it, for a session that moves");
     }
+
+    [TestMethod]
+    public void ASandboxWithoutTheNetworkOfItsProfile_IsSaidNotToRun_WithWhatToSetUp()
+    {
+        // Ubuntu 24.04: bwrap starts, but AppArmor refuses unshare the namespaces of the proxy, so no network but off.
+        var offOnly = new SandboxAvailability(true, "Linux Bubblewrap", "This system refuses the namespaces.", "Give `unshare` an AppArmor profile.", new HashSet<SandboxNetwork> { SandboxNetwork.Off });
+
+        var node = FleetNodeSandbox.Describe(offOnly, SandboxProfiles.Node, []);
+        Assert.IsFalse(node.Available, "its sessions in node run no command: the page must not say they run");
+        Assert.AreEqual(("node", "This system refuses the namespaces.", "Give `unshare` an AppArmor profile."), (node.Profile, node.Reason, node.Setup));
+
+        var strict = FleetNodeSandbox.Describe(offOnly, SandboxProfiles.Strict, []);
+        Assert.IsTrue(strict.Available, "a profile without a network runs there");
+
+        var unexplained = FleetNodeSandbox.Describe(offOnly with { Reason = null, Setup = null }, SandboxProfiles.Node, []);
+        Assert.IsFalse(unexplained.Available);
+        StringAssert.Contains(unexplained.Reason, "network 'hosts'");
+
+        Assert.IsNull(FleetNodeSandbox.Describe(offOnly, "off", []).Profile, "no profile, nothing refused");
+        Assert.IsTrue(FleetNodeSandbox.Describe(offOnly, "missing-profile", []).Available, "a profile that does not resolve is said elsewhere");
+    }
 }
