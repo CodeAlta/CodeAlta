@@ -81,10 +81,10 @@ and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
       the size and SHA-256 of each `github-copilot-<version>-<platform>.tgz` in source, as the Codex pin does, instead of
       reading `SHA256SUMS.txt` at run time. It keeps what the SDK's targets keep (the files of `prebuilds/<platform>`
       beside those of the root, without the terminal CLI); tests.
-- [ ] 2. **Neutral contract** (`CodeAlta.Orchestration`): `ManagedPolicy` (source, account, widest permission mode,
-      default mode, sandbox required, run outside allowed, fresh policy required, support URL, managed keys, last
-      refresh) and `IManagedPolicySource` (current policy, change event, refresh), merged most-restrictive across
-      sources; no static mutable state; tests.
+- [x] 2. **Neutral contract** (`CodeAlta.Orchestration`): `ManagedPolicy` (source, account, refused modes with
+      `Narrow` to the widest mode the session can be given, default mode, sandbox required, no run outside, fresh
+      policy missing, support URL, managed keys, read at) and `ManagedPolicyState` (one policy per source, combined
+      most-restrictive, `Changed`), instance-owned; tests.
 - [ ] 3. **The Copilot reader** (`CodeAlta.Agent.Copilot`): reference `GitHub.Copilot.SDK` (bump to the current release),
       start the runtime from slice 1 per refresh, `ResolveAsync(gitHubToken, clientName: "CodeAlta")` per signed-in
       direct provider, `ReadAsync` when none, map to `ManagedPolicy`, keep the last one beside the credential, the
