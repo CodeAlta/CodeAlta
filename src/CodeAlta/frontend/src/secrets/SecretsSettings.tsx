@@ -14,7 +14,7 @@ import { VaultBindingDialog } from "./VaultPicker";
 import { isSecretName, referenceOf, secretNameProblem } from "./secrets";
 
 type SecretsApi = Pick<typeof secrets, "list" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable" | "saveProvider" | "removeProvider"
-  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant">;
+  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "setDeveloperUnlock" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant">;
 type Result = Promise<{ status: string; message?: string | null }>;
 
 /** What the body of the page does: each call writes one change and says how it went. */
@@ -90,6 +90,7 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
               remove: id => api.removeProvider({ expectedEpoch, id }),
               edit: provider => setProviderDialog({ editing: provider }),
               runInTerminal,
+              setDeveloperUnlock: enabled => api.setDeveloperUnlock({ expectedEpoch, enabled }),
             }} />}
             {listing.types.length > 0 && <SignInsCard signIns={listing.signIns} providers={listing.providers} types={listing.types} busy={busy} run={run} actions={{
           save: draft => api.saveSignIn({ expectedEpoch, id: draft.id, label: draft.label, provider: draft.provider, sites: [...draft.sites],

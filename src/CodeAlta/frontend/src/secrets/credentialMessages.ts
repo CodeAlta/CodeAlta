@@ -48,6 +48,24 @@ export const credentialMessages = {
     "Wo die Werte der Geheimnisse liegen: dieser Computer oder ein Tresor, den CodeAlta über sein Programm liest und in den es nie schreibt.",
     "シークレットの値の保管場所：このコンピューター、または CodeAlta がそのプログラムを通じて読み取り、書き込むことのない保管庫。",
     "机密值的保存位置：本机，或 CodeAlta 通过其程序读取且从不写入的保管库。"],
+  "Let the developer instance unlock the vaults": [
+    "Dejar que la instancia de desarrollo desbloquee las bóvedas",
+    "Laisser l’instance de développement déverrouiller les coffres",
+    "Die Entwicklerinstanz die Tresore entsperren lassen",
+    "開発者インスタンスに保管庫のロック解除を許可",
+    "允许开发者实例解锁保管库"],
+  "It then asks your vault for its own run when you click Unlock in its window, as 1Password asks Windows Hello. Off, it reads only what a vault gives without asking.": [
+    "Entonces pide a tu bóveda para su propia ejecución cuando haces clic en Desbloquear en su ventana, como 1Password pide Windows Hello. Desactivado, solo lee lo que una bóveda da sin preguntar.",
+    "Elle demande alors à votre coffre pour sa propre exécution quand vous cliquez sur Déverrouiller dans sa fenêtre, comme 1Password demande Windows Hello. Désactivé, elle ne lit que ce qu’un coffre donne sans demander.",
+    "Sie fragt dann Ihren Tresor für ihren eigenen Lauf, wenn Sie in ihrem Fenster auf Entsperren klicken, so wie 1Password nach Windows Hello fragt. Aus, liest sie nur, was ein Tresor ohne Nachfrage gibt.",
+    "その場合、そのウィンドウで「ロック解除」をクリックすると、1Password が Windows Hello を求めるように、自身の実行のために保管庫に確認します。オフの場合は、確認なしで保管庫が渡すものだけを読み取ります。",
+    "开启后，当你在其窗口中点击解锁时，它会为自己的运行向保管库请求，就像 1Password 请求 Windows Hello 一样。关闭时，它只读取保管库无需询问即可提供的内容。"],
+  "The developer instance asks no vault to unlock: unlock it in the normal instance, or turn on Let the developer instance unlock the vaults, below.": [
+    "La instancia de desarrollo no pide desbloquear ninguna bóveda: desbloquéala en la instancia normal, o activa Dejar que la instancia de desarrollo desbloquee las bóvedas, abajo.",
+    "L’instance de développement ne demande à aucun coffre de se déverrouiller : déverrouillez-le dans l’instance normale, ou activez Laisser l’instance de développement déverrouiller les coffres, ci-dessous.",
+    "Die Entwicklerinstanz fordert keinen Tresor zum Entsperren auf: Entsperren Sie ihn in der normalen Instanz oder aktivieren Sie unten „Die Entwicklerinstanz die Tresore entsperren lassen“.",
+    "開発者インスタンスは保管庫のロック解除を求めません。通常のインスタンスでロックを解除するか、下の「開発者インスタンスに保管庫のロック解除を許可」をオンにしてください。",
+    "开发者实例不会请求解锁任何保管库：请在正常实例中解锁，或在下方开启“允许开发者实例解锁保管库”。"],
   "Use this item": ["Usar este elemento", "Utiliser cet élément", "Diesen Eintrag verwenden", "この項目を使う", "使用此项目"],
   "1 hour": ["1 hora", "1 heure", "1 Stunde", "1 時間", "1 小时"],
   "15 minutes": ["15 minutos", "15 minutes", "15 Minuten", "15 分", "15 分钟"],
@@ -167,12 +185,6 @@ export const credentialMessages = {
     "Die Konfiguration verweist mit ${secret:NAME} darauf, wo immer sein Wert liegt.",
     "値がどこにあっても、設定からは ${secret:NAME} で参照します。",
     "无论其值在何处，配置都以 ${secret:NAME} 引用它。"],
-  "The developer instance never asks a vault to unlock: unlock it in the normal instance.": [
-    "La instancia de desarrollo nunca pide desbloquear una bóveda: desbloquéala en la instancia normal.",
-    "L’instance de développement ne demande jamais de déverrouiller un coffre : déverrouillez-le dans l’instance normale.",
-    "Die Entwicklerinstanz bittet nie um das Entsperren eines Tresors: entsperre ihn in der normalen Instanz.",
-    "開発用インスタンスは保管庫のロック解除を求めません。通常のインスタンスでロック解除してください。",
-    "开发实例从不请求解锁保管库：请在正常实例中解锁。"],
   "The secrets kept in this vault name it.": ["Los secretos guardados en esta bóveda lo nombran.", "Les secrets gardés dans ce coffre le nomment.", "Die Geheimnisse in diesem Tresor nennen ihn.", "この保管庫のシークレットはこの ID で参照します。", "保存在此保管库中的机密以此命名它。"],
   "The vault cannot be listed now: unlock it, then try again.": [
     "La bóveda no se puede listar ahora: desbloquéala y vuelve a intentarlo.",

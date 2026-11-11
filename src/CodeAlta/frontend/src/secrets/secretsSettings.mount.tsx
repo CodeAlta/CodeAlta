@@ -48,6 +48,8 @@ const listing: SecretsList = {
   uses: [{ name: "DEPLOY_TOKEN", use: "MCP server deploy", at: "2026-11-12T09:04:00Z", outcome: "given" }],
   verification: { available: true, reason: null },
   canPrompt: true,
+  developerInstance: false,
+  developerUnlock: false,
   configurationProblems: [],
   signIns: [{ id: "github", label: "GitHub", provider: "personal", sites: ["https://github.com"], username: "op://Private/GitHub/username",
     password: "op://Private/GitHub/password", totp: "op://Private/GitHub/one-time password?attribute=otp", providerName: "1Password", icon: "1password",
@@ -76,6 +78,7 @@ const api = {
   confirmUse: async () => ({ status: "ok", message: null, provider: null }), declineUse: async () => ({ status: "ok", message: null, provider: null }),
   saveSignIn: async () => ({ status: "ok", message: null, provider: null }), removeSignIn: async () => ({ status: "ok", message: null, provider: null }),
   revokeSiteGrant: async () => ({ status: "ok", message: null, provider: null }),
+  setDeveloperUnlock: async () => ({ status: "ok", message: null, provider: null }),
 };
 // The width of the page of the Settings window: about 1250 CSS pixels in a window of 1600, about 430 in one of 900.
 function Fixture() {

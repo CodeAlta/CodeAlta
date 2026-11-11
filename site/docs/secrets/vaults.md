@@ -77,7 +77,7 @@ The row of the secret then shows its vault and its item, and the state of that v
 
 - **At start**, CodeAlta reads, without a prompt, what each vault gives as it is. Then CodeAlta Desktop asks each locked vault that has its own prompt, such as 1Password, to unlock, once, after the window shows. A prompt you dismiss is not shown again until you click **Unlock**.
 - **While CodeAlta runs**, a value read stays in memory for the time its provider keeps it. Nothing prompts again, and an automation that runs at night still has its values.
-- **The developer instance, `altacli` and `altanode` never ask a vault to unlock.** What is locked stays locked, and what needs it says which vault to unlock. In the developer instance, unlock the vault in the normal instance: a vault such as 1Password then answers both.
+- **`altacli` and `altanode` never ask a vault to unlock, nor does the developer instance by default.** What is locked stays locked, and what needs it says which vault to unlock. To test a vault in the developer instance, turn on **Let the developer instance unlock the vaults** under **Vaults**, in either instance: the developer instance then shows **Unlock**, and its click asks your vault for that run, as 1Password asks Windows Hello. It never asks at start, so a developer instance an agent starts shows no prompt by itself.
 
 A provider, an MCP server or the shell of a session whose secret is in a locked vault does not start, and its diagnostic names the secret and the vault. Once you unlock the vault, the providers start, and an MCP server starts at its next use.
 

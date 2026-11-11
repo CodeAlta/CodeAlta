@@ -344,6 +344,12 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public bool CredentialPrompts { get; init; }
 
+    /// <summary>
+    /// Gets whether the host is the developer instance of CodeAlta Desktop: its credential broker asks a vault to unlock only on a
+    /// click, and only when the user lets the developer instance do it (<c>developer_instance = "unlock"</c> under <c>[secrets]</c>).
+    /// </summary>
+    public bool CredentialsDeveloperInstance { get; init; }
+
     /// <summary>Gets what verifies the user before a secret that asks before use is given; null where nobody can be asked.</summary>
     public CodeAlta.Credentials.IUserPresenceVerifier? UserPresenceVerifier { get; init; }
 

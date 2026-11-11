@@ -153,3 +153,19 @@ test("a secret is named after the item and the field picked", () => {
   assert.equal(suggestedSecretName("Contoso/Azure DevOps#Password"), "PASSWORD");
 });
 
+test("a switch lets the developer instance unlock the vaults, and its tag says where to find it", () => {
+  const actions = { unlock: never, lock: never, test: never, remove: never, edit: never, setDeveloperUnlock: never };
+  const developer = render(createElement(CredentialProviders, { listing: listing([provider({ state: "locked", held: 0 })], { canPrompt: false, developerInstance: true }),
+    busy: false, run: never, onAdd: never, actions }));
+  assert.match(developer, /Let the developer instance unlock the vaults/);
+  assert.match(developer, /Unlock in the normal instance/);
+  assert.match(developer, /turn on Let the developer instance unlock the vaults, below/);
+  const allowed = render(createElement(CredentialProviders, { listing: listing([provider({ state: "locked", held: 0 })], { canPrompt: true, developerInstance: true, developerUnlock: true }),
+    busy: false, run: never, onAdd: never, actions }));
+  assert.match(allowed, /Unlock/);
+  assert.doesNotMatch(allowed, /Unlock in the normal instance/, "once allowed, the developer instance offers Unlock itself");
+  assert.match(allowed, /type="checkbox"[^>]*checked/);
+  const none = render(createElement(CredentialProviders, { listing: listing([]), busy: false, run: never, onAdd: never, actions }));
+  assert.doesNotMatch(none, /Let the developer instance/, "without a vault there is nothing to let it unlock");
+});
+

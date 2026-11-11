@@ -51,7 +51,7 @@ A secret kept in a locked vault is the same kind of error, and names the vault: 
 Turn on **Ask before use** on a secret, kept on this computer or in a vault, and CodeAlta gives its value only after the system checked that you are there: Windows Hello (PIN, fingerprint, face) on Windows, Touch ID or the password of your account on macOS. The prompt names the secret and what asks for it, such as `the provider anthropic`, `the MCP server grafana of C:\code\shop\.alta\mcp.json` or `the shell of the session 01a1…`.
 
 - Your answer is kept for that secret and what uses it, for the time you choose: each use, 15 minutes, 1 hour, or until CodeAlta closes. Something else that asks for the same secret asks you again: another provider, an MCP server of another file or space, the shell of another session, the automations of another project.
-- Where nobody can answer, such as an automation at night, `altacli`, `altanode` or the developer instance, the secret is not given, and what needs it says that it waits for your confirmation. When the window is open, **Confirm** at the top of **Settings > Secrets** asks you again.
+- Where nobody can answer, such as an automation at night, `altacli`, `altanode` or the developer instance unless you [let it unlock the vaults](vaults.md#when-a-vault-is-asked), the secret is not given, and what needs it says that it waits for your confirmation. When the window is open, **Confirm** at the top of **Settings > Secrets** asks you again.
 - **Recent uses**, at the bottom of the page, lists which secret was asked for, by what, when, and whether it was given. `alta secret uses` gives agents the same list.
 - Where the system cannot check you (Windows Hello not set up, Linux), the switch is off and says why.
 

@@ -129,6 +129,30 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task The_developer_instance_unlocks_a_vault_on_a_click_once_the_user_lets_it_and_never_at_start()
+    {
+        using var vault = new FakeVault();
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\npath = \"{vault.TomlPath}\"\n");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, DeveloperInstance = true });
+        Assert.IsTrue(broker.DeveloperInstance);
+        Assert.IsFalse(broker.CanPrompt, "by default the developer instance asks no vault to unlock");
+
+        broker.Settings.SetDeveloperInstanceUnlocks(true);
+        StringAssert.Contains(File.ReadAllText(vault.ConfigPath), "developer_instance = \"unlock\"");
+        Assert.IsTrue(broker.CanPrompt, "the setting is read as it is now: the window offers Unlock at once");
+        await broker.RefreshAsync();
+        await broker.UnlockAtStartAsync();
+        Assert.IsFalse(vault.Calls().Any(static call => call.StartsWith("vault", StringComparison.Ordinal)), "a developer instance an agent starts shows no prompt by itself");
+        Assert.AreEqual(CredentialProviderState.Ready, (await broker.UnlockAsync("personal", null)).Status.State, "a click unlocks it");
+
+        broker.Settings.SetDeveloperInstanceUnlocks(false);
+        Assert.IsFalse(broker.CanPrompt);
+        Assert.DoesNotContain("developer_instance", File.ReadAllText(vault.ConfigPath));
+        using var normal = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        Assert.AreEqual((true, false), (normal.CanPrompt, normal.DeveloperInstance), "the normal instance prompts whatever the setting");
+    }
+
+    [TestMethod]
     public async Task A_service_account_token_is_a_secret_of_this_computer_given_in_the_environment_of_op()
     {
         using var vault = new FakeVault();

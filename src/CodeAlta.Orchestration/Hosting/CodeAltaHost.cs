@@ -610,6 +610,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 Types = new CodeAlta.Credentials.CredentialProviderTypes(new CodeAlta.Credentials.VaultCommandRunner(), pluginRuntime.GetCredentialProviderTypes),
                 Verifier = options.UserPresenceVerifier,
                 CanPrompt = options.CredentialPrompts,
+                DeveloperInstance = options.CredentialsDeveloperInstance,
                 Logger = LogManager.IsInitialized ? LogManager.GetLogger("CodeAlta.Credentials") : null,
             });
             if (credentials.Settings.Load(out _).Count > 0)

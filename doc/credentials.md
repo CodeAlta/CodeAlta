@@ -59,8 +59,11 @@ flowchart LR
   began before it drops its result, and a provider the user locked is neither checked nor read until the user unlocks
   it, since the lock of some vaults (pass, a keychain) forgets nothing.
 - **Prompts**: only a host with a user (`CanPrompt`, the normal desktop instance) asks a vault to unlock, once at start
-  for the providers whose `unlock_at_start` is on and whose vault prompts by itself, then on a click. The developer
-  instance, `altacli` and `altanode` read only what a vault gives without a prompt.
+  for the providers whose `unlock_at_start` is on and whose vault prompts by itself, then on a click. `altacli` and
+  `altanode` read only what a vault gives without a prompt. So does the developer instance, unless the user lets it unlock
+  (`developer_instance = "unlock"` under `[secrets]`, read each time it is needed): then it asks on a click, never at
+  start, since agents start developer instances. A vault such as 1Password authorizes each process on its own, so values
+  never pass from one instance to the other.
 - **Changes**: `Changed` names the secrets that became readable or not. CodeAlta Desktop then registers the model
   providers that were left out for one of them (and only those, so that no runtime in use is replaced); an MCP server
   that did not start for a missing secret is not remembered as failed, and starts at its next use.

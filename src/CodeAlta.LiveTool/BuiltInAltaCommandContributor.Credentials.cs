@@ -197,7 +197,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             if (!TryGetBroker(context, out var broker)) return AltaExitCodes.ServiceUnavailable;
             if (string.IsNullOrWhiteSpace(id) || broker.GetProvider(id) is not { } view) return NotFound(context, "credential.notFound", $"No credential provider is named '{id}'.");
-            if (!broker.CanPrompt) return PermissionDenied(context, "credential.noPrompt", "This instance of CodeAlta never asks a vault to unlock: ask the user to unlock it in the normal instance of CodeAlta Desktop.");
+            if (!broker.CanPrompt) return PermissionDenied(context, "credential.noPrompt", "This instance of CodeAlta asks no vault to unlock: ask the user to unlock it in the normal instance of CodeAlta Desktop, or, in the developer instance, to turn on Let the developer instance unlock the vaults in Settings › Secrets.");
             if (view.UnlockAsksPassword) return PermissionDenied(context, "credential.password", $"{view.DisplayName} takes its master password: ask the user to unlock it in Settings > Secrets of CodeAlta Desktop.");
             if (!broker.TryBeginAgentUnlock(view.Id, AgentUnlockPause))
                 return PermissionDenied(context, "credential.unlockPaused", $"The user dismissed the unlock of {view.DisplayName} a moment ago: it is not asked again for a while. Ask the user instead.");
