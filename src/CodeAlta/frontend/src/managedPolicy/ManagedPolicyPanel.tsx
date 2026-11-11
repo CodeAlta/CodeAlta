@@ -10,7 +10,7 @@ import { downloadSize, managedPolicyLines, readingUnderWay, useManagedPolicy, ty
  * The policy of the organization on the page of a Copilot provider: what it enforces in every session, where its
  * reading stands (the download of the Copilot runtime the first time), and a way to read it again.
  */
-export function ManagedPolicyPanel({ epoch, api }: { epoch: string; api?: ManagedPolicyApi }) {
+export function ManagedPolicyPanel({ epoch, api }: { epoch: string; api: ManagedPolicyApi }) {
   const { t, locale } = useShellLanguage();
   const { policy, refreshing, refresh } = useManagedPolicy(epoch, api);
   if (policy && policy.status !== "ok") return null;

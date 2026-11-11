@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { managedPolicy, type ManagedPolicyReading, type ManagedPolicyResponse } from "#neoastra";
+// Types only: the pages that read the policy are mounted alone in tests, without the client of the host, and give the service.
+import type { managedPolicy, ManagedPolicyReading, ManagedPolicyResponse } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** The calls of the policy of the organization a component makes: given, so that tests mount it alone. */
@@ -92,12 +93,12 @@ export function createManagedPolicyPoller(epoch: string, api: ManagedPolicyApi, 
 }
 
 /** The policy of a host, read when the component shows, then every 15 seconds, every second and a half while its reading is under way. */
-export function useManagedPolicy(epoch: string | null, api: ManagedPolicyApi = managedPolicy) {
+export function useManagedPolicy(epoch: string | null, api: ManagedPolicyApi | null) {
   const [state, setState] = useState<Readonly<{ policy: ManagedPolicyResponse | null; refreshing: boolean }>>({ policy: null, refreshing: false });
   const poller = useRef<ReturnType<typeof createManagedPolicyPoller> | null>(null);
   useEffect(() => {
     setState({ policy: null, refreshing: false });
-    if (!epoch) return;
+    if (!epoch || !api) return;
     // One poller per host: the answers of the host of an earlier epoch are dropped with its poller.
     const current = createManagedPolicyPoller(epoch, api, (policy, refreshing) => setState({ policy, refreshing }));
     poller.current = current;

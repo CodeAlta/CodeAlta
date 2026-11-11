@@ -16,7 +16,7 @@ import { useManagedPolicy, type ManagedPolicyApi } from "./managedPolicy/managed
  */
 export function PermissionSettings({ permissions, confirms, tools = null, managed = null }: {
   /** The host whose policy of the organization can lock the modes; null where the window has none. */
-  managed?: Readonly<{ epoch: string; api?: ManagedPolicyApi }> | null;
+  managed?: Readonly<{ epoch: string; api: ManagedPolicyApi }> | null;
   /**
    * The host the tools every session does without are read from and written to; null where the window has none. The
    * page is given the service: it is mounted alone in tests, without the client of the host.
@@ -31,7 +31,7 @@ export function PermissionSettings({ permissions, confirms, tools = null, manage
   confirms: Readonly<Record<Confirmation, boolean>> & { set: (confirmation: Confirmation, ask: boolean) => void };
 }) {
   const { t } = useShellLanguage();
-  const { policy } = useManagedPolicy(managed?.epoch ?? null, managed?.api);
+  const { policy } = useManagedPolicy(managed?.epoch ?? null, managed?.api ?? null);
   // The policy of the organization turns the mode that asks nothing off: sessions ask first, whatever is chosen here.
   const locked = policy?.bypassPermissionsDisabled === true;
   const mode = permissions?.review || locked ? askPermissionMode : bypassPermissionMode;

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, TextArea, type Intent } from "@blueprintjs/core";
-import { globalConfig, modelCatalog, providerLogin, providerUsage, sandboxSettings, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+import { globalConfig, managedPolicy, modelCatalog, providerLogin, providerUsage, sandboxSettings, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogModel, type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
 import { ProviderKeySecret } from "./secrets/ProviderKeySecret";
@@ -84,7 +84,7 @@ function ProviderContextSize({ epoch, providerId, model, value, disabled, readMo
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null, secretKeys = globalConfig, policy }: {
+export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null, secretKeys = globalConfig, policy = managedPolicy }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
   /** Moves the key of a provider into a secret of this machine; the host by default. */
   secretKeys?: Pick<typeof globalConfig, "keepKeyAsSecret">;

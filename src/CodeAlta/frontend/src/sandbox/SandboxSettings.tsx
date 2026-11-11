@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, Card, HTMLSelect, InputGroup, Radio, RadioGroup, Tag, TagInput } from "@blueprintjs/core";
-import { sandboxSettings, type ManagedPolicyResponse, type SandboxCheckEvent, type SandboxProfileItem, type SandboxScopeItem, type SandboxSettingsResponse } from "#neoastra";
+import { managedPolicy, sandboxSettings, type ManagedPolicyResponse, type SandboxCheckEvent, type SandboxProfileItem, type SandboxScopeItem, type SandboxSettingsResponse } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
 import type { MessageKey } from "../localization";
@@ -62,7 +62,7 @@ export function SandboxSettings({ epoch, api = sandboxSettings, onOpenScope, pol
   onOpenScope?: (scope: SandboxScopeItem) => void;
 }) {
   const { t } = useShellLanguage();
-  const { policy } = useManagedPolicy(epoch, policyApi);
+  const { policy } = useManagedPolicy(epoch, policyApi ?? managedPolicy);
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor<SandboxSettingsResponse>(options => epoch
     ? api.read({ expectedEpoch: epoch }, options) : Promise.resolve({ status: "unavailable", availability: null, allSessions: null, profiles: [], scopes: [] }), epoch ?? "");
   const [selected, setSelected] = useState<string | null>(null);

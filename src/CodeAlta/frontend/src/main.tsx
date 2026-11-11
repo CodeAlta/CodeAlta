@@ -269,6 +269,7 @@ import { mcpApps as mcpAppsApi } from "#neoastra";
 import { createMcpAppsHost, McpAppsContext } from "./mcpApps/mcpAppHost";
 import type { SessionDisplayView, SessionOptionsChoice, SpaceSessionResourcesResponse } from "#neoastra";
 import { globalConfig } from "#neoastra";
+import { managedPolicy } from "#neoastra";
 import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsRequest } from "./windows/windowsHub";
 import { fileTabRef, readTransfer, sessionTabRef, spaceBound, transferOf } from "./windows/tabRefs";
@@ -6605,7 +6606,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         turnAlerts={owned && typeof shellPreferences?.turnAlerts === "string" ? { mode: turnAlertMode(shellPreferences.turnAlerts), platform: shellPreferences.platform, set: setTurnAlerts } : null}
         externalEditor={owned ? { api: externalEditorSettings, onChanged: externalOpener.accept } : null} />
       : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} tools={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: globalConfig } : null}
-        managed={owned && status?.hostEpoch ? { epoch: status.hostEpoch } : null}
+        managed={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: managedPolicy } : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "sandbox" ? <SandboxSettings epoch={owned ? status?.hostEpoch ?? null : null} onOpenScope={openSandboxScope} />
