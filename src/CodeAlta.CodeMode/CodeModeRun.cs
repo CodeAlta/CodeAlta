@@ -40,7 +40,7 @@ internal sealed partial class CodeModeRun
     private readonly CodeModeLimits _limits;
     private readonly ICodeModeRunObserver? _observer;
     private readonly Stopwatch _clock = new();
-    private readonly StepTracker _tracker = new();
+    private readonly StepTracker _tracker;
     private readonly SemaphoreSlim _slots;
     private readonly SemaphoreSlim _exclusive = new(1, 1);
     private readonly ConcurrentDictionary<int, PendingCall> _pending = new();
@@ -75,6 +75,9 @@ internal sealed partial class CodeModeRun
     // thread of a busy loop being preempted by a loaded machine (both leave a gap between two checks).
     private long _settledCalls;
     private long _settledAtCheck;
+    // The thread and the settled calls of the slice the constraints of the engine count (Resume).
+    private int _sliceThread;
+    private long _settledAtSlice;
     private volatile bool _ended;
     private Engine? _engine;
 
@@ -87,6 +90,7 @@ internal sealed partial class CodeModeRun
         _options = options;
         _limits = options.Limits;
         _observer = observer;
+        _tracker = new StepTracker(this);
         _slots = new SemaphoreSlim(Math.Max(1, _limits.MaxCallsInFlight));
         _timeout = new CancellationTokenSource(_limits.Timeout);
         // The run exec runs and the scripts its workflow() calls start share their steps, and their replay.
@@ -173,6 +177,7 @@ internal sealed partial class CodeModeRun
             options.DisableStringCompilation();
             // The CPU time of a slice is measured by the activity constraint (CheckActivity): Jint's own timer is not
             // reset when the script resumes after an await, so it would count awaited time.
+            // Jint counts both from its last reset; Resume resets them when the script resumes after an await.
             options.MaxStatements(_limits.MaxStatements);
             options.LimitMemory(_limits.MemoryBytes);
             options.LimitRecursion(_limits.MaxRecursionDepth);
@@ -1065,6 +1070,23 @@ internal sealed partial class CodeModeRun
         _options.ParentRun?.PauseLimit(waiting);
     }
 
+    // Called as a job starts, before its code runs. Jint resets its constraints only when the host enters the engine, and
+    // its memory limit counts what the thread allocated since: a thread of the pool the script resumes on ran other code
+    // meanwhile (the sessions it awaits), and a thread it did not start on is not checked at all. The script resumes from
+    // an await on another thread, or once a call settled: a new slice, whose memory and statements count from here. Jobs
+    // that follow on the same thread with no call settled are the same slice (a loop of awaits on resolved promises).
+    private void Resume(Engine engine)
+    {
+        var thread = Environment.CurrentManagedThreadId;
+        var settled = Interlocked.Read(ref _settledCalls);
+        if (thread != _sliceThread || settled != _settledAtSlice)
+        {
+            _sliceThread = thread;
+            _settledAtSlice = settled;
+            engine.Constraints.Reset();
+        }
+    }
+
     // Called on the engine's thread while JavaScript runs: the run is busy, and the time between two close checks
     // is the script's own time. A longer gap is time the script waited (an await): it starts a new slice, and a slice
     // longer than the limit is a busy loop.
@@ -1118,17 +1140,22 @@ internal sealed partial class CodeModeRun
     // The step that runs: its id, its key (lib#0/read#0 in a script workflow() started), its index and the index of its parent.
     internal sealed record ActiveStep(string Id, string Key, int Index, int? ParentIndex);
 
-    // One per run: the engine runs one job at a time, so a plain field carries the current step.
-    private sealed class StepTracker : JobCallbackHooks
+    // One per run: the engine runs one job at a time, so a plain field carries the current step. A job is also where the
+    // script resumes after an await, so it starts the slice the limits count (see Resume).
+    private sealed class StepTracker(CodeModeRun run) : JobCallbackHooks
     {
+        // Captured when no step runs: Jint enters only a job that captured something, and every job must be entered.
+        private static readonly object NoStep = new();
+
         public ActiveStep? Current { get; set; }
 
-        protected override object? Capture(Engine engine) => Current;
+        protected override object? Capture(Engine engine) => Current ?? NoStep;
 
         protected override object? Enter(Engine engine, object hostDefined)
         {
+            run.Resume(engine);
             var previous = Current;
-            Current = (ActiveStep)hostDefined;
+            Current = hostDefined as ActiveStep;
             return previous;
         }
 
