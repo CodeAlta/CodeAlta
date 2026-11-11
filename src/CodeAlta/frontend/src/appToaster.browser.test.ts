@@ -67,6 +67,8 @@ test("A toast is above a window of the app and can be clicked there, and goes ba
     assert.equal(await page.evaluate<number>("window.acted"), 1);
 
     await page.evaluate(`${f}.show({ message: "still here", timeout: 0 }, "kept")`);
+    // On screen before the window closes: the layer goes back to the page at once, and React renders a toast later.
+    await page.until(`${f}.messages().includes("still here")`, "the toast kept over the window");
     await page.evaluate(`document.getElementById("window").close()`);
     await page.until(`document.querySelector(".app-toaster-layer")?.parentElement === document.body && document.querySelector(".app-toaster-layer").matches(":popover-open")`,
       "the toasts to go back to the page with the window closed");
