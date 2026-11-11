@@ -129,6 +129,9 @@ public sealed class SubProjectCatalogTests
         Assert.AreEqual(1, projects.Count(project => project.Id == billing.Id));
         Assert.AreEqual(billing.ProjectPath, projects.Single(project => project.Id == billing.Id).ProjectPath, "The file keeps its folder.");
         Assert.AreEqual(projects.Count, projects.Select(static project => project.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.AreEqual(SubProjectShowStatus.Conflict, (await fixture.Projects.SetSubProjectShownAsync(repository.Id, "billing", shown: true)).Status,
+            "Showing it would write a second file of the same identity.");
+        Assert.AreEqual(1, Directory.GetFiles(fixture.Options.ProjectsRoot).Count(file => File.ReadAllText(file).Contains(billing.Id, StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]

@@ -29,6 +29,11 @@ public static class ProjectResourceRoots
     /// </summary>
     /// <param name="project">The project; null for none.</param>
     /// <returns>The folders; empty for a project that is no sub-project, or one that writes its own folder only.</returns>
+    /// <remarks>
+    /// The folder of the sub-project is looked at again here, as a session starts: what the catalog keeps of the folders
+    /// of a map could be older than a link put in place of one, which must not widen what the session writes.
+    /// </remarks>
     public static IReadOnlyList<string> WriteRoots(ProjectDescriptor? project)
-        => project is { IsSubProject: true, WriteScope: ProjectWriteScope.Repository, RepositoryPath: { } repository } ? [repository] : [];
+        => project is { IsSubProject: true, WriteScope: ProjectWriteScope.Repository, RepositoryPath: { } repository, SubPath: { } subPath }
+            && ProjectManifest.ResolveFolder(repository, subPath).State == ProjectManifestFolderState.Ok ? [repository] : [];
 }

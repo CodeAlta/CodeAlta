@@ -164,7 +164,7 @@ public sealed class ProjectManifestTests
         Assert.AreEqual("libs/core", ProjectManifest.NormalizePath("./libs/core/", out _));
         Assert.IsNull(ProjectManifest.NormalizePath("libs//core", out var problem));
         Assert.IsNotNull(problem);
-        foreach (var settings in new[] { ".alta", "tools/.alta/skills", "apps/.claude", ".GIT/x" })
+        foreach (var settings in new[] { ".alta", "tools/.alta/skills", "apps/.claude", ".GIT/x", ".codex", "a/.vscode" })
             Assert.IsNull(ProjectManifest.NormalizePath(settings, out _), $"{settings}: a folder of settings is no project.");
     }
 
@@ -195,6 +195,8 @@ public sealed class ProjectManifestTests
 
             Assert.AreEqual(ProjectManifestFolderState.Outside, ProjectManifest.ResolveFolder(root, "away").State);
             Assert.AreEqual(ProjectManifestFolderState.Ok, ProjectManifest.ResolveFolder(root, "near").State, "A link that stays inside is a folder like another.");
+            Directory.CreateSymbolicLink(Path.Combine(root, "alias"), Directory.CreateDirectory(Path.Combine(root, ".git", "modules")).FullName);
+            Assert.AreEqual(ProjectManifestFolderState.Outside, ProjectManifest.ResolveFolder(root, "alias").State, "A link into a folder of settings is no folder for a project.");
         }
         finally
         {

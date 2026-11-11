@@ -154,7 +154,7 @@ public sealed partial class ProjectCatalog
             if (state == ProjectManifestFolderState.Missing)
                 problems.Add(new(entry.Key, "folder.missing", $"The folder `{entry.Path}` of `{entry.Key}` is not there."));
             else if (state == ProjectManifestFolderState.Outside)
-                problems.Add(new(entry.Key, "folder.outside", $"The folder `{entry.Path}` of `{entry.Key}` is a link that leads out of the repository: it is left out."));
+                problems.Add(new(entry.Key, "folder.outside", $"The folder `{entry.Path}` of `{entry.Key}` is a link that leads out of the repository, or into a folder of settings: it is left out."));
             entries.Add(new(entry, full, state, project, claimedBy));
         }
 
@@ -182,7 +182,11 @@ public sealed partial class ProjectCatalog
         if (map is null || map.ClaimedBy is not null || map.Entries.FirstOrDefault(entry => entry.Entry.Key == key) is not { } status)
             return (SubProjectShowStatus.NotFound, null);
         if (status.Folder != ProjectManifestFolderState.Ok || status.ClaimedBy is not null) return (SubProjectShowStatus.FolderUnavailable, null);
-        var project = status.Project ?? DeclaredProject(map.Repository, status.Entry, NormalizePath(status.FullPath), await LoadAsync(cancellationToken).ConfigureAwait(false));
+        var projects = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        // A project file already holds the identity of this entry, in the folder it had before it moved: one identity, one file.
+        if (status.Project is null && projects.Any(other => string.Equals(other.Id, DeriveSubProjectId(map.Repository.Id, key), StringComparison.OrdinalIgnoreCase)))
+            return (SubProjectShowStatus.Conflict, null);
+        var project = status.Project ?? DeclaredProject(map.Repository, status.Entry, NormalizePath(status.FullPath), projects);
         if (project.SourcePath is null)
         {
             if (!shown && project.Archived) return (SubProjectShowStatus.Updated, project);

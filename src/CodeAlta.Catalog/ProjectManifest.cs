@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 using Tomlyn;
 using Tomlyn.Model;
@@ -85,6 +86,11 @@ public sealed class ProjectManifest
 
     /// <summary>The longest description of a sub-project or of a label.</summary>
     public const int MaximumDescriptionLength = 2000;
+
+    // The folders of settings and of agents that the sessions of a project never write (as AgentWriteGuard keeps them): a
+    // sub-project is never one of them, nor inside one, by its path or through a link.
+    private static readonly FrozenSet<string> SettingsFolderNames =
+        new[] { ".git", ".alta", ".claude", ".codex", ".copilot", ".gemini", ".vscode", ".cursor" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private ProjectManifest(IReadOnlyList<ProjectManifestEntry> projects, IReadOnlyList<ProjectManifestLabel> labels, IReadOnlyList<ProjectManifestProblem> problems)
         => (Projects, Labels, Problems) = (projects, labels, problems);
@@ -193,8 +199,7 @@ public sealed class ProjectManifest
             }
 
             // The folders of settings of a project are kept out of reach of its sessions: none is a project of its own.
-            if (segment.Equals(".git", StringComparison.OrdinalIgnoreCase) || segment.Equals(".alta", StringComparison.OrdinalIgnoreCase)
-                || segment.Equals(".claude", StringComparison.OrdinalIgnoreCase))
+            if (SettingsFolderNames.Contains(segment))
             {
                 problem = $"A sub-project cannot be a folder of settings or be inside one (`{segment}`).";
                 return null;
@@ -232,7 +237,11 @@ public sealed class ProjectManifest
                 if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) == 0) continue;
                 if (Directory.ResolveLinkTarget(current, returnFinalTarget: true) is not { } target) continue;
                 var resolved = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
-                if (!roots.Any(value => IsInside(resolved, value))) return (full, ProjectManifestFolderState.Outside);
+                var inside = roots.FirstOrDefault(value => IsInside(resolved, value));
+                if (inside is null) return (full, ProjectManifestFolderState.Outside);
+                // A link that stays inside but leads into a folder of settings is no folder for a project either.
+                if (Path.GetRelativePath(inside, resolved).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(SettingsFolderNames.Contains))
+                    return (full, ProjectManifestFolderState.Outside);
                 current = resolved;
             }
 

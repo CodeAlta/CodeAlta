@@ -306,7 +306,8 @@ public sealed partial class SessionRuntimeService
             var map = await _projectCatalog.ReadRepositoryMapAsync(repositoryId, cancellationToken).ConfigureAwait(false);
             var declared = projects.Where(candidate => string.Equals(candidate.ParentId, repositoryId, StringComparison.OrdinalIgnoreCase))
                 .Select(static candidate => candidate.ProjectPath)
-                .Concat(map?.Entries.Where(static entry => entry.Folder == ProjectManifestFolderState.Ok).Select(static entry => entry.FullPath) ?? [])
+                // A folder that is not there yet is kept too: what the session would make there is no setting of its own.
+                .Concat(map?.Entries.Where(static entry => entry.Folder != ProjectManifestFolderState.Outside).Select(static entry => entry.FullPath) ?? [])
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (declared.Count == 0) return ([], []);
             var worktree = _entries.TryGetValue(sessionId, out var entry) ? entry.WorktreeDirectory : null;
