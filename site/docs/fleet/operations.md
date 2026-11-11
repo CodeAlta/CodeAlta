@@ -81,7 +81,7 @@ Your nodes tell the server how they are: little disk space left, a provider whos
 
 ## Give secrets to your machines
 
-**Settings > Fleet > Secrets and environments** sets the secrets and variables of your machines from the computer that made the server: for all your work, a space, a project or an environment, for the machines you choose, rotated from there. Environments such as `production` run only on the machines they name and can wait for your approval before a run starts. See [Secrets of your machines with a server](../secrets/readme.md#secrets-of-your-machines-with-a-server).
+**Settings > Fleet > Secrets and environments** sets the secrets and variables of your machines from the computer that made the server: for all your work, a space, a project or an environment, for the machines you choose, rotated from there. Environments such as `production` run only on the machines they name and can wait for your approval before a run starts. See [Secrets of your machines with a server](../secrets/machines.md#secrets-of-your-machines-with-a-server).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-fleet-secrets.webp" alt="Settings > Fleet > Secrets and environments with a new secret GRAFANA_TOKEN being added for all my work on the machine Build box, and the environments with who approves them" loading="lazy">

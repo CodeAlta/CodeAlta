@@ -188,7 +188,7 @@ On the machine of the node:
 
 Tags such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Machine tags**: type one or more, separated by commas or spaces, and **Add**; the cross of a tag removes it. On the machine itself, `altanode tags` lists them, `altanode tags add gpu prod` and `altanode tags remove gpu` change them, and `altanode tags set` replaces them all.
 
-A machine linked to a CodeAlta Server publishes its tags there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --tag gpu`, and an [environment](../secrets/readme.md#environments) that names tags runs only on the machines with one of them. A tag is letters, digits, `-`, `_`, `.` and `:`.
+A machine linked to a CodeAlta Server publishes its tags there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --tag gpu`, and an [environment](../secrets/machines.md#environments) that names tags runs only on the machines with one of them. A tag is letters, digits, `-`, `_`, `.` and `:`.
 
 Tags were named labels before CodeAlta 4.2: `altanode labels` and `--label` still work.
 

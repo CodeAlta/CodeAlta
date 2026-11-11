@@ -41,7 +41,7 @@ export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
       <li className="credential-provider-row" data-provider="this-computer">
         <span className="credential-provider-icon"><AppIcon name="computer" size={18} /></span>
         <span className="credential-provider-name"><strong>{t("This computer")}</strong>
-          <span className="credential-provider-detail">{protectionName(listing.protection, t)}{" · "}{t("{count} secrets", { count: String(local) })}</span></span>
+          <span className="credential-provider-detail">{protectionName(listing.protection, t)}{" · "}{secretCount(local, t)}</span></span>
         <Tag minimal intent="success">{t("Ready")}</Tag>
         <span className="credential-provider-actions" />
       </li>
@@ -50,6 +50,11 @@ export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
     {listing.providers.length === 0 && <NonIdealState className="credential-providers-empty" icon={<AppIcon name="secret" size={24} />}
       description={t("Add 1Password, Bitwarden, KeePassXC or another vault to keep the values of your secrets there.")} />}
   </Card>;
+}
+
+/** A number of secrets, in the singular for one. */
+function secretCount(count: number, t: ReturnType<typeof useShellLanguage>["t"]): string {
+  return count === 1 ? t("1 secret") : t("{count} secrets", { count: String(count) });
 }
 
 function protectionName(protection: string | null, t: ReturnType<typeof useShellLanguage>["t"]): string {
@@ -75,7 +80,7 @@ function ProviderRow({ provider, busy, run, actions, canPrompt }: {
     <span className="credential-provider-name">
       <strong title={provider.id}>{provider.displayName}</strong>
       <span className="credential-provider-detail" title={provider.programPath ?? undefined}>{detail}
-        {provider.secrets > 0 && <>{" · "}{t("{count} secrets", { count: String(provider.secrets) })}</>}</span>
+        {provider.secrets > 0 && <>{" · "}{secretCount(provider.secrets, t)}</>}</span>
       {provider.message && provider.state !== "ready" && <span className="credential-provider-message">{provider.message}</span>}
       {provider.state === "not_installed" && <InstallHint provider={provider} runInTerminal={actions.runInTerminal} />}
     </span>
@@ -97,7 +102,8 @@ function ProviderRow({ provider, busy, run, actions, canPrompt }: {
         <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove {name}", { name: provider.displayName })}
           disabled={busy} onClick={() => setRemoving(true)} />
         {removing && <ConfirmPopover always intent="danger" busy={busy} placement="bottom-end" title={t("Remove this provider?")} subject={provider.displayName}
-          detail={provider.secrets > 0 ? t("Its {count} secrets are removed with it. Nothing changes in the vault.", { count: String(provider.secrets) }) : t("Nothing changes in the vault.")}
+          detail={provider.secrets > 1 ? t("Its {count} secrets are removed with it. Nothing changes in the vault.", { count: String(provider.secrets) })
+            : provider.secrets === 1 ? t("Its secret is removed with it. Nothing changes in the vault.") : t("Nothing changes in the vault.")}
           confirmLabel={t("Remove")} onConfirm={() => { setRemoving(false); void run(() => actions.remove(provider.id)); }} onCancel={() => setRemoving(false)} />}
       </span>
     </span>

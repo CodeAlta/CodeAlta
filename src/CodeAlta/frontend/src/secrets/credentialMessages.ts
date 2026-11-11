@@ -4,6 +4,13 @@ type Row = readonly [string, string, string, string, string];
 
 export const credentialMessages = {
   "(required)": ["(obligatorio)", "(obligatoire)", "(erforderlich)", "(必須)", "（必填）"],
+  "1 secret": ["1 secreto", "1 secret", "1 Geheimnis", "シークレット 1 件", "1 个机密"],
+  "Its secret is removed with it. Nothing changes in the vault.": [
+    "Su secreto se quita con él. Nada cambia en la bóveda.",
+    "Son secret est retiré avec lui. Rien ne change dans le coffre.",
+    "Sein Geheimnis wird mit ihm entfernt. Im Tresor ändert sich nichts.",
+    "そのシークレットも一緒に削除されます。保管庫には何も変更されません。",
+    "其机密会一并移除。保管库中不会有任何更改。"],
   "1 hour": ["1 hora", "1 heure", "1 Stunde", "1 時間", "1 小时"],
   "15 minutes": ["15 minutos", "15 minutes", "15 Minuten", "15 分", "15 分钟"],
   "8 hours": ["8 horas", "8 heures", "8 Stunden", "8 時間", "8 小时"],

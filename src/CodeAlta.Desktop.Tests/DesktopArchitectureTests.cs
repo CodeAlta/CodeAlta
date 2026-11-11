@@ -39,7 +39,9 @@ public sealed class DesktopArchitectureTests
                     // The model host of this computer: llama.cpp, its models and servers.
                     or "CodeAlta.ModelServers"
                     // The safe file operations every project shares.
-                    or "CodeAlta.Core", reference.Name);
+                    or "CodeAlta.Core"
+                    // The vaults of Settings > Secrets, the verification of the user and the sign-ins of websites.
+                    or "CodeAlta.Credentials", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }

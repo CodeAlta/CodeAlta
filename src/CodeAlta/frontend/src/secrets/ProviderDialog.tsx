@@ -81,7 +81,7 @@ function ProviderForm({ type, providers, editing, busy, onSave, onBack, onClose 
             ? <TextArea id={`credential-setting-${setting.key}`} fill rows={3} value={drafts[setting.key] as string} placeholder={setting.placeholder?.split(" ").join("\n") ?? undefined}
               disabled={busy} className="credential-setting-list" onChange={event => setDrafts({ ...drafts, [setting.key]: event.currentTarget.value })} />
             : <InputGroup id={`credential-setting-${setting.key}`} value={drafts[setting.key] as string} placeholder={setting.placeholder ?? undefined} disabled={busy}
-              leftElement={setting.kind === "secret" ? <AppIcon name="secret" size={14} className="credential-setting-icon" /> : undefined}
+              leftElement={setting.kind === "secret" ? <span className="credential-setting-icon"><AppIcon name="secret" size={14} /></span> : undefined}
               onChange={event => setDrafts({ ...drafts, [setting.key]: event.currentTarget.value })} />}
       </FormGroup>)}
       {type.settings.some(setting => setting.kind === "list") && <p className="credential-form-note">{t("One argument a line. The program is found on the PATH, and run without a shell.")}</p>}
