@@ -39,16 +39,14 @@ sequenceDiagram
     alt the CLI is signed in on the machine
         N-->>P: Ready
     else signed out
-        N-->>P: Not signed in - Sign in…
-        P->>N: Sign in…
-        N->>N: claude setup-token in a pseudo-terminal
-        N-->>P: page to open (opens in the browser) and the code box
-        P->>N: the code
+        N-->>P: Not signed in - How to sign in…
+        P->>N: altanode providers sign-in claude-code (in a terminal there, Anthropic's own claude auth login)
+        P->>N: Check again
         N-->>P: Ready
     end
 ```
 
-From the composer, **Run on: pc-ai** with no provider ready shows **Set up a provider on pc-ai…**, which opens that section of the page. Nothing in the flow needs SSH, a terminal on the machine, or `config.toml`.
+From the composer, **Run on: pc-ai** with no provider ready shows **Set up a provider on pc-ai…**, which opens that section of the page. Nothing in the flow needs `config.toml`. Claude Code is the exception for the terminal: it signs in on the machine itself (see "Claude Code signs in on the machine" below).
 
 ## Decisions
 
@@ -82,37 +80,40 @@ From the composer, **Run on: pc-ai** with no provider ready shows **Set up a pro
 - [x] 8. Pinned versions follow CodeAlta: after an update of the node, the pinned CLIs of its configured providers are downloaded before their next session (while it is idle), and the versions no longer pinned are removed once no session runs them. A registry agent compares its version with the registry's and offers **Update**.
    > **As built.** Only where a pinned version was installed before (`FollowPinnedVersionsAsync` at the start of the node), so that a first install stays the person's choice; the providers that run it start again once it is there. **Deviation:** older versions are not removed: the cache is shared with the other CodeAlta of the profile (the desktop on a workstation that is also a node), which may still run one (review).
 - [x] 9. The page shows the state of the program of each provider on its row: version, **Install**, **Update to {version}**, progress, and the reason when it cannot run there. The desktop's own Claude Code first-use download (`ClaudeCliFirstUse`, `ConfiguredClaudeCodeCli`) and the Codex CLI download use the same component, so that a computer and a machine look and behave the same.
-   > **As built.** On the machine page only. **Open:** the desktop's own Claude Code first-use download and Codex download still have their own components; moving them onto this one is left for a follow-up.
+   > **As built.** `ProgramProgress` draws the progress of the machine page with the painted bar and the style of the desktop's own Claude Code download (`provider-claude-cli-progress`), so a computer and a machine look the same. **Deviation:** the desktop's first-use downloads keep their own code paths (they run in the desktop, not through the node API); only the visual is shared.
 
 ### Phase 3 - Add any provider from the page
 
 - [x] 10. The node lists the provider types it can run: the built-in types (`OfferedTypes`, plus `claude-code`, `codex-cli`, `mistral-vibe`), the types of its plugins (`PluginModelProviderTypes`), and the agents of the ACP registry it can run, each with how it gets its credential and the state of its program (step 7). `FleetProviderType` gains these fields and an icon key; the list stays bounded.
    > **As built.** `FleetProviderOffer` (a new list, so that an older desktop keeps reading `Types`), with the program and an icon SVG the desktop sanitizes.
 - [x] 11. The type picker of **Add a provider…**: a dialog with a filter, groups, and one row per type with its icon, name and need, in place of the `HTMLSelect`; the ACP rows reuse the catalog of `ProviderCatalogDialog`. The same picker serves the desktop's Settings > Providers where it lists types, so that the two do not drift. Checked in both themes and at 900×650.
-   > **As built.** `ProviderPicker` on the machine page: groups, filter, icons (`ProviderIcon`, the registry's SVG), what each needs and installs, why one cannot run there. **Open:** Settings > Providers of the desktop does not use it yet.
+   > **As built.** `ProviderPicker` on the machine page: groups, filter, icons (`ProviderIcon`, the registry's SVG), what each needs and installs, why one cannot run there. Checked against pc-ai in the developer instance. **Deviation:** Settings > Providers of the desktop keeps its own menu, which already shows the icons of the built-in types and of the catalogs; the picker reads offers of a node, the menu the desktop's own catalog.
 - [x] 12. `control.providers.set` accepts those types: a built-in CLI type is written as a provider of `config.toml`, a plugin or ACP type as an external provider (`SaveGlobalExternalProvider`), its program installed first when missing (step 7), then applied and probed (`ApplyNow`, `PrepareAsync`).
    > **As built.** Through `control.providers.add`; `control.providers.set` also takes `claude-code`, `codex` and `mistral-vibe` now.
 - [x] 13. **Available** rows: the agents found on the machine and not configured, each with its icon and **Add** (one click: the default key, enabled). After the add, the row becomes the provider, and its state decides the next action inline: **Install**, **Sign in…**, or nothing when it is ready.
    > **As built.** The picker is where they are found: an agent installed on the machine says "Found on the machine"; no separate rows on the page. After the add, the row shows its program and the next action (**Install**, **Update to**, **Sign in…**).
-- [x] 14. The sign-in of a provider is on its provider row (Claude Code `setup-token`, Codex CLI device code, Mistral Vibe browser, an ACP agent's key or its declared method); Sign-ins keeps MCP servers and tools, and lists providers only as a summary.
-   > **As built.** A provider not ready with a sign-in of the machine gets **Sign in…** on its row, and adding one opens its sign-in at once. The Sign-ins section still lists the providers too (unchanged).
+- [x] 14. The sign-in of a provider is on its provider row (Claude Code: how to sign in on the machine, Codex CLI device code, Mistral Vibe browser, an ACP agent's key or its declared method); Sign-ins keeps MCP servers and tools, and lists providers only as a summary.
+   > **As built.** A provider not ready with a sign-in of the machine gets **Sign in…** on its row (Claude Code: **How to sign in…**), and adding one opens its sign-in at once. **Deviation:** the Sign-ins section still lists the providers: it carries **Sign out** and serves older nodes, whose offers the row cannot read.
 - [x] 15. Composer: when the machine chosen in **Run on** has no provider ready, the disabled **Start session** comes with **Set up a provider on {machine}…**, which opens the machine page at Providers. The provider picker of a machine shows each provider with its icon, and those not ready disabled with their reason.
-   > **As built.** The new-session page says the machine has no provider ready and links to its page. The model picker of the composer is unchanged.
+   > **As built.** The new-session page says the machine has no provider ready and links to it with **Set up a provider on {machine}…** (`offersProviderSetup`). **Deviation:** the model picker of the composer is unchanged: it already shows the icons of the providers, and lists only those a machine can run.
 
 ### Phase 4 - Reload, terminal, recover
 
 - [x] 16. The node watches `~/.alta/config.toml` and applies the providers whose definition changed (added, changed, removed), through the same path as the desktop's changes. A file that does not parse leaves the running providers as they are, and the page says the configuration has an error, with its line.
    > **As built.** Each `[providers.*]` section is compared with what was applied (`CodeAltaConfigStore.ReadProviderSections`); the node's own writes are remembered so they are not applied twice. The list says the error while the file does not read.
-- [x] 17. `altanode providers` for a person in a terminal on the machine: `list` (state, reason, program version), `add <type>` (installs its program), `update [<key>]`, `sign-in <key>` (Claude Code: runs `claude setup-token` in the terminal itself and keeps the token as the desktop flow does), `remove <key>`. It talks to the running node through its local control, so the change applies at once.
+- [x] 17. `altanode providers` for a person in a terminal on the machine: `list` (state, reason, program version), `add <type>` (installs its program), `update [<key>]`, `sign-in <key>` (Claude Code: runs its own `claude auth login` in the terminal, CodeAlta keeps nothing), `remove <key>`. It talks to the running node through its local control, so the change applies at once.
    > **As built.** `list`, `available`, `add <what>`, `update <key>`, `sign-in <key>` (device code, code to paste, or a key read from the terminal; a browser sign-in is left to the desktop). No `remove`, as the node API has none.
 - [x] 18. A node whose shared .NET runtime was replaced under it (a `FileNotFoundException`/`FileLoadException` for an assembly of the framework) logs it once and exits with the code its service restarts on, after its sessions are idle, rather than failing every connection until someone restarts it.
    > **As built.** Already on main before this work (`ccf090c21`, `UpdateRuntimeFiles`): nothing to add here.
 
 ### Phase 5 - Documentation and verification
 
-- [ ] 19. `site/docs/fleet/machines.md`: the Providers row of the machine page and a short "Use an agent on a machine" section (add, install and update, sign in, who may). `doc/fleet/node.md`, Credentials on a node: providers detected and offered, programs installed and updated by the node, the configuration watched. The desktop's provider pages say the same of the installer when it moves (step 9).
-- [ ] 20. Tests: the installer contract over fakes of the three installers (install, update after a pin change, removal of old versions, unsupported platform); node types and add for each kind (key, device code, Claude Code, Codex CLI, ACP binary and `npx`); the reload of a changed `config.toml`; the Claude Code sign-in with the fake CLI on the resolved path; browser tests of the type picker (icons, filter, groups), the Available row, inline **Install** and **Sign in…**, the read-only page of a computer without Manage, the page link, and the composer action.
+- [x] 19. `site/docs/fleet/machines.md`: the Providers row of the machine page and a short "Use an agent on a machine" section (add, install and update, sign in, who may). `doc/fleet/node.md`, Credentials on a node: providers detected and offered, programs installed and updated by the node, the configuration watched. The desktop's provider pages say the same of the installer when it moves (step 9).
+   > **As built.** `machines.md`: "Give it providers", the Providers row, Claude Code in the sign-in table, the paired-only rule. `doc/fleet/node.md`: "The providers of a node and what they run" and the Claude Code row of the credentials.
+- [x] 20. Tests: the installer contract over fakes of the three installers (install, update after a pin change, removal of old versions, unsupported platform); node types and add for each kind (key, device code, Claude Code, Codex CLI, ACP binary and `npx`); the reload of a changed `config.toml`; the Claude Code sign-in with the fake CLI on the resolved path; browser tests of the type picker (icons, filter, groups), the Available row, inline **Install** and **Sign in…**, the read-only page of a computer without Manage, the page link, and the composer action.
+   > **As built.** `NodeProviderProgramsTests`, `NodeProviderStatusTests`, `NodePluginSignInTests`, `NodeCliSignInTests`, `MachineSignInPageTests`, the Claude Code session and provider tests; browser tests of the picker, Claude Code's help, a relayed machine and an older node in `machinePage.browser.test.ts`; `providerOffers`, `machineManagement` and `runOn` unit tests. No test of the removal of old versions (not done, step 8).
 - [ ] 21. Live check on pc-ai (Linux, `systemd --user`), the Mac (LaunchDaemon, no keychain) and a Windows node: from a fresh profile with no `config.toml` and no agent installed, reach a ready Claude Code, Codex CLI and one ACP agent and run a session on each, without SSH; then update the node and see the pinned CLIs follow. Then the same machine reached only through the server: the page is read only and says how to manage it. Then an edit of `config.toml` by hand applies without a restart.
+   > **Done on pc-ai (branch node, 2026-11-11):** the node installed Claude Code 2.1.322 from the page; the owner signed it in with `altanode providers sign-in claude-code` over SSH; the provider became Ready with no token in CodeAlta's configuration or secrets; a hand edit of `config.toml` applied without a restart; the picker listed agents, subscriptions, keys and model servers with their icons. **Open:** a turn on pc-ai stops at the sandbox: `bwrap` has its AppArmor profile there, but the proxy of the `node` profile makes its namespaces with util-linux `unshare` (mxc's pre-flight `unshare --user --map-current-user --keep-caps --net`), which Ubuntu 24.04 refuses without a profile of its own; the owner sets it up with `sudo`. The node now detects it (`LinuxNetworkNamespaces`), the machine page and `altanode status` say the sandbox cannot run with the command to run, and the user guide has "Set up the sandbox on Linux". Then: Codex CLI and an ACP agent end to end; the Mac and a Windows node.
 
 ## Review (Codex GPT-6.1 Sol, max)
 
@@ -122,6 +123,6 @@ From the composer, **Run on: pc-ai** with no provider ready shows **Set up a pro
 
 Claude Code's terms (code.claude.com, Legal and compliance; Consumer Terms §2 and §3.7) forbid a third party to "collect, store, or intermediate Claude.ai credentials or session tokens", and allow a person to sign their own unmodified Claude Code in with their own subscription. The owner chose the safest reading: CodeAlta no longer runs `claude setup-token`, relays the code or keeps the token. The person signs Claude Code in on the machine with `altanode providers sign-in <key>`, which starts `claude auth login` of the Claude Code the node runs, in their own terminal; the page of the machine gives these steps, with the command to copy and **Check again**. A token an older version kept still works until its Sign out removes it. A subscription is never propagated beyond the person's own machines; machines run for others use API or gateway keys the server lends.
 
-## State left on pc-ai by the investigation
+## State left on pc-ai
 
-Claude Code 2.1.322 installed by its installer (`~/.local/bin/claude`), `~/.alta/config.toml` created with `[providers.claude-code] type = "claude-code"`, the node restarted (which also cleared the runtime error). Remove them before step 17 to start from a fresh machine.
+The branch node runs from `~/altanode-dev` (port 2585, started by hand, so not after a reboot); the `altanode` service of `systemd --user` is stopped. `~/.alta/config.toml` holds `[providers.claude-code]`, signed in with the owner's Claude account by Claude Code itself. Restore with `systemctl --user start altanode` once a release with this work is installed there.
