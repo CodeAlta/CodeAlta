@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace CodeAlta.Plugin.Mcp;
 
 // A file a discovery reads: one of CodeAlta (origin CodeAlta), which it writes, or one of another tool.
-internal readonly record struct McpConfigSourceFile(McpConfigScope Scope, McpConfigOrigin Origin, string Path);
+// One of a folder the project inherits its setup from (Inherited) is read after those of the project and never written.
+internal readonly record struct McpConfigSourceFile(McpConfigScope Scope, McpConfigOrigin Origin, string Path, bool Inherited = false);
 
 internal sealed class McpConfigDiscovery
 {
@@ -21,8 +22,24 @@ internal sealed class McpConfigDiscovery
         var context = new McpExternalContext(projectDirectory, home.OtherToolsHome ?? GetUserHome(null));
         var sources = new List<McpConfigSource>(2);
         var external = new List<McpConfigSource>(4);
-        foreach (var file in GetSourceFiles(projectDirectory, home))
+        IReadOnlyList<string> inherited = projectDirectory is null ? [] : InheritedFolders(options.InheritedProjectDirectories);
+        foreach (var file in GetSourceFiles(projectDirectory, inherited, home))
         {
+            // A file of a folder the project inherits from comes after those of the project, and is never written.
+            if (file.Inherited)
+            {
+                if (file.Origin == McpConfigOrigin.CodeAlta)
+                {
+                    if (File.Exists(file.Path)) external.Add(ReadSource(file.Scope, file.Path, probeWritability: false, boundedRead: true) with { IsWritable = false });
+                }
+                else
+                {
+                    AddExternalSource(external, file.Scope, file.Origin, file.Path, context with { ProjectDirectory = Path.GetDirectoryName(file.Path) });
+                }
+
+                continue;
+            }
+
             if (file.Origin == McpConfigOrigin.CodeAlta)
             {
                 sources.Add(ReadSource(file.Scope, file.Path, options.ProbeWritability, boundedRead));
@@ -73,6 +90,28 @@ internal sealed class McpConfigDiscovery
     // Every file a discovery reads, in the order it reads them: the two files of CodeAlta (global, then the project's), then
     // those of other tools, the global ones only from a home of other tools. A cache of discoveries watches the same files.
     internal static IReadOnlyList<McpConfigSourceFile> GetSourceFiles(string? projectDirectory, McpHome home)
+        => GetSourceFiles(projectDirectory, [], home);
+
+    // The files of a project and, after those of other tools, those of the folders it inherits from (the nearest first):
+    // their file of CodeAlta and their `.mcp.json`.
+    internal static IReadOnlyList<McpConfigSourceFile> GetSourceFiles(string? projectDirectory, IReadOnlyList<string> inheritedDirectories, McpHome home)
+    {
+        var files = new List<McpConfigSourceFile>(GetOwnSourceFiles(projectDirectory, home));
+        if (projectDirectory is null) return files;
+        foreach (var folder in inheritedDirectories)
+        {
+            files.Add(new(McpConfigScope.Project, McpConfigOrigin.CodeAlta, Path.Combine(folder, ".alta", "mcp.json"), Inherited: true));
+            files.Add(new(McpConfigScope.Project, McpConfigOrigin.Common, Path.Combine(folder, ".mcp.json"), Inherited: true));
+        }
+
+        return files;
+    }
+
+    // The folders a project inherits from, as full paths, each once.
+    internal static IReadOnlyList<string> InheritedFolders(IReadOnlyList<string> folders)
+        => [.. folders.Where(static folder => !string.IsNullOrWhiteSpace(folder)).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    private static IReadOnlyList<McpConfigSourceFile> GetOwnSourceFiles(string? projectDirectory, McpHome home)
     {
         var files = new List<McpConfigSourceFile>(6)
         {

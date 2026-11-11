@@ -356,6 +356,15 @@ public interface IPluginWorkspaceService
     /// <param name="path">The path to inspect.</param>
     /// <returns><see langword="true"/> when the path is inside the selected project.</returns>
     bool IsInsideSelectedProject(string path);
+
+    /// <summary>
+    /// Gets the folders a project inherits its setup from, the nearest first: for a sub-project of a monorepo, the
+    /// declared sub-projects whose folder holds its own, then the folder of its repository. A plugin that reads a setting
+    /// of the folder of a project reads those folders after it, the project winning.
+    /// </summary>
+    /// <param name="projectPath">The folder of the project.</param>
+    /// <returns>The folders; empty for a project that is no sub-project, or a host that does not tell.</returns>
+    IReadOnlyList<string> GetInheritedProjectRoots(string projectPath) => [];
 }
 
 /// <summary>

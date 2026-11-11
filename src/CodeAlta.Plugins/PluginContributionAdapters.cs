@@ -214,6 +214,12 @@ public sealed partial class PluginContributionAdapterService
     /// </summary>
     public Func<string, IReadOnlyList<string>>? InheritedProjectRoots { get; set; }
 
+    /// <summary>
+    /// Gets or sets what gives the folders a project inherits its setup from, by the folder of the project, which the
+    /// plugins read through <see cref="IPluginWorkspaceService.GetInheritedProjectRoots"/>; null when the host gives none.
+    /// </summary>
+    public Func<string, IReadOnlyList<string>>? InheritedProjectRootsOfFolder { get; set; }
+
     // The folders the project of an operation inherits from; empty for none.
     private IReadOnlyList<string> InheritedRootsOf(PluginAdapterOperationOptions? options)
         => options?.ProjectId is { Length: > 0 } projectId && InheritedProjectRoots is { } inherited ? inherited(projectId) : [];

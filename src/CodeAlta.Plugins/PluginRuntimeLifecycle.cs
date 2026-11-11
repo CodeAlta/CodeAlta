@@ -218,6 +218,12 @@ public sealed record PluginActivationOptions
     /// every space, as the host services say it.
     /// </summary>
     public Func<SpaceAssignments>? SpaceAssignments { get; init; }
+
+    /// <summary>
+    /// Gets what gives the folders a project inherits its setup from, by the folder of the project
+    /// (<see cref="IPluginWorkspaceService.GetInheritedProjectRoots"/>); null when the host gives none.
+    /// </summary>
+    public Func<string, IReadOnlyList<string>>? InheritedProjectRoots { get; init; }
 }
 
 /// <summary>
@@ -328,6 +334,7 @@ public sealed class PluginRuntimeActivator
                 builtIn: sourcePackage is null)
             {
                 SecretsOverride = options.Secrets,
+                InheritedProjectRoots = options.InheritedProjectRoots,
             };
             dependencies.Add(services);
             var context = new PluginRuntimeContext

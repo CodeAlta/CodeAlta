@@ -309,7 +309,12 @@ internal sealed class PluginRuntimeServices : IPluginServices
     // The tables of this plugin when the host has a database; else what the host gave, which has none.
     public IPluginDatabase Database => _database ?? _inner.Database;
 
-    public IPluginWorkspaceService Workspace => _inner.Workspace;
+    // The workspace of the host, which tells the folders a sub-project inherits from when the runtime knows them.
+    public IPluginWorkspaceService Workspace => _workspace ??= InheritedProjectRoots is { } inherited ? new InheritingWorkspace(_inner.Workspace, inherited) : _inner.Workspace;
+
+    private IPluginWorkspaceService? _workspace;
+
+    internal Func<string, IReadOnlyList<string>>? InheritedProjectRoots { get; init; }
 
     public IPluginSessionService Sessions => _inner.Sessions;
 
@@ -373,5 +378,27 @@ internal sealed class PluginRuntimeServices : IPluginServices
                 ? runtime.InvokeAsync(pluginRuntimeKey, args, stdin, effectiveOptions, cancellationToken)
                 : inner.InvokeAsync(args, stdin, effectiveOptions, cancellationToken);
         }
+    }
+}
+
+// The workspace of the host, with the folders a sub-project inherits its setup from as the runtime knows them.
+internal sealed class InheritingWorkspace(IPluginWorkspaceService inner, Func<string, IReadOnlyList<string>> inheritedProjectRoots) : IPluginWorkspaceService
+{
+    public string? SelectedProjectId => inner.SelectedProjectId;
+
+    public string? SelectedProjectPath => inner.SelectedProjectPath;
+
+    public string? SelectedSpaceId => inner.SelectedSpaceId;
+
+    public IReadOnlyList<string> ProjectPaths => inner.ProjectPaths;
+
+    public string? GetSelectedProjectPath(string relativePath) => inner.GetSelectedProjectPath(relativePath);
+
+    public bool IsInsideSelectedProject(string path) => inner.IsInsideSelectedProject(path);
+
+    public IReadOnlyList<string> GetInheritedProjectRoots(string projectPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        return inheritedProjectRoots(projectPath) is { Count: > 0 } roots ? roots : inner.GetInheritedProjectRoots(projectPath);
     }
 }

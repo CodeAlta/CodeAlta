@@ -48,6 +48,19 @@ public sealed class PluginContributionRegistryTests
     }
 
     [TestMethod]
+    public void TheWorkspaceOfAPlugin_TellsTheFoldersASubProjectInheritsFrom_AsTheRuntimeKnowsThem()
+    {
+        var repository = Path.Combine(Path.GetTempPath(), "contoso");
+        var billing = Path.Combine(repository, "services", "billing");
+        IPluginWorkspaceService host = new NoopPluginWorkspaceService();
+        var workspace = new InheritingWorkspace(host, folder => folder == billing ? [repository] : []);
+
+        CollectionAssert.AreEqual(new[] { repository }, workspace.GetInheritedProjectRoots(billing).ToArray());
+        Assert.AreEqual(0, workspace.GetInheritedProjectRoots(repository).Count);
+        Assert.AreEqual(0, host.GetInheritedProjectRoots(billing).Count, "a host that does not tell");
+    }
+
+    [TestMethod]
     public void AContributionOfARepository_AppliesToTheSubProjectsThatInheritFromIt()
     {
         var repository = Path.Combine(Path.GetTempPath(), "contoso");

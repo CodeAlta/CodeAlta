@@ -51,6 +51,12 @@ internal sealed class McpConfigCache
         _policyLoader = new McpPolicyLoader(globalConfigContent);
     }
 
+    /// <summary>
+    /// Gets or sets what gives the folders a project inherits its setup from, by the folder of the project (the host's
+    /// catalog: for a sub-project of a monorepo, its repository); null for none.
+    /// </summary>
+    public Func<string, IReadOnlyList<string>>? InheritedProjectDirectories { get; set; }
+
     /// <summary>Gets the loader of the policy, which reads the user's configuration as the host does: what reads the policy without the cache uses it too.</summary>
     internal McpPolicyLoader PolicyLoader => _policyLoader;
 
@@ -67,7 +73,9 @@ internal sealed class McpConfigCache
     public McpConfigSnapshot Discover(string? projectDirectory, McpHome home)
     {
         var project = string.IsNullOrWhiteSpace(projectDirectory) ? null : Path.GetFullPath(projectDirectory);
-        var files = McpConfigDiscovery.GetSourceFiles(project, home);
+        // The folders a sub-project inherits from, as the host knows them: their servers come after its own.
+        IReadOnlyList<string> inherited = project is not null && InheritedProjectDirectories is { } inheritedOf ? McpConfigDiscovery.InheritedFolders(inheritedOf(project)) : [];
+        var files = McpConfigDiscovery.GetSourceFiles(project, inherited, home);
         var stamps = new FileStamp[files.Count];
         var now = _time.GetUtcNow().UtcDateTime;
         var settled = true;
@@ -76,12 +84,13 @@ internal sealed class McpConfigCache
             stamps[index] = StampOf(files[index].Path, files[index].Origin == McpConfigOrigin.CodeAlta, now, ref settled);
         }
 
-        return Get(_configs, string.Concat(project, "\n", home.Key), stamps, settled, () =>
+        return Get(_configs, string.Join('\n', [project, home.Key, .. inherited]), stamps, settled, () =>
         {
             Interlocked.Increment(ref _configReads);
             return _discovery.Discover(new McpConfigPathOptions
             {
                 ProjectDirectory = project,
+                InheritedProjectDirectories = inherited,
                 Home = home,
                 ProbeWritability = false,
                 BoundedRead = false,
