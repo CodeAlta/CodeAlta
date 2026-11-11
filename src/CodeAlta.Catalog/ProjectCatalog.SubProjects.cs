@@ -46,6 +46,20 @@ public sealed partial class ProjectCatalog
     private readonly Dictionary<string, (ProjectManifest Map, Dictionary<string, (string FullPath, ProjectManifestFolderState State)> Folders)> _folders
         = new(StringComparer.Ordinal);
 
+    // The folders each sub-project inherits from, as the last load found them, replaced whole by each load: for the readers
+    // that hold an identifier of a project and no descriptor.
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> _inheritedRoots = new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>
+    /// Gets the folders a project inherits its setup from, the nearest first (<see cref="ProjectResourceRoots.Inherited"/>),
+    /// as the last load of this catalog found them, without reading anything: for a reader that holds the identifier of a
+    /// project and no descriptor. A reader that has the descriptor takes them from it.
+    /// </summary>
+    /// <param name="projectId">The identifier of the project; null for none.</param>
+    /// <returns>The folders; empty for a project that is no sub-project, or before the first load.</returns>
+    public IReadOnlyList<string> GetInheritedRoots(string? projectId)
+        => projectId is not null && Volatile.Read(ref _inheritedRoots).TryGetValue(projectId, out var roots) ? roots : [];
+
     /// <summary>Works out the identifier of a sub-project from its repository project and its key in the map.</summary>
     /// <param name="repositoryId">The identifier of the repository project.</param>
     /// <param name="key">The key of the sub-project in the map.</param>
@@ -223,6 +237,19 @@ public sealed partial class ProjectCatalog
     // The projects of a load with the sub-projects the maps of the others declare. A map is read for a project that no
     // other map declares; the folder of a project that two maps declare belongs to the nearer repository.
     private async Task<List<ProjectDescriptor>> WithSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
+    {
+        var result = await WithDeclaredSubProjectsAsync(projects, cancellationToken).ConfigureAwait(false);
+        var inherited = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in result)
+        {
+            if (project.IsSubProject) inherited[project.Id] = [.. project.InheritedRoots];
+        }
+
+        Volatile.Write(ref _inheritedRoots, inherited);
+        return result;
+    }
+
+    private async Task<List<ProjectDescriptor>> WithDeclaredSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
     {
         if (projects.Count == 0) return projects;
         var claims = new Dictionary<string, (ProjectDescriptor Repository, ProjectManifestEntry Entry)>(StringComparer.OrdinalIgnoreCase);

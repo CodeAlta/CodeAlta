@@ -351,6 +351,7 @@ public sealed class AgentInstructionTemplateProvider
         var prompt = new AgentPromptCatalog().ResolvePrompt(new AgentPromptCatalogQuery
         {
             ProjectRoot = project?.ProjectPath,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(project),
             ProjectPromptResourcesTrusted = project is not null,
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
             UserProfileRoot = UserHomeRoot,

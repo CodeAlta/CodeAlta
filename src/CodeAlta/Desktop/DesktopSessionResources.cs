@@ -62,6 +62,7 @@ internal sealed class DesktopSessionResources
         var prompts = AgentPromptCatalog.InSpace(new AgentPromptCatalog().ListEffectivePrompts(new AgentPromptCatalogQuery
         {
             ProjectRoot = project?.ProjectPath,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(project),
             ProjectPromptResourcesTrusted = project is not null,
             UserCodeAltaRoot = _host.CatalogOptions.GlobalRoot,
             UserProfileRoot = profile,

@@ -56,6 +56,13 @@ public sealed class SystemPromptDiscoveryContext
     public string? ProjectRoot { get; init; }
 
     /// <summary>
+    /// Gets or sets the folders the project inherits its prompts from, the nearest first: for a sub-project, the declared
+    /// folders above it, then its repository (<see cref="Catalog.ProjectResourceRoots.Inherited"/>). Their prompts come
+    /// before those of the project, which replace or add to them as a project prompt does to a global one.
+    /// </summary>
+    public IReadOnlyList<string> InheritedProjectRoots { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets a value indicating whether project-local prompt resources are trusted.
     /// </summary>
     public bool ProjectPromptResourcesTrusted { get; init; }
@@ -82,6 +89,22 @@ public sealed record SystemPromptContentRoots(
     /// An application that ships none does not have the folder.
     /// </summary>
     public string ShippedUserGuideRoot => Path.Combine(Path.GetDirectoryName(ShippedDocsRoot) ?? ShippedDocsRoot, "user-guide");
+
+    /// <summary>
+    /// Gets the prompt resource roots (<c>.alta/prompts</c>) of the folders the project inherits from, the nearest first;
+    /// trusted as <see cref="ProjectPromptRoot"/> is.
+    /// </summary>
+    public IReadOnlyList<string> InheritedProjectPromptRoots { get; init; } = [];
+
+    // The trusted prompt roots of the project, the farthest first and its own last, with their precedence from
+    // `basePrecedence` up: a nearer root replaces or adds to a farther one.
+    internal IEnumerable<(int Precedence, string Root)> ProjectPromptRoots(int basePrecedence)
+    {
+        if (!ProjectPromptResourcesTrusted || ProjectPromptRoot is null) yield break;
+        var inherited = InheritedProjectPromptRoots;
+        for (var index = inherited.Count - 1; index >= 0; index--) yield return (basePrecedence + inherited.Count - 1 - index, inherited[index]);
+        yield return (basePrecedence + inherited.Count, ProjectPromptRoot);
+    }
 
     /// <summary>
     /// Gets the folder of the custom agents GitHub Copilot keeps in the project (<c>.github/agents</c>), when a
@@ -140,6 +163,8 @@ public sealed class FileSystemPromptContentLocator : ISystemPromptContentLocator
             ProjectPromptRoot: projectRoot is null ? null : Path.Combine(projectRoot, ".alta", "prompts"),
             ProjectPromptResourcesTrusted: context.ProjectPromptResourcesTrusted)
         {
+            InheritedProjectPromptRoots = projectRoot is null ? []
+                : [.. context.InheritedProjectRoots.Select(NormalizeOptionalRoot).OfType<string>().Select(static root => Path.Combine(root, ".alta", "prompts"))],
             CopilotProjectAgentsRoot = projectRoot is null ? null : Path.Combine(projectRoot, ".github", "agents"),
             ClaudeProjectAgentsRoot = projectRoot is null ? null : Path.Combine(projectRoot, ".claude", "agents"),
             // The profile the caller names: a caller that names none is given no file of the real one.

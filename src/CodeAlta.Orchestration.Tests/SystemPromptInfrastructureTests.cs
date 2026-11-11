@@ -54,6 +54,47 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void ASubProject_TakesThePromptsOfTheFoldersItInheritsFrom_ItsOwnReplacingOrAddingToThem()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        // The helpers write the prompts of a folder whose name ends with "project" in its `.alta/prompts`.
+        var repository = Path.Combine(temp.Path, "contoso-project");
+        var billing = Path.Combine(repository, "services", "billing-project");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        WritePrompt(repository, "release", "Release", "default", "Release from the repository.");
+        WritePrompt(repository, "review", "Review", "default", "Review from the repository.");
+        WritePrompt(billing, "review", name: null, "default", "And the invoices of billing.", frontmatterLines: ["mode: append"]);
+        var catalog = new AgentPromptCatalog(new FileSystemPromptContentLocator(appBase));
+        var query = new AgentPromptCatalogQuery { ProjectRoot = billing, InheritedProjectRoots = [repository], ProjectPromptResourcesTrusted = true };
+
+        var release = catalog.ResolvePrompt(query, "release");
+        Assert.AreEqual(("Release", AgentPromptSourceKind.Project), (release?.DisplayName, release?.SourceKind), "a prompt of the repository");
+        Assert.AreEqual($"Review from the repository.{Environment.NewLine}{Environment.NewLine}And the invoices of billing.", catalog.ResolvePrompt(query, "review")?.Body,
+            "the prompt of the sub-project adds to the one of its repository");
+        Assert.AreEqual("default", catalog.ResolvePrompt(new AgentPromptCatalogQuery { ProjectRoot = billing, ProjectPromptResourcesTrusted = true }, "release")?.PromptName,
+            "a project that is no sub-project reads its own folder only");
+
+        var bundle = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase)).Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            ProviderType = "codex",
+            ProtocolFamily = "codex",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = billing, Kind = SessionViewKind.ProjectSession },
+            Project = new ProjectDescriptor
+            {
+                Id = "0b6f6d6e-0000-8000-8000-000000000001", Slug = "contoso-billing", ProjectPath = billing, ParentId = "0b6f6d6e-0000-8000-8000-000000000000",
+                SubPath = "services/billing-project", InheritedRoots = [repository],
+            },
+            SelectedPromptName = "release",
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: false, ToolGuidance: false),
+        });
+        Assert.AreEqual("release", bundle.Manifest.Composition.AgentPromptName, "a session of the sub-project runs with a prompt of its repository");
+        StringAssert.Contains(bundle.DeveloperInstructions!, "Release from the repository.");
+    }
+
+    [TestMethod]
     public void AgentPromptCatalog_AppendsEffectiveAgentPromptBodyAndMetadata()
     {
         using var temp = TempDirectory.Create();

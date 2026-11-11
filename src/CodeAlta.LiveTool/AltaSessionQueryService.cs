@@ -354,7 +354,7 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
     // each session that works there.
     private sealed class KnownPrompts(AltaCommandContext context, Func<AgentPromptCatalogQuery, IReadOnlyList<AgentPromptDescriptor>> listPrompts)
     {
-        private readonly Dictionary<(string? ProjectRoot, bool Trusted), HashSet<string>> _names = [];
+        private readonly Dictionary<(string? ProjectRoot, bool Trusted, string Inherited), HashSet<string>> _names = [];
         private string? _userCodeAltaRoot;
         private string? _userProfileRoot;
 
@@ -366,7 +366,9 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
                 return AgentPromptCatalog.DefaultPromptName;
             }
 
-            (string? ProjectRoot, bool Trusted) key = (session.WorkingDirectory, !string.IsNullOrWhiteSpace(session.ProjectRef));
+            // A sub-project also knows the prompts of the folders it inherits from, as the catalog last found them.
+            IReadOnlyList<string> inherited = string.IsNullOrWhiteSpace(session.ProjectRef) ? [] : context.Services.Get<ProjectCatalog>()?.GetInheritedRoots(session.ProjectRef) ?? [];
+            (string? ProjectRoot, bool Trusted, string Inherited) key = (session.WorkingDirectory, !string.IsNullOrWhiteSpace(session.ProjectRef), string.Join('\n', inherited));
             if (!_names.TryGetValue(key, out var names))
             {
                 _userProfileRoot ??= BuiltInAltaCommandContributor.UserHomeOf(context);
@@ -375,6 +377,7 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
                 var query = new AgentPromptCatalogQuery
                 {
                     ProjectRoot = key.ProjectRoot,
+                    InheritedProjectRoots = inherited,
                     ProjectPromptResourcesTrusted = key.Trusted,
                     UserCodeAltaRoot = _userCodeAltaRoot,
                     UserProfileRoot = _userProfileRoot,

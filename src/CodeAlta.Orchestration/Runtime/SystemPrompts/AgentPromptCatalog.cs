@@ -262,6 +262,7 @@ public sealed class AgentPromptCatalog
             UserProfileRoot = query.UserProfileRoot,
             UserCodeAltaRoot = query.UserCodeAltaRoot,
             ProjectRoot = query.ProjectRoot,
+            InheritedProjectRoots = query.InheritedProjectRoots,
             ProjectPromptResourcesTrusted = query.ProjectPromptResourcesTrusted || !string.IsNullOrWhiteSpace(query.ProjectRoot),
         });
     }
@@ -284,9 +285,9 @@ public sealed class AgentPromptCatalog
             yield return new GlobalPromptRoot(AgentPromptSourceKind.UserGlobal, 1, Path.Combine(roots.GlobalPromptRoot, "agents"));
         }
 
-        if (roots.ProjectPromptResourcesTrusted && roots.ProjectPromptRoot is not null && Directory.Exists(Path.Combine(roots.ProjectPromptRoot, "agents")))
+        foreach (var (precedence, root) in roots.ProjectPromptRoots(2))
         {
-            yield return new GlobalPromptRoot(AgentPromptSourceKind.Project, 2, Path.Combine(roots.ProjectPromptRoot, "agents"));
+            if (Directory.Exists(Path.Combine(root, "agents"))) yield return new GlobalPromptRoot(AgentPromptSourceKind.Project, precedence, Path.Combine(root, "agents"));
         }
     }
 
@@ -302,9 +303,9 @@ public sealed class AgentPromptCatalog
             yield return new GlobalPromptRoot(AgentPromptSourceKind.UserGlobal, 1, Path.Combine(roots.GlobalPromptRoot, "system"));
         }
 
-        if (roots.ProjectPromptResourcesTrusted && roots.ProjectPromptRoot is not null && Directory.Exists(Path.Combine(roots.ProjectPromptRoot, "system")))
+        foreach (var (precedence, root) in roots.ProjectPromptRoots(2))
         {
-            yield return new GlobalPromptRoot(AgentPromptSourceKind.Project, 2, Path.Combine(roots.ProjectPromptRoot, "system"));
+            if (Directory.Exists(Path.Combine(root, "system"))) yield return new GlobalPromptRoot(AgentPromptSourceKind.Project, precedence, Path.Combine(root, "system"));
         }
     }
 
@@ -712,6 +713,12 @@ public sealed class AgentPromptCatalogQuery
 
     /// <summary>Gets or initializes the project root for project-local prompt overrides.</summary>
     public string? ProjectRoot { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the folders the project inherits its prompts from, the nearest first
+    /// (<see cref="Catalog.ProjectResourceRoots.Inherited"/>); empty for a project that is no sub-project.
+    /// </summary>
+    public IReadOnlyList<string> InheritedProjectRoots { get; init; } = [];
 
     /// <summary>Gets or initializes a value indicating whether project-local prompt resources are trusted.</summary>
     public bool ProjectPromptResourcesTrusted { get; init; }

@@ -61,6 +61,7 @@ public sealed class SystemPromptBuilder
             UserProfileRoot = UserHomeOf(request),
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(request.Project),
             ProjectPromptResourcesTrusted = projectRoot is not null,
         });
 
@@ -976,6 +977,7 @@ public sealed class SystemPromptBuilder
             UserProfileRoot = UserHomeOf(request),
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
+            InheritedProjectRoots = ProjectResourceRoots.Inherited(request.Project),
             ProjectPromptResourcesTrusted = projectRoot is not null,
         });
         // The prompts of the session's space, and the one it runs with, which it keeps.
@@ -1300,9 +1302,9 @@ public sealed class SystemPromptBuilder
             yield return new PromptRoot("user-global", 1, roots.GlobalPromptRoot);
         }
 
-        if (roots.ProjectPromptResourcesTrusted && roots.ProjectPromptRoot is not null && Directory.Exists(roots.ProjectPromptRoot))
+        foreach (var (precedence, root) in roots.ProjectPromptRoots(2))
         {
-            yield return new PromptRoot("project", 2, roots.ProjectPromptRoot);
+            if (Directory.Exists(root)) yield return new PromptRoot("project", precedence, root);
         }
     }
 
