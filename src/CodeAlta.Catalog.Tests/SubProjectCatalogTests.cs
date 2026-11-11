@@ -238,6 +238,41 @@ public sealed class SubProjectCatalogTests
     }
 
     [TestMethod]
+    public void LongSlugsAndKeys_StayValid_AndTellRepositoriesApart()
+    {
+        var slug = new string('a', 64);
+        var key = new string('k', 48);
+        var first = ProjectCatalog.DeclaredLabelId(slug, key);
+        var second = ProjectCatalog.DeclaredLabelId(slug[..60] + "bbbb", key);
+        Assert.IsTrue(CatalogSlugValidator.IsValid(first), first);
+        Assert.AreNotEqual(first, second, "Two repositories that start alike keep labels of their own.");
+        Assert.AreEqual("contoso.backend", ProjectCatalog.DeclaredLabelId("contoso", "backend"));
+    }
+
+    [TestMethod]
+    public async Task ARepositoryOfALongSlug_GivesItsSubProjectsSlugsThatCanBeWritten()
+    {
+        using var fixture = new Fixture();
+        var root = Directory.CreateDirectory(Path.Combine(fixture.Root, "code", new string('r', 70))).FullName;
+        Directory.CreateDirectory(Path.Combine(root, "apps", "web"));
+        var repository = await fixture.Projects.UpsertFromPathAsync(root);
+        Assert.AreEqual(64, repository.Slug.Length);
+        await fixture.WriteMapAsync(root, "[projects.web]\npath = \"apps/web\"\n");
+        var web = (await fixture.Projects.LoadAsync()).Single(static project => project.DeclaredKey == "web");
+        StringAssert.EndsWith(web.Slug, "-web");
+        Assert.AreEqual(web.Id, (await fixture.Projects.EnsurePersistedAsync(web)).Id, "Its file can be written.");
+    }
+
+    [TestMethod]
+    public async Task AMapLargerThanAMapCanBe_IsNotRead()
+    {
+        using var fixture = new Fixture();
+        var repository = await fixture.RepositoryAsync("# " + new string('x', ProjectManifest.MaximumBytes + 100) + "\n[projects.web]\npath = \"apps/web\"\n");
+        Assert.AreEqual("file.tooLarge", (await fixture.Projects.ReadManifestAsync(repository.ProjectPath)).Problems.Single().Code);
+        Assert.IsFalse((await fixture.Projects.LoadAsync()).Any(static project => project.IsSubProject));
+    }
+
+    [TestMethod]
     public async Task AMapThatCannotBeRead_ListsNoSubProject_AndTheOthersStay()
     {
         using var fixture = new Fixture();

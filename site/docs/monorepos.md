@@ -41,7 +41,7 @@ Open it with **Sub-projects…** in the **⋯** menu of the repository row, or t
 | --- | --- |
 | Hide a sub-project you do not use | Turn its switch off. It leaves your Explorer only: the map stays as it is, and its sessions are kept. |
 | Add an optional sub-project | Turn its switch on. An optional sub-project is listed only for those who add it. |
-| Rename it, move its folder, describe it | Select it, change its form, **Save**. A folder that moves keeps its project and its sessions: the key of the entry is its identity. |
+| Rename it, move its folder, describe it | Select it, change its form, **Save**. A folder that moves keeps its project and its sessions: the key of the entry is its identity. A folder you had added as a project before it was in the map keeps its own identity: after a move, add it again. |
 | Give it labels of the map | Tick them in its form. |
 | Keep its sessions in its folder | **Its sessions write only its folder**. Otherwise they may write the whole repository: a change in a monorepo often crosses folders. |
 | Remove it from the map | **Remove from the map…**. Its folder stays; once it has sessions, it stays a project of its own. |
@@ -79,12 +79,13 @@ A session of a sub-project works in its folder, and gets the setup of the reposi
 | Skills | Its own, then those of the repository; the nearest wins on a name |
 | Agent prompts | Its own, then those of the repository |
 | MCP servers | Both; its own wins on a name |
-| `.alta/config.toml` | The repository's, then its own on top. What the repository turns off stays off. |
-| Plugins | Those of the repository |
+| `.alta/config.toml` | For its plugins, skills and MCP servers, the repository's, then its own on top: what the repository turns off stays off. Its other settings (search, command line profiles, default provider) are its own. |
+| Plugins | Project plugins load from the folder CodeAlta starts in: started in the repository, its plugins apply to its sub-projects too |
 | Plans, tasks, automations | Its own only |
+| Issue views | Its own, else those of the repository |
 | Spaces, sandbox, added folders of skills | Those of the repository, unless you chose others for the sub-project |
 
-A sub-project is in the [spaces](spaces.md) of its repository. Its sessions write the whole repository unless the map says **write = "folder"**, and never the `.alta`, `.claude` and `.git` folders of any project in it. A [worktree](worktrees.md) of a sub-project is a checkout of its repository, and the session works in the same folder of it; a sub-project that is a git submodule gets worktrees of the submodule.
+A sub-project is in the [spaces](spaces.md) of its repository. A session that works in its folder writes the whole repository unless the map says **write = "folder"**, and never the `.alta`, `.claude` and `.git` folders of any project in it. A session in a worktree writes the folder of the sub-project in that worktree. A [worktree](worktrees.md) of a sub-project is a checkout of its repository, and the session works in the same folder of it; a sub-project that is a git submodule gets worktrees of the submodule.
 
 ## Agents and the map
 
@@ -129,7 +130,7 @@ path = "tools/reports"
 optional = true
 ```
 
-- A path stays inside the repository: no `..`, no absolute path, no link that leads out.
+- A path stays inside the repository: no `..`, no absolute path, no link that leads out, and never a folder of settings such as `.alta`, `.claude`, `.git` or `.codex`, nor one inside.
 - A map declares up to 2,000 projects and 256 labels; labels go four levels deep.
 - The map of a folder that another map declares is not read: declare everything from the root. A folder two maps declare belongs to the nearer repository.
 - Hidden sub-projects, and those you used, have a file of yours in `~/.alta/projects/`, as any project. The others are kept in memory.

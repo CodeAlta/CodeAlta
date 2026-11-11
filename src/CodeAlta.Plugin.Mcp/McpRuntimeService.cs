@@ -755,9 +755,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             });
         var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.Home);
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
+        // The policy of the repository of a sub-project applies to the servers it inherits from it, under its own.
+        IReadOnlyList<string> inheritedPolicyPaths = projectDirectory is not null && _configCache?.InheritedProjectDirectories is { } inheritedOf
+            ? [.. McpConfigDiscovery.InheritedFolders(inheritedOf(projectDirectory)).Select(McpPolicyWriter.GetProjectPolicyPath)]
+            : [];
         var policy = _configCache is { } policies
-            ? policies.LoadPolicy(globalPolicyPath, projectPolicyPath)
-            : _policyLoader.Load(globalPolicyPath, projectPolicyPath);
+            ? policies.LoadPolicy(globalPolicyPath, inheritedPolicyPaths, projectPolicyPath)
+            : _policyLoader.Load(globalPolicyPath, inheritedPolicyPaths, projectPolicyPath);
         return new RuntimeContext(request, config, policy, CreateServerAliasPartMap(config.EffectiveServers));
     }
 

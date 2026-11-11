@@ -288,6 +288,27 @@ public sealed partial class McpRuntimeServiceTests
             "a host that tells no inherited folder reads the folder of the project alone");
     }
 
+    [TestMethod]
+    public void ASubProject_TakesThePolicyOfItsRepository_UnderItsOwn()
+    {
+        using var repository = TempDirectory.Create();
+        var billing = Directory.CreateDirectory(Path.Combine(repository.Path, "services", "billing")).FullName;
+        var shared = McpPolicyWriter.GetProjectPolicyPath(repository.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(shared)!);
+        File.WriteAllText(shared, "[plugins.mcp.servers.b]\nenabled = false\n\n[plugins.mcp.servers.c]\nallowed_tools = [\"read\"]\n");
+        var own = McpPolicyWriter.GetProjectPolicyPath(billing);
+        Directory.CreateDirectory(Path.GetDirectoryName(own)!);
+        File.WriteAllText(own, "[plugins.mcp.servers.c]\nenabled = true\n");
+        Settle(shared, own);
+        var cache = new McpConfigCache();
+
+        var policy = cache.LoadPolicy(null, new[] { shared }, own);
+        Assert.AreEqual(false, policy.Servers["b"].Enabled, "a server the repository turns off stays off in the sub-project");
+        CollectionAssert.AreEqual(new[] { "read" }, policy.Servers["c"].AllowedTools.ToArray(), "what the repository restricts stays restricted");
+        Assert.AreEqual(true, policy.Servers["c"].Enabled, "the sub-project's own values come on top");
+        Assert.IsFalse(cache.LoadPolicy(null, own).Servers.ContainsKey("b"), "without its repository, only its own file");
+    }
+
     private static void WriteServers(string path, params string[] keys)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

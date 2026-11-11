@@ -43,7 +43,8 @@ export function sessionsForProject(snapshot: WorkspaceSnapshot, projectId: strin
  * same signature list the same sessions under the same parents and titles.
  */
 export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
-  return JSON.stringify([snapshot.projects.map(project => [project.id, project.name, project.path, project.archived]),
+  return JSON.stringify([snapshot.projects.map(project => [project.id, project.name, project.path, project.archived, project.parentId ?? null, project.subPath ?? null,
+    project.repositoryName ?? null]),
     snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath,
       session.worktreePath, session.worktreeMissing, session.rewindCount, session.forkedFromSessionId, session.forkKind, session.archived, session.providerConversation === true])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);

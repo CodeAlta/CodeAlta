@@ -79,6 +79,12 @@ test("in the one list, a sub-project follows its repository, and one the user hi
   assert.deepEqual(projectRailProjection(snapshot, "name").projects.map(value => value.id), ["beta", "contoso", "admin"]);
 });
 
+test("the sub-projects of an archived repository leave the Explorer with it, also those used", () => {
+  const snapshot = { configured: true, projects: [{ ...project("contoso"), archived: true }, sub("billing", "contoso"), project("beta")],
+    sessions: [], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
+  assert.deepEqual(projectRailProjection(snapshot, "name").projects.map(value => value.id), ["beta", "contoso"]);
+});
+
 test("while the list is filtered, a repository whose projects do not match is left out", () => {
   const projects = [project("solo")];
   assert.deepEqual(shape(projectRailGroups(projects, 0, [label("contoso.backend", ["billing"], { repository: "contoso" })], false)), []);

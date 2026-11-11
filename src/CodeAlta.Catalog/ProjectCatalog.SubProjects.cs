@@ -115,8 +115,11 @@ public sealed partial class ProjectCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(repositorySlug);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         var room = 64 - key.Length - 1;
-        var slug = repositorySlug.Length <= room ? repositorySlug : repositorySlug[..Math.Max(1, room)].TrimEnd('-', '_', '.');
-        return $"{slug}.{key}";
+        if (repositorySlug.Length <= room) return $"{repositorySlug}.{key}";
+        // Shortened, the slug ends with a hash of the whole of it: two repositories that start alike keep labels of their own.
+        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(repositorySlug)))[..6];
+        var slug = repositorySlug[..Math.Max(1, room - hash.Length - 1)].TrimEnd('-', '_', '.');
+        return $"{slug}-{hash}.{key}";
     }
 
     /// <summary>
@@ -233,7 +236,10 @@ public sealed partial class ProjectCatalog
         var path = ProjectManifest.PathOf(repositoryPath);
         try
         {
-            if (!File.Exists(path)) return ProjectManifest.Empty;
+            var file = new FileInfo(path);
+            if (!file.Exists) return ProjectManifest.Empty;
+            // A file larger than a map can be is not read at all: the bound holds before anything is allocated.
+            if (file.Length > ProjectManifest.MaximumBytes + 4) return ProjectManifest.TooLarge();
             return await _manifests.ReadAsync(path, static (_, text) => ProjectManifest.Parse(text), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
@@ -268,7 +274,8 @@ public sealed partial class ProjectCatalog
         var changed = known is null;
         foreach (var entry in map.Projects)
         {
-            if (!recheck && known is not null && known.TryGetValue(entry.Key, out var seen) && seen.State != ProjectManifestFolderState.Missing)
+            // A missing folder too: a load does not probe the many absent folders of a sparse checkout each time.
+            if (!recheck && known is not null && known.TryGetValue(entry.Key, out var seen))
             {
                 folders[entry.Key] = seen;
                 continue;
@@ -383,7 +390,10 @@ public sealed partial class ProjectCatalog
 
     private static ProjectDescriptor DeclaredProject(ProjectDescriptor repository, ProjectManifestEntry entry, string folder, HashSet<string> slugs)
     {
-        var baseSlug = Slugify($"{repository.Slug}-{entry.Key}");
+        // The key stays whole and room is kept for a number after it: a slug is 64 characters at most.
+        var repositoryPart = repository.Slug.Length + entry.Key.Length + 1 <= 58 ? repository.Slug
+            : repository.Slug[..Math.Max(1, 58 - entry.Key.Length - 1)].TrimEnd('-', '_', '.');
+        var baseSlug = Slugify($"{repositoryPart}-{entry.Key}");
         var slug = baseSlug;
         for (var suffix = 2; slugs.Contains(slug); suffix++) slug = $"{baseSlug}-{suffix}";
         var displayName = ProjectPathNameFormatter.InferDisplayName(folder);

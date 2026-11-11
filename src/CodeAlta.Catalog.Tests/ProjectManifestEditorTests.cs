@@ -73,6 +73,34 @@ public sealed class ProjectManifestEditorTests
     }
 
     [TestMethod]
+    public void ASecondProblemOfTheSameKind_IsAProblemAdded()
+    {
+        using var fixture = new Fixture("apps/web");
+        fixture.Write($"[projects.web]\npath = \"apps/web\"\nname = \"{new string('n', 300)}\"\n");
+        var change = ProjectManifestEditor.SetProject(fixture.Root, "web", new ProjectManifestEdit(Description: new string('d', ProjectManifest.MaximumDescriptionLength + 1)));
+        Assert.AreEqual(ProjectManifestChangeStatus.Invalid, change.Status, "The name too long was there before; the description too long is new.");
+    }
+
+    [TestMethod]
+    public void AMapReachedThroughALink_IsNotWritten()
+    {
+        using var fixture = new Fixture("apps/web");
+        using var other = new Fixture();
+        other.Write("[projects.x]\npath = \"x\"\n");
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(fixture.Root, ".alta"), Path.Combine(other.Root, ".alta"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Inconclusive("This system does not let the test create a link.");
+        }
+
+        Assert.AreEqual(ProjectManifestChangeStatus.Unsupported, ProjectManifestEditor.AddProject(fixture.Root, null, new ProjectManifestEdit("apps/web")).Status);
+        Assert.AreEqual("[projects.x]\npath = \"x\"\n", other.Read());
+    }
+
+    [TestMethod]
     public void AMapWrittenInAnotherForm_IsNotEdited()
     {
         using var fixture = new Fixture("apps/web");

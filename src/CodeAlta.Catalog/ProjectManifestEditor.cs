@@ -230,6 +230,13 @@ public static class ProjectManifestEditor
     private static ProjectManifestChange Edit(string repositoryPath, Func<string, ProjectManifest, (string? Text, ProjectManifestChange Change)> edit)
     {
         var path = Path.GetFullPath(ProjectManifest.PathOf(repositoryPath));
+        // A map reached through a link could be the file of another repository: it is not written from this one.
+        foreach (var item in new[] { Path.GetDirectoryName(path)!, path })
+        {
+            if ((File.Exists(item) || Directory.Exists(item)) && (File.GetAttributes(item) & FileAttributes.ReparsePoint) != 0)
+                return new(ProjectManifestChangeStatus.Unsupported, $"`{item}` is a link: the project map is edited only in the folder of its repository.");
+        }
+
         using var writing = ConfigFileLock.Acquire(path);
         var content = SharedTextFile.TryReadAllText(path) ?? string.Empty;
         var before = ProjectManifest.Parse(content);
@@ -251,9 +258,10 @@ public static class ProjectManifestEditor
             return change with { Status = ProjectManifestChangeStatus.Unchanged };
         // The edited map must read as asked: a change never adds a problem.
         var after = ProjectManifest.Parse(updated);
-        var known = before.Problems.Select(static problem => (problem.Key, problem.Code)).ToHashSet();
-        if (after.Problems.FirstOrDefault(problem => !known.Contains((problem.Key, problem.Code))) is { } added)
-            return new(ProjectManifestChangeStatus.Invalid, added.Message, change.Key);
+        // Counted, not only told apart: a second value too long of the same entry is a problem added all the same.
+        var known = before.Problems.GroupBy(static problem => (problem.Key, problem.Code)).ToDictionary(static group => group.Key, static group => group.Count());
+        if (after.Problems.GroupBy(static problem => (problem.Key, problem.Code)).FirstOrDefault(group => group.Count() > known.GetValueOrDefault(group.Key)) is { } added)
+            return new(ProjectManifestChangeStatus.Invalid, added.First().Message, change.Key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         SharedTextFile.WriteAllText(path, updated);
         return change;

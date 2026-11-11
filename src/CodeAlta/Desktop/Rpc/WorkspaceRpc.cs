@@ -195,7 +195,9 @@ internal sealed partial class WorkspaceService
         var projectsRemaining = 240 * 1024;
         var names = projects.GroupBy(static project => project.Id, StringComparer.Ordinal).ToDictionary(static group => group.Key, static group => group.First().DisplayName, StringComparer.Ordinal);
         // The projects of their own first: sub-projects come after them, so that a large map never pushes them out.
-        foreach (var project in projects.OrderBy(static value => value.IsSubProject).ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
+        // Sub-projects the user hid come last: the window leaves them out, and they must not take the room of those it shows.
+        foreach (var project in projects.OrderBy(static value => value.IsSubProject).ThenBy(static value => value.IsSubProject && value.Archived)
+                     .ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(value => value.Id, StringComparer.Ordinal).ThenBy(value => value.ProjectPath, StringComparer.Ordinal))
         {
             if (displayedProjects.Count == MaximumProjects) break;

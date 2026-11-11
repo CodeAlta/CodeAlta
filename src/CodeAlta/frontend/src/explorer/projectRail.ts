@@ -56,7 +56,9 @@ export function projectRailProjection(snapshot: WorkspaceSnapshot, sort: Project
 
 function orderedProjects(snapshot: WorkspaceSnapshot, sort: ProjectSort): { projects: WorkspaceProject[]; evidenceNotice: string | null } {
   // A sub-project the user hid is archived: it leaves the Explorer, and the window of the sub-projects shows it again.
-  const projects = snapshot.projects.filter(project => !(project.archived && isSubProject(project)));
+  // One of an archived repository goes with it, also once it has a file of its own.
+  const archived = new Set(snapshot.projects.filter(project => project.archived).map(project => project.id));
+  const projects = snapshot.projects.filter(project => !(isSubProject(project) && (project.archived || archived.has(project.parentId!))));
   if (sort === "name") return { projects: projects.sort(compareProjects), evidenceNotice: null };
 
   const idCounts = new Map<string, number>();

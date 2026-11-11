@@ -115,19 +115,30 @@ internal sealed class McpConfigCache
         Invalidate();
     }
 
-    /// <summary>Loads the MCP policy of the global and the project <c>config.toml</c>, as <see cref="McpPolicyLoader.Load"/> does.</summary>
+    /// <summary>Loads the MCP policy of the global and the project <c>config.toml</c>, as <see cref="McpPolicyLoader.Load(string?, string?)"/> does.</summary>
     /// <exception cref="Tomlyn.TomlException">A file is not valid TOML.</exception>
     /// <exception cref="IOException">A file cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">A file cannot be read.</exception>
-    public McpPolicyOptions LoadPolicy(string? globalPolicyPath, string? projectPolicyPath)
+    public McpPolicyOptions LoadPolicy(string? globalPolicyPath, string? projectPolicyPath) => LoadPolicy(globalPolicyPath, [], projectPolicyPath);
+
+    /// <summary>
+    /// Loads the MCP policy of the global <c>config.toml</c>, then of those of the folders a sub-project inherits from (the
+    /// farthest first), then of its own: what its repository restricts applies to the servers it inherits.
+    /// </summary>
+    /// <exception cref="Tomlyn.TomlException">A file is not valid TOML.</exception>
+    /// <exception cref="IOException">A file cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">A file cannot be read.</exception>
+    public McpPolicyOptions LoadPolicy(string? globalPolicyPath, IReadOnlyList<string> inheritedPolicyPaths, string? projectPolicyPath)
     {
+        ArgumentNullException.ThrowIfNull(inheritedPolicyPaths);
         var now = _time.GetUtcNow().UtcDateTime;
         var settled = true;
-        FileStamp[] stamps = [StampOf(globalPolicyPath, withFolder: false, now, ref settled), StampOf(projectPolicyPath, withFolder: false, now, ref settled)];
-        return Get(_policies, string.Concat(globalPolicyPath, "\n", projectPolicyPath), stamps, settled, () =>
+        FileStamp[] stamps = [StampOf(globalPolicyPath, withFolder: false, now, ref settled), .. inheritedPolicyPaths.Select(path => StampOf(path, withFolder: false, now, ref settled)),
+            StampOf(projectPolicyPath, withFolder: false, now, ref settled)];
+        return Get(_policies, string.Join("\n", [globalPolicyPath, .. inheritedPolicyPaths, projectPolicyPath]), stamps, settled, () =>
         {
             Interlocked.Increment(ref _policyReads);
-            return _policyLoader.Load(globalPolicyPath, projectPolicyPath);
+            return _policyLoader.Load(globalPolicyPath, inheritedPolicyPaths, projectPolicyPath);
         });
     }
 

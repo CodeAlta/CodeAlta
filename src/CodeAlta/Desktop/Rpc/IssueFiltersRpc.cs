@@ -167,7 +167,8 @@ internal sealed partial class IssuesService
         if (Views is not { } store) return new("unavailable");
         if (!Name(request.Service) || ViewKind(request.Kind) is not { } kind || request.Name is not null && !IssueViewStore.IsViewName(request.Name)) return new("invalid_request");
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
-        if (request.Name is not null && ReadAll(request.Service, kind, project).All(view => view.Name != request.Name)) return new("not_found");
+        // A view of its repository that a sub-project shows can be chosen; the choice stays the sub-project's own.
+        if (request.Name is not null && ReadAll(request.Service, kind, project, inherited: true).All(view => view.Name != request.Name)) return new("not_found");
         return WriteViews(() => store.SetCurrent(request.Service, kind, project.ProjectPath, request.Name));
     }
 

@@ -97,6 +97,18 @@ internal sealed class McpPolicyLoader
     internal McpPolicyOptions LoadBoundedForInventory(string? globalConfigPath, string? projectConfigPath)
         => LoadCore(globalConfigPath, projectConfigPath, bounded: true);
 
+    /// <summary>
+    /// Loads the policy as <see cref="Load(string?, string?)"/> does, with the project files of the folders a sub-project
+    /// inherits its setup from read before its own: the farthest first, so that the nearer wins on a value.
+    /// </summary>
+    public McpPolicyOptions Load(string? globalConfigPath, IReadOnlyList<string> inheritedConfigPaths, string? projectConfigPath)
+    {
+        ArgumentNullException.ThrowIfNull(inheritedConfigPaths);
+        var policy = LoadCore(globalConfigPath, null, bounded: false);
+        for (var index = inheritedConfigPaths.Count - 1; index >= 0; index--) policy = ApplyFile(policy, inheritedConfigPaths[index], bounded: false, global: false);
+        return ApplyFile(policy, projectConfigPath, bounded: false, global: false);
+    }
+
     private McpPolicyOptions LoadCore(string? globalConfigPath, string? projectConfigPath, bool bounded)
     {
         var policy = new McpPolicyOptions();

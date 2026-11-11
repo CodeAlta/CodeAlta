@@ -32,7 +32,7 @@ internal sealed class ParsedFileCache<T> where T : class
     internal static readonly TimeSpan RacyWindow = TimeSpan.FromSeconds(3);
 
     // Beyond that many files, what is kept is dropped before a file is added: a bound, not a policy.
-    private const int MaximumEntries = 512;
+    private const int MaximumEntries = 4096;
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);

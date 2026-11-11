@@ -98,6 +98,10 @@ public sealed class ProjectManifest
     /// <summary>Gets a map that declares nothing.</summary>
     public static ProjectManifest Empty { get; } = new([], [], []);
 
+    // A map whose file is larger than a map can be: no entry, and the reason.
+    internal static ProjectManifest TooLarge()
+        => new([], [], [new(null, "file.tooLarge", $"The project map is larger than {MaximumBytes / 1024} KB: nothing of it is read.")]);
+
     // A map whose file cannot be read: no entry, and the reason.
     internal static ProjectManifest Unreadable(string message)
         => new([], [], [new(null, "file.unreadable", $"The project map cannot be read: {FirstLine(message)}")]);
