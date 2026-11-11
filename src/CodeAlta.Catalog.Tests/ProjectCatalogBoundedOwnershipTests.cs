@@ -61,7 +61,7 @@ public sealed class ProjectCatalogBoundedOwnershipTests
     {
         using var fixture = new Fixture();
         fixture.Write("alpha", Id, fixture.Workspace);
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < ProjectCatalog.MaximumOwnershipTotalBytes / (ProjectCatalog.MaximumOwnershipFileBytes - 512) + 2; i++)
             fixture.Write($"extra-{i}", Guid.NewGuid().ToString("D"), fixture.OtherWorkspace + "-" + i,
                 body: new string('x', ProjectCatalog.MaximumOwnershipFileBytes - 512));
         var budget = await fixture.ReadAsync(Id, fixture.Workspace);

@@ -131,6 +131,7 @@ public sealed partial class ProjectCatalog
             }
         }
 
+        persisted = await WithSubProjectsAsync(persisted, cancellationToken).ConfigureAwait(false);
         return persisted
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -287,7 +288,7 @@ public sealed partial class ProjectCatalog
 
         Directory.CreateDirectory(_options.ProjectsRoot);
         var markdownPath = GetProjectMarkdownPath(project.Slug);
-        var markdown = _serializer.SerializeProjectMarkdown(project);
+        var markdown = _serializer.SerializeProjectMarkdown(project.ForFile());
         var added = !File.Exists(markdownPath);
         try
         {
@@ -361,7 +362,8 @@ public sealed partial class ProjectCatalog
             string.Equals(NormalizePath(candidate.ProjectPath), project.ProjectPath, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
-            if (existing.Archived && !IsReadOnly)
+            // A sub-project a map declares gets its file once it is used, with the identifier it had in memory.
+            if ((existing.Archived || existing.IsSubProject && existing.SourcePath is null) && !IsReadOnly)
             {
                 existing.Archived = false;
                 await SaveAsync(existing, origin, cancellationToken).ConfigureAwait(false);

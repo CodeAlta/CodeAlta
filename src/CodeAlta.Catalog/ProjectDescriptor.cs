@@ -97,6 +97,81 @@ public sealed class ProjectDescriptor
     public CheckoutRule Checkout { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets the repository project of a sub-project: the project whose map (<c>.alta/projects.toml</c>) declares
+    /// its folder; null for a project that is no sub-project. Computed when the catalog loads, never written to the file.
+    /// </summary>
+    [JsonPropertyName("parent_id")]
+    public string? ParentId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folder of a sub-project inside its repository, with <c>/</c> between the names, such as
+    /// <c>services/billing</c>; null for a project that is no sub-project. Computed, never written.
+    /// </summary>
+    [JsonPropertyName("sub_path")]
+    public string? SubPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the key of a sub-project in the map of its repository, which its identifier is derived from; null
+    /// for a project that is no sub-project. Computed, never written.
+    /// </summary>
+    [JsonPropertyName("declared_key")]
+    public string? DeclaredKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the labels the map of its repository gives to a sub-project, as identifiers of labels
+    /// (<see cref="LabelCatalog"/>). Computed, never written: the user's own labels are <see cref="Labels"/>.
+    /// </summary>
+    [JsonPropertyName("declared_labels")]
+    public List<string> DeclaredLabels { get; set; } = [];
+
+    /// <summary>Gets or sets whether the map of its repository lists the sub-project only for those who add it. Computed, never written.</summary>
+    [JsonPropertyName("declared_optional")]
+    public bool DeclaredOptional { get; set; }
+
+    /// <summary>Gets or sets what the sessions of a sub-project may write, as the map of its repository says. Computed, never written.</summary>
+    [JsonPropertyName("write_scope")]
+    public ProjectWriteScope WriteScope { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folders a sub-project inherits its setup from, the nearest first: the declared sub-projects
+    /// whose folder holds its own, then the folder of its repository. Empty for a project that is no sub-project.
+    /// Computed, never written.
+    /// </summary>
+    [JsonPropertyName("inherited_roots")]
+    public List<string> InheritedRoots { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the sandbox the repository project chose, which a sub-project without a choice of its own uses
+    /// (<see cref="EffectiveSandbox"/>). Computed, never written.
+    /// </summary>
+    [JsonPropertyName("inherited_sandbox")]
+    public string? InheritedSandbox { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folders of skills the user added for the repository project, which a sub-project without its
+    /// own uses (<see cref="EffectiveSkillFolders"/>). Computed, never written.
+    /// </summary>
+    [JsonPropertyName("inherited_skill_folders")]
+    public List<string> InheritedSkillFolders { get; set; } = [];
+
+    /// <summary>Gets the sandbox of the sessions of the project: its own choice, else the one of its repository.</summary>
+    [JsonIgnore]
+    public string? EffectiveSandbox => Sandbox ?? InheritedSandbox;
+
+    /// <summary>Gets the folders of skills added for the project: its own, else those of its repository.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> EffectiveSkillFolders => SkillFolders.Count > 0 ? SkillFolders : InheritedSkillFolders;
+
+    /// <summary>Gets whether the project is a sub-project of a repository.</summary>
+    [JsonIgnore]
+    public bool IsSubProject => ParentId is not null;
+
+    // What the file of a sub-project says, under what the map shows: a save writes these, never the map's values.
+    internal List<string>? FileSpaces { get; set; }
+    internal string? FileDisplayName { get; set; }
+    internal string? FileDescription { get; set; }
+
+    /// <summary>
     /// Gets the path to the source markdown file when loaded from disk.
     /// </summary>
     public string? SourcePath { get; set; }
@@ -138,9 +213,32 @@ public sealed class ProjectDescriptor
             Depth = Checkout.Depth,
             Submodules = Checkout.Submodules,
         },
+        ParentId = ParentId,
+        SubPath = SubPath,
+        DeclaredKey = DeclaredKey,
+        DeclaredLabels = [.. DeclaredLabels],
+        DeclaredOptional = DeclaredOptional,
+        WriteScope = WriteScope,
+        InheritedRoots = [.. InheritedRoots],
+        InheritedSandbox = InheritedSandbox,
+        InheritedSkillFolders = [.. InheritedSkillFolders],
+        FileSpaces = FileSpaces is null ? null : [.. FileSpaces],
+        FileDisplayName = FileDisplayName,
+        FileDescription = FileDescription,
         SourcePath = SourcePath,
         MarkdownBody = MarkdownBody,
     };
+
+    // The descriptor as its file must say it: a sub-project's file keeps the user's values, never those of the map.
+    internal ProjectDescriptor ForFile()
+    {
+        if (ParentId is null) return this;
+        var file = Copy();
+        file.Spaces = FileSpaces is null ? [] : [.. FileSpaces];
+        file.DisplayName = FileDisplayName ?? ProjectPathNameFormatter.InferDisplayName(ProjectPath);
+        file.Description = FileDescription;
+        return file;
+    }
 
     /// <summary>
     /// Keeps what a list of folders of skills can hold: each path on one line, once, at most

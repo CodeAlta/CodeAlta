@@ -1,6 +1,6 @@
 ---
 title: Sub-projects of a monorepo, declared in the repository
-status: draft
+status: in-progress
 created: 2026-11-10
 summary: A monorepo declares its projects in a file it commits (`.alta/projects.toml`). Whoever adds the repository gets every sub-project in the left bar, grouped under the repository with the team's labels, each with its own sessions and its own `.alta` setup on top of the one of the repository. Agents see them with `alta project`, and a skill sets up an existing monorepo.
 ---
@@ -11,7 +11,7 @@ Today a team that works in a big monorepo sets CodeAlta up by hand, each person 
 
 After this work the repository carries its own map. A person adds the monorepo once and gets all its sub-projects, grouped and labeled as the team decided, each one a real project: its own sessions, plans, tasks, skills and agents, on top of what the repository shares. A change of the map arrives with `git pull`.
 
-Tracked by [#398](https://github.com/CodeAlta/CodeAlta/issues/398), milestone `5.0.0`.
+Tracked by [#398](https://github.com/CodeAlta/CodeAlta/issues/398), milestone `4.3.0`.
 
 ## What exists already
 
@@ -186,8 +186,8 @@ alta project manifest label <key> [--name <n>] [--parent <l>] [--icon <i>] [--co
 
 **Phase 1: declare and list**
 
-- [ ] 1. `ProjectManifest` and its reader in `src/CodeAlta.Catalog/` (Tomlyn): the model, the bounds, path validation with links resolved, problems reported and never thrown. Tests in `CodeAlta.Catalog.Tests`.
-- [ ] 2. `ProjectCatalog`: read the maps of the listed projects through a `ParsedFileCache`, add the declared sub-projects (derived id and slug, `ParentId`, `SubPath`, spaces of the repository), link a project file of the same folder, keep the id when `EnsurePersistedAsync` writes the file. `ProjectDescriptor.Copy` carries the new properties. Tests: identity before and after a file, a folder added by hand, an entry removed, a moved folder, an archived repository, a read-only catalog (`altacli`).
+- [x] 1. `ProjectManifest` and its reader in `src/CodeAlta.Catalog/` (Tomlyn): the model, the bounds, path validation with links resolved, problems reported and never thrown. Tests in `CodeAlta.Catalog.Tests`.
+- [x] 2. `ProjectCatalog`: read the maps of the listed projects through a `ParsedFileCache`, add the declared sub-projects (derived id and slug, `ParentId`, `SubPath`, spaces of the repository), link a project file of the same folder, keep the id when `EnsurePersistedAsync` writes the file. `ProjectDescriptor.Copy` carries the new properties. Tests: identity before and after a file, a folder added by hand, an entry removed, a moved folder, an archived repository, a read-only catalog (`altacli`).
 - [ ] 3. Sandbox and skill folders of the user fall back to the repository project (`SandboxScopes`, `SkillCatalogQuery.ForSession`). Tests.
 - [ ] 4. `LabelCatalog`: serve the labels of the maps, read-only, hidden in a space where they hold no project; `alta label` and `LabelsRpc` refuse to change them. Tests.
 - [ ] 5. `alta project list --parent/--declared`, `show` and the record fields (`AltaScriptAnnotations` included). Tests beside `AltaSpaceCommandsTests.cs`.
@@ -229,11 +229,11 @@ alta project manifest label <key> [--name <n>] [--parent <l>] [--icon <i>] [--co
 | Spaces | A sub-project is in the spaces of its repository | A repository cannot place itself, and a split group has no sensible display |
 | CodeAlta TUI | No new UI: sub-projects are listed as projects | New features are desktop only; the shared catalog keeps working |
 
-> **Open:** one map at the root, or each folder declaring itself (`services/billing/.alta/project.toml`, found through the git index)? The second suits `CODEOWNERS` better and needs a scan to list the projects.
->
-> **Open:** may a sub-project session write the whole checkout by default (proposed), or only its folder unless the map widens it?
->
-> **Open:** are all declared sub-projects listed unless `optional` (proposed), or only those a person adds?
+| One map or a file per folder | One map at the root | No scan to list the projects; the editors of the map (commands, the dialog) keep it whole |
+| What a sub-project session writes | The whole repository folder by default, `write = "folder"` narrows | A change in a monorepo often crosses folders |
+| Which declared sub-projects are listed | All, unless `optional` | The team decides the default list; a person hides what they do not use |
+| Git | Not assumed: a sub-project is a folder, the repository is the folder of the map | A sub-project can be a git submodule (its own repository, its own worktrees and Changes), and the map can name folders inside a submodule |
+| Nested maps | The map of a declared folder is not read; a folder two maps declare belongs to the nearer repository | One repository group per folder; a submodule that is a monorepo is declared from the root map |
 
 ## Risks
 

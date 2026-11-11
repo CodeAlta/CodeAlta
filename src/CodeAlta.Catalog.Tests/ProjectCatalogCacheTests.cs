@@ -274,6 +274,7 @@ public sealed class ProjectCatalogCacheTests
             if (underlying == typeof(string)) return $"value-{number}";
             if (underlying == typeof(bool)) return true;
             if (underlying == typeof(int)) return number;
+            if (underlying == typeof(ProjectWriteScope)) return ProjectWriteScope.Folder;
             if (type == typeof(List<string>)) return new List<string> { $"a-{number}", $"b-{number}" };
             if (type == typeof(CheckoutRule)) return new CheckoutRule();
             Assert.Fail($"The test does not know how to fill a {type}; teach it, and ProjectCatalog.Copy, that type.");

@@ -64,6 +64,8 @@ public sealed partial class ProjectCatalog
     {
         var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is null) return ProjectSpacesStatus.NotFound;
+        // A sub-project is in the spaces of its repository, always.
+        if (project.IsSubProject) return ProjectSpacesStatus.Unsupported;
         if (project.SourcePath is null) return ProjectSpacesStatus.Unsupported;
         var sourcePath = Path.GetFullPath(project.SourcePath);
         var projectsRoot = Path.GetFullPath(_options.ProjectsRoot);
@@ -129,7 +131,7 @@ public sealed partial class ProjectCatalog
 
     private async Task<ProjectSpacesStatus> UpdateSandboxCoreAsync(string projectId, string? sandbox, CancellationToken cancellationToken)
     {
-        var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        var project = await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is null) return ProjectSpacesStatus.NotFound;
         if (project.SourcePath is null) return ProjectSpacesStatus.Unsupported;
         var sourcePath = Path.GetFullPath(project.SourcePath);
@@ -196,7 +198,7 @@ public sealed partial class ProjectCatalog
     private async Task<ProjectSpacesStatus> UpdateLabelsCoreAsync(string projectId, Func<IReadOnlyList<string>, IEnumerable<string>> change,
         CancellationToken cancellationToken)
     {
-        var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        var project = await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is null) return ProjectSpacesStatus.NotFound;
         if (project.SourcePath is null) return ProjectSpacesStatus.Unsupported;
         var sourcePath = Path.GetFullPath(project.SourcePath);
@@ -264,7 +266,7 @@ public sealed partial class ProjectCatalog
     private async Task<ProjectSpacesStatus> UpdateSkillFoldersCoreAsync(string projectId, Func<IReadOnlyList<string>, IEnumerable<string>> change,
         CancellationToken cancellationToken)
     {
-        var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        var project = await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is null) return ProjectSpacesStatus.NotFound;
         if (project.SourcePath is null) return ProjectSpacesStatus.Unsupported;
         var sourcePath = Path.GetFullPath(project.SourcePath);
@@ -296,6 +298,15 @@ public sealed partial class ProjectCatalog
         var result = await SaveSourceAsync(new TextFileSaveRequest(sourcePath, updated, snapshot.Encoding, snapshot.HasByteOrderMark,
             snapshot.Revision), cancellationToken).ConfigureAwait(false);
         return result.IsConflict ? ProjectSpacesStatus.Conflict : ProjectSpacesStatus.Updated;
+    }
+
+    // The project an edit of its own file works on: a sub-project nobody used yet gets its file first, with the
+    // identifier it had in memory.
+    private async Task<ProjectDescriptor?> GetEditableAsync(string projectId, CancellationToken cancellationToken)
+    {
+        var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        if (project is { IsSubProject: true, SourcePath: null }) await SaveAsync(project, null, cancellationToken).ConfigureAwait(false);
+        return project;
     }
 
     // Writes the `spaces` entry of the front matter on one line, replaces the lines it took, or removes it

@@ -36,9 +36,10 @@ public sealed partial class ProjectCatalog
     /// <summary>Maximum bytes read from one source, excluding one sentinel (which counts toward the aggregate budget).</summary>
     public const int MaximumOwnershipFileBytes = 32 * 1024;
     /// <summary>Maximum bytes actually read across all sources, including sentinels.</summary>
-    public const int MaximumOwnershipTotalBytes = 512 * 1024;
+    public const int MaximumOwnershipTotalBytes = 4 * 1024 * 1024;
     /// <summary>Maximum encountered root entries and legacy readmes before an incomplete result.</summary>
-    public const int MaximumOwnershipEntries = 128;
+    /// <remarks>Room for the files of the sub-projects of the monorepos a person works in, besides their other projects.</remarks>
+    public const int MaximumOwnershipEntries = 1024;
 
     /// <summary>Checks a known project ID and normalized absolute project path against a complete budgeted catalog scan.</summary>
     /// <remarks>Does not use the ordinary unbounded loader, infer filenames from IDs, or establish an atomic
