@@ -345,6 +345,63 @@ public sealed class SessionSandboxTests
         Assert.AreEqual(new SandboxChoice(null, SandboxScope.Project), (await f.Runtime.GetSessionSandboxAsync("s")).Choice, "its own choice wins");
     }
 
+    [TestMethod]
+    public async Task ASubProjectSession_WritesItsRepository_ButNotTheSettingsOfItsProjects_UnlessItsMapKeepsItToItsFolder()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var repository = f.Project.ProjectPath;
+        var billing = await f.SubProjectAsync("billing", "services/billing");
+        var web = await f.SubProjectAsync("web", "apps/web");
+        var reports = await f.SubProjectAsync("reports", "tools/reports", write: "folder");
+        // A sub-project that is a git submodule, with its git folder in the one of the repository.
+        File.WriteAllText(Path.Combine(web.ProjectPath, ".git"), "gitdir: ../../.git/modules/web\n");
+        var webGit = Directory.CreateDirectory(Path.Combine(repository, ".git", "modules", "web")).FullName;
+        Directory.CreateDirectory(Path.Combine(repository, "libs"));
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        await f.CreateSessionAsync("s", billing);
+        var tools = f.RoutedTools("s", billing);
+
+        var shared = Path.Combine(repository, "libs", "shared.cs");
+        var crossing = await tools.CallAsync("write_file", new { path = shared, content = "x" });
+        Assert.IsTrue(crossing.Success, crossing.Error);
+        var policy = backend.Starts.Last();
+        CollectionAssert.Contains(policy.ReadWrite.ToList(), repository, "the folder of the repository");
+        foreach (var settings in new[]
+                 {
+                     Path.Combine(repository, ".alta", "projects.toml"), Path.Combine(repository, ".alta", "config.toml"), Path.Combine(billing.ProjectPath, ".alta", "config.toml"),
+                     Path.Combine(web.ProjectPath, ".alta", "config.toml"), Path.Combine(web.ProjectPath, ".alta", "skills"), Path.Combine(web.ProjectPath, ".claude"),
+                     Path.Combine(web.ProjectPath, ".mcp.json"), Path.Combine(web.ProjectPath, ".git"), Path.Combine(webGit, "hooks"), Path.Combine(webGit, "config"),
+                     Path.Combine(reports.ProjectPath, ".alta", "config.toml"),
+                 })
+        {
+            CollectionAssert.Contains(policy.Protected.ToList(), settings, settings);
+        }
+
+        var otherSettings = await tools.CallAsync("write_file", new { path = Path.Combine(web.ProjectPath, ".alta", "config.toml"), content = "[sandbox]\nall_sessions = \"off\"\n" });
+        Assert.IsFalse(otherSettings.Success, "the settings of another sub-project");
+
+        await f.CreateSessionAsync("narrow", reports);
+        var narrow = await f.RoutedTools("narrow", reports).CallAsync("write_file", new { path = shared, content = "y" });
+        Assert.IsFalse(narrow.Success, "`write = \"folder\"` keeps a sub-project to its own folder");
+        Assert.IsFalse(backend.Starts.Last().ReadWrite.Contains(repository, StringComparer.OrdinalIgnoreCase));
+        Assert.AreEqual("x", File.ReadAllText(shared));
+    }
+
+    [TestMethod]
+    public async Task ASessionOfTheRootOfAMonorepo_KeepsTheSettingsOfItsSubProjects()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var billing = await f.SubProjectAsync("billing", "services/billing");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        await f.CreateSessionAsync("s");
+
+        Assert.IsTrue((await f.RoutedTools("s").CallAsync("write_file", new { path = Path.Combine("services", "billing", "a.cs"), content = "a" })).Success);
+        CollectionAssert.Contains(backend.Starts.Last().Protected.ToList(), Path.Combine(billing.ProjectPath, ".alta", "config.toml"));
+        Assert.IsFalse((await f.RoutedTools("s").CallAsync("write_file", new { path = Path.Combine("services", "billing", ".alta", "mcp.json"), content = "{}" })).Success);
+    }
+
     private static bool IsInside(string root, string path)
     {
         var relative = Path.GetRelativePath(root, path);

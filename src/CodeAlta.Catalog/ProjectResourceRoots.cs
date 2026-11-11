@@ -20,4 +20,15 @@ public static class ProjectResourceRoots
     /// <returns>The folders.</returns>
     public static IReadOnlyList<string> Inherited(ProjectDescriptor? project)
         => project is { IsSubProject: true } ? [.. project.InheritedRoots.Where(static root => !string.IsNullOrWhiteSpace(root))] : [];
+
+    /// <summary>
+    /// Gets the folders a session of a project writes besides the folder of its project, when it works in that folder
+    /// (not in a worktree): the folder of the repository of a sub-project, since a change in a monorepo often crosses
+    /// folders, unless its map narrows it to its own folder (<see cref="ProjectWriteScope.Folder"/>). Its settings, and
+    /// those of the other projects of the repository, stay protected.
+    /// </summary>
+    /// <param name="project">The project; null for none.</param>
+    /// <returns>The folders; empty for a project that is no sub-project, or one that writes its own folder only.</returns>
+    public static IReadOnlyList<string> WriteRoots(ProjectDescriptor? project)
+        => project is { IsSubProject: true, WriteScope: ProjectWriteScope.Repository, RepositoryPath: { } repository } ? [repository] : [];
 }

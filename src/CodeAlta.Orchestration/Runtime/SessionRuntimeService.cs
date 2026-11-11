@@ -2290,7 +2290,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Tools = tools,
             DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
             DisabledToolPatterns = toolPatterns,
-            WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
+            // A sub-project session in the folder of its project writes the folder of its repository too; one in a
+            // worktree writes its worktree, as any session does.
+            WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree,
+                worktree is null ? [.. options.ProjectRoots, .. ProjectResourceRoots.WriteRoots(project)] : options.ProjectRoots),
             CommandGuard = CreateCommandGuard(session.SessionId),
             ToolInterceptor = toolInterceptor,
             // Where its built-in tools run: in the worker of its sandbox while it is sandboxed, read at each call.

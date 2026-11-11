@@ -44,6 +44,39 @@ public sealed class AgentWriteGuardTests
     }
 
     [TestMethod]
+    public void TheGuard_OfASubProjectThatWritesItsRepository_RefusesTheSettingsOfEverySubProject()
+    {
+        using var temp = new Temp();
+        var repository = temp.Folder("contoso");
+        var billing = temp.Folder("contoso", "services", "billing");
+        var web = temp.Folder("contoso", "apps", "web");
+        // A sub-project that is a git submodule: its `.git` is a file that names its git folder.
+        File.WriteAllText(Path.Combine(web, ".git"), "gitdir: ../../.git/modules/web\n");
+        var guard = new AgentWriteGuard([billing, repository], [], [], temp.Folder("home"));
+
+        foreach (var allowed in new[]
+                 {
+                     Path.Combine(billing, "src", "a.cs"), Path.Combine(repository, "libs", "shared.cs"), Path.Combine(web, "src", "app.ts"),
+                     Path.Combine(billing, ".alta", "plans", "p.md"), Path.Combine(web, ".alta", "tasks", "t.md"),
+                 })
+        {
+            Assert.IsNull(guard.Check(allowed), allowed);
+        }
+
+        foreach (var refused in new[]
+                 {
+                     Path.Combine(billing, ".alta", "config.toml"), Path.Combine(web, ".alta", "skills", "x", "SKILL.md"), Path.Combine(web, ".mcp.json"),
+                     Path.Combine(web, ".claude", "settings.json"), Path.Combine(web, ".git"), Path.Combine(repository, ".git", "modules", "web", "hooks", "pre-commit"),
+                     Path.Combine(repository, ".alta", "projects.toml"), Path.Combine(repository, ".alta", "config.toml"),
+                 })
+        {
+            Assert.IsNotNull(guard.Check(refused), refused);
+        }
+
+        Assert.IsNotNull(guard.CheckTree(web), "a sub-project, whose settings it may not change, is not deleted or moved whole");
+    }
+
+    [TestMethod]
     public void TheGuardOfASandbox_SaysTheSandboxRefuses_NotThatTheShellIsTurnedOff()
     {
         using var temp = new Temp();
