@@ -131,6 +131,7 @@ Override only what the plugin needs.
 | `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
 | `GetResources()` | Skills shipped with the plugin: `Resources.SkillRoot("skills")` | yes | yes |
 | `GetAutomationTriggers()` | Triggers that automations start on (see "Automation triggers") | yes | no |
+| `GetCredentialProviders()` | Kinds of vaults that secrets are kept in (see "Credential providers") | yes | yes |
 | `GetScripts()` | Scripts of the library of Code Mode, named `<prefix>/<name>` (see "Automation triggers") | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
@@ -588,6 +589,33 @@ public sealed class DeploysPlugin : PluginBase, IAutomationTriggerSource
 - `Problem` of a page, or `sink.SetProblem`, is shown under the trigger. `ValidateAsync` refuses settings the fields do not check. `Project = PluginTriggerProject.Required` gives `context.ProjectPath`.
 - A field of kind `Secret` holds `${secret:NAME}`; `context.Settings` gives its value.
 - A script of a plugin is in the library while the plugin runs, and is never saved over. A script run **without a model** has no session: it calls the `alta` commands that change nothing and those of plugins (`alta.<root>.<command>(...)`, such as a command that sends a mail), and the tools that read; `PluginTriggerScript.Writes = true` asks for edits and commands too, in a sandbox. Nothing that starts or drives an agent.
+
+## Credential providers
+
+A credential provider is a kind of vault that secrets of CodeAlta are kept in (Settings > Secrets, `[credentials.<id>] type = "<prefix>/<name>"` in `~/.alta/config.toml`). Only the plugins of `~/.alta/plugins` and built-in ones add them, never the plugin of a project folder.
+
+```csharp
+public override IEnumerable<PluginCredentialProviderContribution> GetCredentialProviders()
+{
+    yield return new PluginCredentialProviderContribution
+    {
+        Type = "acme.vault/secrets",                 // <prefix>/<name>, shadows no built-in type
+        DisplayName = "Acme Vault",
+        Icon = "vault",                              // a brand or Lucide name; or IconSvg (made safe by the host)
+        Settings = [new("address", "Address", PluginCredentialProviderSettingKind.Text) { Required = true },
+                    new("token", "Token", PluginCredentialProviderSettingKind.Secret)],   // Secret: a ${secret:NAME} of this computer
+        ReferenceHint = "team/item#field",
+        UnlockAsksPassword = false,                  // true: Unlock asks a password in the page, given in CredentialUnlockContext.Password
+        Create = context => new AcmeVaultProvider(context),   // context.Id, GetString/GetBoolean/GetList, Logger, Mask
+    };
+}
+```
+
+`ICredentialProvider`: `GetStatusAsync` (never prompts: `CredentialProviderStatus.Ready/Locked/Unavailable`, or `SignInNeeded`/`NotInstalled` with `SignInCommand`/`Install`), `UnlockAsync(context)`, `ReadAsync(reference, interactive)` (with `interactive` false never prompts: throw `CredentialProviderException(CredentialFailure.Locked, ...)`; `CredentialValue.ExpiresAt` for a one-time code), `BrowseAsync` (names only, never values; optional) and `Lock`.
+
+- The host keeps the bindings, the memory of values and its duration, the masking, Ask before use and the states shown. Never log, return or put a value in an exception message.
+- Run a program by the full path of its file with an argument array, never a shell, in a folder that is not a project; a password or token on its standard input or in its own environment, never in an argument.
+- A value obtained another way (a session key) goes through `context.Mask` first. Keep nothing on disk.
 
 ## Text added to the prompt
 
