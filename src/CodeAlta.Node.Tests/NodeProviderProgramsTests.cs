@@ -68,9 +68,14 @@ public sealed class NodeProviderProgramsTests
         Assert.AreEqual(("acp", "cli", "runner", "0.9.0", "1.0.0"), (listed.Type, listed.Credential, listed.Program!.State, listed.Program.Version, listed.Program.Update));
         Assert.AreEqual("gemini-2", (await providers.ListOffersAsync(false, token)).Offers.Single(static offer => offer.Id == "acp:gemini").ConfiguredKey);
 
+        // A change made while the update downloads (a sign-in that wrote the environment of the agent) stays.
+        catalog.DuringUpdate = () => File.WriteAllText(node.Host.CatalogOptions.ConfigPath,
+            File.ReadAllText(node.Host.CatalogOptions.ConfigPath).Replace("[providers.gemini-2]", "[providers.gemini-2]\nenv = { OPENAI_API_KEY = \"${secret:KEY}\" }", StringComparison.Ordinal));
         var update = await providers.WaitOperationAsync((await providers.StartUpdateAsync("gemini-2", token)).Id, TimeSpan.FromSeconds(20), token);
         Assert.AreEqual("completed", update.Status, update.Message);
-        StringAssert.Contains(File.ReadAllText(node.Host.CatalogOptions.ConfigPath), "version = \"1.0.0\"");
+        var updated = File.ReadAllText(node.Host.CatalogOptions.ConfigPath);
+        StringAssert.Contains(updated, "agent_version = \"1.0.0\"");
+        StringAssert.Contains(updated, "OPENAI_API_KEY", "what was written during the update stays");
 
         // An entry its catalog does not have fails, with what the catalog said; an offer the node does not have is refused.
         var missing = await providers.WaitOperationAsync((await providers.StartAddAsync(new FleetProviderAddParams("acp:nothing"), "owner", token)).Id, TimeSpan.FromSeconds(20), token);
@@ -93,6 +98,9 @@ public sealed class NodeProviderProgramsTests
 
         Assert.AreEqual(("completed", "copilot"), (first.Status, first.Key));
         Assert.AreEqual(("completed", "copilot-2"), (second.Status, second.Key));
+        // Additions at once never take the same key.
+        var many = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() => providers.StartAddAsync(new FleetProviderAddParams("xai"), "owner", token), token)));
+        Assert.AreEqual(6, many.Select(static state => state.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => providers.StartAddAsync(new FleetProviderAddParams("copilot", "copilot"), "owner", token));
     }
 
@@ -120,16 +128,26 @@ public sealed class NodeProviderProgramsTests
         await providers.SetAsync(new FleetProviderSetParams("claude", null, "Claude", null, null, null), "owner", token);
         Assert.AreEqual(0, providers.ApplyConfigurationChanges().Count);
 
-        File.WriteAllText(path, "[providers.claude\ntype = ");
+        // A key typed in a broken line: the page says where the file is wrong, never what it holds.
+        File.WriteAllText(path, "[providers.claude]\ntype = \"claude-code\"\napi_key \"sk-ant-secret-0123456789\"\n");
         Assert.AreEqual(0, providers.ApplyConfigurationChanges().Count);
-        Assert.IsNotNull((await providers.ListAsync(token)).ConfigurationError, "the page says the file does not read");
+        var error = (await providers.ListAsync(token)).ConfigurationError;
+        Assert.IsNotNull(error, "the page says the file does not read");
+        StringAssert.Contains(error, "line 3");
+        Assert.IsFalse(error.Contains("sk-ant", StringComparison.Ordinal), error);
+        Assert.IsFalse(providers.ConfigurationError!.Contains("sk-ant", StringComparison.Ordinal));
+
+        // A value of the wrong kind reads as TOML but not as a provider: nothing is applied, nothing stops the node.
+        File.WriteAllText(path, "[providers.claude]\ntype = \"claude-code\"\nmax_concurrent_requests = \"oops\"\n");
+        Assert.AreEqual(0, providers.ApplyConfigurationChanges().Count);
+        Assert.IsNotNull(providers.ConfigurationError);
         Assert.IsTrue(node.Host.ModelProviderRegistry.ListProviders(includeDisabled: true).Any(static provider => provider.ProviderId.Value == "claude"), "the providers run as before");
 
         File.WriteAllText(path, "");
         CollectionAssert.AreEqual(new[] { "claude" }, providers.ApplyConfigurationChanges().ToArray());
         Assert.IsNull((await providers.ListAsync(token)).ConfigurationError);
         // A provider still prepared is taken away once its preparation ended.
-        var until = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        var until = DateTime.UtcNow + TestTime.Seconds(30);
         while (node.Host.ModelProviderRegistry.ListProviders(includeDisabled: true).Any(static provider => provider.ProviderId.Value == "claude") && DateTime.UtcNow < until)
             await Task.Delay(100, token);
         Assert.IsFalse(node.Host.ModelProviderRegistry.ListProviders(includeDisabled: true).Any(static provider => provider.ProviderId.Value == "claude"), "taken away");
@@ -164,14 +182,20 @@ public sealed class NodeProviderProgramsTests
             Progress.Add("Downloading Gemini CLI…");
             return Task.FromResult(new PluginProviderInstallResult("gemini", "Gemini CLI", new Dictionary<string, object?>
             {
-                ["agent"] = "gemini", ["version"] = "0.9.0", ["distribution"] = "npx",
+                ["agent"] = "gemini", ["agent_version"] = "0.9.0", ["distribution"] = "npx",
             }));
         }
 
+        /// <summary>Gets or sets what runs while an update downloads: a change of the configuration made meanwhile.</summary>
+        public Action? DuringUpdate { get; set; }
+
         public Task<string?> GetUpdateAsync(PluginProviderSettings settings, CancellationToken cancellationToken)
-            => Task.FromResult<string?>(settings.GetString("version") == "0.9.0" ? "1.0.0" : null);
+            => Task.FromResult<string?>(settings.GetString("agent_version") == "0.9.0" ? "1.0.0" : null);
 
         public Task<IReadOnlyDictionary<string, object?>> UpdateAsync(PluginProviderSettings settings, IProgress<PluginProviderInstallProgress> progress, CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?> { ["version"] = "1.0.0" });
+        {
+            DuringUpdate?.Invoke();
+            return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?> { ["agent_version"] = "1.0.0" });
+        }
     }
 }

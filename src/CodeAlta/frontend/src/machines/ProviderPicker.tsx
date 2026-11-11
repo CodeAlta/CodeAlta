@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, ProgressBar, Tag } from "@blueprintjs/core";
-import { machines, type MachineProviderOfferView, type MachineProviderOperationView, type MachineView } from "#neoastra";
+import { machines, type MachineProviderOfferView, type MachineProviderOperationView, type MachineProviderTypeView, type MachineView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { ProviderIcon } from "../ProviderIcon";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { managementProblem } from "./machineManagement";
-import { offerGroups, offerNeed, offerProgram, offerMatches } from "./providerOffers";
+import { offerGroups, offerNeed, offerProgram, offerMatches, offersOfTypes } from "./providerOffers";
 
 /** The calls of the picker of the providers a machine can add. */
 export type ProviderPickerApi = Pick<typeof machines, "providerOffers" | "addProvider" | "providerOperationWait">;
@@ -23,8 +23,15 @@ type Problem = { key: MessageKey; detail?: string | null } | null;
  * keeps the ones whose name or description has the words typed. An agent is added in one click: the machine installs the program it
  * runs when it is missing, with its progress here; a type that takes a key opens its form.
  */
-export function ProviderPicker({ epoch, machine, api = machines, onClose }: {
+// The answers that say the machine is there but refuses or cannot be reached now, rather than that it does not know the call.
+function reachableProblem(status: string): boolean {
+  return ["offline", "machine_offline", "connecting", "not_manager", "unauthorized", "not_found", "stale_epoch", "invalid_request"].includes(status);
+}
+
+export function ProviderPicker({ epoch, machine, api = machines, types, onClose }: {
   epoch: string; machine: MachineView; api?: ProviderPickerApi; onClose: (picked: ProviderPicked | null) => void;
+  /** The types the machine listed with its providers: what a machine of an older version, which offers nothing more, can add. */
+  types: readonly MachineProviderTypeView[];
 }) {
   const { t } = useShellLanguage();
   const [offers, setOffers] = useState<readonly MachineProviderOfferView[] | null>(null);
@@ -33,10 +40,16 @@ export function ProviderPicker({ epoch, machine, api = machines, onClose }: {
   const [filter, setFilter] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [adding, setAdding] = useState<{ offer: MachineProviderOfferView; state: MachineProviderOperationView | null } | null>(null);
+  // A machine of an older version offers nothing more than its types: each is added through its form, as before.
+  const [legacy, setLegacy] = useState(false);
+  // Read when the offers fail, not a reason to ask again: the list of the page is read again every few seconds.
+  const knownTypes = useRef(types);
+  knownTypes.current = types;
   useEffect(() => {
     const abort = new AbortController();
     api.providerOffers({ expectedEpoch: epoch, machineId: machine.id, refresh: refresh > 0 }, { signal: abort.signal, timeoutMilliseconds: 60_000 }).then(value => {
       if (abort.signal.aborted) return;
+      if (value.status !== "ok" && !reachableProblem(value.status)) { setLegacy(true); setOffers(offersOfTypes(knownTypes.current)); return; }
       const failed = managementProblem(value.status);
       if (failed) { setProblem({ key: failed, detail: value.message }); return; }
       setOffers(value.offers);
@@ -47,7 +60,7 @@ export function ProviderPicker({ epoch, machine, api = machines, onClose }: {
   const groups = useMemo(() => offerGroups((offers ?? []).filter(offer => offerMatches(offer, filter))), [offers, filter]);
 
   async function add(offer: MachineProviderOfferView) {
-    if (offer.credential === "key" || offer.credential === "none") { onClose({ keyFor: offer }); return; }
+    if (legacy || offer.credential === "key" || offer.credential === "none") { onClose({ keyFor: offer }); return; }
     setAdding({ offer, state: null });
     setProblem(null);
     try {

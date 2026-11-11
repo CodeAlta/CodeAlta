@@ -62,9 +62,9 @@ internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogS
         }
         catch (InvalidDataException exception)
         {
-            // A configuration file that does not read: the providers run as they were applied, and the page says where the file is wrong.
-            var why = exception.InnerException?.Message ?? exception.Message;
-            return new FleetProviderList([], types, protection) { ConfigurationError = why.Length <= 512 ? why : why[..512] };
+            // A configuration file that does not read: the providers run as they were applied, and the page says where the file is
+            // wrong, never what it holds.
+            return new FleetProviderList([], types, protection) { ConfigurationError = SafeError(exception) };
         }
 
         var providers = new List<FleetProviderStatus>(definitions.Length);
@@ -442,7 +442,7 @@ internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogS
 
     private void ApplyNow(CodeAltaConfigStore store, string changed)
     {
-        RememberApplied();
+        RememberApplied(changed);
         var registry = host.ModelProviderRegistry;
         var enabled = store.LoadGlobalProviderDefinitions(includeDisabled: true).Where(static definition => definition.Enabled != false).ToArray();
         var applied = ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry, enabled, Root, modelCatalog);

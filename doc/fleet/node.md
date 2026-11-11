@@ -121,13 +121,25 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 | --- | --- |
 | Providers CodeAlta signs in (Codex subscription, Copilot, xAI, Mistral Vibe) | Signed in from the desktop ([below](#signing-in-from-the-desktop)); tokens stay in the node's `~/.alta/auth/` |
 | Providers with an API key, and any other token a run needs | A secret of the node's store ([secrets](secrets.md)): typed by the person from the desktop and sent over the end-to-end channel, or a secret of a space, a team or the organization sealed to the node; kept in its protected store (DPAPI, Keychain, libsecret), or named as an environment variable of the service |
-| Claude Code | `claude setup-token` run by the node in a pseudo-terminal (`script` on macOS and Linux, ConPTY on Windows); the token it prints is a secret of the node's store, named by the provider's `CLAUDE_CODE_OAUTH_TOKEN` (`${secret:NAME}`) |
+| Claude Code | `claude setup-token` run by the node in a pseudo-terminal (`script` on macOS and Linux, ConPTY on Windows), with the executable its sessions run; the token it prints is a secret of the node's store, named by the provider's `CLAUDE_CODE_OAUTH_TOKEN` (`${secret:NAME}`) |
 | Codex CLI, ACP agents | The sign-in method of their plugin: Codex CLI's device code is shown by the desktop; an ACP agent's API key (`env_var`) is typed on the desktop and kept as a secret of the node, which its `env` names (`${secret:NAME}`, resolved when its runtime starts); an agent that signs in in a terminal or with a browser on its own loopback signs in on the machine |
 | MCP servers with OAuth | Signed in from the desktop; tokens stay in `~/.alta/auth/mcp/` ([MCP](../mcp.md#runtime)) |
 | Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
 | GitHub | `gh auth login` with a device code, per space profile, run by the node on behalf of the desktop; with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
 | Cloud CLIs | The login command of the space's CLI profile (`gh`, `glab`, `az`, `aws`, `gcloud`), checked by its check command |
 | Organization providers (API keys or gateway keys for unattended runs) | Sealed by the server to this node's key when an admin allows the node to use them; kept in its protected store; lent only to runs of the scopes that may use them ([orchestration](orchestration.md#credentials-of-unattended-runs)) |
+
+### The providers of a node and what they run
+
+A node offers the device that manages it the providers it can add (`control.providers.offers`): its own types, and the
+entries of the catalogs of its plugins (`IPluginProviderCatalog`: Codex CLI, the ACP registry). Each says the program it
+runs and whether the node installs it. Every program is installed and updated by the node the same way: Claude Code from
+the version CodeAlta pins, the others through their catalog; an addition or an update is an operation of the node
+(`control.providers.add`, `update`) that the desktop follows until it ends, so that the download stays on the machine.
+A program the person installed on the machine is used as it is and never updated by the node. Once the node runs a
+release that pins new versions, it downloads them for the providers that ran an older one, and removes the older
+folders before its sessions start. The node also watches its configuration file: a provider section edited by hand is
+applied within a second; one that does not read leaves the running providers as they are.
 
 ### Signing in from the desktop
 

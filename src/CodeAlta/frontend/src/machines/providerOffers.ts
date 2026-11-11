@@ -1,4 +1,4 @@
-import type { MachineProviderOfferView, MachineProviderProgramView } from "#neoastra";
+import type { MachineProviderOfferView, MachineProviderProgramView, MachineProviderTypeView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** A group of the picker of providers: the agents that run on the machine first, then the subscriptions, the APIs and the model servers. */
@@ -16,6 +16,13 @@ export function offerGroups(offers: readonly MachineProviderOfferView[]): OfferG
   const known = new Set(groupOrder.map(group => group.id));
   return groupOrder.map(group => ({ ...group, offers: offers.filter(offer => (known.has(offer.group) ? offer.group : "key") === group.id) }))
     .filter(group => group.offers.length > 0);
+}
+
+/** The types a machine of an older version lists with its providers, as offers: each added through its form. */
+export function offersOfTypes(types: readonly MachineProviderTypeView[]): MachineProviderOfferView[] {
+  return types.map(type => ({ id: type.type, type: type.type, name: type.name, credential: type.credential, signIn: type.signIn,
+    group: type.type === "llama-cpp" ? "local" : type.credential === "key" ? "key" : type.credential === "sign_in" ? "subscription" : "agent",
+    description: null, icon: null, program: null, unavailable: null, catalog: null, configuredKey: null }));
 }
 
 /** Whether an offer has every word typed in its name, its type, its description or the name of its catalog. */

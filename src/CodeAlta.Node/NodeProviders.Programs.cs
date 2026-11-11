@@ -44,7 +44,9 @@ internal sealed partial class NodeProviders
     public async Task<FleetProviderOfferList> ListOffersAsync(bool refresh, CancellationToken cancellationToken)
     {
         var store = Store;
-        var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true);
+        IReadOnlyList<CodeAltaProviderDocument> definitions;
+        try { definitions = [.. store.LoadGlobalProviderDefinitions(includeDisabled: true)]; }
+        catch (InvalidDataException) { definitions = []; }
         var external = TryRead(store.LoadGlobalExternalProviders) ?? [];
         string? Configured(string type) => definitions.FirstOrDefault(definition => string.Equals(definition.ProviderType, type, StringComparison.Ordinal))?.ProviderKey
             ?? external.FirstOrDefault(provider => string.Equals(provider.ProviderType, type, StringComparison.OrdinalIgnoreCase))?.ProviderKey;
@@ -161,10 +163,16 @@ internal sealed partial class NodeProviders
                 var changed = await catalog.UpdateAsync(settings, Progress(operation), token).ConfigureAwait(false);
                 lock (_gate)
                 {
-                    var values = new Dictionary<string, object?>(provider.Values, StringComparer.OrdinalIgnoreCase);
+                    // What the provider is now: a sign-in or an edit made during the download stays, and a provider taken away meanwhile
+                    // is not written again.
+                    var current = TryRead(Store.LoadGlobalExternalProviders)?.FirstOrDefault(value => string.Equals(value.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new InvalidOperationException($"{settings.DisplayName} was removed from the machine during its update.");
+                    if (!string.Equals(current.ProviderType, provider.ProviderType, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"{settings.DisplayName} changed during its update: update it again.");
+                    var values = new Dictionary<string, object?>(current.Values, StringComparer.OrdinalIgnoreCase);
                     foreach (var (name, value) in changed) values[name] = value;
-                    Store.SaveGlobalExternalProvider(provider.ProviderKey, provider.ProviderType, values);
-                    RememberApplied();
+                    Store.SaveGlobalExternalProvider(current.ProviderKey, current.ProviderType, values);
+                    RememberApplied(current.ProviderKey);
                 }
             }
 
@@ -193,7 +201,9 @@ internal sealed partial class NodeProviders
     /// <summary>
     /// Downloads the versions CodeAlta pins now of the programs the providers of the node run, once the node was updated to a
     /// release that pins new ones: only where a version was installed before, so that the first installation stays the choice of
-    /// the person. Then removes the versions no longer pinned, which no session runs before the node starts its sessions.
+    /// the person. The providers that run them are started again once their program is there, so that none stays failed on the
+    /// probe it made while it was missing. The older versions stay: the cache is shared with the other CodeAlta of the profile,
+    /// which may still run one.
     /// </summary>
     /// <param name="cancellationToken">Stops the downloads; what is on disk is resumed by the next one.</param>
     /// <returns>The end of the downloads; never throws.</returns>
@@ -206,6 +216,10 @@ internal sealed partial class NodeProviders
                 && store.LoadGlobalProviderDefinitions(includeDisabled: false).Any(definition => definition.ProviderType == ClaudeType && ClaudeProgram(definition).State == "missing"))
             {
                 await DownloadClaudeAsync(null, cancellationToken).ConfigureAwait(false);
+                foreach (var definition in Store.LoadGlobalProviderDefinitions(includeDisabled: false).Where(static definition => definition.ProviderType == ClaudeType))
+                {
+                    lock (_gate) Apply(Store, definition.ProviderKey);
+                }
             }
 
             if (HasOtherVersions(CodexRoot, CodexPinnedRelease.Version) && CodexProgram(null).State == "missing"
@@ -213,15 +227,14 @@ internal sealed partial class NodeProviders
                 && (TryRead(store.LoadGlobalExternalProviders) ?? []).Any(static provider => string.Equals(provider.ProviderType, CodexCliType, StringComparison.OrdinalIgnoreCase)))
             {
                 await codex.InstallAsync(CodexCatalogEntry, new Progress<PluginProviderInstallProgress>(), cancellationToken).ConfigureAwait(false);
+                foreach (var provider in (TryRead(Store.LoadGlobalExternalProviders) ?? []).Where(static provider => string.Equals(provider.ProviderType, CodexCliType, StringComparison.OrdinalIgnoreCase)))
+                    RegisterPlugin(provider.ProviderKey);
             }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The next start tries again; a session that needs the program says what is missing meanwhile.
         }
-
-        RemoveOtherVersions(ClaudeRoot, ConfiguredClaudeCodeCli.PinnedVersion, ClaudeProgram(null).State == "installed");
-        RemoveOtherVersions(CodexRoot, CodexPinnedRelease.Version, CodexProgram(null).State == "installed");
     }
 
     // The entry of Codex CLI in the catalog of its plugin.
@@ -271,7 +284,7 @@ internal sealed partial class NodeProviders
         }
 
         var distribution = settings.GetString("distribution");
-        return new FleetProviderProgram(distribution is "npx" or "uvx" ? "runner" : "installed", Bounded(settings.GetString("version")), Bounded(update), Bounded(distribution));
+        return new FleetProviderProgram(distribution is "npx" or "uvx" ? "runner" : "installed", Bounded(settings.GetString("agent_version")), Bounded(update), Bounded(distribution));
     }
 
     private async Task<string> AddClaudeAsync(Operation operation, string? key, bool makeDefault, string setBy, CancellationToken cancellationToken)
@@ -304,16 +317,17 @@ internal sealed partial class NodeProviders
     {
         var result = await catalog.InstallAsync(entry, Progress(operation), cancellationToken).ConfigureAwait(false);
         string added;
+        // The key is chosen, checked and written under one lock: two additions never take the same one.
         lock (_gate)
         {
             var store = Store;
-            added = key ?? FreeKey(store, result.SuggestedKey);
             if (key is not null && Exists(store, key)) throw new InvalidOperationException($"Another provider of this machine has the key {key}.");
+            added = key ?? FreeKey(store, result.SuggestedKey);
             var values = new Dictionary<string, object?>(result.Values, StringComparer.OrdinalIgnoreCase) { ["enabled"] = true, ["display_name"] = result.DisplayName };
             if (result.Icon is { } icon) values["icon"] = icon;
             store.SaveGlobalExternalProvider(added, contribution.ProviderType, values);
             if (makeDefault) store.SaveGlobalDefaultProvider(added);
-            RememberApplied();
+            RememberApplied(added);
         }
 
         RegisterPlugin(added);
@@ -321,39 +335,69 @@ internal sealed partial class NodeProviders
     }
 
     // A type of the node written as a new provider, under the key given or the first free one of its type.
+    // The key is chosen, checked and written under one lock (SetAsync takes it again: the lock is reentrant).
     private FleetProviderStatus SetAddedAsync(string type, string? key, bool makeDefault, string setBy)
     {
-        string chosen;
         lock (_gate)
         {
             var store = Store;
             if (key is not null && Exists(store, key)) throw new InvalidOperationException($"Another provider of this machine has the key {key}.");
-            chosen = key ?? FreeKey(store, type);
+            var chosen = key ?? FreeKey(store, type);
+            return SetAsync(new FleetProviderSetParams(chosen, type, null, null, null, null, Enabled: true, MakeDefault: makeDefault), setBy, CancellationToken.None).GetAwaiter().GetResult();
         }
-
-        return SetAsync(new FleetProviderSetParams(chosen, type, null, null, null, null, Enabled: true, MakeDefault: makeDefault), setBy, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     // A provider of a plugin registered again as the configuration has it, and prepared, so that the page sees it ready or why not.
+    // While it is still prepared, the runtime refuses to replace it: tried again every half second for a minute, as Apply does.
     private void RegisterPlugin(string key)
     {
-        if (PluginProviderTypes is not { } types) return;
+        if (!TryRegisterPlugin(key)) _ = RegisterPluginLaterAsync(key);
+    }
+
+    private async Task RegisterPluginLaterAsync(string key)
+    {
+        for (var attempt = 0; attempt < 120; attempt++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500)).ConfigureAwait(false);
+            try
+            {
+                if (TryRegisterPlugin(key)) return;
+            }
+            catch (ObjectDisposedException)
+            {
+                // The node stops: its next start registers it.
+                return;
+            }
+        }
+    }
+
+    // Whether the provider of a plugin is registered as the configuration has it, or needs nothing; false while it is still prepared.
+    private bool TryRegisterPlugin(string key)
+    {
+        if (PluginProviderTypes is not { } types) return true;
         try
         {
             var store = Store;
-            if (TryRead(store.LoadGlobalExternalProviders)?.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } provider) return;
+            if (TryRead(store.LoadGlobalExternalProviders)?.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } provider) return true;
             var settings = PluginModelProviderTypes.CreateSettings(provider, store.GetEffectiveDefaultProvider());
-            if (!settings.IsEnabled) return;
+            if (!settings.IsEnabled) return true;
             var registry = host.ModelProviderRegistry;
             if (types.TryCreateProviderRegistration(settings, Root, registry.SecretIssued, registry.BoundSecrets, out var descriptor, out var createRuntime))
             {
                 registry.RegisterOrReplace(descriptor, createRuntime);
                 _ = PrepareAsync(descriptor.ProviderId);
             }
+
+            return true;
         }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or InvalidDataException)
+        catch (InvalidOperationException exception) when (exception is not ObjectDisposedException)
         {
-            // Applied at the next start.
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException)
+        {
+            // Read again at its next change, or the next start.
+            return true;
         }
     }
 
@@ -394,18 +438,6 @@ internal sealed partial class NodeProviders
     private static bool HasOtherVersions(string root, string version)
         => Directory.Exists(root) && Directory.EnumerateDirectories(root).Any(folder => IsVersionFolder(folder, version));
 
-    // Removes the versions of a pinned program other than the one pinned now, once that one is installed. A file a process still
-    // holds stays, and is removed at a later start.
-    private static void RemoveOtherVersions(string root, string version, bool current)
-    {
-        if (!current || !Directory.Exists(root)) return;
-        foreach (var folder in Directory.EnumerateDirectories(root).Where(folder => IsVersionFolder(folder, version)).ToArray())
-        {
-            try { Directory.Delete(folder, recursive: true); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-        }
-    }
-
     // A folder of another version: a name that starts with a digit (2.1.322, 0.130.0), not a partial download.
     private static bool IsVersionFolder(string folder, string version)
     {
@@ -417,21 +449,34 @@ internal sealed partial class NodeProviders
         => new SynchronousProgress(value => operation.Report(Bounded(value.Message), value.Received, value.Total));
 
     // An operation of the node: a download, then the provider written. Kept a while once it ended, so that a wait reads its end.
+    // The room for one more operation is made, checked and taken under one lock, with the operation published there once it has its
+    // completion: the operations kept stay bounded, whatever runs at once.
     private FleetProviderOperationState Start(Func<Operation, CancellationToken, Task<string>> run)
     {
         var operation = new Operation(Guid.NewGuid().ToString("N")[..16]);
         lock (_gate)
         {
-            foreach (var old in _operations.Values.Where(static value => value.Completion.IsCompleted).OrderBy(static value => value.StartedAt).ToArray())
-            {
-                if (_operations.Count < MaxOperations && DateTimeOffset.UtcNow - old.StartedAt < OperationLifetime) break;
-                _operations.Remove(old.Id);
-            }
+            MakeRoomForOperation();
+            operation.Completion = Run(operation, run);
+            _operations[operation.Id] = operation;
+            return operation.Current;
+        }
+    }
 
-            if (_operations.Count >= MaxOperations) throw new InvalidOperationException("Too many additions and updates run on this machine: wait for one to end.");
+    // Removes the operations that ended long ago, then the oldest that ended while there is no room; refuses when every one still runs.
+    private void MakeRoomForOperation()
+    {
+        foreach (var old in _operations.Values.Where(static value => value.Completion.IsCompleted).OrderBy(static value => value.StartedAt).ToArray())
+        {
+            if (_operations.Count < MaxOperations && DateTimeOffset.UtcNow - old.StartedAt < OperationLifetime) break;
+            _operations.Remove(old.Id);
         }
 
-        operation.Completion = Task.Run(async () =>
+        if (_operations.Count >= MaxOperations) throw new InvalidOperationException("Too many additions and updates run on this machine: wait for one to end.");
+    }
+
+    private Task<FleetProviderOperationState> Run(Operation operation, Func<Operation, CancellationToken, Task<string>> run)
+        => Task.Run(async () =>
         {
             using var lifetime = new CancellationTokenSource(OperationLifetime);
             try
@@ -448,16 +493,18 @@ internal sealed partial class NodeProviders
                 return operation.End("failed", Bounded(Masked(exception.Message)), null);
             }
         });
-        lock (_gate) _operations[operation.Id] = operation;
-        return operation.Current;
-    }
 
     private FleetProviderOperationState Completed(string key, string message)
     {
         var operation = new Operation(Guid.NewGuid().ToString("N")[..16]);
         var end = operation.End("completed", message, key);
         operation.Completion = Task.FromResult(end);
-        lock (_gate) _operations[operation.Id] = operation;
+        lock (_gate)
+        {
+            MakeRoomForOperation();
+            _operations[operation.Id] = operation;
+        }
+
         return end;
     }
 

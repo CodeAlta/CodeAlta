@@ -131,7 +131,7 @@ const api: MachinePageApi = {
     return { status: "completed", account: "octocat", code: null };
   },
   // What the machine can add: Claude Code it installs, Codex CLI and an ACP agent of its plugins, a subscription, APIs, a model server.
-  providerOffers: async () => ({ status: "ok", message: null, error: null, offers: [
+  providerOffers: async () => oldNode ? { status: "method_not_found", message: "Unknown method control.providers.offers.", error: null, offers: [] } : ({ status: "ok", message: null, error: null, offers: [
     { id: "claude-code", type: "claude-code", name: "Claude Code", group: "agent", credential: "cli", signIn: false, description: "Anthropic's agent.", icon: null,
       program: { state: "missing", version: "2.1.322", update: null, detail: null }, unavailable: null, catalog: null, configuredKey: null },
     { id: "codex-cli:codex-cli", type: "codex-cli", name: "Codex CLI", group: "agent", credential: "cli", signIn: false, description: "OpenAI's Codex agent.", icon: null,
@@ -210,6 +210,8 @@ const api: MachinePageApi = {
 let labels: string[] = ["gpu"];
 let signInWaits = 0;
 let operationWaits = 0;
+// A node of an older version, which does not know the offers.
+let oldNode = false;
 let claudeAdded = false;
 const signedIn = new Set<string>();
 let providerList: MachineProviderStatusView[] = [
@@ -228,7 +230,7 @@ function setSecret(name: string, value: string) {
 
 function Fixture() {
   const [shown, setShown] = useState("managed");
-  Object.assign(window, { machineFixture: { calls, show: setShown } });
+  Object.assign(window, { machineFixture: { calls, show: setShown, oldNode: () => { oldNode = true; } } });
   // A node whose connection to a server it joined fails after its .NET runtime was replaced under it: only the node knows why.
   managedServers = shown === "joinable" ? [{ name: "Work", state: "disconnected",
     message: "transport_error Could not load file or assembly 'System.Net.WebSockets.Client, Version=10.0.0.0'." }] : [];

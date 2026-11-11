@@ -42,6 +42,8 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
   const [keyFor, setKeyFor] = useState<MachineProviderOfferView | null>(null);
   // The provider whose program the machine installs or updates, and what it says of it.
   const [installing, setInstalling] = useState<{ key: string; message: string | null } | null>(null);
+  // Why an installation or an update failed: kept apart from the problem of the list, which its next read clears.
+  const [actionProblem, setActionProblem] = useState<Problem>(null);
   const reload = useCallback(() => setGeneration(value => value + 1), []);
   useEffect(() => {
     const abort = new AbortController();
@@ -73,6 +75,7 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
   // Installs or updates the program a provider runs, and follows the machine until it ends.
   async function install(provider: MachineProviderStatusView) {
     setInstalling({ key: provider.key, message: null });
+    setActionProblem(null);
     try {
       let state = await api.updateProvider({ expectedEpoch: epoch, machineId: machine.id, key: provider.key }, { timeoutMilliseconds: 60_000 });
       while (state.status === "ok" && state.state === "running" && state.id) {
@@ -80,10 +83,10 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
         state = await api.providerOperationWait({ expectedEpoch: epoch, machineId: machine.id, id: state.id }, { timeoutMilliseconds: 40_000 });
       }
 
-      if (state.status !== "ok") setProblem({ key: managementProblem(state.status) ?? "The machine could not do it.", detail: state.message });
-      else if (state.state !== "completed") setProblem({ key: "The machine could not do it.", detail: state.message });
+      if (state.status !== "ok") setActionProblem({ key: managementProblem(state.status) ?? "The machine could not do it.", detail: state.message });
+      else if (state.state !== "completed") setActionProblem({ key: "The machine could not do it.", detail: state.message });
     } catch {
-      setProblem({ key: "The machine does not answer: it is offline." });
+      setActionProblem({ key: "The machine does not answer: it is offline." });
     } finally { setInstalling(null); reload(); }
   }
   // A provider that prepares is read again a moment later, until it is ready or says why not.
@@ -104,6 +107,8 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
     </div>
     <p className="muted-text">{t("The providers the sessions of {name} run on.", { name: machine.name })}</p>
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {actionProblem && <Callout compact intent="warning" role="alert" className="machine-provider-action-problem">{t(actionProblem.key)}
+      {actionProblem.detail && <div className="muted-text">{actionProblem.detail}</div>}</Callout>}
     {view && !paired && <Callout compact intent="primary" className="machine-paired-only">{t("This computer reaches {name} through your server: it sees its providers, but only a computer paired with {name} adds them, gives their keys and signs them in. To do it from this one, run altanode pair --manage on {name}, then paste the link in Pair a machine… here.", { name: machine.name })}</Callout>}
     {view?.configurationError && <Callout compact intent="warning" role="alert" className="machine-configuration-error">
       {t("The configuration file of {name} has an error since it was last changed: its providers run as before until it is fixed.", { name: machine.name })}
@@ -142,7 +147,7 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
         </span>
       </li>;
     })}</ul>}
-    {picking && <ProviderPicker epoch={epoch} machine={machine} api={api} onClose={choice => void picked(choice)} />}
+    {picking && view && <ProviderPicker epoch={epoch} machine={machine} api={api} types={view.types} onClose={choice => void picked(choice)} />}
     {editing !== undefined && view && <ProviderDialog epoch={epoch} machine={machine} api={api} view={view} provider={editing} initialType={editing === null ? keyFor?.type : undefined}
       onClose={(saved, signIn) => { setEditing(undefined); setKeyFor(null); if (saved) reload(); if (signIn) setSigningIn(signIn); }} />}
     {machineSignIn && <SignInDialog epoch={epoch} machine={machine} api={api} item={machineSignIn} onClose={() => { setMachineSignIn(null); reload(); }} />}

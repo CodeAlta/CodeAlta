@@ -26,6 +26,9 @@ internal sealed class NodeProviderCommands(TextWriter output, TextWriter error, 
     /// <summary>Gets or sets what stops a call to the node, for tests; none by default.</summary>
     public CancellationToken Stop { get; init; }
 
+    /// <summary>Gets what reads a key typed on the console without showing it; replaced by tests.</summary>
+    public Func<string?> ReadHidden { get; init; } = NodeSecretCommands.ReadHiddenFromConsole;
+
     public async ValueTask<int> RunAsync(NodeProviderCommandOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -175,9 +178,10 @@ internal sealed class NodeProviderCommands(TextWriter output, TextWriter error, 
             else
             {
                 await output.WriteLineAsync(way == FleetMachineSignInWays.Secret
-                    ? $"{started.Ask ?? "The value"}{(started.Page is { } where ? $" (where to get it: {where})" : "")}:"
+                    ? $"{started.Ask ?? "The value"}{(started.Page is { } where ? $" (where to get it: {where})" : "")}, not shown:"
                     : $"Open {started.Page} in a browser, sign in, then paste here the code it shows:").ConfigureAwait(false);
-                var typed = (await input.ReadLineAsync(Stop).ConfigureAwait(false))?.Trim();
+                // A key is never shown, nor kept in the scrollback of the terminal: read without echo when a person types it.
+                var typed = (way == FleetMachineSignInWays.Secret && !Console.IsInputRedirected ? ReadHidden() : await input.ReadLineAsync(Stop).ConfigureAwait(false))?.Trim();
                 if (string.IsNullOrEmpty(typed))
                 {
                     await error.WriteLineAsync("altanode providers: nothing was typed: the sign-in stops.").ConfigureAwait(false);

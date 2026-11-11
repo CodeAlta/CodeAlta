@@ -151,6 +151,19 @@ test("the picker of a machine shows each provider with its icon and what it inst
   }, options);
 });
 
+test("a machine of an older version, which offers nothing more, still adds a provider through the form of its type", { skip: !edge, timeout: testLimit(60_000) }, async () => {
+  await withCanvas(async page => {
+    const section = ".machine-providers-section";
+    await page.evaluate(`window.machineFixture.oldNode()`);
+    await page.until(`document.querySelectorAll('${section} .machine-providers li').length === 3`, "the providers of the machine");
+    await page.clickText(`${section} .bp6-button`, "Add a provider…");
+    await page.until(`document.querySelectorAll('.machine-provider-picker .machine-offer').length === 3`, "its types");
+    await page.evaluate(`document.querySelector('.machine-provider-picker [data-offer="anthropic"] button').click()`);
+    await page.until(`document.querySelector('.machine-provider-dialog input[type=password]')`, "the form of its type");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("a computer that manages a machine through the server sees its providers and sign-ins, gives none, and is told how", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.machineFixture.show("managed-relayed")`);

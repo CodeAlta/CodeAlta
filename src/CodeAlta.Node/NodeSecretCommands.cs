@@ -181,7 +181,7 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
     private static string Format(DateTimeOffset at) => at.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
     // Reads a line typed on the console without echoing it.
-    private static string? ReadHiddenFromConsole()
+    internal static string? ReadHiddenFromConsole()
     {
         var text = new StringBuilder();
         while (true)
