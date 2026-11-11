@@ -35,7 +35,7 @@ The link between the name and the vault item is a *binding*, written by **Settin
     "ref": "op://Private/Anthropic/credential",      // what that provider reads
     "label": "Private › Anthropic › credential",     // what the user picked, for the list
     "ask_before_use": "15m",                         // optional, see "Ask before use"
-    "version": 1, "set_by": "alexandre (CodeAlta Desktop)", "set_at": "2026-11-12T09:14:00Z"
+    "version": 1, "set_by": "alice (CodeAlta Desktop)", "set_at": "2026-11-12T09:14:00Z"
   }
 }
 ```
@@ -295,7 +295,7 @@ sequenceDiagram
 - [ ] 12. **Settings > Secrets** (`src/CodeAlta/frontend/src/secrets/`): the providers card, the gallery of types with logos and what each needs, the form of a provider (its settings, how long its values stay in memory, **Unlock when CodeAlta starts**), the binding dialog with its picker (a name that has a value here is replaced after a confirmation beside its row), the source and state of each row, **Unlock** and **Lock**; **Use a vault item…** in `ProviderKeySecret.tsx`; **Unlock** where a provider is unavailable for a locked secret (its page, the composer). Logos through `scripts/generate-brand-icons.mjs` and `npm run icons`. Texts in `secrets/messages.ts` in the five languages. Tests beside the modules, and one browser test.
 - [ ] 13. **`alta`, reading** (`BuiltInAltaCommandContributor.Secrets.cs`, new `BuiltInAltaCommandContributor.Credentials.cs`): `secret list` with provider and state, `secret test`, `credential types|list|status`, their help. Tests: `AltaSecretCommandsTests`, `AltaCredentialCommandsTests`, and one that a sandboxed session is refused each of them.
 - [ ] 14. **Documentation**: `site/docs/secrets.md` (credential providers, 1Password, a command, binding, with pictures), the page where the key of a provider is set, a new `doc/credentials.md` (the broker, ensure then resolve, the rules of "What this protects") linked from `doc/architecture.md`, `readme.md`.
-- [ ] 15. **Validation of phase 1**: the .NET tests, `npm test`, `lunet build`, the developer instance with the test double, and the owner's own 1Password.
+- [ ] 15. **Validation of phase 1**: the .NET tests, `npm test`, `lunet build`, the developer instance with the test double, and a real 1Password account.
 
 ### Phase 2: ask before use
 
@@ -331,7 +331,7 @@ sequenceDiagram
 - [ ] A session whose command prints the key shows `***` in its timeline and in its journal file.
 - [ ] From a sandboxed session, `alta secret list` and `alta credential list` answer the refusal of the sandbox.
 - [ ] With **Ask before use** on, starting an MCP server that names the secret shows the system prompt with the name of the server; **Cancel** leaves the server stopped with "waits for your confirmation".
-- [ ] On the owner's computer with the real 1Password: one Windows Hello prompt at start, none afterwards; the Developer page of the 1Password app lists the reads of CodeAlta.
+- [ ] With a real 1Password account on Windows: one Windows Hello prompt at start, none afterwards; the Developer page of the 1Password app lists the reads of CodeAlta.
 - [ ] `lunet build` passes with the new sections and pictures.
 
 ## Decisions
