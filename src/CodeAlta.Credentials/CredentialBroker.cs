@@ -526,10 +526,72 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     /// The provider cannot read them: the vault is locked (<see cref="CredentialFailure.Locked"/>), the item is missing, or the
     /// provider is not configured. The message names no value.
     /// </exception>
-    public async Task<SignInValues> ReadSignInAsync(string id, CancellationToken cancellationToken = default)
+    public Task<SignInValues> ReadSignInAsync(string id, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(id);
         if (!_signIns.TryGet(id, out var signIn)) throw new KeyNotFoundException($"No sign-in is named '{id}'.");
+        return ReadSignInFieldsAsync(signIn, codeOnly: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the values of the sign-in the user approved for a site, as the card showed it, without a prompt, for one fill of a
+    /// page: it is refused when the saved sign-in changed since (its sites, its references, its vault) or no longer lists the
+    /// site, and the references read are those of the approved sign-in. Each value is told to the masking of the host before it
+    /// is given, and none is kept.
+    /// </summary>
+    /// <param name="approved">The sign-in as the user approved it.</param>
+    /// <param name="origin">The site it is typed on.</param>
+    /// <param name="cancellationToken">A token to stop.</param>
+    /// <returns>The values, for the fill only.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="KeyNotFoundException">The sign-in was removed.</exception>
+    /// <exception cref="InvalidOperationException">The sign-in changed since it was approved, or no longer lists the site.</exception>
+    /// <exception cref="CredentialProviderException">The provider cannot read them; the message names no value.</exception>
+    public Task<SignInValues> ReadSignInAsync(SignIn approved, string origin, CancellationToken cancellationToken = default)
+    {
+        Approved(approved, origin);
+        return ReadSignInFieldsAsync(approved, codeOnly: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the one-time code of the sign-in the user approved for a site now, without a prompt, as its field is reached: a code
+    /// read before the user name and the password were sent may have expired. The same checks as
+    /// <see cref="ReadSignInAsync(SignIn, string, CancellationToken)"/> apply, and the code is masked before it is given.
+    /// </summary>
+    /// <param name="approved">The sign-in as the user approved it.</param>
+    /// <param name="origin">The site it is typed on.</param>
+    /// <param name="cancellationToken">A token to stop.</param>
+    /// <returns>The code and when it expires.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The sign-in has no one-time code.</exception>
+    /// <exception cref="KeyNotFoundException">The sign-in was removed.</exception>
+    /// <exception cref="InvalidOperationException">The sign-in changed since it was approved, or no longer lists the site.</exception>
+    /// <exception cref="CredentialProviderException">The provider cannot read it; the message names no value.</exception>
+    public async Task<SignInCode> ReadSignInCodeAsync(SignIn approved, string origin, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(approved);
+        if (approved.Totp is null) throw new ArgumentException($"The sign-in {approved.Label} has no one-time code.", nameof(approved));
+        Approved(approved, origin);
+        using var values = await ReadSignInFieldsAsync(approved, codeOnly: true, cancellationToken).ConfigureAwait(false);
+        return new SignInCode(values.Totp!, values.TotpExpiresAt);
+    }
+
+    // Checks that the sign-in saved now is the one the user approved, and that it still lists the site.
+    private void Approved(SignIn approved, string origin)
+    {
+        ArgumentNullException.ThrowIfNull(approved);
+        ArgumentNullException.ThrowIfNull(origin);
+        if (!_signIns.TryGet(approved.Id, out var current)) throw new KeyNotFoundException($"No sign-in is named '{approved.Id}'.");
+        if (!SignIns.IsSameDefinition(current, approved)) throw new InvalidOperationException($"The sign-in {approved.Label} changed since the user approved it.");
+        if (SignIns.OriginOf(origin) is not { } site || !current.Sites.Contains(site, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException($"The sign-in {approved.Label} is not for {origin}.");
+        }
+    }
+
+    // Reads the fields of a sign-in through its provider, never with a prompt: all of them, or its one-time code only.
+    private async Task<SignInValues> ReadSignInFieldsAsync(SignIn signIn, bool codeOnly, CancellationToken cancellationToken)
+    {
         Synchronize();
         ProviderEntry entry;
         lock (_gate)
@@ -545,10 +607,10 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(40));
-            var username = await ReadFieldAsync(provider, signIn.Username, timeout.Token).ConfigureAwait(false);
-            var password = await ReadFieldAsync(provider, signIn.Password, timeout.Token).ConfigureAwait(false);
+            var username = codeOnly ? null : await ReadFieldAsync(provider, signIn.Username, timeout.Token).ConfigureAwait(false);
+            var password = codeOnly ? null : await ReadFieldAsync(provider, signIn.Password, timeout.Token).ConfigureAwait(false);
             var totp = signIn.Totp is null ? null : await ReadFieldAsync(provider, signIn.Totp, timeout.Token).ConfigureAwait(false);
-            return new SignInValues(username.Value, password.Value, totp?.Value, totp?.ExpiresAt);
+            return new SignInValues(username?.Value ?? string.Empty, password?.Value ?? string.Empty, totp?.Value, totp?.ExpiresAt);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

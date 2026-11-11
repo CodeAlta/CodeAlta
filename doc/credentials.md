@@ -51,7 +51,8 @@ flowchart LR
   identity of a session, the triggers of automations. A resolver built without a broker treats a bound secret as not
   available.
 - **Every value is masked from its first read**: the broker gives it to the masking of the host (`Mask`,
-  `AgentSecretMasker.Retain`) before it keeps it.
+  `AgentSecretMasker.Retain`) before it keeps it. The masking finds it as it is, escaped as JSON writes it, and
+  percent-encoded as a form or an address sends it.
 - **Memory**: a value stays until the duration of its provider ends (`cache`: until CodeAlta closes, or 15 minutes to
   8 hours), the user locks the provider, or CodeAlta closes. Nothing is written to disk: no value, no master password,
   no session key.
@@ -94,7 +95,9 @@ It is a check of CodeAlta, not encryption: a program that runs as the user is st
 A sign-in (`SignIns`, members `sign_ins` and `site_grants` of `bindings.json`) names the vault references of a user
 name, a password and a one-time code, and the origins they are typed on; a site grant lets one origin go without the
 card for 30 days. `CredentialBroker.ReadSignInAsync` reads them without a prompt, masks each value first and keeps
-none: the `SignInValues` it returns is disposed once the fields are typed. How the browser types them is in
+none: the `SignInValues` it returns is disposed once the fields are typed. It reads the sign-in the card showed, and
+refuses when the saved one changed since or no longer lists the site; `ReadSignInCodeAsync` reads its one-time code again
+under the same checks when the code expired before its field came. How the browser types them is in
 [browser](browser.md#sign-ins).
 
 ## Agents

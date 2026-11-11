@@ -26,6 +26,28 @@ public sealed record SignIn(string Id, string Label, string Provider, IReadOnlyL
     public DateTimeOffset SetAt { get; init; }
 }
 
+/// <summary>
+/// The one-time code of a sign-in, read from its vault at the moment its field is typed, and already told to the masking of the
+/// host. Its text names no value.
+/// </summary>
+public sealed class SignInCode
+{
+    internal SignInCode(string value, DateTimeOffset? expiresAt)
+    {
+        Value = value;
+        ExpiresAt = expiresAt;
+    }
+
+    /// <summary>Gets the code.</summary>
+    public string Value { get; }
+
+    /// <summary>Gets when the code stops being valid, when the vault says.</summary>
+    public DateTimeOffset? ExpiresAt { get; }
+
+    /// <inheritdoc />
+    public override string ToString() => "SignInCode(***)";
+}
+
 /// <summary>A site the user allowed a sign-in on without being asked again, until a time.</summary>
 /// <param name="SignIn">The id of the sign-in.</param>
 /// <param name="Origin">The origin of the site.</param>
@@ -323,6 +345,22 @@ public sealed class SignIns
         if (scheme != Uri.UriSchemeHttps && !(scheme == Uri.UriSchemeHttp && uri.IsLoopback)) return null;
         var host = uri.HostNameType == UriHostNameType.IPv6 ? uri.Host : uri.IdnHost.ToLowerInvariant();
         return uri.IsDefaultPort ? $"{scheme}://{host}" : $"{scheme}://{host}:{uri.Port.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>
+    /// Tells whether two sign-ins are the same definition: the same id, label, provider, references and sites. What the user was
+    /// shown is typed only while the saved sign-in is still that one.
+    /// </summary>
+    /// <param name="first">A sign-in.</param>
+    /// <param name="second">Another.</param>
+    /// <returns>True when they type the same values on the same sites.</returns>
+    /// <exception cref="ArgumentNullException">A sign-in is null.</exception>
+    public static bool IsSameDefinition(SignIn first, SignIn second)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        return first.Id == second.Id && first.Label == second.Label && first.Provider == second.Provider && first.Username == second.Username
+            && first.Password == second.Password && first.Totp == second.Totp && first.Sites.SequenceEqual(second.Sites, StringComparer.Ordinal);
     }
 
     /// <summary>Gets the origin of a site as a sign-in lists it: an origin, without a path, a query or a fragment.</summary>
