@@ -1,6 +1,6 @@
 ---
 title: Sub-projects of a monorepo, declared in the repository
-status: in-progress
+status: done
 created: 2026-11-10
 summary: A monorepo declares its projects in a file it commits (`.alta/projects.toml`). Whoever adds the repository gets every sub-project in the left bar, grouped under the repository with the team's labels, each with its own sessions and its own `.alta` setup on top of the one of the repository. Agents see them with `alta project`, and a skill sets up an existing monorepo.
 ---
