@@ -112,6 +112,42 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     }
 
     /// <summary>
+    /// Drops the cached runtime of a provider, so that its next probe creates a new one that asks the provider again rather
+    /// than answering from what the old runtime kept (its models, its account). The registration stays as it is: its
+    /// version does not change, and sessions, which run on runtimes of their own, go on.
+    /// </summary>
+    /// <param name="providerId">The provider identifier.</param>
+    /// <returns><see langword="true" /> when a cached runtime was dropped.</returns>
+    /// <exception cref="KeyNotFoundException">The provider is not registered.</exception>
+    /// <exception cref="InvalidOperationException">The provider's original model preparation still owns its cached runtime.</exception>
+    /// <exception cref="ObjectDisposedException">Registry shutdown has begun.</exception>
+    public bool DropCachedRuntime(ModelProviderId providerId)
+    {
+        var key = ModelProviderId.NormalizeValue(providerId.Value);
+        IModelProviderRuntime? dropped;
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            if (!_registrations.TryGetValue(key, out var registration))
+            {
+                throw new KeyNotFoundException($"Model provider '{key}' is not registered.");
+            }
+
+            ThrowIfPreparing(key);
+            dropped = registration.Runtime;
+            if (dropped is null)
+            {
+                return false;
+            }
+
+            _registrations[key] = registration with { Runtime = null };
+        }
+
+        DisposeRuntime(dropped);
+        return true;
+    }
+
+    /// <summary>
     /// Gets the gate that bounds the requests at once of a provider. It is the same across the registrations of the
     /// provider: replacing the provider changes its limit, not its count.
     /// </summary>

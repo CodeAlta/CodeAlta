@@ -2335,9 +2335,12 @@ public sealed partial class AltaLiveToolTests
     public async Task ProviderModelRefresh_AsksTheProviderForItsModelsAgain()
     {
         var providerId = new ModelProviderId("refreshing");
-        var provider = new StatefulProviderRuntime(providerId) { Models = [new AgentModelInfo("gpt-old")] };
+        // Each runtime keeps the models it was made with, as Claude Code keeps its own for five minutes: only a new runtime
+        // sees the models the provider has now.
+        IReadOnlyList<AgentModelInfo> models = [new AgentModelInfo("gpt-old")];
         var registry = new ModelProviderRegistry();
-        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, "Refreshing"), () => provider);
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, "Refreshing"), () => new StatefulProviderRuntime(providerId) { Models = models });
+        var version = registry.GetRegistrationVersion(providerId);
         var dispatcher = CreateDispatcher(new AltaServiceCollection()
             .Add<IModelProviderRegistry>(registry)
             .Add<IModelProviderInitializationService>(new ModelProviderInitializationService(registry)));
@@ -2350,12 +2353,13 @@ public sealed partial class AltaLiveToolTests
         CollectionAssert.AreEqual(new[] { "refreshing:gpt-old" }, Refs(first));
 
         // The provider has a new model: a list gives what it said before, a refresh asks it again.
-        provider.Models = [new AgentModelInfo("gpt-old"), new AgentModelInfo("gpt-new")];
+        models = [new AgentModelInfo("gpt-old"), new AgentModelInfo("gpt-new")];
         var cached = await dispatcher.InvokeAsync(["provider", "model", "list", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         CollectionAssert.AreEqual(new[] { "refreshing:gpt-old" }, Refs(cached));
         var refreshed = await dispatcher.InvokeAsync(["provider", "model", "refresh", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.Success, refreshed.ExitCode, refreshed.Stderr);
         CollectionAssert.AreEqual(new[] { "refreshing:gpt-new", "refreshing:gpt-old" }, Refs(refreshed));
+        Assert.AreEqual(version, registry.GetRegistrationVersion(providerId), "the provider is asked again, not registered again: sessions go on");
 
         var missing = await dispatcher.InvokeAsync(["provider", "model", "refresh", "--provider", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode);

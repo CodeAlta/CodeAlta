@@ -57,16 +57,26 @@ internal sealed partial class NodeProviders
 
     /// <summary>Applies the providers whose section of the configuration changed since they were last applied.</summary>
     /// <returns>The keys of the providers applied again.</returns>
-    internal IReadOnlyList<string> ApplyConfigurationChanges()
+    internal IReadOnlyList<string> ApplyConfigurationChanges() => ApplyConfigurationChanges(requireRead: false);
+
+    /// <summary>Applies the providers whose section of the configuration changed since they were last applied.</summary>
+    /// <param name="requireRead">
+    /// Whether a file that cannot be read now (another program holds it, or it is being written) is a failure: an explicit
+    /// apply must not say the configuration was applied when it was not read; the watch reads it again at its next change.
+    /// </param>
+    /// <returns>The keys of the providers applied again.</returns>
+    /// <exception cref="IOException"><paramref name="requireRead"/> is set and the file cannot be read now.</exception>
+    internal IReadOnlyList<string> ApplyConfigurationChanges(bool requireRead)
     {
         Dictionary<string, string> now;
         List<string> changed;
         lock (_gate)
         {
             if (_applied is not { } applied) return [];
-            if (Fingerprints(host.CatalogOptions.ConfigPath, out var error) is not { } read)
+            if (Fingerprints(host.CatalogOptions.ConfigPath, out var error, out var unreadable) is not { } read)
             {
                 if (error is not null) _configurationError = error;
+                if (unreadable && requireRead) throw new IOException("config.toml cannot be read now: another program holds it, or it is being written.");
                 return [];
             }
 
@@ -123,9 +133,13 @@ internal sealed partial class NodeProviders
 
     // The section of each provider of a configuration file, as text; null when the file does not read, with why (null while it is
     // still being written: it is read again at its next change).
-    private static Dictionary<string, string>? Fingerprints(string path, out string? error)
+    private static Dictionary<string, string>? Fingerprints(string path, out string? error) => Fingerprints(path, out error, out _);
+
+    // The same, saying whether the file could not be read at all (locked, being written, not accessible) rather than not parsed.
+    private static Dictionary<string, string>? Fingerprints(string path, out string? error, out bool unreadable)
     {
         error = null;
+        unreadable = false;
         try
         {
             return new Dictionary<string, string>(CodeAltaConfigStore.ReadProviderSections(path), StringComparer.OrdinalIgnoreCase);
@@ -137,6 +151,7 @@ internal sealed partial class NodeProviders
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            unreadable = true;
             return null;
         }
     }

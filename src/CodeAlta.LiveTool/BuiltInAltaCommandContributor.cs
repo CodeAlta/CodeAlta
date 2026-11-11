@@ -5159,7 +5159,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 .Where(static state => state.Availability == ModelProviderAvailability.Probing)
                 .Select(static state => state.ProviderId)
                 .ToArray();
-            await RefreshProvidersAsync(context, service, preparing).ConfigureAwait(false);
+            await RefreshProvidersAsync(context, service, preparing, askAgain: false).ConfigureAwait(false);
             try
             {
                 registered = await configuration.ApplyAsync(context.CancellationToken).ConfigureAwait(false);
@@ -5185,7 +5185,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return NotFound(context, "provider.notFound", $"Provider '{provider}' was not found.");
         }
 
-        var failures = await RefreshProvidersAsync(context, service, providers).ConfigureAwait(false);
+        var failures = await RefreshProvidersAsync(context, service, providers, askAgain: true).ConfigureAwait(false);
         var states = service.CurrentStates;
         var ready = 0;
         foreach (var id in providers)
@@ -5233,10 +5233,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private const int ProviderRefreshConcurrency = 3;
 
     // Tests the providers again and waits for them; returns those that could not be, with why. A test that fails is no
-    // failure here: the state of the provider says it.
+    // failure here: the state of the provider says it. `askAgain` makes each test ask the provider itself: the runtime kept
+    // for tests may answer from what it kept (Claude Code keeps its models five minutes), so it is replaced by a new one,
+    // once a test that runs ended; the registration stays the same, and sessions go on with runtimes of their own.
     private static async Task<IReadOnlyList<(ModelProviderId Provider, string Message)>> RefreshProvidersAsync(AltaCommandContext context,
-        IModelProviderInitializationService service, IReadOnlyList<ModelProviderId> providers)
+        IModelProviderInitializationService service, IReadOnlyList<ModelProviderId> providers, bool askAgain)
     {
+        var registry = askAgain ? context.Services.Get<IModelProviderRegistry>() as ModelProviderRegistry : null;
         if (providers.Count == 0)
         {
             return [];
@@ -5248,6 +5251,25 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             await slots.WaitAsync(context.CancellationToken).ConfigureAwait(false);
             try
             {
+                if (registry is not null)
+                {
+                    if (service.CurrentStates.Any(state => state.Availability == ModelProviderAvailability.Probing
+                            && string.Equals(state.ProviderId.Value, provider.Value, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        try
+                        {
+                            // Joins the test that runs: its runtime is not taken from under it.
+                            await service.RefreshProviderAsync(provider, context.CancellationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception exception) when (exception is InvalidOperationException or AggregateException)
+                        {
+                            // Its outcome is replaced by the test below.
+                        }
+                    }
+
+                    registry.DropCachedRuntime(provider);
+                }
+
                 await service.RefreshProviderAsync(provider, context.CancellationToken).ConfigureAwait(false);
                 return ((ModelProviderId Provider, string Message)?)null;
             }
@@ -5284,7 +5306,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         if (options.Refresh)
         {
-            foreach (var (provider, message) in await RefreshProvidersAsync(context, providerInitializationService, providers).ConfigureAwait(false))
+            foreach (var (provider, message) in await RefreshProvidersAsync(context, providerInitializationService, providers, askAgain: true).ConfigureAwait(false))
             {
                 AltaJsonlWriter.WriteWarning(context.Stderr, context.CorrelationId, "provider.refreshFailed", $"Provider '{provider.Value}' was not asked again: {message}");
             }

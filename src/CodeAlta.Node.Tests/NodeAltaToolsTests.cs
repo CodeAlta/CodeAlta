@@ -92,6 +92,20 @@ public sealed class NodeAltaToolsTests
         StringAssert.Contains(broken.Transcript, "line 3");
         Assert.IsFalse(broken.Transcript.Contains("sk-secret", StringComparison.Ordinal), broken.Transcript);
         Assert.IsFalse(broken.Stdout.Contains("alta.provider.state", StringComparison.Ordinal), "nothing is tested");
+
+        // A file another program holds is not read: the refresh fails rather than say the configuration was applied. Only
+        // Windows enforces such a lock on another reader.
+        if (OperatingSystem.IsWindows())
+        {
+            File.WriteAllText(path, "[providers.local]\ntype = \"openai-chat\"\napi_url = \"http://127.0.0.1:9/v1\"\napi_key = \"other-key\"\n");
+            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var locked = await node.Alta.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli, cancellationToken: token);
+                Assert.AreEqual(AltaExitCodes.Failure, locked.ExitCode, locked.Transcript);
+                StringAssert.Contains(locked.Transcript, "cannot be read now");
+                Assert.IsFalse(locked.Stdout.Contains("alta.provider.state", StringComparison.Ordinal), "nothing is tested");
+            }
+        }
     }
 
     [TestMethod]
