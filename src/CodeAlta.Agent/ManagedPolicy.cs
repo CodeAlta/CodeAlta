@@ -1,4 +1,4 @@
-namespace CodeAlta.Orchestration.Runtime;
+namespace CodeAlta.Agent;
 
 /// <summary>
 /// What an organization requires of the sessions of this computer, as a source outside CodeAlta gives it: the managed
@@ -8,6 +8,13 @@ namespace CodeAlta.Orchestration.Runtime;
 /// </summary>
 public sealed record ManagedPolicy
 {
+    // The permission modes a policy knows: those of the host and of every provider (the ids of the Claude Code CLI).
+    private const string Ask = "default";
+    private const string AcceptEdits = "acceptEdits";
+    private const string Assisted = "auto";
+    private const string Bypass = "bypassPermissions";
+    private static readonly string[] HostModes = [Ask, AcceptEdits, Bypass];
+
     /// <summary>Gets the policy that says nothing.</summary>
     public static ManagedPolicy None { get; } = new();
 
@@ -17,7 +24,7 @@ public sealed record ManagedPolicy
     /// <summary>Gets the account the policy was read for, for people; null when it is the computer's own.</summary>
     public string? Account { get; init; }
 
-    /// <summary>Gets whether a session may not run in a mode that asks nothing (<see cref="SessionPermissionModes.Bypass"/>).</summary>
+    /// <summary>Gets whether a session may not run in a mode that asks nothing (<c>bypassPermissions</c>).</summary>
     public bool BypassPermissionsDisabled { get; init; }
 
     /// <summary>
@@ -26,7 +33,7 @@ public sealed record ManagedPolicy
     /// </summary>
     public bool AssistedPermissionsDisabled { get; init; }
 
-    /// <summary>Gets the mode a new session runs in when it is given none, one of <see cref="SessionPermissionModes.HostModes"/>; null to leave it to the settings.</summary>
+    /// <summary>Gets the mode a new session runs in when it is given none, <c>default</c>, <c>acceptEdits</c> or <c>bypassPermissions</c>; null to leave it to the settings.</summary>
     public string? DefaultPermissionMode { get; init; }
 
     /// <summary>Gets whether every session runs in the sandbox.</summary>
@@ -60,8 +67,8 @@ public sealed record ManagedPolicy
     public bool Refuses(string? permissionMode)
         => permissionMode?.Trim() switch
         {
-            SessionPermissionModes.Bypass => BypassPermissionsDisabled,
-            "auto" => AssistedPermissionsDisabled,
+            Bypass => BypassPermissionsDisabled,
+            Assisted => AssistedPermissionsDisabled,
             _ => false,
         };
 
@@ -70,21 +77,33 @@ public sealed record ManagedPolicy
     /// below it that the policy allows and the session can be given.
     /// </summary>
     /// <param name="permissionMode">The mode, or null for none.</param>
-    /// <param name="offered">The modes the session can be given, or null for those of the host (<see cref="SessionPermissionModes.HostModes"/>).</param>
+    /// <param name="offered">The modes the session can be given, or null for those of the host (<c>default</c>, <c>acceptEdits</c>, <c>bypassPermissions</c>).</param>
     /// <returns>The mode; null when <paramref name="permissionMode"/> is null.</returns>
     public string? Narrow(string? permissionMode, IReadOnlyCollection<string>? offered = null)
     {
         if (!Refuses(permissionMode)) return permissionMode;
-        offered ??= [.. SessionPermissionModes.HostModes];
-        foreach (var candidate in (string[])["auto", SessionPermissionModes.AcceptEdits])
+        offered ??= HostModes;
+        foreach (var candidate in (string[])[Assisted, AcceptEdits])
         {
-            if (SessionPermissionModes.Rank(candidate) < SessionPermissionModes.Rank(permissionMode) && !Refuses(candidate)
+            if (Rank(candidate) < Rank(permissionMode) && !Refuses(candidate)
                 && offered.Contains(candidate, StringComparer.Ordinal))
                 return candidate;
         }
 
-        return SessionPermissionModes.Ask;
+        return Ask;
     }
+
+    // How much a mode lets a session do without asking, as the host compares modes: plan and dontAsk lowest, then the
+    // mode that asks (and an unknown one), acceptEdits, auto, then bypassPermissions.
+    private static int Rank(string? permissionMode)
+        => permissionMode?.Trim() switch
+        {
+            "plan" or "dontAsk" => 0,
+            AcceptEdits => 2,
+            Assisted => 3,
+            Bypass => 4,
+            _ => 1,
+        };
 
     /// <inheritdoc />
     public bool Equals(ManagedPolicy? other)
@@ -131,7 +150,7 @@ public sealed record ManagedPolicy
         if (list.Length == 1) return list[0];
         string? defaultMode = null;
         foreach (var mode in list.Select(static policy => policy.DefaultPermissionMode).OfType<string>())
-            defaultMode = defaultMode is null || SessionPermissionModes.Rank(mode) < SessionPermissionModes.Rank(defaultMode) ? mode : defaultMode;
+            defaultMode = defaultMode is null || Rank(mode) < Rank(defaultMode) ? mode : defaultMode;
         return new ManagedPolicy
         {
             Source = string.Join(", ", list.Select(static policy => policy.Source).OfType<string>().Distinct(StringComparer.Ordinal)) is { Length: > 0 } sources ? sources : null,

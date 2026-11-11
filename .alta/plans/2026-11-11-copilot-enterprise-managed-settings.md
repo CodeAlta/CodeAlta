@@ -85,12 +85,16 @@ and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
       `Narrow` to the widest mode the session can be given, default mode, sandbox required, no run outside, fresh
       policy missing, support URL, managed keys, read at) and `ManagedPolicyState` (one policy per source, combined
       most-restrictive, `Changed`), instance-owned; tests.
-- [ ] 3. **The Copilot reader** (`CodeAlta.Agent.Copilot`): reference `GitHub.Copilot.SDK` (bump to the current release),
-      start the runtime from slice 1 per refresh, `ResolveAsync(gitHubToken, clientName: "CodeAlta")` per signed-in
-      direct provider, `ReadAsync` when none, map to `ManagedPolicy`, keep the last one beside the credential, the
-      refresh schedule; for a Copilot ACP provider, `ResolveAsync()` with the CLI's current account (verify that the
-      runtime sees the npm CLI's sign-in); tests with a fake runtime; a live test gated by an environment variable,
-      as `AcpLiveTests`.
+- [x] 3. **The Copilot reader**: `CopilotManagedSettingsReader` and `CopilotManagedSettings` (`CodeAlta.Agent.Copilot`,
+      SDK 1.0.31, `CopilotSkipCliDownload`, `GHCP001` suppressed) start the runtime per reading in a home of its own
+      (`UseLoggedInUser = false`) and resolve each token with `clientName: "CodeAlta"`, or the computer alone without
+      one. `CopilotManagedPolicySource` (`CodeAlta.Hosting`, which sees the providers) lists the Copilot providers,
+      reads their GitHub tokens, installs the runtime only when one exists, maps to `ManagedPolicy`, keeps the last
+      policy in `~/.alta/auth/copilot-policy/` and refreshes hourly or on demand. *Deviation*: `ManagedPolicy` moved
+      to `CodeAlta.Agent`, the project both `CodeAlta.Hosting` and `CodeAlta.Orchestration` see. Tests, and a live
+      test (`CODEALTA_COPILOT_POLICY_LIVE_TOKEN`) that passed with a personal account (no policy).
+      *Not done*: the Copilot ACP provider's own sign-in (the runtime would have to read the user's Copilot CLI
+      home); an ACP provider gets the policy of the direct providers and of the computer.
 - [ ] 4. **Permission modes** (`SessionRuntimeService`, `OwnedSessionCommandService`, `OwnedSessionSelection`,
       `SessionFallbackCoordinator`, `AutomationRunner`, `FleetNodeService.Agents`): the ceiling and the default of the
       table at every entry point, a running session narrowed when the policy arrives, refusals that name the policy;

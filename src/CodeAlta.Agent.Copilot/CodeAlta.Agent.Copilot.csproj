@@ -5,6 +5,10 @@
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
+    <!-- CodeAlta does not ship the Copilot runtime: CopilotRuntimeInstaller downloads it when a provider needs it. -->
+    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+    <!-- The managed-settings surface of the SDK is marked experimental: CopilotManagedSettings maps the little it reads. -->
+    <NoWarn>$(NoWarn);GHCP001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="GitHub.Copilot.SDK" />
     <PackageReference Include="XenoAtom.Logging" />
   </ItemGroup>
 </Project>
