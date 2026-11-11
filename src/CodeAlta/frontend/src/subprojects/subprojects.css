@@ -34,6 +34,7 @@ dialog.subprojects-dialog:has(> .app-window) > .app-window > .app-window-body > 
 .subprojects-list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .subprojects-filter, .subprojects-new-label { flex: none; margin: 8px 10px; }
 .subprojects-new-label { align-self: flex-start; }
+.subprojects-filter-icon { display: grid; place-items: center; width: 26px; height: 24px; color: var(--muted); }
 .subprojects-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0 0 8px; overflow: auto; list-style: none; }
 .subprojects-row { display: flex; align-items: center; gap: 4px; padding: 0 8px 0 10px; }
 .subprojects-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }

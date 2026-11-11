@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject } from "#neoastra";
 import type { Label } from "../labels/labels";
-import { projectRailGroups, projectTitle, type RailGroup } from "./projectRail";
+import { projectRailGroups, projectRailProjection, projectTitle, type RailGroup } from "./projectRail";
 
 const project = (id: string): WorkspaceProject => ({ id, name: id, path: `/${id}`, archived: false });
 const label = (id: string, projectIds: string[], look: Partial<Label> = {}): Label =>
@@ -71,6 +71,12 @@ test("a sub-project whose repository is not listed is a project like the others"
   assert.deepEqual(projectRailGroups([sub("billing", "contoso")], 0, []), []);
   assert.deepEqual(projectTitle(sub("billing", "contoso")), { repository: "CONTOSO", name: "billing" });
   assert.deepEqual(projectTitle(project("solo")), { repository: null, name: "solo" });
+});
+
+test("in the one list, a sub-project follows its repository, and one the user hid is left out", () => {
+  const snapshot = { configured: true, projects: [sub("admin", "contoso"), project("contoso"), project("beta"), { ...sub("old", "contoso"), archived: true }],
+    sessions: [], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
+  assert.deepEqual(projectRailProjection(snapshot, "name").projects.map(value => value.id), ["beta", "contoso", "admin"]);
 });
 
 test("while the list is filtered, a repository whose projects do not match is left out", () => {

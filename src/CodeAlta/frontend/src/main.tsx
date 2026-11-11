@@ -2533,14 +2533,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   // A new session of a repository whose prompt asks an agent to set it up as a monorepo: the user reads it and sends it.
   function setUpMonorepo(id: string) {
+    if (!owned) return;
     setDialog(null);
-    showScopeDraft(id, true, true);
-    let tries = 0;
-    const put = () => {
-      const request = askPluginComposer("draft", null, monorepoSetupPrompt);
-      if (!request.handled && ++tries < 20) setTimeout(put, 50);
-    };
-    setTimeout(put, 0);
+    const scope = `local-draft:${JSON.stringify(id)}`, key = `codealta.desktop.localPrompt.${JSON.stringify(id)}`;
+    // What is already written there belongs to the user: it is shown, not replaced.
+    if (!localDrafts.get(scope, () => restoreDraft(() => localStorage.getItem(key), scope)).text.trim()) {
+      localDrafts.edit(scope, monorepoSetupPrompt);
+      persistDraft((_key, value) => localStorage.setItem(key, value), () => localStorage.removeItem(key), scope, monorepoSetupPrompt);
+    }
+    selectProject(id);
+    focusPromptSoon();
   }
   // A folder just added that is a repository with sub-projects, or that looks like a monorepo, says so once.
   async function announceSubProjects(id: string, name: string) {

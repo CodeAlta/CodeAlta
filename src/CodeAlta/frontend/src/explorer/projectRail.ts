@@ -19,8 +19,11 @@ function compareText(a: string, b: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+// A sub-project is ordered by its repository, then its name: it comes right after its repository.
+const sortName = (project: WorkspaceProject): string => project.repositoryName && project.subPath ? `${project.repositoryName} › ${project.name}` : project.name;
+
 function compareProjects(a: WorkspaceProject, b: WorkspaceProject): number {
-  return compareText(a.name, b.name) || compareText(a.id, b.id)
+  return compareText(sortName(a), sortName(b)) || compareText(a.id, b.id)
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
@@ -52,7 +55,8 @@ export function projectRailProjection(snapshot: WorkspaceSnapshot, sort: Project
 }
 
 function orderedProjects(snapshot: WorkspaceSnapshot, sort: ProjectSort): { projects: WorkspaceProject[]; evidenceNotice: string | null } {
-  const projects = [...snapshot.projects];
+  // A sub-project the user hid is archived: it leaves the Explorer, and the window of the sub-projects shows it again.
+  const projects = snapshot.projects.filter(project => !(project.archived && isSubProject(project)));
   if (sort === "name") return { projects: projects.sort(compareProjects), evidenceNotice: null };
 
   const idCounts = new Map<string, number>();
@@ -168,8 +172,11 @@ export function projectRailGroups(projects: readonly WorkspaceProject[], favorit
     groups.push({ kind: "label", label, path: [], depth: above.length, ancestors: above, repository,
       projects: [repository, ...members.filter(project => !ownLabels(project))] });
     const inner = [...above, id];
+    // A label of the map is shown while it, or a label under it, has a sub-project listed.
+    const used = (value: Label, depth = 0): boolean => depth <= declared.length
+      && (members.some(project => value.projectIds.includes(project.id)) || declared.some(child => child.parent === value.id && used(child, depth + 1)));
     const placeDeclared = (value: Label, depth: number, path: readonly string[]) => {
-      if (depth > declared.length) return;
+      if (depth > declared.length || !used(value)) return;
       groups.push({ kind: "label", label: value, path: [], depth: path.length, ancestors: path,
         projects: members.filter(project => value.projectIds.includes(project.id)) });
       for (const child of declared) if (child.parent === value.id) placeDeclared(child, depth + 1, [...path, value.id]);

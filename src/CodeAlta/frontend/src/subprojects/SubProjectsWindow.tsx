@@ -191,7 +191,7 @@ function ProjectsPane({ map, entries, total, filter, onFilter, selected, onSelec
     </span>} />;
   return <div className="subprojects-body">
     <div className="subprojects-list-pane">
-      <InputGroup className="subprojects-filter" size="small" leftElement={<AppIcon name="filter" size={13} />} placeholder={t("Filter by name, folder or label")}
+      <InputGroup className="subprojects-filter" size="small" leftElement={<span className="subprojects-filter-icon"><AppIcon name="filter" size={13} /></span>} placeholder={t("Filter by name, folder or label")}
         value={filter} onChange={event => onFilter(event.target.value)} aria-label={t("Filter by name, folder or label")} />
       <ul className="subprojects-list" aria-label={t("Projects")}>
         {entries.map(entry => {
@@ -252,7 +252,7 @@ function EntryForm({ entry, labels, busy, error, onDirty, onSave, onRemove, onOp
   return <form className="subprojects-form" aria-label={entryName(entry)} onSubmit={event => { event.preventDefault(); if (changes && !busy) onSave(changes); }}>
     <header className="subprojects-form-head">
       <strong>{entryName(entry)}</strong><code>{entry.key}</code>
-      {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="goto" size={14} />} text={t("Show in the Explorer")} onClick={onOpen} />}
+      {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="locate" size={14} />} text={t("Show in the Explorer")} onClick={onOpen} />}
     </header>
     <FormGroup label={t("Name")} labelFor={`${id}-name`} helperText={t("Empty for the name of its folder.")}>
       <InputGroup id={`${id}-name`} value={draft.name} placeholder={entry.path.split("/").at(-1)} disabled={busy} autoComplete="off" spellCheck={false}
@@ -454,7 +454,7 @@ function AddPane({ api, epoch, projectId, map, busy, error, onAdd }: {
         {addable.length > 0 && <Button variant="minimal" text={chosen.size === addable.length ? t("Clear selection") : t("Select all")} disabled={busy}
           onClick={() => setChosen(chosen.size === addable.length ? new Set() : new Set(addable.map(candidate => candidate.path)))} />}
         <Button intent="primary" icon={<AppIcon name="plus" size={14} />} loading={busy} disabled={chosen.size === 0}
-          text={t(chosen.size === 1 ? "Add the folder" : "Add {count} folders", { count: chosen.size })} onClick={() => void onAdd([...chosen])} />
+          text={chosen.size === 0 ? t("Add folders") : t(chosen.size === 1 ? "Add the folder" : "Add {count} folders", { count: chosen.size })} onClick={() => void onAdd([...chosen])} />
       </span>
     </footer>
   </div>;
