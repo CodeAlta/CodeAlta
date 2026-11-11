@@ -27,8 +27,8 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
   let seq = 0;
   const event = (kind: string, text: string, extra: Partial<TimelineEvent> = {}): TimelineEvent => ({ seq: ++seq, at: now, kind, text, activityId: null, ...extra });
   const running = { id: "s1", projectId: "p1", live: "running", kind: "activity", line: null, at: now, activity: null, canSteer: true } as const;
-  server.state.sessions = [session("s1", "A running session", "p1", 0, { live: "running", kind: "activity", line: null, canSteer: true })];
-  const answer = event("assistant.message", "See [code](src/a.cs#L1250), [the guide](docs/guide.md), [the plan](docs/plan.md#L41), [gone](gone.txt), [elsewhere](//server/share/a.txt) and [the web](https://example.com/).");
+  server.state.sessions = [session("s1", "A running session", "p1", 0, { live: "running", kind: "activity", line: null, canSteer: true }), session("s2", "The review", "p1", 5)];
+  const answer = event("assistant.message", "See [code](src/a.cs#L1250), [the guide](docs/guide.md), [the plan](docs/plan.md#L41), [gone](gone.txt), [elsewhere](//server/share/a.txt), [the web](https://example.com/) and [the review](session:s2).");
   const ownPrompt = event("user.message", "Build it [my prompt](docs/own.md)");
   const linkedFile = (seq: number, link: string) => `s1/${seq}/${link}`;
   const longCode = numberedLines("code", 2500);
@@ -349,6 +349,20 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     await waitFor('document.querySelector(".output-viewer-note")?.textContent === "This file is not there."');
     await evaluate('document.querySelector(".output-viewer-close").click()');
     await waitFor('!document.querySelector(".output-viewer")');
+
+    // A link to a session is a chip with the project of the session and what it does, and a tap opens that session.
+    const chip = fileLink("the review");
+    assert.equal(await evaluate(`${chip}.dataset.sessionLink`), "s2");
+    assert.equal(await evaluate(`${chip}.dataset.sessionState`), "idle");
+    assert.equal(await evaluate(`${chip}.dataset.sessionScope`), "parser", "the project of the session");
+    await evaluate(`${chip}.scrollIntoView({ block: "center" })`);
+    await shot("session-link");
+    await evaluate(`${chip}.click()`);
+    await waitFor('location.hash === "#/session/s2"');
+    await waitFor('document.querySelector("#detail-title")?.textContent === "The review"');
+    await evaluate("history.back()");
+    await waitFor('location.hash === "#/session/s1"');
+    await waitFor(fileLink("the review"));
 
     // ---- A prompt queued before the page opened shows, and can be deleted ----
     await waitFor(`${card("Queued before the reload")}`);

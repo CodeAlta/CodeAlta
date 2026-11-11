@@ -131,7 +131,13 @@ export function startMobile(window: Window & typeof globalThis) {
 
   // ---- The list of sessions ----
   const list = $<HTMLUListElement>("sessions"), moreButton = $<HTMLButtonElement>("more");
-  const markdown = createMarkdownView({ window, upload: body => api.diagram(body), installed: () => installedApp(window), note: text => noteHere(text) });
+  // A link to a session is a chip with the state the page knows of it: a session it has not read yet is a plain chip, which opens it all the same.
+  const markdown = createMarkdownView({ window, upload: body => api.diagram(body), installed: () => installedApp(window), note: text => noteHere(text),
+    describeSession: id => {
+      const view = sessions.view(id);
+      return { title: view?.title ?? "", scope: view?.project ?? null, state: isBusy(view?.live?.live) ? "running" : "idle", updatedAt: view?.lastActivity ?? null };
+    },
+    openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; } });
 
   // The facts of a session, compact: the dot (with a word while it works), then its space, project, worktree, model and effort, agent and
   // whether it is a sub-agent; at most two lines, the time on the right.
