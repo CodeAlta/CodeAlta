@@ -71,6 +71,22 @@ public sealed class TrustedProxies
         return first?.ToLowerInvariant() is "https" or "http" ? first.ToLowerInvariant() : scheme;
     }
 
+    /// <summary>Gets the public host a trusted proxy forwards when it rewrites Host to localhost, as Dev Tunnels does.</summary>
+    /// <param name="peer">The peer of the connection.</param>
+    /// <param name="headers">The request headers.</param>
+    /// <param name="host">The unforwarded request host.</param>
+    /// <returns>The validated public host, or <paramref name="host"/> when untrusted, malformed or ambiguous.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="headers"/> is null.</exception>
+    public HostString HostOf(IPAddress? peer, IHeaderDictionary headers, HostString host)
+    {
+        ArgumentNullException.ThrowIfNull(headers);
+        if (peer is null || !IsTrusted(peer) || !headers.TryGetValue("X-Forwarded-Host", out var values) || values.Count != 1) return host;
+        var value = values[0];
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 255 || value.Any(static c => char.IsWhiteSpace(c) || char.IsControl(c) || c is ',' or '/' or '\\' or '@' or '?' or '#')
+            || !Uri.TryCreate("https://" + value, UriKind.Absolute, out var uri) || uri.UserInfo.Length != 0 || uri.Host.Length == 0) return host;
+        return new HostString(value);
+    }
+
     /// <summary>Gets whether an address is a trusted proxy.</summary>
     /// <param name="address">The address.</param>
     /// <returns>Whether one of the networks holds it.</returns>

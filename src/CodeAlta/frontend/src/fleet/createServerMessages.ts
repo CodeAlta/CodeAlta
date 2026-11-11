@@ -3,6 +3,26 @@
 type Row = readonly [string, string, string, string, string];
 
 export const createServerMessages = {
+  "A private Dev Tunnel (no router port to open)": ["Un Dev Tunnel privado (sin abrir puertos del router)", "Un Dev Tunnel privé (aucun port du routeur à ouvrir)",
+    "Ein privater Dev Tunnel (kein Router-Port nötig)", "プライベート Dev Tunnel (ルーターのポート開放不要)", "专用 Dev Tunnel（无需开放路由器端口）"],
+  "A private tunnel hosted as a service on that machine. Install devtunnel there first. Sign in with the device code shown during setup. Usage limits apply.": [
+    "Un túnel privado alojado como servicio en esa máquina. Instala devtunnel allí primero. Inicia sesión con el código de dispositivo mostrado durante la instalación. Hay límites de uso.",
+    "Un tunnel privé hébergé comme service sur cette machine. Installez-y d’abord devtunnel. Connectez-vous avec le code d’appareil affiché pendant la configuration. Des limites d’usage s’appliquent.",
+    "Ein privater Tunnel als Dienst auf diesem Rechner. Installieren Sie dort zuerst devtunnel. Melden Sie sich mit dem bei der Einrichtung angezeigten Gerätecode an. Es gelten Nutzungslimits.",
+    "そのマシン上でサービスとして動作するプライベートトンネルです。まず devtunnel をインストールし、セットアップ中に表示されるデバイスコードでサインインしてください。使用制限があります。",
+    "在该机器上作为服务托管的专用隧道。请先安装 devtunnel，再使用设置期间显示的设备代码登录。存在使用限额。"],
+  "Install the Dev Tunnels command line on the server's machine first, then start over.": [
+    "Instala primero la línea de comandos de Dev Tunnels en la máquina del servidor y vuelve a empezar.",
+    "Installez d’abord la ligne de commande Dev Tunnels sur la machine du serveur, puis recommencez.",
+    "Installieren Sie zuerst die Dev-Tunnels-Befehlszeile auf dem Serverrechner und beginnen Sie erneut.",
+    "まずサーバーのマシンに Dev Tunnels コマンドラインをインストールしてから、やり直してください。",
+    "请先在服务器机器上安装 Dev Tunnels 命令行，然后重新开始。"],
+  "The private Dev Tunnel could not be configured or started: follow the instructions below. Anonymous access was not enabled.": [
+    "No se pudo configurar o iniciar el Dev Tunnel privado: sigue las instrucciones. No se habilitó el acceso anónimo.",
+    "Le Dev Tunnel privé n’a pas pu être configuré ou démarré : suivez les instructions ci-dessous. L’accès anonyme n’a pas été activé.",
+    "Der private Dev Tunnel konnte nicht eingerichtet oder gestartet werden: Folgen Sie der Anleitung. Anonymer Zugriff wurde nicht aktiviert.",
+    "プライベート Dev Tunnel を設定または起動できませんでした。以下の手順を確認してください。匿名アクセスは有効にされていません。",
+    "无法配置或启动专用 Dev Tunnel：请遵循下方说明。未启用匿名访问。"],
   "The server runs, but the Dev Tunnel does not answer: devtunnel host must forward to its loopback port. Devices need the tunnel account or a connect token; see the instructions below.": [
     "El servidor funciona, pero el Dev Tunnel no responde: devtunnel host debe reenviar a su puerto de bucle local. Los dispositivos necesitan la cuenta del túnel o un token de conexión; consulta las instrucciones.",
     "Le serveur tourne, mais le Dev Tunnel ne répond pas : devtunnel host doit relayer vers son port de boucle locale. Les appareils ont besoin du compte du tunnel ou d’un jeton de connexion ; suivez les instructions ci-dessous.",

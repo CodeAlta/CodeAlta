@@ -34,6 +34,13 @@ internal static class ApiEndpoints
             .Produces<FleetUpdateStatus>()
             .WithSummary("The versions of the server and where its self-update stands: the running and installed versions, the one on trial, the switch that waits, the versions rolled back.");
 
+        api.MapGet("/server/tunnel-access", async (HttpContext context, ServerTunnelAccessSource tunnel) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Json(await tunnel.ReadAsync(context.RequestAborted).ConfigureAwait(false), ServerApiJsonContext.Default.FleetTunnelAccessDto);
+            })
+            .WithSummary("A fresh connect-only credential of the private Dev Tunnel; only a signed, approved device may read it.");
+
         api.MapPost("/setup", async (SetupRequest? request, HttpContext context, SetupService setup, Telemetry.ServerTelemetry telemetry) =>
             {
                 var response = await setup.SetUpAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false);

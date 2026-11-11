@@ -126,7 +126,7 @@ internal sealed partial class FleetServerService
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
-        if (request.Token is not { Length: > 0 and <= 256 } token) return new("invalid_request", null, null);
+        if (!FleetTunnelAccessStore.IsEnrollmentCode(request.Token) || request.Token is not { } token) return new("invalid_request", null, null);
         return await ActAsync(async () => Result(await _servers!.JoinAsync(address, token.Trim(), pin, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
     }
 

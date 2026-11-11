@@ -110,6 +110,8 @@ public sealed partial class FleetServerClient : IDisposable
     private readonly DeviceIdentity _identity;
     private readonly TimeProvider _time;
     private readonly HttpMessageHandler? _handler;
+    private readonly FleetTunnelAccessStore? _tunnelAccess;
+    private readonly SemaphoreSlim _tunnelRenewal = new(1, 1);
 
     /// <summary>Initializes a new instance of the <see cref="FleetServerClient"/> class.</summary>
     /// <param name="serverAddress">The address of the server (<see cref="FleetServerAddress.TryParse(string?, out Uri?)"/>).</param>
@@ -139,10 +141,14 @@ public sealed partial class FleetServerClient : IDisposable
         _time = time ?? TimeProvider.System;
         _handler = handler;
         CertificatePin = certificatePin;
+        if (FleetTunnelAccessStore.IsTunnel(serverAddress))
+            _tunnelAccess = new FleetTunnelAccessStore(identity, _time);
         // A pinned server is reached through a handler of this client that trusts its key only (a given handler, of a test, wins).
+        var ownHandler = handler is null ? certificatePin is not null ? FleetServerCertificates.CreateHandler(certificatePin) : new SocketsHttpHandler() : null;
+        // A private relay redirects unauthenticated requests to sign-in. Never forward its custom token header there.
+        if (ownHandler is not null && _tunnelAccess is not null) ownHandler.AllowAutoRedirect = false;
         _http = handler is not null ? new HttpClient(handler, disposeHandler: false)
-            : certificatePin is not null ? new HttpClient(FleetServerCertificates.CreateHandler(certificatePin), disposeHandler: true)
-            : new HttpClient();
+            : new HttpClient(ownHandler!, disposeHandler: true);
         _http.Timeout = TimeSpan.FromSeconds(30);
         _ownsHttp = true;
     }
@@ -250,11 +256,39 @@ public sealed partial class FleetServerClient : IDisposable
     /// <returns>The token, whose value is shown once.</returns>
     /// <exception cref="FleetServerException">The server refused the call.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<EnrollmentTokenResponse> CreateEnrollmentTokenAsync(TimeSpan? lifetime = null, string? label = null, CancellationToken cancellationToken = default)
-        => SendAsync(HttpMethod.Post, "api/v1/enrollment-tokens",
+    public async Task<EnrollmentTokenResponse> CreateEnrollmentTokenAsync(TimeSpan? lifetime = null, string? label = null, CancellationToken cancellationToken = default)
+    {
+        var invitation = await SendAsync(HttpMethod.Post, "api/v1/enrollment-tokens",
             Body(new EnrollmentTokenRequest(lifetime is { } value ? (int)value.TotalSeconds : null, string.IsNullOrWhiteSpace(label) ? null : label.Trim()),
                 ServerApiJsonContext.Default.EnrollmentTokenRequest),
-            ServerApiJsonContext.Default.EnrollmentTokenResponse, cancellationToken);
+            ServerApiJsonContext.Default.EnrollmentTokenResponse, cancellationToken).ConfigureAwait(false);
+        if (_tunnelAccess?.Read(ServerAddress) is null) return invitation;
+        var access = await GetTunnelAccessAsync(cancellationToken).ConfigureAwait(false);
+        _tunnelAccess.Save(ServerAddress, access);
+        return invitation with { Token = FleetTunnelAccessStore.Invitation(invitation.Token, access),
+            ExpiresAt = invitation.ExpiresAt < access.ExpiresAt ? invitation.ExpiresAt : access.ExpiresAt };
+    }
+
+    /// <summary>Renews a private Dev Tunnel's connect token before it expires. An offline device with an expired token needs a fresh invitation.</summary>
+    /// <param name="cancellationToken">Stops the renewal.</param>
+    /// <returns>A task that completes once access is current, or no tunnel credential is held.</returns>
+    /// <exception cref="FleetServerException">The approved device or the tunnel owner's login was refused.</exception>
+    /// <exception cref="HttpRequestException">The relay is unreachable or the old credential expired.</exception>
+    public async Task RenewTunnelAccessAsync(CancellationToken cancellationToken)
+    {
+        if (_tunnelAccess is null) return;
+        await _tunnelRenewal.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_tunnelAccess.Read(ServerAddress) is not { } held || held.ExpiresAt - _time.GetUtcNow() > TimeSpan.FromHours(2)) return;
+            var access = await GetTunnelAccessAsync(cancellationToken).ConfigureAwait(false);
+            _tunnelAccess.Save(ServerAddress, access);
+        }
+        finally { _tunnelRenewal.Release(); }
+    }
+
+    private Task<FleetTunnelAccessDto> GetTunnelAccessAsync(CancellationToken cancellationToken)
+        => SendAsync(HttpMethod.Get, "api/v1/server/tunnel-access", null, ServerApiJsonContext.Default.FleetTunnelAccessDto, cancellationToken);
 
     /// <summary>Registers this device as an execution node with an enrollment token: it is pending until a controller device approves it.</summary>
     /// <param name="token">The enrollment token.</param>
@@ -284,6 +318,7 @@ public sealed partial class FleetServerClient : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceName);
         if (!FleetDeviceKinds.IsKnown(kind)) throw new ArgumentException($"'{kind}' is not a class of device.", nameof(kind));
+        token = (_tunnelAccess ?? new FleetTunnelAccessStore(_identity)).ImportInvitation(ServerAddress, token.Trim());
         var enrolled = await SendAsync(HttpMethod.Post, "api/v1/enroll",
             Body(new EnrollRequest(token.Trim(), PublicKey, deviceName.Trim(), kind), ServerApiJsonContext.Default.EnrollRequest),
             ServerApiJsonContext.Default.EnrollResponse, cancellationToken).ConfigureAwait(false);
@@ -770,6 +805,7 @@ public sealed partial class FleetServerClient : IDisposable
     public void Dispose()
     {
         if (_ownsHttp) _http.Dispose();
+        _tunnelRenewal.Dispose();
     }
 
     // Signs the entry that follows the last one of the verified list and posts it; read again once when another entry was appended meanwhile.
@@ -826,6 +862,7 @@ public sealed partial class FleetServerClient : IDisposable
 
     private async Task<TResult> SendAsync<TResult>(HttpMethod method, string relative, byte[]? body, JsonTypeInfo<TResult> resultType, CancellationToken cancellationToken)
     {
+        if (relative != "api/v1/server/tunnel-access") await RenewTunnelAccessAsync(cancellationToken).ConfigureAwait(false);
         using var request = CreateSigned(method, relative, body);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var text = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
@@ -859,6 +896,7 @@ public sealed partial class FleetServerClient : IDisposable
         request.Headers.Add(FleetSignedRequest.TimestampHeader, time.ToString(CultureInfo.InvariantCulture));
         request.Headers.Add(FleetSignedRequest.NonceHeader, nonce);
         request.Headers.Add(FleetSignedRequest.SignatureHeader, Base64Url.EncodeToString(_identity.SignData(signed)));
+        _tunnelAccess?.Authorize(ServerAddress, request);
         return request;
     }
 

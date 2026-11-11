@@ -321,7 +321,10 @@ public sealed class SignInService : IDisposable
                 // trusted proxy says; the passkey ceremony needs that secure origin.
                 var scheme = Proxies is { Any: true } proxies ? proxies.SchemeOf(context.Connection.RemoteIpAddress, context.Request.Headers, context.Request.Scheme)
                     : context.Request.Scheme;
-                url = new Uri($"{scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(id)}");
+                // Dev Tunnels' browser sign-in keeps the query but drops the fragment. This is a short-lived ceremony
+                // id, never a tunnel credential; the page removes it from the address and sends no referrer.
+                var separator = context.Request.Host.Host.EndsWith(".devtunnels.ms", StringComparison.OrdinalIgnoreCase) ? "?attempt=" : "#";
+                url = new Uri($"{scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey{separator}{Uri.EscapeDataString(id)}");
             }
             else if (deviceFlow)
             {

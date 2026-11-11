@@ -23,6 +23,42 @@ public sealed class DesktopFleetServerSetupTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task ATransportRefreshInvitation_KeepsTheExistingDeviceLink_WithoutEnrollingAgain()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-tunnel-recovery-").FullName;
+        string At(string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
+        try
+        {
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = At("global"), CurrentProjectPath = At("project"), DiscoveryScope = new(At("home"), root), BuiltInSkillRoot = At("builtin"),
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+            }, TestContext.CancellationToken);
+            using var identity = DeviceIdentity.LoadOrCreate(host.CatalogOptions.FleetRoot);
+            var address = new Uri("https://personal-2586.euw.devtunnels.ms");
+            var now = DateTimeOffset.UtcNow;
+            var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), "org", "Home", identity.DeviceId,
+                FleetDeviceKinds.Controller, FleetServerLinkStates.Approved, now, now);
+            new FleetServerLinkStore(host.CatalogOptions.FleetRoot).Save(link);
+            await using var servers = new DesktopFleetServers(host, "Desktop", "4.2.0") { Handler = new NoEnrollment() };
+            var access = new FleetTunnelAccessDto(address.ToString(), "fresh.connect.token", now.AddHours(24));
+            Assert.AreEqual(link, await servers.JoinAsync(address, FleetTunnelAccessStore.Invitation("transport-refresh", access), null, TestContext.CancellationToken));
+            Assert.AreEqual(access, new FleetTunnelAccessStore(identity).Read(address));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private sealed class NoEnrollment : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => throw new AssertFailedException("Refreshing an existing transport link must not enroll it again.");
+    }
+
+    [TestMethod]
     public async Task ASetUpServer_IsPinnedToTheEntryThisDesktopSigned_SoAListRootedInAnotherKeyIsRefusedFromTheFirstRead()
     {
         var token = TestContext.CancellationToken;

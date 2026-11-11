@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
 using CodeAlta.Plugins.Abstractions;
 using CodeAlta.Plugins.PrivateNetworks;
 
@@ -63,6 +66,9 @@ internal sealed record SshServerSetupRequest
 
     /// <summary>Gets whether the person asked the matching private-network provider to publish the server.</summary>
     public bool PublishNetwork { get; init; }
+
+    /// <summary>Gets whether to create and host a persistent private Dev Tunnel on the server's machine.</summary>
+    public bool DevTunnel { get; init; }
 }
 
 /// <summary>The steps of a server set up over SSH.</summary>
@@ -90,6 +96,9 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
     /// <summary>The proxies a server behind an address of its own trusts: the ones on its own loopback (<c>altaserver --trusted-proxy</c>).</summary>
     internal const string LoopbackProxies = "127.0.0.1;::1";
 
+    /// <summary>Gets what keeps a tunnel credential read over SSH before checking the public address. It is never progress text.</summary>
+    internal Func<FleetTunnelAccessDto, CancellationToken, Task>? TunnelAccessReceived { get; init; }
+
     /// <summary>Runs the setup.</summary>
     /// <param name="request">The computer and the options.</param>
     /// <param name="reachable">Checks that the server answers at an address from this computer, with the pin of its own certificate if it has one: null when it does, otherwise what blocked it.</param>
@@ -103,7 +112,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
     {
         ArgumentNullException.ThrowIfNull(request);
         var target = request.Target;
-        var onNetwork = request.Address is null;
+        var onNetwork = request.Address is null && !request.DevTunnel;
         var encrypted = onNetwork && request.OwnCertificate;
         var address = request.Address ?? new Uri($"{(encrypted ? "https" : "http")}://{(target.Host.Contains(':', StringComparison.Ordinal) ? $"[{target.Host}]" : target.Host)}:"
             + request.Port.ToString(CultureInfo.InvariantCulture));
@@ -124,6 +133,8 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
         progress(new(SshSetupSteps.Check, "running"));
         if (facts.RuntimeIdentifier is not { } rid || facts.Os is not ("Linux" or "Darwin")) throw new SshSetupException(SshSetupSteps.Check, "unsupported_system", $"{facts.OsName} {facts.Architecture}");
         if (facts.Dotnet is null || facts.Sdk is null) throw new SshSetupException(SshSetupSteps.Check, "dotnet_missing", $"{facts.OsName} {facts.Architecture}");
+        if (request.DevTunnel && !facts.DevTunnel)
+            throw new SshSetupException(SshSetupSteps.Check, "devtunnel_not_installed", "https://learn.microsoft.com/azure/developer/dev-tunnels/get-started");
         SshNodeInstaller.CheckAlwaysOn(facts, request.AlwaysOn, request.SudoPassword, "altaserver install");
         progress(new(SshSetupSteps.Check, "done", $"{facts.OsName} {facts.Architecture} · .NET SDK {facts.Sdk}"));
 
@@ -148,7 +159,17 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Server {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted, request.AlwaysOn, request.SudoPassword),
+        if (request.DevTunnel)
+        {
+            // Run as the SSH account, before a system service's sudo: its credential cache must own the tunnel.
+            var configure = await ssh.RunAsync(target, TunnelScript(facts, toolPath, dataRoot, $"configure --port {request.Port.ToString(CultureInfo.InvariantCulture)}"),
+                request.TrustedHostKey, line =>
+                {
+                    if (line.StartsWith("Dev Tunnel sign-in:", StringComparison.Ordinal)) progress(new(SshSetupSteps.Service, "running", line));
+                }, cancellationToken).ConfigureAwait(false);
+            if (!configure.Succeeded) throw new SshSetupException(SshSetupSteps.Service, "devtunnel_setup_failed", Lines(configure.Error));
+        }
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted, request.AlwaysOn, request.SudoPassword, request.DevTunnel),
             request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
         if (!service.Succeeded)
             throw new SshSetupException(SshSetupSteps.Service, SshNodeInstaller.SudoRefused(service.Error + service.Output) ? "sudo_refused" : "service_failed", Lines(service.Error + service.Output));
@@ -157,6 +178,29 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
         var marker = service.Output.IndexOf(SshNodeInstaller.StatusMarker, StringComparison.Ordinal);
         var pin = encrypted ? (marker < 0 ? service.Output : service.Output[..marker]).Split('\n', StringSplitOptions.TrimEntries).LastOrDefault(FleetServerCertificates.IsPin) : null;
         if (encrypted && pin is null) throw new SshSetupException(SshSetupSteps.Service, "service_failed", "The server did not print the pin of its certificate. " + Lines(service.Output));
+        if (request.DevTunnel)
+        {
+            SshResult credential;
+            using var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            waiting.CancelAfter(StartTimeout);
+            try
+            {
+                credential = await ssh.RunAsync(target, TunnelScript(facts, toolPath, dataRoot, "token", waitForHost: true),
+                    request.TrustedHostKey, null, waiting.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new SshSetupException(SshSetupSteps.Service, "devtunnel_setup_failed", "The tunnel service did not report its address within 60 s.");
+            }
+
+            FleetTunnelAccessDto? access = null;
+            try { if (credential.Succeeded) access = JsonSerializer.Deserialize(credential.Output.Trim(), ServerApiJsonContext.Default.FleetTunnelAccessDto); }
+            catch (JsonException) { }
+            if (access is null || !Uri.TryCreate(access.Address, UriKind.Absolute, out var tunnelAddress) || !FleetTunnelAccessStore.IsTunnel(tunnelAddress))
+                throw new SshSetupException(SshSetupSteps.Service, "devtunnel_setup_failed", "The tunnel service did not return a private HTTPS address and a connect credential. Check altaserver tunnel status on the machine.");
+            address = tunnelAddress;
+            if (TunnelAccessReceived is { } received) await received(access, cancellationToken).ConfigureAwait(false);
+        }
         var restart = SshNodeInstaller.AfterRestart(service.Output);
         progress(new(SshSetupSteps.Service, "done", (facts.Os == "Linux" ? "systemd" : "launchd") + $", port {request.Port}"
             + (onNetwork ? ", every network of the machine" : ", its loopback") + (encrypted ? ", HTTPS with its own certificate" : "") + (restart is null ? "" : $" · {restart}")));
@@ -218,7 +262,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
     // the server answers its own status. The default data root has the service of ~/.altaserver; another one a service
     // named after it, so that two never collide.
     internal static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, bool onNetwork, bool encrypted, bool alwaysOn = false,
-        string? sudoPassword = null)
+        string? sudoPassword = null, bool devTunnel = false)
     {
         var script = new StringBuilder(SshNodeInstaller.DotnetPrelude(facts));
         script.Append("TOOLS=").Append(SshNodeInstaller.Quote(toolPath)).Append("\nTOOLS=$(cd \"$TOOLS\" && pwd)\n");
@@ -237,7 +281,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
         }
 
         script.Append("ME=$(id -un)\n");
-        var root = dataRoot is not null ? " --data-root \"$ROOT\"" : "";
+        var root = dataRoot is not null || devTunnel ? " --data-root \"$ROOT\"" : "";
         var sudo = SshNodeInstaller.Sudo(facts, sudoPassword);
         if (alwaysOn && facts.Os == "Darwin")
         {
@@ -251,6 +295,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
         }
 
         script.Append(root);
+        if (devTunnel) script.Append(" --dev-tunnel --port ").Append(port.ToString(CultureInfo.InvariantCulture));
         // The local network is HTTPS with the server's own certificate, or plain HTTP that the person chose: the server
         // refuses that one unless it is forced.
         // Behind an address of its own, the server stays on its loopback, and what stands in front of it there (Tailscale
@@ -277,6 +322,17 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion, 
         script.Append("TOOLS=").Append(SshNodeInstaller.Quote(toolPath)).Append('\n');
         script.Append("ROOT=").Append(SshNodeInstaller.Quote(dataRoot)).Append("\nROOT=$(cd \"$ROOT\" && pwd)\n");
         script.Append("exec \"$TOOLS/altaserver\" setup-code --data-root \"$ROOT\"\n");
+        return script.ToString();
+    }
+
+    private static string TunnelScript(SshMachineFacts facts, string toolPath, string dataRoot, string action, bool waitForHost = false)
+    {
+        var script = new StringBuilder(SshNodeInstaller.DotnetPrelude(facts));
+        script.Append("TOOLS=").Append(SshNodeInstaller.Quote(toolPath)).Append("\nROOT=").Append(SshNodeInstaller.Quote(dataRoot))
+            .Append("\nmkdir -p \"$ROOT\"\nROOT=$(cd \"$ROOT\" && pwd)\n");
+        if (waitForHost)
+            script.Append("i=0\nwhile [ $i -lt 60 ]; do\n  OUT=$(\"$TOOLS/altaserver\" tunnel token --data-root \"$ROOT\" 2>/dev/null) && { printf '%s\\n' \"$OUT\"; exit 0; }\n  i=$((i+1)); sleep 1\ndone\nexit 1\n");
+        else script.Append("\"$TOOLS/altaserver\" tunnel ").Append(action).Append(" --data-root \"$ROOT\"\n");
         return script.ToString();
     }
 

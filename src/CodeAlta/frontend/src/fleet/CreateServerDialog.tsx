@@ -21,7 +21,7 @@ export type CreateServerMachinesApi = Pick<typeof machines, "list" | "joinServer
 
 type StepState = { state: "waiting" | "running" | "done" | "failed"; detail?: string | null };
 type Where = "ssh" | "local";
-type Reach = "address" | "encrypted" | "network";
+type Reach = "address" | "devtunnel" | "encrypted" | "network";
 // A server just created has no space linked yet.
 const noSpaces: readonly string[] = [];
 
@@ -93,8 +93,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
     setTailscaleServe(serve);
     try {
       const events = await api.createServer(where === "local"
-        ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false, alwaysOn: false, sudoPassword: null, tailscaleServe: false, publishNetwork: false }
-        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted", alwaysOn, sudoPassword: password, tailscaleServe: serve, publishNetwork: serve },
+        ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false, alwaysOn: false, sudoPassword: null, tailscaleServe: false, publishNetwork: false, devTunnel: false }
+        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted", alwaysOn, sudoPassword: password, tailscaleServe: serve, publishNetwork: serve, devTunnel: reach === "devtunnel" },
         { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
@@ -139,12 +139,14 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
           <div className="add-machine-field"><span>{t("How your machines reach it")}</span>
             <RadioGroup selectedValue={reach} onChange={event => setReach(event.currentTarget.value as Reach)} className="create-server-reach">
               <Radio value="address" label={t("An address I put in front of it (a domain, Tailscale Serve)")} />
+              <Radio value="devtunnel" label={t("A private Dev Tunnel (no router port to open)")} />
               <Radio value="encrypted" labelElement={<span>{t("The local network, encrypted with the server's own certificate")} <code className="muted-text">{`https://${shownHost || "host"}:${port}`}</code></span>} />
               <Radio value="network" labelElement={<span>{t("The local network, not encrypted")} <code className="muted-text">{`http://${shownHost || "host"}:${port}`}</code></span>} />
             </RadioGroup>
             {reach === "address" && <InputGroup fill value={address} placeholder="https://fleet.example.com" aria-label={t("Address of the server")}
               onChange={event => setAddress(event.currentTarget.value)} />}
             {reach === "encrypted" && <small className="muted-text create-server-reach-note">{t("The server makes a certificate of its own. No browser trusts it, but CodeAlta reads its fingerprint over SSH and every device checks it at each connection: nothing travels in clear, and no other machine of the network can pass for your server.")}</small>}
+            {reach === "devtunnel" && <small className="muted-text create-server-reach-note">{t("A private tunnel hosted as a service on that machine. Install devtunnel there first. Sign in with the device code shown during setup. Usage limits apply.")}</small>}
             {reach === "network" && <small className="muted-text create-server-reach-note">{t("Anyone on the network can read what your devices send the server. Only on a network you trust.")}</small>}
           </div>
           <Checkbox className="add-machine-always-on" checked={alwaysOn} onChange={event => setAlwaysOn(event.currentTarget.checked)}

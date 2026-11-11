@@ -276,7 +276,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         if pgrep -x alta >/dev/null 2>&1; then echo "desktop=running"; fi
         if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then echo "firewall=ufw"; fi
         if command -v tailscale >/dev/null 2>&1; then echo "tailscale=yes"; fi
-        if command -v devtunnel >/dev/null 2>&1; then echo "devtunnel=yes"; fi
+        if command -v devtunnel >/dev/null 2>&1 || [ -x "$HOME/.devtunnel/bin/devtunnel" ]; then echo "devtunnel=yes"; fi
         if [ -f /etc/alpine-release ]; then echo "libc=musl"; fi
         if [ "$(id -u)" = 0 ]; then echo "sudo=root"; elif command -v sudo >/dev/null 2>&1; then
           if sudo -n true >/dev/null 2>&1; then echo "sudo=nopassword"; else echo "sudo=password"; fi

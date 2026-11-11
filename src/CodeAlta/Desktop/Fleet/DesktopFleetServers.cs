@@ -347,6 +347,18 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         }
     }
 
+    /// <summary>Keeps the private tunnel credential read over SSH before the server's first public health request.</summary>
+    internal async Task KeepTunnelAccessAsync(CodeAlta.Fleet.Protocol.Api.FleetTunnelAccessDto access, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { new FleetTunnelAccessStore(Identity()).Save(new Uri(access.Address), access); }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Adds the held tunnel credential to the setup's health request, without putting it in progress or links.</summary>
+    internal void AuthorizeTunnelRequest(Uri address, HttpRequestMessage request)
+        => new FleetTunnelAccessStore(_fleetRoot, TimeProvider.System).Authorize(address, request);
+
     /// <summary>
     /// Joins a server with an enrollment token, as a controller device of the person who made the token: this desktop
     /// waits for one of that person's controller devices to approve it, then may approve others.
@@ -375,6 +387,12 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_store.Find(FleetServerAddress.Format(address)) is { State: not FleetServerLinkStates.Revoked } existing
+                && existing.DeviceId == Identity().DeviceId && FleetTunnelAccessStore.IsInvitation(token))
+            {
+                new FleetTunnelAccessStore(Identity()).ImportInvitation(address, token.Trim());
+                return existing;
+            }
             RequireNoLink(address);
             var identity = Identity();
             using var client = new FleetServerClient(address, identity, Handler, null, certificatePin);

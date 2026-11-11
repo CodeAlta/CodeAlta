@@ -29,6 +29,8 @@ An address in front of the server is yours to set up: its name, its proxy and it
 
 For a `*.devtunnels.ms` address, the step checks Dev Tunnels on the server's machine and explains what is missing. `devtunnel host <tunnel-id>` must keep running there and forward the tunnel's HTTP port to `http://127.0.0.1:2586` (or the port in **Advanced**). Devices need the tunnel account's sign-in or a connect token; a headless node cannot use a browser sign-in. Do not enable anonymous access to get past this check. A private network supplied by a plugin can diagnose and offer publication in the same step; **Publish with its private network** asks for the machine's sudo password only when needed.
 
+To have CodeAlta create and host it for you, choose **A private Dev Tunnel (no router port to open)** instead of typing an address. Install the [Dev Tunnels command line](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started) on the machine first. Setup shows a device code when the tunnel account needs to sign in: open its page on your computer and enter the code. The tunnel is created by your SSH account, not by sudo. CodeAlta discovers its HTTPS address and keeps its connect credential privately; neither goes in a router rule. See [A private Dev Tunnel](#a-private-dev-tunnel).
+
 Once you are its owner, **Spaces on this server** lists your spaces: a server shows the sessions of a linked space only, yours included, so click **Link all my spaces** or turn on the ones you want. **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
 
 When you click **Done**, CodeAlta shows your **recovery key**: 32 words, shown once. Write them down or click **Copy** and keep them somewhere safe, click **I wrote them down**, and type the two words it asks for.
@@ -52,6 +54,29 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 `altaserver status` tells whether it runs and whether it will start again after a restart. `altaserver install --dry-run` prints what it would set up, `altaserver uninstall` stops the server and removes the service: the data root stays. `--system` starts it at boot, whoever is logged in. On macOS and Linux it runs as `--account <name>`, with `sudo`. On Windows, `altaserver install --system` registers a Windows service that runs as its own account, `NT SERVICE\altaserver`, which needs no password, with its data root under `%ProgramData%\CodeAlta`; `--account <name> --password-stdin` runs it as that account instead, with the password given once on standard input (Windows keeps it; CodeAlta does not). A data root you already use is not moved: name it with `--data-root <folder>`, and the service account is given access to it. A server needs no one's login, so this suits it better than a task at your sign-in. `altaserver update` keeps working under the service.
 
 `altaserver update` does the same for CodeAlta Server: it first copies its database to the `backups` folder of its data root, and puts that copy back if the new version has to be undone. The server keeps the secrets it uses itself (the client secret of your company's sign-in, the headers of your telemetry collector) encrypted with a key of its `keys` folder: keep that folder with your copies of the database. A copy made by a version before 4.0 may hold them in clear: the server tells you when it starts, and `altaserver backups --delete-unsealed` deletes those copies.
+
+## A private Dev Tunnel
+
+A small personal fleet can use [Microsoft Dev Tunnels](https://learn.microsoft.com/azure/developer/dev-tunnels/overview) without opening an inbound port. This is a preview service for development and testing, without an uptime guarantee, not a production hosting service.
+
+Install `devtunnel` on the server's machine, then:
+
+```sh
+altaserver install --dev-tunnel
+altaserver tunnel status
+```
+
+When needed, installation signs the tunnel account in with a device code, without a browser on the server. It creates a persistent, private tunnel and installs **two services**: the server on its HTTP loopback port and `devtunnel host` through `altaserver tunnel host`. The second service keeps the tunnel available independently of CodeAlta Desktop. `tunnel status` prints its saved id and, once the host starts, its HTTPS address. Reinstalling reuses the id; uninstalling stops both services but keeps the tunnel and data. An unused tunnel can expire after 30 days without activity.
+
+The tunnel's service must run as the account that signed in. For a system service, first run `altaserver tunnel configure --data-root <folder> --port 2586` **as that account**, then install with `--system --account <account> --data-root <folder> --dev-tunnel` (with sudo on Linux/macOS, or from an elevated terminal on Windows). **Create my server** does this over SSH on Linux and macOS. Windows system services also need their named account's password as described above; a virtual service account has no tunnel-owner login. A user service on Windows starts at login. If the owner's login expires, sign in again on the server's machine as the service account with `devtunnel user login --github -d`.
+
+**Invite a computer…** and **Add your machines** include temporary tunnel access in the enrollment code. Copy the **whole code** privately; it opens the network gate but does not approve the device. Nodes need no GitHub account or tunnel of their own. Approved devices renew access while online. A device offline until its connect token expires needs a fresh invitation from an approved computer: give it in **Connect to my server…**, or run the node's join command again, with the same server address. An existing link keeps its device identity. [Why access stays private](security.md#dev-tunnels).
+
+If every computer's token expired, reach the server over SSH and run `altaserver tunnel token --invitation` (with its `--data-root` if needed). Give that secret refresh code to an **existing** link in the same way. It restores only transport access; it cannot enroll a new device. If necessary, sign the tunnel owner in again first.
+
+To open a server page such as passkey sign-in, the browser also needs an account allowed by the tunnel. The private invitation authorizes the desktop and node clients, not the browser; see [Dev Tunnels access](security.md#dev-tunnels).
+
+Microsoft currently limits an account to **5 GB per month** of bandwidth, with **1,500 HTTP requests/minute per port**, **1,000 active connections per port**, up to **20 MB/s per tunnel**, and a **16 MB HTTP request body**. See the [service limits](https://aka.ms/devtunnels/limits) for all quotas. State updates and relayed sessions both use the allowance. Measure idle fleet updates and representative relayed sessions against that budget before relying on it; these quotas are not a CodeAlta throughput promise.
 
 ## Add machines and computers
 

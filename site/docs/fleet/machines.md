@@ -32,6 +32,10 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Ad
 | **With a pairing link** | CodeAlta Desktop runs there: paste the link of its **Pair another computer…** (see [Pair two CodeAlta Desktops](#pair-two-codealta-desktops)). Or CodeAlta Node runs there: paste the link of `altanode pair` (see [Pair it with CodeAlta Desktop](#pair-it-with-codealta-desktop)) |
 | **Through my server** | The machine joins your CodeAlta Server with one command, and you approve it when it shows the same six words (see [Connect to a CodeAlta Server](server.md)) |
 
+With a [private Dev Tunnel server](server.md#a-private-dev-tunnel), use the whole invitation code: it includes temporary network access, so `altanode` needs no GitHub sign-in and no inbound port or tunnel of its own. Approved devices renew it while online. After more than a token's lifetime offline, get a fresh invitation and join the same address again; this refreshes transport access without replacing an existing device link.
+
+Direct pairing links, without a server, do not grant Dev Tunnel access. A browser sign-in is not a headless pairing credential: use a private network such as Tailscale for direct pairing, or an authenticated `devtunnel connect` port-forward set up separately. The managed Dev Tunnel option is for a server with outbound-connected nodes, not automatic publication of each node.
+
 ## Pair two CodeAlta Desktops
 
 Your laptop and your desktop at home, a Windows PC and a Mac: each runs CodeAlta Desktop, and each can be a machine of the other. Nothing else is installed.

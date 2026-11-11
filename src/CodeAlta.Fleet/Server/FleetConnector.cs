@@ -232,6 +232,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
     private long _keysReadAt;
     // Completed once a read of the keys ends, then replaced: what RefreshKeysAsync waits for.
     private TaskCompletionSource _keysRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly FleetServerClient? _tunnelClient;
 
     /// <summary>Initializes a new instance of the <see cref="FleetConnector"/> class; <see cref="Start"/> connects.</summary>
     /// <param name="options">The server, the device and what to publish.</param>
@@ -242,6 +243,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options.ServerAddress);
         ArgumentNullException.ThrowIfNull(options.Identity);
         _options = options;
+        if (FleetTunnelAccessStore.IsTunnel(options.ServerAddress))
+            _tunnelClient = new FleetServerClient(options.ServerAddress, options.Identity, null, options.TimeProvider, options.CertificatePin);
         _outbox = FleetPublicationOutbox.Load(options.OutboxPath);
         if (options.Statistics is not null)
         {
@@ -366,6 +369,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
         await Task.WhenAll(relays).ConfigureAwait(false);
         SetState(FleetConnectorState.Stopped, LastError);
         _stop.Dispose();
+        _tunnelClient?.Dispose();
     }
 
     private async Task RunAsync(CancellationToken stop)
@@ -446,6 +450,9 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var address = FleetServerAddress.ControlAddress(_options.ServerAddress);
         var transport = _options.ConnectTransport is { } connect
             ? await connect(address, stop).ConfigureAwait(false)
+            : FleetTunnelAccessStore.IsTunnel(_options.ServerAddress)
+                ? new FleetWebSocketTransport(await new FleetTunnelAccessStore(_options.Identity, _options.TimeProvider).ConnectAsync(_options.ServerAddress, address,
+                    _options.CertificatePin, null, stop).ConfigureAwait(false))
             : await FleetWebSocketTransport.ConnectAsync(address, socket => FleetServerCertificates.Configure(socket, _options.CertificatePin), stop).ConfigureAwait(false);
         FleetWelcome welcome;
         try
@@ -583,6 +590,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 var now = _options.TimeProvider.GetUtcNow();
                 if (dirty || now - lastRead >= _options.PollInterval)
                 {
+                    if (_tunnelClient is not null) await _tunnelClient.RenewTunnelAccessAsync(stop).ConfigureAwait(false);
                     var active = await PublishAsync(connection, stop).ConfigureAwait(false);
                     lastRead = _options.TimeProvider.GetUtcNow();
                     dirty = false;

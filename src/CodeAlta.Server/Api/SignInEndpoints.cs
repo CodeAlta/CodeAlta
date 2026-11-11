@@ -206,7 +206,9 @@ internal static class PasskeyPage
         (() => {
           const status = document.getElementById("status");
           const button = document.getElementById("go");
-          const attempt = decodeURIComponent(location.hash.slice(1));
+          const query = new URLSearchParams(location.search);
+          const attempt = query.get("attempt") || decodeURIComponent(location.hash.slice(1));
+          if (query.has("attempt")) history.replaceState(null, "", location.pathname + location.hash);
           const show = text => { status.textContent = text; };
           if (!attempt) { show("Start the sign-in from CodeAlta."); button.hidden = true; return; }
           if (!window.PublicKeyCredential || !PublicKeyCredential.parseRequestOptionsFromJSON) {

@@ -378,6 +378,8 @@ public sealed record SetUpdatePolicyRequest(FleetSignedUpdateDocument Policy);
 [JsonSerializable(typeof(ListResponse<SessionDto>))]
 [JsonSerializable(typeof(EnrollmentTokenRequest))]
 [JsonSerializable(typeof(EnrollmentTokenResponse))]
+[JsonSerializable(typeof(FleetTunnelAccessDto))]
+[JsonSerializable(typeof(FleetTunnelInvitationDto))]
 [JsonSerializable(typeof(EnrollRequest))]
 [JsonSerializable(typeof(EnrollResponse))]
 [JsonSerializable(typeof(DeviceListChangeRequest))]

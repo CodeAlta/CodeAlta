@@ -22,8 +22,9 @@ internal sealed partial class DevTunnelNetwork
         if (!await host.IsInstalledAsync("devtunnel", cancellationToken).ConfigureAwait(false))
             return new($"{instructions}\nInstall devtunnel there: {DevTunnel.InstallUrl}", "devtunnel_host_missing");
         var user = await host.RunAsync("devtunnel", ["user", "show"], null, cancellationToken).ConfigureAwait(false);
-        if (user.ExitCode != 0 || !DevTunnel.IsSignedIn(new(user.ExitCode, user.Output, user.TimedOut)))
-            return new($"{instructions}\nSign in there with devtunnel user login --github --use-device-code.", "devtunnel_host_missing");
+        if (user.ExitCode != 0 || user.TimedOut || !user.Output.Contains("Logged in as", StringComparison.OrdinalIgnoreCase)
+            || user.Output.Contains("Not logged in", StringComparison.OrdinalIgnoreCase))
+            return new($"{instructions}\nSign in there with devtunnel user login --github -d.", "devtunnel_host_missing");
 
         // Reading the tunnel on the server's machine distinguishes an unknown tunnel from one whose host/access is missing.
         // A web-forwarding name is <id>-<port>.<cluster>.devtunnels.ms (older names omit the cluster).
@@ -38,8 +39,9 @@ internal sealed partial class DevTunnelNetwork
             try
             {
                 using var json = JsonDocument.Parse(shown.Output);
-                if (json.RootElement.TryGetProperty("ports", out var ports) && ports.ValueKind == JsonValueKind.Array
-                    && !ports.EnumerateArray().Any(port => port.TryGetProperty("portNumber", out var value) && value.TryGetInt32(out var portNumber) && portNumber == localPort))
+                if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("ports", out var ports) && ports.ValueKind == JsonValueKind.Array
+                    && !ports.EnumerateArray().Any(port => port.ValueKind == JsonValueKind.Object && port.TryGetProperty("portNumber", out var value)
+                        && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var portNumber) && portNumber == localPort))
                     instructions += $"\nThe tunnel does not publish port {number}.";
             }
             catch (JsonException)

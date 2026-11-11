@@ -87,6 +87,22 @@ test("Create my server behind a name of a tailnet offers to publish it with Tail
   }, options);
 });
 
+test("Create my server offers a private Dev Tunnel without requiring its address in advance", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.create-server-dialog .add-machine-choice')`, "the places");
+    await page.evaluate(`document.querySelector('.create-server-dialog .add-machine-choice').click()`);
+    await page.until(`document.querySelector('.create-server-dialog input[aria-label=Computer]')`, "the form");
+    await page.evaluate(type(".create-server-dialog input[aria-label=Computer]", "me@box"));
+    await page.evaluate(`document.querySelector('.create-server-reach input[value=devtunnel]').click()`);
+    assert.equal(await page.evaluate(`!!document.querySelector('.create-server-dialog input[aria-label="Address of the server"]')`), false);
+    await page.until(`document.querySelector('.create-server-reach-note')?.textContent.includes('device code')`, "private tunnel setup explained");
+    await page.clickText(".create-server-dialog .bp6-button", "Create my server");
+    await page.until(`document.querySelector('.create-server-dialog [role=status]')?.textContent.includes('you are its owner')`, "the tunnel's address was discovered");
+    assert.deepEqual((await calls(page)).filter(call => call.ssh), [{ ssh: "me@box", address: null, port: 2586, ownCertificate: false, devTunnel: true }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("Connect to my server speaks to the owner, links every space of the person, and is approved by another computer of theirs", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('joinOwn')`);

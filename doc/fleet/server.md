@@ -26,6 +26,13 @@ What it does not do: run an agent, hold a model credential in clear (organizatio
 machines that use them), read a journal, clone a repository (unless an organization turns on the GitHub token broker,
 which mints tokens and never clones).
 
+A managed private Dev Tunnel is an outer transport gate, not a fleet identity. A separate service on the server's
+machine owns the persistent tunnel host and its account login; the coordinator issues connect-only credentials
+through an approved-device, signed API. Invitations bootstrap that gate out of band. Devices protect credentials
+beside their own key, bind them to the exact server origin, refuse redirects and renew before expiry. Expired
+offline credentials need an out-of-band invitation again: recovery never weakens the gate to anonymous access.
+Only configured proxies may supply the public host and scheme; a tunnel's internal forwarded IP is not a device identity.
+
 ## Stack
 
 - **.NET 10, ASP.NET Core minimal APIs and WebSockets on Kestrel.** One process.

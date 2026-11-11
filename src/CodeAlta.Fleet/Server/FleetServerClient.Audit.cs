@@ -44,6 +44,7 @@ public sealed partial class FleetServerClient
         if (!FleetAuditExportFormats.IsKnown(format)) throw new ArgumentException($"'{format}' is not a format of the audit export.", nameof(format));
         var filters = (query with { After = null, Before = null, Newest = false, Limit = null }).ToQueryString();
         var path = "api/v1/audit/export?format=" + format + (filters.Length == 0 ? string.Empty : "&" + filters[1..]);
+        await RenewTunnelAccessAsync(cancellationToken).ConfigureAwait(false);
         using var request = CreateSigned(HttpMethod.Get, path, null);
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

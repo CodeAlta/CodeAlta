@@ -67,7 +67,9 @@ internal sealed class SshPrivateNetworkHost(ISshRunner ssh, SshTarget target, st
         // Executable names supplied by plugins are quoted too; known names keep the established, readable scripts.
         var command = (executable is "tailscale" or "devtunnel" or "command" ? executable : SshNodeInstaller.Quote(executable))
             + " " + string.Join(' ', args.Select(SshNodeInstaller.Quote));
-        var script = new StringBuilder("T=\"\"\nif command -v timeout >/dev/null 2>&1; then T=\"timeout ").Append(RemotePatienceSeconds).Append("\"; fi\n");
+        var script = new StringBuilder();
+        if (executable == "devtunnel") script.Append("PATH=\"$HOME/.devtunnel/bin:$PATH\"\n");
+        script.Append("T=\"\"\nif command -v timeout >/dev/null 2>&1; then T=\"timeout ").Append(RemotePatienceSeconds).Append("\"; fi\n");
         if (elevateOnFailure is null) return script.Append("$T ").Append(command).Append(" </dev/null\n").ToString();
 
         script.Append("OUT=$($T ").Append(command).Append(" 2>&1 </dev/null) && CODE=0 || CODE=$?\n");

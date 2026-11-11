@@ -25,6 +25,8 @@ test("A Dev Tunnel that does not answer names its host and the access needed by 
   assert.match(serverSetupProblem("devtunnel_host_missing"), /devtunnel host/u);
   assert.match(serverSetupProblem("devtunnel_host_missing"), /loopback/u);
   assert.match(serverSetupProblem("devtunnel_host_missing"), /connect token/u);
+  assert.match(serverSetupProblem("devtunnel_not_installed"), /server's machine/u);
+  assert.match(serverSetupProblem("devtunnel_setup_failed"), /Anonymous access was not enabled/u);
 });
 
 test("A plugin's private network offers publication and asks for sudo only when needed", () => {

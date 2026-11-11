@@ -140,6 +140,9 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public IReadOnlyList<string> TrustedProxies { get; init; } = [];
 
+    /// <summary>Gets a fresh connect-only Dev Tunnel token for an approved device; null when the server uses no managed tunnel.</summary>
+    public Func<CancellationToken, Task<FleetTunnelAccessDto?>>? TunnelAccess { get; init; }
+
     /// <summary>
     /// Gets settings added to the configuration of ASP.NET Core, as its environment variables (<c>Kestrel__Endpoints__...</c>)
     /// or an <c>appsettings.json</c> would give them; for tests of what the server does with them.
@@ -473,6 +476,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         var metrics = telemetry.Metrics;
         services.AddSingleton(time);
         services.AddSingleton(new ServerUpdateStatusSource(options.UpdateStatus));
+        services.AddSingleton(new ServerTunnelAccessSource(options.TunnelAccess));
         services.AddSingleton<ICoordinatorStore>(store);
         services.AddSingleton(codes);
         services.AddSingleton(telemetry);
@@ -579,6 +583,13 @@ public sealed class CoordinatorServer : IAsyncDisposable
         var app = builder.Build();
         app.UseMiddleware<HttpSpanEnricher>();
         app.UseMiddleware<ProblemDetailsMiddleware>();
+        app.Use(async (context, next) =>
+        {
+            var proxies = context.RequestServices.GetRequiredService<TrustedProxies>();
+            context.Request.Scheme = proxies.SchemeOf(context.Connection.RemoteIpAddress, context.Request.Headers, context.Request.Scheme);
+            context.Request.Host = proxies.HostOf(context.Connection.RemoteIpAddress, context.Request.Headers, context.Request.Host);
+            await next(context).ConfigureAwait(false);
+        });
         app.UseStatusCodePages();
         app.UseWebSockets();
         app.UseRouting();

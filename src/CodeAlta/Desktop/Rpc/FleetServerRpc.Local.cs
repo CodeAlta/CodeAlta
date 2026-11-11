@@ -113,6 +113,7 @@ internal sealed partial class FleetServerService
         Uri? address = null;
         if (!SshTarget.TryParse(request!.Target, out var target) || request.Port is < 1 or > 65535 || request.OwnerName is not { Length: > 0 and <= 128 } owner
             || request.OrganizationName is { Length: > 128 } || !LocalFolder(request.PackageFolder) || !RemoteFolder(request.DataRoot) || !RemoteFolder(request.ToolPath)
+            || request.DevTunnel && request.Address is { Length: > 0 }
             || request.Address is { Length: > 0 } text && !CodeAlta.Fleet.Server.FleetServerAddress.TryParse(text.Trim(), out address))
         {
             yield return MachineSetupEvent.Failed(SshSetupSteps.Connect, "invalid_request", null);
@@ -120,7 +121,10 @@ internal sealed partial class FleetServerService
         }
 
         var events = Channel.CreateUnbounded<MachineSetupEvent>(new UnboundedChannelOptions { SingleReader = true });
-        var installer = new SshServerInstaller(Ssh ?? new OpenSshRunner(), DesktopVersion, PrivateNetworks);
+        var installer = new SshServerInstaller(Ssh ?? new OpenSshRunner(), DesktopVersion, PrivateNetworks)
+        {
+            TunnelAccessReceived = (access, token) => _servers!.KeepTunnelAccessAsync(access, token),
+        };
         var run = Task.Run(async () =>
         {
             try
@@ -130,7 +134,7 @@ internal sealed partial class FleetServerService
                     Target = target, Port = request.Port ?? 2586, Address = address, DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath),
                     PackageFolder = Blank(request.PackageFolder), TrustedHostKey = TrustedHostKey(request.TrustedHostKey), OwnCertificate = request.OwnCertificate,
                     // Given to sudo -S on the machine for this setup only: never kept, never logged.
-                    AlwaysOn = request.AlwaysOn, TailscaleServe = request.TailscaleServe, PublishNetwork = request.PublishNetwork,
+                    AlwaysOn = request.AlwaysOn, TailscaleServe = request.TailscaleServe, PublishNetwork = request.PublishNetwork, DevTunnel = request.DevTunnel,
                     SudoPassword = (request.AlwaysOn || request.TailscaleServe || request.PublishNetwork) && !string.IsNullOrEmpty(request.SudoPassword) ? request.SudoPassword : null,
                 }, Reachable ?? AnswersAsync, async (linkAddress, setupAddress, code, pin, token) =>
                 {
@@ -170,17 +174,21 @@ internal sealed partial class FleetServerService
 
     // The health request of the server, from this computer, as the machines will reach it: null when it answers, otherwise
     // what the last attempt met.
-    private static async Task<ReachProblem?> AnswersAsync(Uri address, string? certificatePin, CancellationToken cancellationToken)
+    private async Task<ReachProblem?> AnswersAsync(Uri address, string? certificatePin, CancellationToken cancellationToken)
     {
         // A server with its own certificate answers through the pin only: the check is the one every device makes.
-        using var http = certificatePin is null ? new HttpClient() : new HttpClient(CodeAlta.Fleet.Protocol.FleetServerCertificates.CreateHandler(certificatePin), disposeHandler: true);
+        var handler = certificatePin is null ? new SocketsHttpHandler() : CodeAlta.Fleet.Protocol.FleetServerCertificates.CreateHandler(certificatePin);
+        if (FleetTunnelAccessStore.IsTunnel(address)) handler.AllowAutoRedirect = false;
+        using var http = new HttpClient(handler, disposeHandler: true);
         http.Timeout = TimeSpan.FromSeconds(10);
         ReachProblem? problem = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
             try
             {
-                using var response = await http.GetAsync(new Uri(address, "api/v1/server/health"), cancellationToken).ConfigureAwait(false);
+                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(address, "api/v1/server/health"));
+                _servers?.AuthorizeTunnelRequest(address, request);
+                using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode) return null;
                 problem = new ReachProblem($"HTTP {(int)response.StatusCode}");
             }
@@ -241,6 +249,7 @@ internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string Owne
 /// <param name="SudoPassword">The password sudo asks there for <paramref name="AlwaysOn"/> or <paramref name="TailscaleServe"/>, given once and never kept; null for none.</param>
 /// <param name="TailscaleServe">Over SSH, whether Tailscale Serve publishes the server there when <paramref name="Address"/> is the name of the machine on its tailnet and nothing serves it yet.</param>
 /// <param name="PublishNetwork">Over SSH, whether the matching private-network provider may publish the server.</param>
+/// <param name="DevTunnel">Over SSH, whether to create and host a persistent private Dev Tunnel; its address is discovered there.</param>
 internal sealed record FleetServerSetupRequest(string ExpectedEpoch, string? Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
     string? ToolPath, string? PackageFolder, string? TrustedHostKey, bool OwnCertificate = false, bool AlwaysOn = false, string? SudoPassword = null, bool TailscaleServe = false,
-    bool PublishNetwork = false);
+    bool PublishNetwork = false, bool DevTunnel = false);

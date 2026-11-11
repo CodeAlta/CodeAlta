@@ -33,7 +33,7 @@ public static class ServerExitCodes
 /// The commands of <c>altaserver</c>: <c>run</c>, <c>status</c>, <c>install</c>, <c>uninstall</c>, <c>setup-code</c>,
 /// <c>update</c>.
 /// </summary>
-public sealed class ServerApplication
+public sealed partial class ServerApplication
 {
     private const string _ = "";
 
@@ -171,6 +171,7 @@ public sealed class ServerApplication
             { "own-certificate", "Without --certificate, a certificate of the server's own, which its devices pin", v => install.OwnCertificate = v is not null },
             { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => install.AllowInsecureHttp = v is not null },
             { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';'", v => install.TrustedProxies = v },
+            { "dev-tunnel", "Host a persistent private Dev Tunnel in a second service; sign in with a device code when needed", v => install.DevTunnel = v is not null },
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
             { "system", "A service of the system, started at boot, that runs as --account", v => install.System = v is not null },
             { "account=", "The {ACCOUNT} a --system service runs as", v => install.Account = v },
@@ -275,6 +276,7 @@ public sealed class ServerApplication
             setupCommand,
             updateCommand,
             backupsCommand,
+            TunnelCommand(),
             _,
             "Options:",
             new HelpOption(),
@@ -394,6 +396,7 @@ public sealed class ServerApplication
                 AllowInsecureHttp = options.AllowInsecureHttp,
                 OwnCertificate = options.OwnCertificate,
                 TrustedProxies = Proxies(options.TrustedProxies),
+                TunnelAccess = token => Tunnel(paths).IssueAsync(token),
                 UpdateStatus = () => updates?.Status(),
                 // The last step of a campaign of the fleet: the same self-update as altaserver update, with the signed hash.
                 ApplyUpdate = (request, requestedBy, token) => updates is { } self
@@ -722,21 +725,50 @@ public sealed class ServerApplication
 
     private async ValueTask<int> InstallAsync(InstallOptions options)
     {
+        if (options.DevTunnel && !ConfigureTunnelBindings(options, out var problem))
+        {
+            await _error.WriteLineAsync("altaserver: " + problem).ConfigureAwait(false);
+            return ServerExitCodes.InvalidUsage;
+        }
         var (manager, plan, failure) = await PlanServiceAsync(options, "install").ConfigureAwait(false);
         if (manager is null || plan is null) return failure;
+        options.TryResolve(_error, out var paths);
+        var tunnelPaths = options.DataRoot is null ? new ServerPaths(Path.Combine(plan.Spec.WorkingDirectory, ".altaserver")) : paths!;
+        var tunnelPlan = options.DevTunnel ? manager.Plan(TunnelServiceRequest(
+            ServiceRequestOf(options, paths!, plan.Spec.Scope, (ServiceExecutable ?? LocateExecutable)()!), tunnelPaths)) : null;
         if (options.DryRun)
         {
             await WritePlanAsync(plan, install: true).ConfigureAwait(false);
+            if (tunnelPlan is not null) await WritePlanAsync(tunnelPlan, install: true).ConfigureAwait(false);
             return ServerExitCodes.Success;
         }
 
-        options.TryResolve(_error, out var paths);
+        if (options.DevTunnel)
+        {
+            try
+            {
+                var tunnel = Tunnel(tunnelPaths);
+                if (plan.Spec.Scope == ServiceScope.System)
+                {
+                    if (tunnel.Read() is not { } configured || configured.Port != int.Parse(options.Port ?? "2586", CultureInfo.InvariantCulture))
+                        throw new InvalidOperationException("First run altaserver tunnel configure --data-root <folder> --port <port> as the service account, so its login owns the tunnel.");
+                }
+                else await tunnel.ConfigureAsync(int.Parse(options.Port ?? "2586", CultureInfo.InvariantCulture), line => _output.WriteLine("Dev Tunnel sign-in: " + line), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (TunnelFailure(exception))
+            {
+                await _error.WriteLineAsync("altaserver: " + TunnelProblem(exception)).ConfigureAwait(false);
+                return ServerExitCodes.Failure;
+            }
+        }
         var running = CoordinatorServer.IsRunning(paths!) ? CoordinatorServer.ReadState(paths!) : null;
         // The password goes to Windows only: read here, never printed, never written.
         // Read here, never printed, never written: typed at a prompt that does not show it, or the first line of a pipe.
         var password = options.PasswordStdin ? await ServicePassword.ReadAsync().ConfigureAwait(false) : null;
         var code = manager.Install(plan, _output, _error, password);
         if (code != ServiceManager.Success) return ServerExitCodes.Failure;
+        if (tunnelPlan is not null && manager.Install(tunnelPlan, _output, _error, password) != ServiceManager.Success)
+            return ServerExitCodes.Failure;
         await _output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Server, (ServiceExecutable ?? LocateExecutable)()!)).ConfigureAwait(false);
         // The server of the service it replaced stopped with it (launchd, systemd): only a server that still holds the data
         // root keeps the new one waiting.
@@ -754,13 +786,24 @@ public sealed class ServerApplication
     {
         var (manager, plan, failure) = await PlanServiceAsync(options, "uninstall").ConfigureAwait(false);
         if (manager is null || plan is null) return failure;
+        options.TryResolve(_error, out var tunnelPaths);
+        if (options.DataRoot is null) tunnelPaths = new ServerPaths(Path.Combine(plan.Spec.WorkingDirectory, ".altaserver"));
+        var tunnel = Tunnel(tunnelPaths!);
+        var tunnelPlan = tunnel.Read() is not null
+            ? manager.Plan(TunnelServiceRequest(ServiceRequestOf(options, tunnelPaths!, plan.Spec.Scope, (ServiceExecutable ?? LocateExecutable)()!), tunnelPaths!)) : null;
         if (options.DryRun)
         {
+            if (tunnelPlan is not null) await WritePlanAsync(tunnelPlan, install: false).ConfigureAwait(false);
             await WritePlanAsync(plan, install: false).ConfigureAwait(false);
             return ServerExitCodes.Success;
         }
 
         var installed = manager.Query(plan).Installed;
+        if (tunnelPlan is not null)
+        {
+            if (manager.Query(tunnelPlan).Installed && manager.Uninstall(tunnelPlan, _output, _error) != ServiceManager.Success) return ServerExitCodes.Failure;
+            if (!await StopTunnelAsync(tunnel).ConfigureAwait(false)) return ServerExitCodes.Failure;
+        }
         if (manager.Uninstall(plan, _output, _error) != ServiceManager.Success) return ServerExitCodes.Failure;
         options.TryResolve(_error, out var paths);
         return installed && plan.LeavesProcessRunning ? await StopServerAsync(paths!).ConfigureAwait(false) : ServerExitCodes.Success;
@@ -996,6 +1039,7 @@ public sealed class ServerApplication
     /// <summary>The options of <c>install</c> and <c>uninstall</c>: those of the <c>run</c> the service starts, and whom it runs as.</summary>
     internal sealed class InstallOptions : RunOptions
     {
+        public bool DevTunnel { get; set; }
         public bool User { get; set; }
 
         public bool System { get; set; }

@@ -1,4 +1,6 @@
+using System.Text.Json;
 using CodeAlta.Desktop.Fleet.MachineSetup;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Plugins.Abstractions;
 using CodeAlta.Plugins.PrivateNetworks;
 
@@ -191,13 +193,61 @@ public sealed class SshServerInstallerTests
     {
         var ssh = new SshNodeInstallerTests.ScriptedSsh();
         foreach (var result in new[] { new SshResult(0, Ubuntu + "devtunnel=yes\n", ""), new(0, "", ""), new(0, "", ""),
-            new(0, "Logged in as me using GitHub.", ""), new(0, """{"ports":[]}""", "") }) ssh.Answers.Enqueue(result);
+            new(0, "Logged in as me using Microsoft.", ""), new(0, """{"ports":[]}""", "") }) ssh.Answers.Enqueue(result);
         var request = new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Port = 2693, Address = new Uri("https://personal-2693.euw.devtunnels.ms") };
         var failure = await NoAnswerAsync(ssh, request);
         StringAssert.Contains(failure.Message, "does not publish port 2693");
         StringAssert.Contains(ssh.Scripts[3], "devtunnel 'user' 'show'");
         StringAssert.Contains(ssh.Scripts[4], "devtunnel 'show' 'personal.euw' '--json' '--nologo'");
         Assert.IsFalse(ssh.Scripts.Skip(3).Any(static script => script.Contains("'create'", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task APrivateDevTunnel_IsConfiguredAsTheSshUser_HostedAsAService_AndItsCredentialNeverBecomesProgress()
+    {
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        var access = new FleetTunnelAccessDto("https://personal-2693.euw.devtunnels.ms", "private.connect.token", DateTimeOffset.UtcNow.AddHours(24));
+        foreach (var answer in new SshResult[]
+        {
+            new(0, Ubuntu + "devtunnel=yes\nsudo=nopassword\n", ""), new(0, "", ""),
+            new(0, "Dev Tunnel sign-in: Open GitHub and enter ABCD-EFGH\nDev Tunnel: personal.euw\n", ""),
+            new(0, "", ""), new(0, JsonSerializer.Serialize(access, ServerApiJsonContext.Default.FleetTunnelAccessDto), ""),
+            new(0, "CODE-1234\n", ""),
+        }) ssh.Answers.Enqueue(answer);
+        var progress = new List<SshSetupProgress>();
+        FleetTunnelAccessDto? kept = null;
+        var installer = new SshServerInstaller(ssh, "4.2.0")
+        {
+            TunnelAccessReceived = (value, _) => { kept = value; return Task.CompletedTask; },
+        };
+        var link = await installer.RunAsync(new SshServerSetupRequest { Target = new SshTarget("me", "box", null), DevTunnel = true, AlwaysOn = true, Port = 2693 },
+            (address, _, _) =>
+            {
+                Assert.AreEqual(new Uri(access.Address), address);
+                Assert.AreEqual(access, kept, "the network credential is kept before checking the public address");
+                return Task.FromResult<ReachProblem?>(null);
+            }, (address, setup, _, _, _) =>
+            {
+                Assert.AreEqual(new Uri(access.Address), address);
+                Assert.AreEqual("127.0.0.1", setup.Host, "claim still travels through the trusted SSH forward, not the public tunnel");
+                return Task.FromResult("private-link");
+            }, progress.Add, TestContext.CancellationToken);
+        Assert.AreEqual("private-link", link);
+        StringAssert.Contains(ssh.Scripts[2], "tunnel configure --port 2693 --data-root \"$ROOT\"");
+        Assert.IsFalse(ssh.Scripts[2].Contains("sudo", StringComparison.Ordinal), "the SSH account, not root, signs in and creates the tunnel");
+        StringAssert.Contains(ssh.Scripts[3], "--dev-tunnel --port 2693 --urls http://127.0.0.1:2693 --trusted-proxy '127.0.0.1;::1'");
+        Assert.IsTrue(progress.Any(static value => value.Detail?.Contains("ABCD-EFGH", StringComparison.Ordinal) == true), "the remote device code is streamed");
+        Assert.IsFalse(progress.Any(value => value.Detail?.Contains(access.Token, StringComparison.Ordinal) == true));
+    }
+
+    [TestMethod]
+    public async Task CreatingADevTunnel_RequiresItsCliOnTheServer_BeforeInstallingAnything()
+    {
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new(0, Ubuntu, ""));
+        var failure = await NoAnswerAsync(ssh, new SshServerSetupRequest { Target = new SshTarget("me", "box", null), DevTunnel = true });
+        Assert.AreEqual(("check", "devtunnel_not_installed"), (failure.Step, failure.Code));
+        Assert.HasCount(1, ssh.Scripts);
     }
 
     [TestMethod]
@@ -393,9 +443,12 @@ public sealed class SshServerInstallerTests
                     CodeAlta.Fleet.Protocol.Api.FleetSignInPurposes.Enroll, token)).AuthorizationUrl;
             }
 
-            StringAssert.StartsWith(await PasskeyPageAsync(given.Groups[1].Value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), "installed"),
-                "https://", "the scheme the proxy on the loopback forwards");
-            StringAssert.StartsWith(await PasskeyPageAsync([], "untrusted"), "http://", "without the trust the installation gives, the page would be at http://");
+            var passkeyUrl = await PasskeyPageAsync(given.Groups[1].Value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), "installed");
+            StringAssert.StartsWith(passkeyUrl,
+                "https://personal-2586.euw.devtunnels.ms/", "Dev Tunnels rewrites Host to localhost: the passkey page needs the public host forwarded by the trusted loopback");
+            StringAssert.Contains(new Uri(passkeyUrl).Query, "attempt=", "Dev Tunnels browser sign-in preserves the query, but drops a fragment");
+            Assert.AreEqual("", new Uri(passkeyUrl).Fragment);
+            StringAssert.StartsWith(await PasskeyPageAsync([], "untrusted"), "http://127.0.0.1:", "without the configured trust, neither the forwarded scheme nor host is believed");
         }
         finally
         {
@@ -411,6 +464,7 @@ public sealed class SshServerInstallerTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Host", "personal-2586.euw.devtunnels.ms");
             return base.SendAsync(request, cancellationToken);
         }
     }

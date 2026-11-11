@@ -33,6 +33,8 @@ export function serverSetupProblem(code: string): MessageKey {
     case "server_blocked": return "The server runs but does not answer from here at {host}: check that port {port} is open in its firewall and that this name reaches it, then try again.";
     case "server_proxy_unreachable": return "The server runs, but its address does not answer from here: check that what you put in front of it forwards to port {port} of {host}, then try again.";
     case "devtunnel_host_missing": return "The server runs, but the Dev Tunnel does not answer: devtunnel host must forward to its loopback port. Devices need the tunnel account or a connect token; see the instructions below.";
+    case "devtunnel_not_installed": return "Install the Dev Tunnels command line on the server's machine first, then start over.";
+    case "devtunnel_setup_failed": return "The private Dev Tunnel could not be configured or started: follow the instructions below. Anonymous access was not enabled.";
     case "private_network_publish_missing": return "The server runs, but its private network does not publish it yet: let CodeAlta publish it, or run this command on the machine.";
     case "private_network_publish_missing_sudo": return "The private network needs sudo to publish the server: give your password on the machine once. It is not kept.";
     case "tailscale_serve_missing": return "The server runs, but Tailscale Serve does not publish its address on {host} yet: let CodeAlta publish it, or run this command there, then start over.";

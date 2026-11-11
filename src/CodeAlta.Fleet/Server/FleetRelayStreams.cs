@@ -74,14 +74,27 @@ public static class FleetRelayStreams
             var now = (time ?? TimeProvider.System).GetUtcNow().ToUnixTimeMilliseconds();
             var nonce = FleetSignedRequest.CreateNonce();
             var signed = FleetSignedRequest.GetSignedBytes("GET", address.PathAndQuery, now, nonce, FleetSignedRequest.HashBody([]), identity.DeviceId);
-            socket.Options.SetRequestHeader(FleetSignedRequest.DeviceHeader, identity.DeviceId);
-            socket.Options.SetRequestHeader(FleetSignedRequest.TimestampHeader, now.ToString(CultureInfo.InvariantCulture));
-            socket.Options.SetRequestHeader(FleetSignedRequest.NonceHeader, nonce);
-            socket.Options.SetRequestHeader(FleetSignedRequest.SignatureHeader, Base64Url.EncodeToString(identity.SignData(signed)));
-            // The channel inside has its own heartbeat; the relay is a pipe.
-            socket.Options.KeepAliveInterval = TimeSpan.Zero;
-            FleetServerCertificates.Configure(socket.Options, certificatePin);
-            await socket.ConnectAsync(address, cancellationToken).ConfigureAwait(false);
+            void Configure(ClientWebSocketOptions options)
+            {
+                options.SetRequestHeader(FleetSignedRequest.DeviceHeader, identity.DeviceId);
+                options.SetRequestHeader(FleetSignedRequest.TimestampHeader, now.ToString(CultureInfo.InvariantCulture));
+                options.SetRequestHeader(FleetSignedRequest.NonceHeader, nonce);
+                options.SetRequestHeader(FleetSignedRequest.SignatureHeader, Base64Url.EncodeToString(identity.SignData(signed)));
+                // The channel inside has its own heartbeat; the relay is a pipe.
+                options.KeepAliveInterval = TimeSpan.Zero;
+            }
+
+            if (FleetTunnelAccessStore.IsTunnel(server))
+            {
+                socket.Dispose();
+                socket = await new FleetTunnelAccessStore(identity, time ?? TimeProvider.System).ConnectAsync(server, address, certificatePin, Configure, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                Configure(socket.Options);
+                FleetServerCertificates.Configure(socket.Options, certificatePin);
+                await socket.ConnectAsync(address, cancellationToken).ConfigureAwait(false);
+            }
             return WebSocketStream.Create(socket, WebSocketMessageType.Binary, CloseTimeout);
         }
         catch

@@ -28,7 +28,7 @@ public sealed partial class FleetNodeService
     {
         if (!FleetServerAddress.TryParse(parameters.Url, out var address, out var certificatePin))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "This is not the address of a server (http:// or https://, with the #pin= of its own certificate if it has one).");
-        if (parameters.Token is not { Length: > 0 and <= 256 } token)
+        if (!FleetTunnelAccessStore.IsEnrollmentCode(parameters.Token) || parameters.Token is not { } token)
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "An enrollment token is needed.");
         string name;
         try { name = Identity.TrustedDeviceStore.NormalizeName(string.IsNullOrWhiteSpace(parameters.Name) ? _options.Name : parameters.Name); }
@@ -38,7 +38,10 @@ public sealed partial class FleetNodeService
         var url = FleetServerAddress.Format(address);
         var words = _options.Identity.Fingerprint.ToShortWords();
         if (store.Find(url) is { State: not FleetServerLinkStates.Revoked } existing && existing.DeviceId == _options.Identity.DeviceId)
+        {
+            if (FleetTunnelAccessStore.IsInvitation(token)) new FleetTunnelAccessStore(_options.Identity).ImportInvitation(address, token.Trim());
             return new FleetServerJoinResult(existing.DeviceId, name, words, AlreadyLinked: true);
+        }
 
         Protocol.Api.DeviceDto device;
         using (var client = new FleetServerClient(address, _options.Identity, ServerHandler, null, certificatePin))
