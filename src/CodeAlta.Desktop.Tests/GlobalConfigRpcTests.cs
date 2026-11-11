@@ -91,6 +91,84 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task APluginProviderLeftOutForALockedVault_IsRegisteredOnceItsSecretCanBeGiven_AndTheOthersStay()
+    {
+        const string content = """
+[providers.agent-work]
+type = "fake-agent"
+
+[providers.agent-work.env]
+AGENT_TOKEN = "${secret:VAULT_KEY}"
+
+[providers.agent-home]
+type = "fake-agent"
+""";
+        await using var fixture = new Fixture(content);
+        var root = Path.GetDirectoryName(fixture.ConfigPath)!;
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(root).Bind("VAULT_KEY", "personal", "op://Private/Agent/credential", "Private › Agent › credential", "tests");
+        var vault = new OneSecretVault();
+        fixture.Registry.BoundSecrets = vault;
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        var contribution = new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent", CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."),
+        };
+        types.Attach(() => [contribution]);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, root, Epoch) { PluginProviderTypes = types };
+        string[] Registered() => [.. fixture.Registry.ListProviders(includeDisabled: true).Select(static provider => provider.ProviderId.Value).Order(StringComparer.Ordinal)];
+
+        // A provider left out is written to the log, as the host has one.
+        var capture = new DesktopLogCapture();
+        var config = new XenoAtom.Logging.LogManagerConfig();
+        config.RootLogger.MinimumLevel = XenoAtom.Logging.LogLevel.Debug;
+        config.RootLogger.Writers.Add(new DesktopCaptureLogWriter(capture));
+        XenoAtom.Logging.LogManager.Initialize(config);
+        ModelProviderDescriptor home;
+        try
+        {
+            types.RegisterOrReplace(fixture.Registry, fixture.Store, root, includeDisabled: false);
+            CollectionAssert.AreEqual(new[] { "agent-home" }, Registered(), "the vault is locked: the provider that needs it is left out");
+            home = fixture.Registry.ListProviders(includeDisabled: true).Single();
+
+            await service.ApplySecretsChangedAsync(["VAULT_KEY"]);
+            CollectionAssert.AreEqual(new[] { "agent-home" }, Registered(), "still locked");
+
+            vault.Unlocked = true;
+            await service.ApplySecretsChangedAsync(["VAULT_KEY"]);
+        }
+        finally
+        {
+            // The loggers keep the levels of the last configuration once the log ends: the tests that run after this one must find them off.
+            config.RootLogger.MinimumLevel = XenoAtom.Logging.LogLevel.None;
+            config.ApplyChanges();
+            XenoAtom.Logging.LogManager.Shutdown();
+        }
+
+        StringAssert.Contains(string.Join("\n", capture.Snapshot().Rows.Select(static row => row.Text)), "Skipped model provider key=agent-work");
+        Assert.IsFalse(capture.Snapshot().Rows.Any(static row => row.Text.Contains("agent-token-value", StringComparison.Ordinal)));
+        CollectionAssert.AreEqual(new[] { "agent-home", "agent-work" }, Registered());
+        Assert.AreSame(home, fixture.Registry.ListProviders(includeDisabled: true).Single(static provider => provider.ProviderId.Value == "agent-home"), "a provider that runs is not replaced");
+        CollectionAssert.AreEquivalent(new[] { "agent-home", "agent-work" }, types.GetProvidersOf([contribution]).ToArray(), "its plugin owns it, and stops it with itself");
+        Assert.AreEqual("provider agent-work", vault.Uses[^1]);
+    }
+
+    private sealed class OneSecretVault : CodeAlta.Agent.Runtime.IBoundSecretSource
+    {
+        public bool Unlocked { get; set; }
+
+        public List<string?> Uses { get; } = [];
+
+        public CodeAlta.Agent.Runtime.BoundSecretRead ReadBound(string name, string? use)
+        {
+            Uses.Add(use);
+            return Unlocked ? CodeAlta.Agent.Runtime.BoundSecretRead.Of("agent-token-value") : CodeAlta.Agent.Runtime.BoundSecretRead.Unavailable($"{name} is kept in 1Password, which is locked.");
+        }
+
+        public string? AuthorizeUse(string name, string? use) => null;
+    }
+
+    [TestMethod]
     public async Task SavePluginProvider_SavesTheContextSize_AndKeepsTheOtherValues()
     {
         const string content = """

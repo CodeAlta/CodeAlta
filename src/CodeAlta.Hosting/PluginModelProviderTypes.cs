@@ -279,6 +279,47 @@ public sealed class PluginModelProviderTypes
         return registered;
     }
 
+    /// <summary>
+    /// Registers the providers of the global configuration whose type a running plugin contributes, that are turned on, not
+    /// registered, and kept by a filter: those left out when a secret they name could not be given, once it can. A provider
+    /// already registered is left as it is, so that no runtime in use is replaced.
+    /// </summary>
+    /// <param name="registry">The registry to update.</param>
+    /// <param name="store">The configuration store.</param>
+    /// <param name="stateRootPath">The state folder of the application.</param>
+    /// <param name="include">Whether to try a provider, by its settings.</param>
+    /// <returns>The descriptors registered, in the order of the configuration.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="registry"/>, <paramref name="store"/> or <paramref name="include"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="stateRootPath"/> is empty.</exception>
+    public IReadOnlyList<ModelProviderDescriptor> RegisterMissing(
+        ModelProviderRegistry registry,
+        CodeAltaConfigStore store,
+        string stateRootPath,
+        Func<PluginProviderSettings, bool> include)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
+        ArgumentNullException.ThrowIfNull(include);
+        if (Types.Count == 0) return [];
+        var running = registry.ListProviders(includeDisabled: true).Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var defaultProvider = store.GetEffectiveDefaultProvider();
+        var registered = new List<ModelProviderDescriptor>();
+        foreach (var provider in store.LoadGlobalExternalProviders())
+        {
+            if (running.Contains(provider.ProviderKey) || Find(provider.ProviderType) is not { } contribution) continue;
+            var settings = CreateSettings(provider, defaultProvider);
+            if (!settings.IsEnabled || !include(settings)) continue;
+            if (!TryCreateProviderRegistration(settings, stateRootPath, registry.SecretIssued, registry.BoundSecrets, out var descriptor, out var createRuntime)) continue;
+            registry.RegisterOrReplace(descriptor, createRuntime);
+            registered.Add(descriptor);
+            // Its plugin owns it as it owns the others: it stops with that plugin.
+            lock (_gate) _registered = new Dictionary<string, PluginModelProviderContribution>(_registered, StringComparer.OrdinalIgnoreCase) { [descriptor.ProviderId.Value] = contribution };
+        }
+
+        return registered;
+    }
+
     // The settings a runtime is given: the texts of the tables of the section (the environment of an agent) with the values of their
     // references, each secret told to the masking first; the settings themselves when nothing refers; null with what is not set.
     private static PluginProviderSettings? ResolveReferences(PluginProviderSettings settings, string stateRootPath, Action<string>? secretIssued,

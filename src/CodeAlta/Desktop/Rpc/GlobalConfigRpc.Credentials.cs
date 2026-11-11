@@ -15,7 +15,7 @@ internal sealed partial class GlobalConfigService
     internal async Task ApplySecretsChangedAsync(IReadOnlyCollection<string> names)
     {
         if (_store is null || _registry is null || names.Count == 0) return;
-        List<string> registered;
+        List<string> registered = [];
         lock (_gate)
         {
             try
@@ -24,9 +24,20 @@ internal sealed partial class GlobalConfigService
                 var definitions = _store.LoadGlobalProviderDefinitions(includeDisabled: false)
                     .Where(definition => definition.Enabled != false && !running.Contains(definition.ProviderKey) && Names(definition, names))
                     .ToList();
-                if (definitions.Count == 0) return;
-                registered = [.. ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(_registry, definitions, _stateRoot!, ModelCatalog)
-                    .Select(static descriptor => descriptor.ProviderId.Value)];
+                if (definitions.Count > 0)
+                {
+                    registered.AddRange(ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(_registry, definitions, _stateRoot!, ModelCatalog)
+                        .Select(static descriptor => descriptor.ProviderId.Value));
+                }
+
+                // The providers of the types of plugins, whose references are in their settings (the environment of an agent...).
+                if (PluginProviderTypes is { } types)
+                {
+                    registered.AddRange(types.RegisterMissing(_registry, _store, _stateRoot!, settings => settings.Values.Values.Any(value => Refers(value, names)))
+                        .Select(static descriptor => descriptor.ProviderId.Value));
+                }
+
+                if (registered.Count == 0) return;
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -53,11 +64,16 @@ internal sealed partial class GlobalConfigService
 
     // Whether a provider takes its key, or a variable of its program, from one of these secrets.
     private static bool Names(CodeAltaProviderDocument definition, IReadOnlyCollection<string> names)
+        => definition.ApiKeySecret is { } secret && names.Contains(secret, StringComparer.OrdinalIgnoreCase)
+            || Refers(definition.ApiKey, names)
+            || (definition.Env?.Values.Any(value => Refers(value, names)) ?? false);
+
+    // Whether a setting, a text or the texts of a list or a table, refers to one of these secrets.
+    private static bool Refers(object? value, IReadOnlyCollection<string> names) => value switch
     {
-        bool Refers(string? text) => text is not null && SecretReferences.Find(text).Any(reference => reference.Kind == SecretReferenceKind.Secret
-            && names.Contains(reference.Name, StringComparer.OrdinalIgnoreCase));
-        return definition.ApiKeySecret is { } secret && names.Contains(secret, StringComparer.OrdinalIgnoreCase)
-            || Refers(definition.ApiKey)
-            || (definition.Env?.Values.Any(Refers) ?? false);
-    }
+        string text => SecretReferences.Find(text).Any(reference => reference.Kind == SecretReferenceKind.Secret && names.Contains(reference.Name, StringComparer.OrdinalIgnoreCase)),
+        IReadOnlyDictionary<string, object?> table => table.Values.Any(item => Refers(item, names)),
+        IEnumerable<object?> list => list.Any(item => Refers(item, names)),
+        _ => false,
+    };
 }
