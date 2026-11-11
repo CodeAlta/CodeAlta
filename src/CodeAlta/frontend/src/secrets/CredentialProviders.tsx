@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, InputGroup, NonIdealState, PopoverNext, Tag } from "@blueprintjs/core";
+import { Button, Card, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import type { CredentialProviderRpcView, SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
@@ -17,6 +17,8 @@ export type CredentialProviderActions = Readonly<{
   remove: (id: string) => Result;
   edit: (provider: CredentialProviderRpcView) => void;
   runInTerminal?: (command: string) => void;
+  /** Lets the developer instance ask a vault to unlock, or no longer; absent where the page offers no such switch. */
+  setDeveloperUnlock?: (enabled: boolean) => Result;
 }>;
 
 /**
@@ -30,14 +32,14 @@ export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
   const local = listing.secrets.filter(secret => !secret.provider).length;
   return <Card className="appearance-settings credential-providers" aria-labelledby="credential-providers-title">
     <div className="credential-providers-heading">
-      <h2 id="credential-providers-title">{t("Credential providers")}</h2>
-      <Button size="small" icon={<AppIcon name="plus" size={14} />} text={t("Add a provider…")} disabled={busy} onClick={onAdd} />
+      <h2 id="credential-providers-title">{t("Vaults")}</h2>
+      <Button size="small" icon={<AppIcon name="plus" size={14} />} text={t("Add a vault…")} disabled={busy} onClick={onAdd} />
     </div>
-    <p className="credential-providers-intro">{t("Where the values of the secrets are kept. A secret keeps its name; its value can come from an item of a vault.")}</p>
+    <p className="credential-providers-intro">{t("Where the values of the secrets are kept: this computer, or a vault CodeAlta reads through its program and never writes into.")}</p>
     {listing.configurationProblems.length > 0 && <ul className="credential-problems" role="alert">
       {listing.configurationProblems.map(problem => <li key={problem}>{problem}</li>)}
     </ul>}
-    <ul className="credential-provider-list" aria-label={t("Credential providers")}>
+    <ul className="credential-provider-list" aria-label={t("Vaults")}>
       <li className="credential-provider-row" data-provider="this-computer">
         <span className="credential-provider-icon"><AppIcon name="computer" size={18} /></span>
         <span className="credential-provider-name"><strong>{t("This computer")}</strong>
@@ -49,6 +51,12 @@ export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
     </ul>
     {listing.providers.length === 0 && <NonIdealState className="credential-providers-empty" icon={<AppIcon name="secret" size={24} />}
       description={t("Add 1Password, Bitwarden, KeePassXC or another vault to keep the values of your secrets there.")} />}
+    {/* A setting of the user that both instances read: off, the developer instance reads only what a vault gives without asking. */}
+    {listing.providers.length > 0 && actions.setDeveloperUnlock && <div className="credential-developer-unlock">
+      <Switch checked={listing.developerUnlock} disabled={busy} label={t("Let the developer instance unlock the vaults")}
+        onChange={event => { const enabled = event.currentTarget.checked; void run(() => actions.setDeveloperUnlock!(enabled)); }} />
+      <p>{t("It then asks your vault for its own run when you click Unlock in its window, as 1Password asks Windows Hello. Off, it reads only what a vault gives without asking.")}</p>
+    </div>}
   </Card>;
 }
 
@@ -88,7 +96,7 @@ function ProviderRow({ provider, busy, run, actions, canPrompt }: {
     <span className="credential-provider-actions">
       {provider.state === "locked" && (canPrompt
         ? <UnlockButton provider={provider} busy={busy} onUnlock={password => run(() => actions.unlock(provider.id, password))} />
-        : <Tag minimal title={t("The developer instance never asks a vault to unlock: unlock it in the normal instance.")}>{t("Unlock in the normal instance")}</Tag>)}
+        : <Tag minimal title={t("The developer instance asks no vault to unlock: unlock it in the normal instance, or turn on Let the developer instance unlock the vaults, below.")}>{t("Unlock in the normal instance")}</Tag>)}
       {provider.state === "sign_in" && provider.signInCommand && actions.runInTerminal
         && <Button size="small" icon={<AppIcon name="terminal" size={14} />} text={t("Sign in…")} disabled={busy}
           onClick={() => actions.runInTerminal!(commandLine(provider.signInCommand!))} />}

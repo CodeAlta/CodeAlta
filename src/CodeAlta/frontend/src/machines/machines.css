@@ -76,6 +76,26 @@
 .machine-provider-main small { overflow-wrap: anywhere; }
 .machine-provider-problem { color: var(--orange, #d9822b); }
 .machine-provider-actions { display: flex; gap: 6px; flex: none; }
+.machine-paired-only { margin: 6px 0; }
+/* How a provider signs in on the machine itself: the steps and the whole command to copy. */
+.machine-signin-help { width: min(600px, calc(100vw - 48px)); }
+.machine-signin-help .bp6-dialog-body { display: grid; gap: 10px; }
+.machine-signin-help .bp6-dialog-body p { margin: 0; overflow-wrap: anywhere; }
+/* The providers a machine can add: by group, each with its icon, what it needs and what it installs. */
+.machine-provider-picker { width: min(640px, calc(100vw - 48px)); }
+.machine-provider-picker .bp6-dialog-body { display: grid; gap: 10px; max-height: min(70vh, 640px); overflow: auto; }
+.machine-offer-group h3 { margin: 4px 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.machine-offers { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.machine-offer { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit;
+  text-align: start; font: inherit; cursor: pointer; }
+.machine-offer:hover:not(:disabled), .machine-offer:focus-visible { background: var(--hover-bg, rgba(128, 128, 128, 0.14)); outline: none; }
+.machine-offer:disabled { cursor: default; opacity: 0.6; }
+.machine-offer-icon { display: inline-flex; flex: none; width: 22px; padding-top: 1px; }
+.machine-offer-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.machine-offer-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.machine-offer-main small { overflow-wrap: anywhere; }
+.machine-provider-adding { display: grid; gap: 8px; }
+.machine-provider-adding p { margin: 0; display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
 .machine-provider-code p { margin: 0 0 6px; }
 .machine-provider-code-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; overflow-wrap: anywhere; }
 .machine-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

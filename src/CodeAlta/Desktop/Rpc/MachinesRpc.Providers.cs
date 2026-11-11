@@ -27,7 +27,10 @@ internal sealed partial class MachinesService
         {
             var list = await host.ManageAsync((client, token) => client.ListProvidersAsync(token), changes: false, cancellationToken).ConfigureAwait(false);
             return new MachineProvidersView("ok", null, [.. list.Providers.Select(View)],
-                [.. list.Types.Select(static type => new MachineProviderTypeView(type.Type, type.Name, type.Credential, type.SignIn))], list.SecretProtection);
+                [.. list.Types.Select(static type => new MachineProviderTypeView(type.Type, type.Name, type.Credential, type.SignIn))], list.SecretProtection)
+            {
+                ConfigurationError = Bound(list.ConfigurationError),
+            };
         }
         catch (ObjectDisposedException) { return MachineProvidersView.Refused(RemoteSessionHost.Describe(host.State)); }
         catch (FleetException exception) { return MachineProvidersView.Refused(Code(exception)) with { Message = exception.Error.Message }; }
@@ -94,9 +97,153 @@ internal sealed partial class MachinesService
         catch (Exception exception) when (exception is IOException or TimeoutException) { return new(RemoteSessionHost.MachineOfflineCode, null, null); }
     }
 
+    /// <summary>
+    /// Lists the providers a machine can add: its own types (Claude Code, a subscription, an API key) and the entries of the catalogs
+    /// of its plugins (Codex CLI, the agents of the ACP registry), each with the program it runs and whether the machine installs it.
+    /// </summary>
+    [NeoRpcMethod("providerOffers")]
+    public async Task<MachineProviderOffersView> ProviderOffersAsync(MachineProviderOffersRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineProviderOffersView.Refused(refused);
+        if (request!.MachineId is not { Length: > 0 and <= 64 } id) return MachineProviderOffersView.Refused("invalid_request");
+        if (_fleet!.Find(id) is not { } host) return MachineProviderOffersView.Refused("not_found");
+        try
+        {
+            var list = await host.ManageAsync((client, token) => client.ListProviderOffersAsync(request.Refresh, token), changes: false, cancellationToken).ConfigureAwait(false);
+            return new MachineProviderOffersView("ok", null, [.. list.Offers.Take(MaximumOffers).Select(static offer => new MachineProviderOfferView(Bound(offer.Id)!, Bound(offer.Type)!,
+                Bound(offer.Name)!, offer.Group, offer.Credential, offer.SignIn, Bound(offer.Description), Icon(offer.IconSvg), Program(offer.Program), Bound(offer.Unavailable),
+                Bound(offer.Catalog), offer.ConfiguredKey))], Bound(list.Error));
+        }
+        catch (ObjectDisposedException) { return MachineProviderOffersView.Refused(RemoteSessionHost.Describe(host.State)); }
+        catch (FleetException exception) { return MachineProviderOffersView.Refused(Code(exception)) with { Message = exception.Error.Message }; }
+        catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineProviderOffersView.Refused(RemoteSessionHost.MachineOfflineCode) with { Message = exception.Message }; }
+    }
+
+    /// <summary>Adds a provider a machine offers: the machine installs the program it runs first when it is missing, then writes and starts it.</summary>
+    [NeoRpcMethod("addProvider")]
+    public async Task<MachineProviderOperationView> AddProviderAsync(MachineAddProviderRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineProviderOperationView.Refused(refused);
+        if (request!.MachineId is not { Length: > 0 and <= 64 } id || request.OfferId is not { Length: > 0 and <= 256 } || request.Key is { } key && !FleetNodeService.IsProviderKey(key))
+            return MachineProviderOperationView.Refused("invalid_request");
+        if (_fleet!.Find(id) is not { } host) return MachineProviderOperationView.Refused("not_found");
+        return await OperationAsync(host, (client, token) => client.AddProviderAsync(new FleetProviderAddParams(request.OfferId, request.Key, request.MakeDefault), token), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Updates the program a provider of a machine runs to the version the machine offers now.</summary>
+    [NeoRpcMethod("updateProvider")]
+    public async Task<MachineProviderOperationView> UpdateProviderAsync(MachineProviderKeyRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineProviderOperationView.Refused(refused);
+        if (request!.MachineId is not { Length: > 0 and <= 64 } id || !FleetNodeService.IsProviderKey(request.Key)) return MachineProviderOperationView.Refused("invalid_request");
+        if (_fleet!.Find(id) is not { } host) return MachineProviderOperationView.Refused("not_found");
+        return await OperationAsync(host, (client, token) => client.UpdateProviderAsync(request.Key, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Waits a while for an addition or an update of a provider of a machine to end: the page asks again while it runs.</summary>
+    [NeoRpcMethod("providerOperationWait")]
+    public async Task<MachineProviderOperationView> ProviderOperationWaitAsync(MachineProviderOperationRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineProviderOperationView.Refused(refused);
+        if (request!.MachineId is not { Length: > 0 and <= 64 } id || request.Id is not { Length: > 0 and <= 64 } operation) return MachineProviderOperationView.Refused("invalid_request");
+        if (_fleet!.Find(id) is not { } host) return MachineProviderOperationView.Refused("not_found");
+        return await OperationAsync(host, (client, token) => client.WaitProviderOperationAsync(operation, 15, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<MachineProviderOperationView> OperationAsync(RemoteSessionHost host, Func<CodeAlta.Fleet.Client.FleetNodeClient, CancellationToken, Task<FleetProviderOperationState>> call,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await host.ManageAsync(call, changes: false, cancellationToken).ConfigureAwait(false);
+            if (state.Status == "completed") Changed();
+            double? fraction = state is { Received: { } received, Total: > 0 and var total } ? Math.Clamp((double)received / total, 0, 1) : null;
+            return new MachineProviderOperationView("ok", Bound(state.Message), Bound(state.Id), state.Status, fraction, state.Key);
+        }
+        catch (ObjectDisposedException) { return MachineProviderOperationView.Refused(RemoteSessionHost.Describe(host.State)); }
+        catch (FleetException exception) { return MachineProviderOperationView.Refused(Code(exception)) with { Message = exception.Error.Message }; }
+        catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineProviderOperationView.Refused(RemoteSessionHost.MachineOfflineCode) with { Message = exception.Message }; }
+    }
+
+    private const int MaximumOffers = 300;
+
+    private static string? Bound(string? value) => value is null ? null : value.Length <= 512 ? value : value[..512];
+
+    // An icon a machine gives, rebuilt as a data URL that cannot run or fetch anything.
+    private static string? Icon(string? svg) => svg is null ? null : PluginIcons.Sanitize(svg);
+
+    private static MachineProviderProgramView? Program(FleetProviderProgram? program)
+        => program is null ? null : new MachineProviderProgramView(program.State, Bound(program.Version), Bound(program.Update), Bound(program.Detail));
+
     private static MachineProviderStatusView View(FleetProviderStatus status)
         => new(status.Key, status.Name, status.Type, status.Enabled, status.State, status.Reason, status.Detail, status.Credential, status.KeySecret, status.SignIn, status.IsDefault,
-            status.Model, status.ApiUrl) { MaxConcurrentRequests = status.MaxConcurrentRequests };
+            status.Model, status.ApiUrl) { MaxConcurrentRequests = status.MaxConcurrentRequests, Program = Program(status.Program), Icon = Icon(status.IconSvg) };
+}
+
+/// <summary>The program a provider of a machine runs, as the machine installs and updates it.</summary>
+/// <param name="State"><c>installed</c>, <c>found</c>, <c>missing</c>, <c>runner</c> or <c>unsupported</c>.</param>
+/// <param name="Version">The version installed or to install.</param>
+/// <param name="Update">The version it can be updated to; null when up to date.</param>
+/// <param name="Detail">Where it is, or why it cannot run there.</param>
+internal sealed record MachineProviderProgramView(string State, string? Version, string? Update, string? Detail);
+
+/// <summary>A provider a machine can add.</summary>
+/// <param name="Id">The offer.</param>
+/// <param name="Type">The type of the provider it adds.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Group"><c>agent</c>, <c>subscription</c>, <c>key</c> or <c>local</c>.</param>
+/// <param name="Credential"><c>key</c>, <c>sign_in</c>, <c>cli</c> or <c>none</c>.</param>
+/// <param name="SignIn">Whether it signs in with a device code shown here.</param>
+/// <param name="Description">What it is.</param>
+/// <param name="Icon">Its icon as a safe data URL; null for the icon of its type.</param>
+/// <param name="Program">The program it runs and whether the machine installs it.</param>
+/// <param name="Unavailable">Why it cannot be added there.</param>
+/// <param name="Catalog">The catalog it comes from.</param>
+/// <param name="ConfiguredKey">The provider of the machine that runs it already.</param>
+internal sealed record MachineProviderOfferView(string Id, string Type, string Name, string Group, string Credential, bool SignIn, string? Description, string? Icon,
+    MachineProviderProgramView? Program, string? Unavailable, string? Catalog, string? ConfiguredKey);
+
+/// <summary>The providers a machine can add.</summary>
+/// <param name="Status"><c>ok</c>, <c>not_manager</c>, <c>offline</c>, <c>stale_epoch</c>, or the code the machine answered.</param>
+/// <param name="Message">What the machine said, when it refused.</param>
+/// <param name="Offers">The offers.</param>
+/// <param name="Error">Why a catalog could not be read.</param>
+internal sealed record MachineProviderOffersView(string Status, string? Message, MachineProviderOfferView[] Offers, string? Error)
+{
+    internal static MachineProviderOffersView Refused(string status) => new(status, null, [], null);
+}
+
+/// <summary>The providers a machine can add, read again from its catalogs or not.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The machine.</param>
+/// <param name="Refresh">Whether the machine fetches the catalogs of its plugins again.</param>
+internal sealed record MachineProviderOffersRequest(string ExpectedEpoch, string MachineId, bool Refresh);
+
+/// <summary>A provider to add to a machine from an offer.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The machine.</param>
+/// <param name="OfferId">The offer.</param>
+/// <param name="Key">Its key; null for the one the offer suggests.</param>
+/// <param name="MakeDefault">Whether sessions that name no provider run on it.</param>
+internal sealed record MachineAddProviderRequest(string ExpectedEpoch, string MachineId, string OfferId, string? Key, bool MakeDefault);
+
+/// <summary>An addition or an update of a provider of a machine, by its identifier.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The machine.</param>
+/// <param name="Id">The operation.</param>
+internal sealed record MachineProviderOperationRequest(string ExpectedEpoch, string MachineId, string Id);
+
+/// <summary>Where an addition or an update of a provider of a machine stands.</summary>
+/// <param name="Status"><c>ok</c> when the machine answered, or why not.</param>
+/// <param name="Message">What the machine says it does, or why it refused.</param>
+/// <param name="Id">The operation.</param>
+/// <param name="State"><c>running</c>, <c>completed</c> or <c>failed</c>.</param>
+/// <param name="Fraction">How much of a download is done, from 0 to 1; null when none runs or its size is not known.</param>
+/// <param name="Key">The provider added or updated.</param>
+internal sealed record MachineProviderOperationView(string Status, string? Message, string? Id, string? State, double? Fraction, string? Key)
+{
+    internal static MachineProviderOperationView Refused(string status) => new(status, null, null, null, null, null);
 }
 
 /// <summary>A provider of a machine as the person who manages it sees it: never its key, only the secret that holds it.</summary>
@@ -119,6 +266,14 @@ internal sealed record MachineProviderStatusView(string Key, string Name, string
     /// <summary>The most requests it takes at once; null for no limit, or the default of its type.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxConcurrentRequests { get; init; }
+
+    /// <summary>The program it runs on the machine; null for none, or an older machine.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MachineProviderProgramView? Program { get; init; }
+
+    /// <summary>The icon its plugin gives it, as a safe data URL; null for the icon of its type.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Icon { get; init; }
 }
 
 /// <summary>A type a provider added to a machine can have.</summary>
@@ -137,6 +292,10 @@ internal sealed record MachineProviderTypeView(string Type, string Name, string 
 internal sealed record MachineProvidersView(string Status, string? Message, MachineProviderStatusView[] Providers, MachineProviderTypeView[] Types, string? SecretProtection)
 {
     internal static MachineProvidersView Refused(string status) => new(status, null, [], [], null);
+
+    /// <summary>Why the configuration file of the machine does not read since it last changed; null when it reads.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigurationError { get; init; }
 }
 
 /// <summary>A provider of a machine to add or change.</summary>

@@ -80,8 +80,13 @@ internal sealed partial class MachinesService
         }
 
         if (prompt.Way != FleetMachineSignInWays.Browser)
+        {
+            // The page of a code to paste back (claude setup-token) opens at once, as a browser sign-in does: the person signs in there
+            // and comes back with the code. A device code is copied first: its page opens from the link of the dialog.
+            if (prompt.Way == FleetMachineSignInWays.Code && page is { Scheme: "https" }) OpenSignInPage(page);
             return new MachineSignInPromptView("ok", null, prompt.AttemptId, prompt.Way, page?.AbsoluteUri, prompt.UserCode is { Length: <= 64 } code ? code : null,
                 prompt.Ask is { Length: <= 256 } ask ? ask : null, prompt.ExpiresAt);
+        }
 
         // A browser sign-in: the page must be one to open, and the redirect a loopback address of this computer.
         if (page is null || !Uri.TryCreate(prompt.Redirect, UriKind.Absolute, out var redirect) || ForwardedState(page) is not { } state)
@@ -117,6 +122,18 @@ internal sealed partial class MachinesService
         }
 
         return new MachineSignInPromptView("ok", null, prompt.AttemptId, prompt.Way, page.AbsoluteUri, null, null, prompt.ExpiresAt);
+    }
+
+    /// <summary>
+    /// Opens the page of a sign-in of a machine, or of a provider of it, in the browser of this computer: the link of its dialog.
+    /// The window never navigates to it, and opens no window of its own; an <c>https</c> page only.
+    /// </summary>
+    [NeoRpcMethod("openSignInPage")]
+    public Task<MachineActionResult> OpenSignInPageAsync(MachineOpenPageRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return Task.FromResult(new MachineActionResult(refused));
+        if (SafePage(request!.Url) is not { Scheme: "https" } page) return Task.FromResult(new MachineActionResult("invalid_request"));
+        return Task.FromResult(new MachineActionResult(OpenSignInPage(page) ? "ok" : "signin.browser"));
     }
 
     /// <summary>Gives a sign-in of a machine the code the person pasted, or the value typed for it to keep as a secret.</summary>
@@ -305,6 +322,11 @@ internal sealed record MachineSignInAttemptRequest(string ExpectedEpoch, string 
 /// <param name="AttemptId">The attempt.</param>
 /// <param name="Code">The code.</param>
 internal sealed record MachineSignInCodeRequest(string ExpectedEpoch, string MachineId, string AttemptId, string Code);
+
+/// <summary>A page of a sign-in to open in the browser of this computer.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Url">The page, an <c>https</c> address.</param>
+internal sealed record MachineOpenPageRequest(string ExpectedEpoch, string Url);
 
 /// <summary>Where a sign-in of a machine stands.</summary>
 /// <param name="Status"><c>waiting</c>, <c>completed</c>, <c>failed</c>, <c>none</c>, or why the machine could not say.</param>

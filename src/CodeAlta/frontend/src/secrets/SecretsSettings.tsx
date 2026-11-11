@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button, Card, InputGroup, NonIdealState, PopoverNext, Tag } from "@blueprintjs/core";
 import { secrets, type CredentialProviderRpcView, type SecretsList, type SecretView, type VariableView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
@@ -14,7 +14,7 @@ import { VaultBindingDialog } from "./VaultPicker";
 import { isSecretName, referenceOf, secretNameProblem } from "./secrets";
 
 type SecretsApi = Pick<typeof secrets, "list" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable" | "saveProvider" | "removeProvider"
-  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant">;
+  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "setDeveloperUnlock" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant">;
 type Result = Promise<{ status: string; message?: string | null }>;
 
 /** What the body of the page does: each call writes one change and says how it went. */
@@ -29,13 +29,15 @@ export type SecretsActions = Readonly<{
 /** What the rows of the secrets do with the vaults; absent on the page of a machine, which has none. */
 export type SecretVaultActions = Readonly<{
   keepInVault: (name: string) => void;
+  /** The logo of the first vault, on the button that gives a secret of this computer an item of a vault. */
+  icon?: string | null;
   setAskBeforeUse: (name: string, duration: string | null) => Result;
   verification: { available: boolean; reason: string | null } | null;
 }>;
 
 /**
  * Settings > Secrets: the credential providers (this computer and the vaults), the secrets of this machine listed by name
- * with where each is kept (Add, Rotate, Delete, Keep in a vault, Ask before use; a value is sent and never shown back), the
+ * with where each is kept (Add, Rotate, Delete, Add from a vault, Ask before use; a value is sent and never shown back), the
  * uses that wait for a confirmation, and the variables, which are read and edited.
  */
 export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch: string | null; api?: SecretsApi; runInTerminal?: (command: string) => void }) {
@@ -60,39 +62,44 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
   };
   const run = (call: () => Result) => mutate(call, "Saved.");
   const browse = useCallback((provider: string, parent: string | null) => api.browse({ expectedEpoch, id: provider, parent }), [api, expectedEpoch]);
-  // A host with a credential broker offers the vaults; without a provider yet, Keep in a vault adds one first.
+  // A host with a credential broker offers the vaults; without a provider yet, using a vault item adds one first.
   const vaults: SecretVaultActions | null = listing && listing.types.length > 0 ? {
     keepInVault: name => { if (listing.providers.length > 0) setBinding({ name }); else setProviderDialog({ editing: null }); },
+    icon: listing.providers[0]?.icon ?? null,
     setAskBeforeUse: (name, duration) => api.setAskBeforeUse({ expectedEpoch, name, duration }),
     verification: listing.verification,
   } : null;
   return <SettingsPage className="secrets-settings" label={t("Secrets")} group="Agent & models" title="Secrets"
     description="Named values of this machine. The configuration refers to them as ${secret:NAME} and ${var:NAME}."
-    notice={notice} loading={loading} busy={busy} onReload={reload}
-    actions={<>
-      {listing && listing.providers.length > 0 && <Button icon={<AppIcon name="secret" size={15} />} disabled={!epoch || busy} onClick={() => setBinding({})}>{t("Keep in a vault…")}</Button>}
-      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing || adding} onClick={() => setAdding(true)}>{t("Add a secret…")}</Button>
-    </>}>
+    notice={notice} loading={loading} busy={busy} onReload={reload}>
     {!listing ? <SettingsUnavailable loading={loading} icon="secret" title="Secrets unavailable" />
       : <>
         {listing.pending.length > 0 && <PendingUses listing={listing} busy={busy}
           onConfirm={(name, use) => run(() => api.confirmUse({ expectedEpoch, name, use }))} onDecline={(name, use) => run(() => api.declineUse({ expectedEpoch, name, use }))} />}
-        <CredentialProviders listing={listing} busy={busy} run={run} onAdd={() => setProviderDialog({ editing: null })} actions={{
-          unlock: (id, password) => api.unlockProvider({ expectedEpoch, id, password }),
-          lock: id => api.lockProvider({ expectedEpoch, id }),
-          test: id => api.testProvider({ expectedEpoch, id }),
-          remove: id => api.removeProvider({ expectedEpoch, id }),
-          edit: provider => setProviderDialog({ editing: provider }),
-          runInTerminal,
-        }} />
-        <SecretsBody listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} vaults={vaults} />
-        {listing.types.length > 0 && <SignInsCard signIns={listing.signIns} providers={listing.providers} types={listing.types} busy={busy} run={run} actions={{
+        <SecretsBody listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} vaults={vaults}
+          secretActions={<>
+            {vaults && <Button size="small" icon={<CredentialIcon icon={listing.providers[0]?.icon ?? "secret"} size={14} />} disabled={!epoch || busy}
+              onClick={() => listing.providers.length > 0 ? setBinding({}) : setProviderDialog({ editing: null })}>{t("Add from a vault…")}</Button>}
+            <Button size="small" intent="primary" icon={<AppIcon name="plus" size={14} />} disabled={!epoch || adding} onClick={() => setAdding(true)}>{t("Add a secret…")}</Button>
+          </>}
+          beforeVariables={<>
+            {listing.types.length > 0 && <CredentialProviders listing={listing} busy={busy} run={run} onAdd={() => setProviderDialog({ editing: null })} actions={{
+              unlock: (id, password) => api.unlockProvider({ expectedEpoch, id, password }),
+              lock: id => api.lockProvider({ expectedEpoch, id }),
+              test: id => api.testProvider({ expectedEpoch, id }),
+              remove: id => api.removeProvider({ expectedEpoch, id }),
+              edit: provider => setProviderDialog({ editing: provider }),
+              runInTerminal,
+              setDeveloperUnlock: enabled => api.setDeveloperUnlock({ expectedEpoch, enabled }),
+            }} />}
+            {listing.types.length > 0 && <SignInsCard signIns={listing.signIns} providers={listing.providers} types={listing.types} busy={busy} run={run} actions={{
           save: draft => api.saveSignIn({ expectedEpoch, id: draft.id, label: draft.label, provider: draft.provider, sites: [...draft.sites],
             username: draft.username, password: draft.password, totp: draft.totp.trim() || null }),
           remove: id => api.removeSignIn({ expectedEpoch, id }),
           revoke: (id, origin) => api.revokeSiteGrant({ expectedEpoch, id, origin }),
           browse,
         }} />}
+          </>} />
         {listing.uses.length > 0 && <RecentUses listing={listing} />}
       </>}
     {providerDialog && listing && <ProviderDialog types={listing.types} providers={listing.providers} editing={providerDialog.editing} busy={busy}
@@ -104,6 +111,23 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
       initialName={binding.name} initialProvider={binding.provider} busy={busy} browse={browse} onClose={() => setBinding(null)}
       onBind={value => run(() => api.bindSecret({ expectedEpoch, name: value.name, provider: value.provider, reference: value.reference, label: value.label, replaceLocal: value.replaceLocal }))} />}
   </SettingsPage>;
+}
+
+/** The reference the configuration writes, such as ${secret:NAME}: a click copies it, and a check says it was copied. */
+export function CopyReference({ text, copy = value => navigator.clipboard.writeText(value) }: { text: string; copy?: (value: string) => Promise<void> }) {
+  const { t } = useShellLanguage();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const label = t("Copy {reference}", { reference: text });
+  return <button type="button" className="secret-reference-copy" title={label} aria-label={label} data-copied={copied || undefined}
+    onClick={() => void copy(text).then(() => setCopied(true), () => { /* No clipboard: nothing is copied. */ })}>
+    <span className="secret-reference">{text}</span>
+    <AppIcon name={copied ? "check" : "copy"} size={12} />
+  </button>;
 }
 
 /** The uses of secrets that ask before use, waiting for the user: Confirm asks the system to verify the user. */
@@ -154,9 +178,13 @@ function RecentUses({ listing }: { listing: SecretsList }) {
  * The secrets and the variables of a listing, with their forms: two cards of a settings page, or, `flat`, two parts of a
  * section of another page (the page of a machine).
  */
-export function SecretsBody({ listing, busy, adding = false, onAdded = () => { }, run, actions, flat = false, vaults = null }: {
+export function SecretsBody({ listing, busy, adding = false, onAdded = () => { }, run, actions, flat = false, vaults = null, secretActions, beforeVariables }: {
   listing: SecretsList; busy: boolean; adding?: boolean; onAdded?: () => void;
   run: (call: () => Result) => Promise<boolean>; actions: SecretsActions; flat?: boolean; vaults?: SecretVaultActions | null;
+  /** The actions that add a secret, in the heading of the secrets. */
+  secretActions?: ReactNode;
+  /** What the page shows between the secrets and the variables: the vaults and the sign-ins of websites. */
+  beforeVariables?: ReactNode;
 }) {
   const { t, locale } = useShellLanguage();
   const date = (value: string) => new Date(value).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
@@ -186,9 +214,14 @@ export function SecretsBody({ listing, busy, adding = false, onAdded = () => { }
 
   return <div className="settings-grid secrets-body">
     <Card className="appearance-settings" aria-labelledby="secrets-title">
-      <h2 id="secrets-title">{t("Secrets")}</h2>
+      <div className="secrets-card-heading">
+        <h2 id="secrets-title">{t("Secrets")}</h2>
+        {secretActions && <span className="secrets-card-actions">{secretActions}</span>}
+      </div>
+      {secretActions && <p className="secrets-card-intro">{t("The configuration names a secret as ${secret:NAME}. Its value is kept on this computer, or read from an item of a vault each time it is used.")}</p>}
       {secretsPart}
     </Card>
+    {beforeVariables}
     <Card className="appearance-settings" aria-labelledby="secret-variables-title">
       <h2 id="secret-variables-title">{t("Variables")}</h2>
       {variablesPart}
@@ -216,7 +249,7 @@ function SecretRow({ secret, busy, date, run, actions, vaults }: {
   const bound = !!secret.provider;
   return <li className="secret-row" data-secret={secret.name} data-source={bound ? secret.provider ?? undefined : "this-computer"}>
     <span className="secret-name"><code title={secret.name}>{secret.name}</code>
-      <span className="secret-reference" title={referenceOf("secret", secret.name)}>{referenceOf("secret", secret.name)}</span></span>
+      <CopyReference text={referenceOf("secret", secret.name)} /></span>
     {bound
       ? <span className="secret-source" title={secret.label ?? undefined}><CredentialIcon icon={secret.icon} size={14} />
         <span>{secret.providerName ?? secret.provider}{secret.label ? ` › ${secret.label}` : ""}</span></span>
@@ -228,8 +261,8 @@ function SecretRow({ secret, busy, date, run, actions, vaults }: {
     </span>
     <span className="secret-actions">
       {vaults && <AskBeforeUse secret={secret} busy={busy} run={run} vaults={vaults} />}
-      {!bound && vaults && <Button size="small" variant="minimal" icon={<AppIcon name="openExternal" size={14} />} aria-label={t("Keep {name} in a vault", { name: secret.name })}
-        title={t("Keep in a vault…")} disabled={busy} onClick={() => vaults.keepInVault(secret.name)} />}
+      {!bound && vaults && <Button size="small" variant="minimal" icon={<CredentialIcon icon={vaults.icon ?? "secret"} size={14} />} aria-label={t("Use a vault item for {name}", { name: secret.name })}
+        title={t("Use a vault item…")} disabled={busy} onClick={() => vaults.keepInVault(secret.name)} />}
       {!bound && <PopoverNext isOpen={rotating} placement="bottom-end" onInteraction={next => { if (!next && !busy) { setRotating(false); setValue(""); } }}
         content={<form className="secret-rotate" onSubmit={event => { event.preventDefault(); if (value) void rotate(); }}>
           <strong>{t("New value of {name}", { name: secret.name })}</strong>
@@ -287,7 +320,7 @@ function VariableRow({ variable, busy, run, actions }: {
   const changed = value !== variable.value;
   return <li className="secret-row" data-variable={variable.name}>
     <span className="secret-name"><code title={variable.name}>{variable.name}</code>
-      <span className="secret-reference" title={referenceOf("var", variable.name)}>{referenceOf("var", variable.name)}</span></span>
+      <CopyReference text={referenceOf("var", variable.name)} /></span>
     <InputGroup className="secret-value" small value={value} disabled={busy} aria-label={t("Value of {name}", { name: variable.name })}
       onChange={event => setValue(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && changed && value) void run(() => actions.setVariable(variable.name, value)); }} />
     <span className="secret-actions">

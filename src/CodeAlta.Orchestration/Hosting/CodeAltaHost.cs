@@ -600,6 +600,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     PluginFrontends.Cli => "cli",
                     _ => null,
                 },
+                CliSignInHint = options.CliSignInHint,
             };
             // The secrets kept in vaults are read before the providers are registered, without a prompt and within a time limit:
             // the providers, the MCP servers and the shells of the sessions are given them from the memory of the broker.
@@ -610,6 +611,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 Types = new CodeAlta.Credentials.CredentialProviderTypes(new CodeAlta.Credentials.VaultCommandRunner(), pluginRuntime.GetCredentialProviderTypes),
                 Verifier = options.UserPresenceVerifier,
                 CanPrompt = options.CredentialPrompts,
+                DeveloperInstance = options.CredentialsDeveloperInstance,
                 Logger = LogManager.IsInitialized ? LogManager.GetLogger("CodeAlta.Credentials") : null,
             });
             if (credentials.Settings.Load(out _).Count > 0)

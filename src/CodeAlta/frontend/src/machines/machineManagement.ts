@@ -131,7 +131,8 @@ export function providerProblem(provider: Pick<MachineProviderStatusView, "state
     case "key_missing": return provider.detail ? { key: "It has no key: the variable {name} is not set on the machine.", values: { name: provider.detail } } : { key: "It has no key." };
     case "sign_in_needed": return { key: "It is not signed in on the machine." };
     case "start_failed": return provider.detail ? { key: "It did not start: {detail}", values: { detail: provider.detail } } : { key: "It did not start." };
-    default: return { key: "The machine left it out: its log says why." };
+    case "pending": return { key: "The machine has not applied it yet: it does in a moment." };
+    default: return { key: "The machine cannot start it with its configuration." };
   }
 }
 

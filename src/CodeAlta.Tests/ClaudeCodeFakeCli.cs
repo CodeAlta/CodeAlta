@@ -173,10 +173,11 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
 
     /// <summary>The options of a provider that runs this CLI.</summary>
     public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", string? configDirectory = null, TimeSpan? startupTimeout = null,
-        AgentProviderProcesses? providerProcesses = null)
+        AgentProviderProcesses? providerProcesses = null, string? signInHintOfHost = null)
         => new()
         {
             ProviderKey = providerKey,
+            SignInHintOfHost = signInHintOfHost,
             ProviderProcesses = providerProcesses,
             ConfigDirectory = configDirectory,
             DisplayName = "Claude Code",

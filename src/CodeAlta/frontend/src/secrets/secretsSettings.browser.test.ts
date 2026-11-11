@@ -3,6 +3,7 @@ import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
 import { testLimit } from "../testTime";
 
+const ask = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
 const options = { entry: "../secrets/secretsSettings.mount.tsx", fixture: "secretsFixture", rpcFixture: "../demo-api.ts", styles: ["../secrets/secrets.css"],
   width: 1300, height: 900, reducedMotion: true } as const;
 // What each row of a list shows of its name, its reference and when it was set: cut or whole, and the name's tooltip.
@@ -33,6 +34,36 @@ test("the names of secrets and variables keep their room in a large window, and 
       assert.deepEqual(narrow.filter(row => row.overflow).map(row => row.name), [], "no row overflows");
       assert.deepEqual(narrow.filter(row => row.tagCut || row.metaCut).map(row => row.name), [], "the version and when it was set stay whole, the date on a line of its own");
       assert.equal(narrow.find(row => row.name === "OPENAI_API_KEY")?.nameCut, false, "a short name stays whole");
+      assert.deepEqual(page.problems, []);
+    }, options);
+  });
+
+test("a vault item is found by its name in any vault, its hidden field is picked and the secret is named after it", { skip: !edge, timeout: testLimit(90_000) },
+  async () => {
+    await withCanvas(async page => {
+      // The reference of a secret is copied by a click, to be pasted in a configuration.
+      await page.until(`document.querySelectorAll(".secret-reference-copy").length > 0`, "the references");
+      await page.evaluate(`Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => { window.copiedText = text; } } })`);
+      await page.click('.secret-row[data-secret="OPENAI_API_KEY"] .secret-reference-copy');
+      await page.until(`window.copiedText === "\${secret:OPENAI_API_KEY}" && document.querySelector('.secret-row[data-secret="OPENAI_API_KEY"] .secret-reference-copy').dataset.copied === "true"`, "the reference copied");
+
+      await page.clickText(".secrets-settings button", "Add from a vault…");
+      await page.until(`${ask(".vault-browser-search input")} && document.querySelectorAll(".vault-browser-entry").length === 2`, "the vaults");
+      // The search field has the focus: what is typed looks into every vault.
+      await page.type("git");
+      await page.until(`[...document.querySelectorAll(".vault-browser-entry")].map(e => e.textContent).join("|") === "Private › GitHublogin"`, "GitHub found in Private");
+      await page.key("Enter", 13);
+      await page.until(`${ask(".vault-browser-picked")}?.textContent === "Private › GitHub › password"`, "the password picked by itself");
+      assert.equal(await page.evaluate(`${ask("#vault-binding-name")}.value`), "GITHUB_PASSWORD", "the secret is named after the item and its field");
+      assert.equal(await page.evaluate(`[...document.querySelectorAll(".vault-binding-dialog .bp6-dialog-footer button")].find(b => b.textContent === "Use this item").disabled`), false);
+      await page.shot("secrets-vault-search");
+
+      // A word found nowhere says so; a name typed by the user is no longer changed.
+      await page.clickText(".vault-browser-trail button", "1Password");
+      await page.until(`document.querySelectorAll(".vault-browser-entry").length === 2`, "the top again");
+      await page.click(".vault-browser-search input");
+      await page.type("nothing");
+      await page.until(`${ask(".vault-browser-none")}?.textContent === "Nothing in the vault has this name."`, "no match");
       assert.deepEqual(page.problems, []);
     }, options);
   });

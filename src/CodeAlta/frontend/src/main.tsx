@@ -304,7 +304,7 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { SecretsSettings } from "./secrets/SecretsSettings";
-import { isMachineProject, machineRowState, readMachinePageLink } from "./machines/machines";
+import { isMachineProject, machinePageLink, machineRowState, readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { ModelServersSettings } from "./modelServers/ModelServersSettings";
@@ -319,7 +319,7 @@ import { FleetApprovals, showHeldStartToast } from "./fleet/FleetApprovals";
 import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { QueuedSessionNotice } from "./machines/QueuedSessionNotice";
-import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
+import { newSessionProblem, noRemoteSelection, offersProviderSetup, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
@@ -6525,6 +6525,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             : !selectedSession
             ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree} cloud={draftCloud}
                 machine={draftMachine ? runOnShown.find(target => target.id === draftMachine)?.name ?? draftMachine : null}
+                machineSetup={draftMachine && offersProviderSetup(remoteChoices.choices)
+                  ? () => settingsNavigation.open(machinePageLink(draftMachine)) : undefined}
                 starting={cloudStart && cloudStart.projectId === projectId ? <CloudStartProgress step={cloudStart.step} outcome={cloudStart.outcome} onStop={stopCloudStart}
                   onShowTerminal={showTerminalById} onOpenLink={url => openCloudLink(url, null)}
                   onBringHere={url => { const id = cloudStart.projectId; setCloudStart(null); setCloudBring({ projectId: id, link: url }); }}

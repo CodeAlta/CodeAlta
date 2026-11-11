@@ -138,8 +138,14 @@ internal sealed record SecretsList(string Status, string? Protection, SecretView
     /// <summary>Whether the system can verify the user, for the secrets that ask before use; null without a broker.</summary>
     public VerificationView? Verification { get; init; }
 
-    /// <summary>Whether this instance asks a vault to unlock; the developer instance never does.</summary>
+    /// <summary>Whether this instance asks a vault to unlock: the normal instance, and the developer instance the user lets do it.</summary>
     public bool CanPrompt { get; init; }
+
+    /// <summary>Whether this is the developer instance of CodeAlta Desktop.</summary>
+    public bool DeveloperInstance { get; init; }
+
+    /// <summary>Whether the user lets the developer instance ask a vault to unlock, on a click in its window.</summary>
+    public bool DeveloperUnlock { get; init; }
 
     /// <summary>What is wrong with the tables of the configuration that were left out.</summary>
     public string[] ConfigurationProblems { get; init; } = [];

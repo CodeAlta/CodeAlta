@@ -64,7 +64,7 @@ The link works once and expires after 10 minutes. Each computer is then listed a
    - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS; with **Always on**, a service that starts at boot;
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once (and manages the machine, when you ticked it). The six words of its key are shown.
    - **Join your server**, when this computer is connected to a [CodeAlta Server](server.md): the node joins it from itself (`altanode join`), and this computer approves the key it just paired with. Your other computers of that server then list the machine too. When this step fails, the machine stays paired: join it later from its page.
-3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
+3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). On Ubuntu 24.04 and later, its sessions need the sandbox set up once with `sudo` (see [Set up the sandbox on Linux](#set-up-the-sandbox-on-linux)): **Permissions** on that page says so.
 
 When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
 
@@ -101,6 +101,20 @@ dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o alt
 The node uses the same profile as CodeAlta Desktop and TUI, `~/.alta`: its providers, prompts, skills and projects. Set up its providers as you would for the desktop app (see [Model Providers](../model-providers/readme.md)): the sessions of a machine run with the accounts of that machine. Only one CodeAlta runs on a profile at a time, so on a computer where you also use CodeAlta Desktop, run the node only while the desktop app is closed, or give it a profile of its own with `--data-root <folder>` (a full path).
 
 The projects a session can start in on the machine are the projects of that profile: add them with `altanode projects` (see [Give it projects](#give-it-projects)).
+
+### Set up the sandbox on Linux
+
+The sessions of a machine run in a [sandbox](sessions.md#what-its-sessions-may-do), which needs Bubblewrap, and `slirp4netns` for its network. On Ubuntu 24.04 and later, AppArmor also keeps `bwrap` and `unshare` from making the namespaces of the sandbox until each has a profile that allows them. Run this once on the machine, then restart the node (`systemctl --user restart altanode` for the service of `altanode install`):
+
+```bash
+sudo apt-get install -y bubblewrap slirp4netns
+for p in bwrap unshare; do
+  printf 'abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile %s /usr/bin/%s flags=(unconfined) {\n  userns,\n\n  include if exists <local/%s>\n}\n' $p $p $p | sudo tee /etc/apparmor.d/$p > /dev/null
+  sudo apparmor_parser -r /etc/apparmor.d/$p
+done
+```
+
+Until then, **Permissions** on the page of the machine says that the sandbox cannot run, why, and the command to run; `altanode status` says it too. A machine added [over SSH](#over-ssh) needs it as well.
 
 ## Run it
 
@@ -184,6 +198,33 @@ On the machine of the node:
 
 `--space <space>` with `add` or `clone` puts the project in a space too. While the node runs, it makes the change, and keeps a project that still has sessions; otherwise the commands change the catalog of the profile directly.
 
+## Give it providers
+
+The sessions of a node run on its own providers, signed in on the machine. On the page of a machine you manage (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)), **Providers** > **Add a provider…** lists what it can run, each with its icon, what it needs and what it installs:
+
+| Group | What it adds |
+| --- | --- |
+| Agents that run on the machine | Claude Code, Codex CLI and the agents of the ACP registry. The machine installs the version CodeAlta is tested with when it has none, uses one already installed there, and updates them with CodeAlta. An agent that cannot run there, such as one that needs Node.js, says why |
+| Subscriptions | Codex, GitHub Copilot, xAI and Mistral Vibe, signed in with an account |
+| APIs with a key | OpenAI, Anthropic, Gemini and the other APIs: you type the key, and the machine keeps it in its secrets |
+| Model servers | A llama.cpp server of the machine |
+
+Click one: an agent is added in one step, with the progress of its download, and its sign-in opens at once (see [Sign in on a machine](#sign-in-on-a-machine)). Claude Code is the exception: it signs in on the machine itself, and the page says how. Each provider then shows what it runs, its version, and **Install** or **Update to** when there is one. A provider that is not ready says why on its row, with what makes it ready: **Sign in…**, **Add its key…** or **Install**.
+
+When no provider of a machine is ready, a new session on it says so, with a link that opens its page.
+
+On the machine of the node, `altanode providers` does the same while the node runs:
+
+| Command | What it does |
+| --- | --- |
+| `altanode providers` | Lists its providers, whether each is ready, and why not |
+| `altanode providers available` | Lists what it can add |
+| `altanode providers add <what>` | Adds one, such as `claude-code`, installing what it runs first |
+| `altanode providers update <key>` | Updates what a provider runs |
+| `altanode providers sign-in <key>` | Signs a provider in: its page is printed, and you type back the code it shows. For Claude Code, it starts Claude Code's own sign-in in that terminal |
+
+A provider written by hand in the node's `~/.alta/config.toml` applies within a second, without a restart. While the file has an error, the providers run as before and the page of the machine says where the file is wrong.
+
 ## Tag your machines
 
 Tags such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Machine tags**: type one or more, separated by commas or spaces, and **Add**; the cross of a tag removes it. On the machine itself, `altanode tags` lists them, `altanode tags add gpu prod` and `altanode tags remove gpu` change them, and `altanode tags set` replaces them all.
@@ -242,7 +283,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Machine tags** | Its [tags](#tag-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Limits** | How many sessions work there at once, and the runs that wait for their turn, with **Start now** and **Take out of the queue** ([Limit the sessions at work](#limit-the-sessions-at-work)) |
 | **Projects** | Clone a repository there, add a folder, remove a project; how many [worktrees](sessions.md#start-a-session-on-it) its sessions work in, and what they take on its disk |
-| **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
+| **Providers** | Each provider of the machine, what it runs and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in, not installed. **Add a provider…** adds one ([Give it providers](#give-it-providers)). **Add its key…** takes its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs a provider in on the machine ([Sign in on a machine](#sign-in-on-a-machine)) |
 | **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in with an account, ACP agents, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
 | **Secrets** | Its [secrets and variables](../secrets/readme.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
 | **Servers** | The servers it joined, and whether it is connected to each, or why not: a server only sees it offline. A server of this computer it is not on yet has **Join**: the machine joins it from itself, and this computer approves it, so that your other computers of that server see it |
@@ -280,12 +321,12 @@ A machine signs in to its providers, MCP servers and tools itself; nothing is co
 | GitHub Copilot, xAI, Codex CLI | A code shows here with **Copy**: enter it on the page it names |
 | `gh` of each space, and the tools whose login a space names in its CLI profiles (`gh`, `glab`, `az`, `aws`, `gcloud`) | The machine runs the login with the identity of the space and shows its page and code here, or asks for the code its page gives |
 | Mistral Vibe | Its page opens in the browser of this computer. Sign in there and choose the workspace: the machine waits for the console of Mistral and keeps the key it gives |
-| Claude Code | The machine runs `claude setup-token` (on Windows too): its page opens here, and you paste the code it shows. The machine keeps the token it gets as a secret and Claude Code uses it |
+| Claude Code | On the machine itself, with Anthropic's own sign-in: in a terminal there (over SSH too), as the account the node runs as, run `altanode providers sign-in <key>`. It starts `claude auth login` of the Claude Code the node runs, and Claude Code keeps its login. Then click **Check again** on the page of the machine. CodeAlta never sees or keeps your Claude login, as the terms of Claude Code require |
 | ACP agents that take an API key | You type the key here. The machine keeps it as a secret, names it in the agent's environment, and it never comes back to this computer |
 | Other ACP agents | They sign in on the machine itself: the list says how, such as the command to run in a terminal there. An agent that signs in with a browser it opens on its own machine cannot finish from another computer |
 
-**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine. Claude Code's token and an ACP agent's key go with their **Sign out**.
+**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine, and so does Claude Code: `claude auth logout` there ends it. An ACP agent's key goes with its **Sign out**, and so does a Claude Code token an older version of CodeAlta kept.
 
 The machine exchanges the code and keeps the token: this computer only opens the page and relays the code or the address the browser returns, which is useless without what the machine holds. If another program holds the port the browser comes back to, the sign-in says it cannot start and the machine keeps nothing half done. A sign-in waits 15 minutes at most for you, and closing its window cancels it.
 
-Only a computer that manages the machine signs it in (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). A person reached through your server never does.
+Only a computer paired with the machine to manage it signs it in, adds its providers and gives their keys (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). A computer that reaches it through your server sees its providers and sign-ins, with these buttons off and the way to pair: run `altanode pair --manage` on the machine, then paste the link in **Pair a machine…**.

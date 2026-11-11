@@ -12,6 +12,8 @@ internal sealed class OnePasswordProvider : ICredentialProvider
 {
     internal const string TypeName = "1password";
     private static readonly TimeSpan StatusReuse = TimeSpan.FromSeconds(30);
+    // The 1Password app keeps an authorization of the CLI for 10 minutes without a command: CodeAlta counts a little less.
+    private static readonly TimeSpan AuthorizationLasts = TimeSpan.FromMinutes(9);
 
     private readonly VaultCommandRunner _runner;
     private readonly string? _configuredPath;
@@ -19,6 +21,8 @@ internal sealed class OnePasswordProvider : ICredentialProvider
     private readonly string? _serviceAccountToken;
     private readonly Lock _gate = new();
     private (DateTimeOffset At, CredentialProviderStatus Status)? _lastStatus;
+    // Until when the app authorized the commands of this process: op says nothing of it without a prompt.
+    private DateTimeOffset _authorizedUntil;
 
     public OnePasswordProvider(PluginCredentialProviderContext context, VaultCommandRunner runner)
     {
@@ -52,11 +56,72 @@ internal sealed class OnePasswordProvider : ICredentialProvider
     public async ValueTask<CredentialProviderStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
         if (Program is not { } program) return NotInstalled();
-        var result = await RunAsync(program, ["whoami", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
-        var status = result.ExitCode == 0 ? Ready(program, result) : Classify(program, result);
+        var status = await CheckAsync(program, cancellationToken).ConfigureAwait(false);
         lock (_gate) _lastStatus = (DateTimeOffset.UtcNow, status);
         return status;
     }
+
+    /// <summary>Forgets that the app authorized CodeAlta: the next read waits for an unlock.</summary>
+    public void Lock()
+    {
+        lock (_gate)
+        {
+            _authorizedUntil = default;
+            _lastStatus = null;
+        }
+    }
+
+    // The state, never with a prompt. A service account, or an op signed in by itself, answers whoami. With the 1Password app,
+    // whoami says "not signed in" even to a process the app authorized: the accounts the app gives say whether it is on and
+    // which account is read, and an authorization is known from the commands that went through since it was given.
+    private async Task<CredentialProviderStatus> CheckAsync(string program, CancellationToken cancellationToken)
+    {
+        var whoami = await RunAsync(program, ["whoami", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        if (whoami.ExitCode == 0) return Ready(program, whoami);
+        if (_serviceAccountToken is not null) return Classify(program, whoami);
+        var accounts = await RunAsync(program, ["account", "list", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        if (accounts.ExitCode != 0) return Classify(program, accounts);
+        var (any, shown) = AccountOf(accounts.Output);
+        if (!any || shown is null) return NoAccount(program);
+        bool authorized;
+        lock (_gate) authorized = DateTimeOffset.UtcNow < _authorizedUntil;
+        return authorized
+            ? CredentialProviderStatus.Ready() with { Account = shown, ProgramPath = program }
+            : CredentialProviderStatus.Locked("Unlock to let the 1Password app authorize CodeAlta.") with { Account = shown, ProgramPath = program };
+    }
+
+    // Whether the app gives op an account, and the one this provider reads: the one set, or the first; null when the one set is not given.
+    private (bool Any, string? Shown) AccountOf(byte[] output)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0) return (false, null);
+            foreach (var entry in document.RootElement.EnumerateArray())
+            {
+                string? Text(string name) => entry.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+                var url = Text("url");
+                var shown = Text("email") is { Length: > 0 } email ? email : url;
+                if (_account is null) return (true, shown);
+                var wanted = _account.Trim();
+                if (new[] { url, url is null ? null : "https://" + url, Text("email"), Text("shorthand"), Text("account_uuid"), Text("user_uuid") }
+                    .Any(candidate => string.Equals(candidate, wanted, StringComparison.OrdinalIgnoreCase)))
+                    return (true, shown);
+            }
+
+            return (true, null);
+        }
+        catch (JsonException)
+        {
+            // An older op that writes its accounts as a table: they are not known, nor the account read.
+            return (false, null);
+        }
+    }
+
+    private CredentialProviderStatus NoAccount(string program) => CredentialProviderStatus.Locked(_account is null
+            ? "Unlock the 1Password app and turn on Integrate with 1Password CLI in its Settings › Developer, then Unlock here."
+            : $"Unlock the 1Password app and turn on Integrate with 1Password CLI in its Settings › Developer, then Unlock here. Check that {_account} is the sign-in address of an account of the app, or leave Account empty.")
+        with { ProgramPath = program };
 
     public async ValueTask<CredentialProviderStatus> UnlockAsync(CredentialUnlockContext context, CancellationToken cancellationToken)
     {
@@ -174,13 +239,21 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         }
     }
 
-    private Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var all = new List<string>(arguments);
-        if (_account is not null && _serviceAccountToken is null) all.AddRange(["--account", _account]);
+        // The list of the accounts filters nothing: the account set is looked for in it.
+        if (_account is not null && _serviceAccountToken is null && arguments[0] != "account") all.AddRange(["--account", _account]);
         Dictionary<string, string>? environment = null;
         if (_serviceAccountToken is not null) environment = new(StringComparer.Ordinal) { ["OP_SERVICE_ACCOUNT_TOKEN"] = _serviceAccountToken };
-        return _runner.RunAsync(program, all, new VaultCommandOptions { Timeout = timeout, Environment = environment }, cancellationToken);
+        var result = await _runner.RunAsync(program, all, new VaultCommandOptions { Timeout = timeout, Environment = environment }, cancellationToken).ConfigureAwait(false);
+        // A command of an account that went through: the app authorized this process, for a while after each one.
+        if (result.ExitCode == 0 && arguments[0] != "account")
+        {
+            lock (_gate) _authorizedUntil = DateTimeOffset.UtcNow + AuthorizationLasts;
+        }
+
+        return result;
     }
 
     private CredentialProviderStatus Ready(string program, VaultCommandResult result)
@@ -216,9 +289,11 @@ internal sealed class OnePasswordProvider : ICredentialProvider
     {
         var error = result.Error;
         if (result.TimedOut) return CredentialProviderStatus.Locked("1Password did not answer in time: is the 1Password app waiting for you?") with { ProgramPath = program };
+        // op knows no account: the 1Password app does not give it one (its integration with the CLI is off, or the app is
+        // locked), or the account set is not one of the app. The app authorizes the process that runs op, so a sign-in typed in
+        // a terminal would authorize that terminal, never CodeAlta: what the user does is turn the integration on, then Unlock.
         if (error.Contains("No accounts configured", StringComparison.OrdinalIgnoreCase) || error.Contains("no account found", StringComparison.OrdinalIgnoreCase))
-            return new CredentialProviderStatus(CredentialProviderState.SignInNeeded,
-                "Turn on Integrate with 1Password CLI in the 1Password app (Settings › Developer), or sign in with op.") { ProgramPath = program, SignInCommand = [program, "signin"] };
+            return NoAccount(program);
         if (error.Contains("LostConnectionToApp", StringComparison.OrdinalIgnoreCase) || error.Contains("connecting to desktop app", StringComparison.OrdinalIgnoreCase)
             || error.Contains("cannot connect", StringComparison.OrdinalIgnoreCase))
             return CredentialProviderStatus.Locked("Open the 1Password app, then unlock.") with { ProgramPath = program };

@@ -249,6 +249,8 @@ h1, h2, h3, p { margin-top: 0; }
 .welcome-content { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 0; text-align: center; color: var(--muted); }
 .welcome-content p { max-width: 100%; margin: 4px 0; overflow-wrap: anywhere; }
 .welcome-content .welcome-subtitle { margin: 18px 0 12px; color: var(--text); }
+.welcome-content .welcome-machine-setup { color: var(--orange, #d9822b); }
+.welcome-content .welcome-link { padding: 0; border: 0; background: none; color: var(--accent, #4c90f0); font: inherit; text-decoration: underline; cursor: pointer; }
 .blank-project-logo { display: flex; justify-content: center; align-items: start; gap: 2ch; font: clamp(3px, 1.8cqw, 12px)/1 var(--code-font-builtin); color: var(--text); user-select: none; }
 .blank-project-logo pre { margin: 0; font: inherit; white-space: pre; }
 .welcome-logo-word { font: inherit; white-space: pre; font-variant-ligatures: none; }

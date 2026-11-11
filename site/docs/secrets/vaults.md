@@ -9,13 +9,13 @@ A secret can keep its value in a vault you already use, such as 1Password, Bitwa
 Each vault is a *credential provider*. Add as many as you need, several of one kind too: a personal 1Password account for the keys of your providers, a KeePassXC database for a client, a secret manager of your company for deployments.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-secrets-vaults.webp" alt="Settings, Secrets: the credential providers This computer, Personal (1Password, ready), Clients (KeePassXC, locked, with Unlock) and Team (Bitwarden, not installed, with its install command), then the secrets with the vault item each one is kept in" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-vaults.webp" alt="Settings, Secrets: the secrets with the vault item each one is kept in, with Add from a vault and Add a secret beside their heading, then the vaults This computer, Personal (1Password, ready), Clients (KeePassXC, locked, with Unlock) and Team (Bitwarden, not installed, with its install command)" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings > Secrets with three vaults: 1Password unlocked, KeePassXC locked, Bitwarden not installed yet.</figcaption>
 </figure>
 
-## Add a provider
+## Add a vault
 
-In CodeAlta Desktop, open **Settings > Secrets** and click **Add a provider…** under **Credential providers**.
+In CodeAlta Desktop, open **Settings > Secrets** and click **Add a vault…** under **Vaults**.
 
 1. Choose the vault. The common ones come first, with their logo, then the secret managers of clouds and a command of your own.
 2. Give it an **Id**, which the secrets kept in it name (`personal` for a 1Password account), and fill the settings of its kind. A setting that is a token, such as the token of a service account, names a [secret of this computer](readme.md), never a value.
@@ -23,7 +23,7 @@ In CodeAlta Desktop, open **Settings > Secrets** and click **Add a provider…**
 4. **Unlock when CodeAlta starts**, on by default, asks the vault to unlock once, after the window shows. A vault that takes its master password in the page waits for you to click **Unlock**.
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-secrets-add-provider.webp" alt="The Add a credential provider window: 1Password, Bitwarden, Bitwarden Secrets Manager, KeePassXC, pass, the keychain of the system, a command, HashiCorp Vault, OpenBao, AWS Secrets Manager, Azure Key Vault, Google Secret Manager, Doppler and Infisical, each with its logo" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-add-provider.webp" alt="The Add a vault window: 1Password, Bitwarden, Bitwarden Secrets Manager, KeePassXC, pass, the keychain of the system, a command, HashiCorp Vault, OpenBao, AWS Secrets Manager, Azure Key Vault, Google Secret Manager, Doppler and Infisical, each with its logo" loading="lazy">
   <figcaption class="small text-secondary mt-2">The kinds of vaults.</figcaption>
 </figure>
 
@@ -55,19 +55,21 @@ cache = "1h"                 # session (the default), 15m, 1h or 8h
 unlock_at_start = false
 ```
 
-## Keep a secret in a vault
+## Use a vault item as a secret
 
-- **Keep in a vault…**, at the top of the page, takes the name of a secret, new or already there, and an item of a vault.
+A secret kept in a vault is a name of CodeAlta for one field of a vault item: the configuration names the secret, and CodeAlta reads the value from the vault each time the secret is used. The value never leaves the vault for a file of CodeAlta.
+
+- **Add from a vault…**, at the top of the page, makes a secret of an item of a vault.
 - On a secret of this computer, the vault button of its row does the same for that secret: the item of the vault replaces its value. The old value is deleted, and stays masked.
 - In **Settings > Providers**, **Use a vault item…** under the key of a provider does the same for that key.
 
-**Items of the vault** lists the vaults, items and fields of the provider by name, to choose one; a value never reaches the page.
+Type a few letters of the item in the search field: at the top it looks into every vault, inside a vault or an item it filters the list. Open the item, and its hidden field (the password, the credential) is picked; pick another field if you need it. The name of the secret follows the item, such as `GITHUB_PASSWORD`, until you type your own. The window shows names only: a value never reaches it.
 
 <figure class="alta-figure my-4" style="max-width: 32rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-secrets-vault-picker.webp" alt="Keep a secret in a vault: the name SENTRY_AUTH_TOKEN, the vault Personal (1Password), the item Platform team › Sentry and its field credential picked" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The field of an item picked by name.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-vault-picker.webp" alt="Use a vault item as a secret: an typed in the search of the vault Personal (1Password), which finds Private › Anthropic and Platform team › Grafana Cloud in two of its vaults" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An item found by a few letters of its name, in any vault; the secret is named after it.</figcaption>
 </figure>
- A vault that cannot be listed (it is locked, or its kind does not list) takes the reference typed in **Or type the reference**, in the form its section below gives.
+ A vault that cannot be listed (it is locked, or its kind does not list) takes a reference typed by hand, in the form its section below gives; **Type the reference instead…** offers the same field for any vault.
 
 The row of the secret then shows its vault and its item, and the state of that vault, instead of a version. The record of which item each secret names is `~/.alta/secrets/bindings.json`, which holds no value.
 
@@ -75,7 +77,7 @@ The row of the secret then shows its vault and its item, and the state of that v
 
 - **At start**, CodeAlta reads, without a prompt, what each vault gives as it is. Then CodeAlta Desktop asks each locked vault that has its own prompt, such as 1Password, to unlock, once, after the window shows. A prompt you dismiss is not shown again until you click **Unlock**.
 - **While CodeAlta runs**, a value read stays in memory for the time its provider keeps it. Nothing prompts again, and an automation that runs at night still has its values.
-- **The developer instance, `altacli` and `altanode` never ask a vault to unlock.** What is locked stays locked, and what needs it says which vault to unlock. In the developer instance, unlock the vault in the normal instance: a vault such as 1Password then answers both.
+- **`altacli` and `altanode` never ask a vault to unlock, nor does the developer instance by default.** What is locked stays locked, and what needs it says which vault to unlock. To test a vault in the developer instance, turn on **Let the developer instance unlock the vaults** under **Vaults**, in either instance: the developer instance then shows **Unlock**, and its click asks your vault for that run, as 1Password asks Windows Hello. It never asks at start, so a developer instance an agent starts shows no prompt by itself.
 
 A provider, an MCP server or the shell of a session whose secret is in a locked vault does not start, and its diagnostic names the secret and the vault. Once you unlock the vault, the providers start, and an MCP server starts at its next use.
 
@@ -85,7 +87,9 @@ CodeAlta reads 1Password through its command line tool, `op`, unlocked by the 1P
 
 1. Install the CLI: `winget install --id AgileBits.1Password.CLI -e` on Windows, `brew install 1password-cli` on macOS.
 2. In the 1Password app, open **Settings > Developer** and turn on **Integrate with 1Password CLI**.
-3. Add a provider of the kind **1Password**. With several accounts in the app, set **Account** to the sign-in address (`my.1password.com`) or the id of the account.
+3. Add a vault of the kind **1Password**. With several accounts in the app, set **Account** to the sign-in address (`my.1password.com`) or the id of the account.
+
+When the row of the provider asks you to turn on **Integrate with 1Password CLI**, do it in the app, keep the app unlocked, then click **Unlock**: the app asks you to authorize CodeAlta. A sign-in typed in a terminal (`op signin`) only authorizes that terminal.
 
 A reference is the secret reference of 1Password, `op://<vault>/<item>/<field>`, such as `op://Private/Anthropic/credential`; the item list writes it for you. The Developer page of the 1Password app lists the reads of CodeAlta.
 
@@ -160,7 +164,7 @@ read = ["vault", "kv", "get", "-mount=secret", "-field={field}", "{item}"]
 sign_in = ["vault", "login", "-method=oidc"]
 ```
 
-The program is found on the `PATH` and run without a shell, in a folder of its own, never the folder of a project. Only you add a provider of this kind: agents cannot propose one.
+The program is found on the `PATH` and run without a shell, in a folder of its own, never the folder of a project. Only you add a vault of this kind: agents cannot propose one.
 
 Plugins add other kinds of vaults: see [Credential providers](../plugins/developers.md#credential-providers).
 

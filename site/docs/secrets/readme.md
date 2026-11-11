@@ -12,15 +12,17 @@ The value of a secret is kept on this computer, or in an item of a vault such as
 
 ## Settings > Secrets
 
-In CodeAlta Desktop, open **Settings > Secrets**.
+In CodeAlta Desktop, open **Settings > Secrets**. The page shows, from the top:
 
-- **Credential providers** lists where values are kept: **This computer** first, then each [vault](vaults.md) you added, with its logo, its account and the action its state needs (**Unlock**, **Sign in**, how to install its program).
-- **Secrets** lists each secret by name, with the reference to write in the configuration and where its value is: **This computer** with its version, who set it and when, or the vault and the item it is kept in, with the state of that vault. A value is never shown.
-- **Add a secret…** takes a name and a value. A name is letters, digits and `_`, not starting with a digit, like an environment variable.
-- **Rotate** gives a secret of this computer a new value and a new version.
-- **Keep in a vault…** moves a secret to an item of a vault (see [Keep a secret in a vault](vaults.md#keep-a-secret-in-a-vault)).
-- The trash button deletes a secret, after a confirmation beside its row. What refers to it stops working until it is set again. A secret kept in a vault leaves the item as it is.
-- **Variables** shows each variable with its value: change it and **Save**, or add one at the bottom.
+- **Secrets**: each secret by name, with the reference to write in the configuration (a click on it copies it) and where its value is: **This computer** with its version, who set it and when, or the vault and the item it is kept in, with the state of that vault. A value is never shown.
+  - **Add a secret…** takes a name and a value. A name is letters, digits and `_`, not starting with a digit, like an environment variable.
+  - **Add from a vault…** makes a secret of an item of a vault, whose value stays in the vault (see [Use a vault item as a secret](vaults.md#use-a-vault-item-as-a-secret)).
+  - **Rotate** gives a secret of this computer a new value and a new version; the button with the logo of your vault gives it an item of the vault instead.
+  - The trash button deletes a secret, after a confirmation beside its row. What refers to it stops working until it is set again. A secret kept in a vault leaves the item as it is.
+- **Vaults**: where values are kept, **This computer** first, then each [vault](vaults.md) you added, with its logo, its account and the action its state needs (**Unlock**, **Sign in**, how to install its program).
+- **Sign-ins of websites**, which the browser of a session types for you (see [Sign in with a vault item](../browser.md#sign-in-with-a-vault-item)).
+- **Variables**: each variable with its reference and its value: change it and **Save**, or add one at the bottom.
+- **Recent uses** of the secrets, once a secret was asked for. A use that [waits for your confirmation](#ask-before-use) is shown at the top of the page.
 
 ## Keep the key of a provider as a secret
 
@@ -49,7 +51,7 @@ A secret kept in a locked vault is the same kind of error, and names the vault: 
 Turn on **Ask before use** on a secret, kept on this computer or in a vault, and CodeAlta gives its value only after the system checked that you are there: Windows Hello (PIN, fingerprint, face) on Windows, Touch ID or the password of your account on macOS. The prompt names the secret and what asks for it, such as `the provider anthropic`, `the MCP server grafana of C:\code\shop\.alta\mcp.json` or `the shell of the session 01a1…`.
 
 - Your answer is kept for that secret and what uses it, for the time you choose: each use, 15 minutes, 1 hour, or until CodeAlta closes. Something else that asks for the same secret asks you again: another provider, an MCP server of another file or space, the shell of another session, the automations of another project.
-- Where nobody can answer, such as an automation at night, `altacli`, `altanode` or the developer instance, the secret is not given, and what needs it says that it waits for your confirmation. When the window is open, **Confirm** at the top of **Settings > Secrets** asks you again.
+- Where nobody can answer, such as an automation at night, `altacli`, `altanode` or the developer instance unless you [let it unlock the vaults](vaults.md#when-a-vault-is-asked), the secret is not given, and what needs it says that it waits for your confirmation. When the window is open, **Confirm** at the top of **Settings > Secrets** asks you again.
 - **Recent uses**, at the bottom of the page, lists which secret was asked for, by what, when, and whether it was given. `alta secret uses` gives agents the same list.
 - Where the system cannot check you (Windows Hello not set up, Linux), the switch is off and says why.
 

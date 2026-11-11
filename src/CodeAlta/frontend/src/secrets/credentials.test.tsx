@@ -6,7 +6,7 @@ import type { CredentialProviderRpcView, CredentialTypeView, SecretsList } from 
 import { ShellLanguageContext } from "../shellLanguage";
 import { CredentialProviders } from "./CredentialProviders";
 import { SecretsBody } from "./SecretsSettings";
-import { commandLine, draftsOf, isProviderId, isSecretReference, isSite, localSecret, missingSetting, noCredentials, pickedLabel, settingsOf, signInDraftProblem, siteList, stateLabel, suggestedProviderId } from "./credentials";
+import { commandLine, draftsOf, isProviderId, isSecretReference, isSite, localSecret, matchesQuery, suggestedSecretName, missingSetting, noCredentials, pickedLabel, settingsOf, signInDraftProblem, siteList, stateLabel, suggestedProviderId } from "./credentials";
 import { SignInsCard } from "./SignIns";
 
 const never = () => assert.fail("rendering must not act");
@@ -135,3 +135,37 @@ test("a sign-in shows its vault, its sites and the sites allowed until a date; n
   const empty = render(createElement(SignInsCard, { signIns: [], providers: [], types: [], busy: false, run: never, actions: { save: never, remove: never, revoke: never, browse: never } }));
   assert.match(empty, /Add a vault first/);
 });
+
+test("a search finds a name by every word, whatever its case and accents", () => {
+  assert.ok(matchesQuery("git", "GitHub"));
+  assert.ok(matchesQuery("git hub", "GitHub"));
+  assert.ok(matchesQuery("ecole", "École"));
+  assert.ok(matchesQuery("192.168.1.1 netgear", "192.168.1.1 - netgear"));
+  assert.ok(matchesQuery("  ", "anything"));
+  assert.ok(!matchesQuery("gitlab", "GitHub"));
+});
+
+test("a secret is named after the item and the field picked", () => {
+  assert.equal(suggestedSecretName("Private › GitHub › password"), "GITHUB_PASSWORD");
+  assert.equal(suggestedSecretName("Private › Anthropic › credential"), "ANTHROPIC_API_KEY");
+  assert.equal(suggestedSecretName("Work › Grafana Cloud › token"), "GRAFANA_CLOUD_TOKEN");
+  assert.equal(suggestedSecretName("Private › 1fichier.com › username"), "SECRET_1FICHIER_COM_USERNAME");
+  assert.equal(suggestedSecretName("Contoso/Azure DevOps#Password"), "PASSWORD");
+});
+
+test("a switch lets the developer instance unlock the vaults, and its tag says where to find it", () => {
+  const actions = { unlock: never, lock: never, test: never, remove: never, edit: never, setDeveloperUnlock: never };
+  const developer = render(createElement(CredentialProviders, { listing: listing([provider({ state: "locked", held: 0 })], { canPrompt: false, developerInstance: true }),
+    busy: false, run: never, onAdd: never, actions }));
+  assert.match(developer, /Let the developer instance unlock the vaults/);
+  assert.match(developer, /Unlock in the normal instance/);
+  assert.match(developer, /turn on Let the developer instance unlock the vaults, below/);
+  const allowed = render(createElement(CredentialProviders, { listing: listing([provider({ state: "locked", held: 0 })], { canPrompt: true, developerInstance: true, developerUnlock: true }),
+    busy: false, run: never, onAdd: never, actions }));
+  assert.match(allowed, /Unlock/);
+  assert.doesNotMatch(allowed, /Unlock in the normal instance/, "once allowed, the developer instance offers Unlock itself");
+  assert.match(allowed, /type="checkbox"[^>]*checked/);
+  const none = render(createElement(CredentialProviders, { listing: listing([]), busy: false, run: never, onAdd: never, actions }));
+  assert.doesNotMatch(none, /Let the developer instance/, "without a vault there is nothing to let it unlock");
+});
+

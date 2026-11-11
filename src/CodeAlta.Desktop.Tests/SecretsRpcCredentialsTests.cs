@@ -141,6 +141,28 @@ public sealed class SecretsRpcCredentialsTests
         Assert.HasCount(1, broker.SignIns.List());
     }
 
+    [TestMethod]
+    public async Task The_developer_instance_unlocks_once_the_switch_of_the_page_lets_it()
+    {
+        using var vault = new FakeOp();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, DeveloperInstance = true });
+        var service = new SecretsService(new LocalSecretStore(vault.Profile), Epoch) { Credentials = broker };
+        Assert.AreEqual("ok", (await service.SaveProviderAsync(new CredentialProviderWriteRequest(Epoch, "personal", "1password", null, CredentialCacheDurations.UntilClosed, true,
+            [new CredentialSettingInput("path", vault.ProgramPath, null, null)]), CancellationToken.None)).Status);
+
+        var before = await service.ListAsync(new(Epoch), CancellationToken.None);
+        Assert.AreEqual((false, true, false), (before.CanPrompt, before.DeveloperInstance, before.DeveloperUnlock));
+        var refused = await service.UnlockProviderAsync(new CredentialUnlockRequest(Epoch, "personal", null), CancellationToken.None);
+        Assert.AreEqual("refused", refused.Status);
+        StringAssert.Contains(refused.Message, "Let the developer instance unlock the vaults", "the refusal says how to allow it");
+
+        Assert.AreEqual("ok", service.SetDeveloperUnlock(new SecretsDeveloperUnlockRequest(Epoch, true)).Status);
+        var after = await service.ListAsync(new(Epoch), CancellationToken.None);
+        Assert.AreEqual((true, true), (after.CanPrompt, after.DeveloperUnlock));
+        Assert.AreEqual("ok", (await service.UnlockProviderAsync(new CredentialUnlockRequest(Epoch, "personal", null), CancellationToken.None)).Status);
+        Assert.AreEqual("stale_epoch", service.SetDeveloperUnlock(new SecretsDeveloperUnlockRequest("another", false)).Status);
+    }
+
     /// <summary>The fake 1Password command line, signed out, under the name <c>op</c>, beside a profile root.</summary>
     private sealed class FakeOp : IDisposable
     {

@@ -771,6 +771,43 @@ public sealed partial class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlProvidersSignInWait, new FleetProviderSignInWaitParams(key, waitSeconds), FleetNodeJsonContext.Default.FleetProviderSignInWaitParams,
             FleetNodeJsonContext.Default.FleetProviderSignInState, null, cancellationToken);
 
+    /// <summary>The owner's local control, or a device that manages the machine: the providers it can add, and the program each runs there.</summary>
+    /// <param name="refresh">Whether to fetch the catalogs of its plugins again.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The offers.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderOfferList> ListProviderOffersAsync(bool refresh, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersOffers, new FleetProviderOffersParams(refresh), FleetNodeJsonContext.Default.FleetProviderOffersParams,
+            FleetNodeJsonContext.Default.FleetProviderOfferList, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: adds a provider it offers, installing its program first.</summary>
+    /// <param name="parameters">The offer.</param>
+    /// <param name="cancellationToken">Cancels the call; the addition goes on.</param>
+    /// <returns>Where the addition stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderOperationState> AddProviderAsync(FleetProviderAddParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersAdd, parameters, FleetNodeJsonContext.Default.FleetProviderAddParams, FleetNodeJsonContext.Default.FleetProviderOperationState, null,
+            cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: updates the program a provider runs.</summary>
+    /// <param name="key">The provider.</param>
+    /// <param name="cancellationToken">Cancels the call; the update goes on.</param>
+    /// <returns>Where the update stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderOperationState> UpdateProviderAsync(string key, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersUpdate, new FleetProviderRef(key), FleetNodeJsonContext.Default.FleetProviderRef,
+            FleetNodeJsonContext.Default.FleetProviderOperationState, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: waits a while for an addition or an update of a provider.</summary>
+    /// <param name="id">The operation.</param>
+    /// <param name="waitSeconds">How long the node waits before it answers <c>running</c>: 0 to 25.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Where it stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderOperationState> WaitProviderOperationAsync(string id, int waitSeconds, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersOperationWait, new FleetProviderOperationWaitParams(id, waitSeconds), FleetNodeJsonContext.Default.FleetProviderOperationWaitParams,
+            FleetNodeJsonContext.Default.FleetProviderOperationState, null, cancellationToken);
+
     /// <summary>The owner's local control, or a paired device that manages the machine: what the machine signs in and how each stands.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Its providers, MCP servers and tools.</returns>

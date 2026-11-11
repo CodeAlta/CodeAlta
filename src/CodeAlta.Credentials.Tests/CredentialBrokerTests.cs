@@ -77,6 +77,82 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task A_1Password_app_that_gives_op_no_account_is_unlocked_from_CodeAlta_never_signed_in_in_a_terminal()
+    {
+        // The app authorizes the process that runs op: a sign-in typed in a terminal authorizes that terminal, never CodeAlta.
+        using var vault = new FakeVault();
+        vault.State["accounts"] = false;
+        vault.Save();
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\naccount = \"my.1password.com\"\npath = \"{vault.TomlPath}\"\nunlock_at_start = false\n");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        await broker.RefreshAsync();
+
+        var status = broker.GetProvider("personal")!.Status;
+        Assert.AreEqual(CredentialProviderState.Locked, status.State, "Unlock is what the user does: it asks the app from CodeAlta");
+        Assert.IsNull(status.SignInCommand, "no command of a terminal can authorize CodeAlta");
+        StringAssert.Contains(status.Message, "Integrate with 1Password CLI");
+        StringAssert.Contains(status.Message, "my.1password.com", "the account set is named, as it may not be one of the app");
+
+        // Still no account: the unlock says the same, without a terminal.
+        var refused = await broker.UnlockAsync("personal", null);
+        Assert.AreEqual((CredentialProviderState.Locked, (IReadOnlyList<string>?)null), (refused.Status.State, refused.Status.SignInCommand));
+
+        // The integration turned on: the unlock asks the app, which authorizes CodeAlta.
+        vault.Reload();
+        vault.State["accounts"] = true;
+        vault.Save();
+        Assert.AreEqual(CredentialProviderState.Ready, (await broker.UnlockAsync("personal", null)).Status.State);
+    }
+
+    [TestMethod]
+    public async Task A_1Password_app_that_authorized_CodeAlta_makes_it_ready_though_whoami_says_not_signed_in()
+    {
+        using var vault = new FakeVault();
+        vault.State["whoamiSignedOut"] = true;
+        vault.Save();
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\npath = \"{vault.TomlPath}\"\nunlock_at_start = false\n");
+        new LocalSecretStore(vault.Profile).Bind("ANTHROPIC_API_KEY", "personal", "op://Private/Anthropic/credential", "label", "alice");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        await broker.RefreshAsync();
+        var locked = broker.GetProvider("personal")!.Status;
+        Assert.AreEqual((CredentialProviderState.Locked, "alice@example.com"), (locked.State, locked.Account), "the account the app gives is known before it authorizes CodeAlta");
+        Assert.IsFalse(vault.Calls().Any(static call => call.StartsWith("read", StringComparison.Ordinal) || call.StartsWith("vault", StringComparison.Ordinal)),
+            "nothing that would show the prompt of the app runs without the user");
+
+        var unlocked = await broker.UnlockAsync("personal", null);
+        Assert.AreEqual((CredentialProviderState.Ready, "alice@example.com"), (unlocked.Status.State, unlocked.Status.Account), unlocked.Status.Message);
+        Assert.AreEqual("sk-ant-fake-value-1234", broker.ReadBound("ANTHROPIC_API_KEY", "provider anthropic").Value, "the secrets of the vault are read once it is unlocked");
+        Assert.AreEqual(CredentialProviderState.Ready, (await broker.TestProviderAsync("personal")).Status.State, "a check after the unlock keeps it ready");
+
+        broker.Lock("personal");
+        Assert.IsNull(broker.ReadBound("ANTHROPIC_API_KEY", "provider anthropic").Value);
+    }
+
+    [TestMethod]
+    public async Task The_developer_instance_unlocks_a_vault_on_a_click_once_the_user_lets_it_and_never_at_start()
+    {
+        using var vault = new FakeVault();
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\npath = \"{vault.TomlPath}\"\n");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, DeveloperInstance = true });
+        Assert.IsTrue(broker.DeveloperInstance);
+        Assert.IsFalse(broker.CanPrompt, "by default the developer instance asks no vault to unlock");
+
+        broker.Settings.SetDeveloperInstanceUnlocks(true);
+        StringAssert.Contains(File.ReadAllText(vault.ConfigPath), "developer_instance = \"unlock\"");
+        Assert.IsTrue(broker.CanPrompt, "the setting is read as it is now: the window offers Unlock at once");
+        await broker.RefreshAsync();
+        await broker.UnlockAtStartAsync();
+        Assert.IsFalse(vault.Calls().Any(static call => call.StartsWith("vault", StringComparison.Ordinal)), "a developer instance an agent starts shows no prompt by itself");
+        Assert.AreEqual(CredentialProviderState.Ready, (await broker.UnlockAsync("personal", null)).Status.State, "a click unlocks it");
+
+        broker.Settings.SetDeveloperInstanceUnlocks(false);
+        Assert.IsFalse(broker.CanPrompt);
+        Assert.DoesNotContain("developer_instance", File.ReadAllText(vault.ConfigPath));
+        using var normal = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        Assert.AreEqual((true, false), (normal.CanPrompt, normal.DeveloperInstance), "the normal instance prompts whatever the setting");
+    }
+
+    [TestMethod]
     public async Task A_service_account_token_is_a_secret_of_this_computer_given_in_the_environment_of_op()
     {
         using var vault = new FakeVault();

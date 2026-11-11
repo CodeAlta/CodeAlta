@@ -880,17 +880,22 @@ internal sealed partial class ClaudeCodeSession
 
     private const string OAuthTokenVariable = "CLAUDE_CODE_OAUTH_TOKEN";
 
-    // What a turn that failed for the sign-in says: how to sign in. A CLI in a sandbox of macOS cannot read its sign-in,
-    // which is in the Keychain: signing in again would change nothing, it needs a token of its own.
-    // A token the provider gives is what the CLI signed in with, before its login: that token was refused.
+    // What a turn that failed for the sign-in says: how to sign in, always with Claude Code's own sign-in. Claude Code's terms forbid
+    // a third party to collect, store or intermediate a Claude credential or session token, so CodeAlta never asks for one: a CLI in
+    // a sandbox of macOS cannot read its sign-in, which is in the Keychain, so that session runs without the sandbox; a token the
+    // person put in the environment of the provider is what the CLI signed in with, before its login: that token was refused, and
+    // the way back is the login of Claude Code. On a node of the fleet, the steps of the node.
     internal static string SignedOutMessage(ClaudeCodeModelProviderRuntimeOptions options, bool sandboxedOnMacOS, string detail)
-        => options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var token) && !string.IsNullOrWhiteSpace(token)
+        => options.SignInHintOfHost is { Length: > 0 } host
+            ? (options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var given) && !string.IsNullOrWhiteSpace(given)
+                ? $"Claude Code refused the token this machine signed it in with: it may have expired or been revoked. {host} to sign it in again, then send the message again. ({detail})"
+                : $"Claude Code is not signed in on this machine. {host}, then send the message again. ({detail})")
+            : options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var token) && !string.IsNullOrWhiteSpace(token)
             ? $"Claude Code refused the token of the provider ({OAuthTokenVariable} in its Environment, Settings > Providers): it may have expired or been revoked. " +
-              $"Make a new one with `claude setup-token` in a terminal and replace it, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
+              $"Remove it from the Environment of the provider and sign Claude Code in: {options.SignInHint()}, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
             : sandboxedOnMacOS
             ? "Claude Code is not signed in in the sandbox of this session: on macOS its sign-in is in the Keychain, which the sandbox does not reach. " +
-              "Make a token with `claude setup-token` in a terminal and give it to the provider as CLAUDE_CODE_OAUTH_TOKEN in its Environment (Settings > Providers), " +
-              "or turn the sandbox off for this session, " +
+              "Turn the sandbox off for this session (Sandbox: Off in the configuration of the session), " +
               $"then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
             : $"Claude Code is not signed in. {options.SignInHint()}, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})";
 

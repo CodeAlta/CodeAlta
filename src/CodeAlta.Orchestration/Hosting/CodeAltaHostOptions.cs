@@ -316,6 +316,13 @@ public sealed class CodeAltaHostOptions
     public PluginFrontends PluginFrontend { get; init; }
 
     /// <summary>
+    /// Gets how a person signs in a provider that runs a CLI with its own login on this host, when it is driven from another
+    /// computer (<see cref="CodeAlta.Agent.ModelProviderRegistry.CliSignInHint"/>); null for the terminal command each
+    /// provider names.
+    /// </summary>
+    public string? CliSignInHint { get; init; }
+
+    /// <summary>
     /// Gets built-in plugins to activate as part of shared host composition.
     /// </summary>
     public IReadOnlyList<BuiltInPluginDefinition> PluginBuiltIns { get; init; } = Array.Empty<BuiltInPluginDefinition>();
@@ -343,6 +350,12 @@ public sealed class CodeAltaHostOptions
     /// default: the developer instance, the terminal application, the command line and the node never prompt.
     /// </summary>
     public bool CredentialPrompts { get; init; }
+
+    /// <summary>
+    /// Gets whether the host is the developer instance of CodeAlta Desktop: its credential broker asks a vault to unlock only on a
+    /// click, and only when the user lets the developer instance do it (<c>developer_instance = "unlock"</c> under <c>[secrets]</c>).
+    /// </summary>
+    public bool CredentialsDeveloperInstance { get; init; }
 
     /// <summary>Gets what verifies the user before a secret that asks before use is given; null where nobody can be asked.</summary>
     public CodeAlta.Credentials.IUserPresenceVerifier? UserPresenceVerifier { get; init; }

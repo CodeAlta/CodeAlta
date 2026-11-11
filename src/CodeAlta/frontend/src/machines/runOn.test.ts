@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineNewSessionChoices, MachineView } from "#neoastra";
 import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
-import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets } from "./runOn";
+import { canStartOn, newSessionProblem, noRemoteSelection, offersProviderSetup, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets } from "./runOn";
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
@@ -100,4 +100,11 @@ test("A first prompt that a budget of the machine holds is not one that was not 
   assert.equal(remoteStartPrompt("queued"), "queued");
   assert.equal(remoteStartPrompt("budget_reached"), "not_sent");
   assert.equal(remoteStartPrompt(null), "not_sent");
+});
+
+test("a new session on a machine with no provider ready offers to set one up there, not on one that does not answer (#414)", () => {
+  assert.equal(offersProviderSetup(choices({ providers: [] })), true);
+  assert.equal(offersProviderSetup(choices()), false, "it has providers ready");
+  assert.equal(offersProviderSetup(choices({ status: "offline", providers: [] })), false, "it does not answer: that is said instead");
+  assert.equal(offersProviderSetup(null), false, "still reading the machine");
 });

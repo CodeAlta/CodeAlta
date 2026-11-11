@@ -189,6 +189,34 @@ public sealed class CredentialProviderSettings
         }
     }
 
+    /// <summary>
+    /// Gets whether the user lets the developer instance of CodeAlta Desktop ask a vault to unlock, on a click in its window
+    /// (`developer_instance = "unlock"` under `[secrets]`); by default it never does.
+    /// </summary>
+    /// <returns>True when the user allows it.</returns>
+    public bool DeveloperInstanceUnlocks()
+    {
+        try
+        {
+            var content = CodeAlta.Core.IO.SafeFile.ReadAllText(_configPath);
+            if (string.IsNullOrWhiteSpace(content)) return false;
+            var model = TomlSerializer.Deserialize<TomlTable>(content) ?? [];
+            return model.TryGetValue("secrets", out var node) && node is TomlTable table && table.TryGetValue("developer_instance", out var value)
+                && value is string text && string.Equals(text, "unlock", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TomlException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Lets the developer instance ask a vault to unlock, or no longer.</summary>
+    /// <param name="allowed">Whether it may.</param>
+    /// <exception cref="IOException">The file cannot be written.</exception>
+    /// <exception cref="InvalidDataException">The file is not a configuration this version edits.</exception>
+    public void SetDeveloperInstanceUnlocks(bool allowed)
+        => CodeAltaConfigStore.EditConfigFile(_configPath, text => ConfigTableSyntax.SetText(text, ["secrets"], "developer_instance", allowed ? "unlock" : null));
+
     /// <summary>Writes a provider: its table gets these values, and loses the keys of its type it no longer has.</summary>
     /// <param name="definition">The provider.</param>
     /// <exception cref="ArgumentException">The id or a key is not valid.</exception>

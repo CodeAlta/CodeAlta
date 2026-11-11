@@ -21,7 +21,8 @@ import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devic
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
   | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "limits" | "setLimits" | "seats" | "startSeat" | "cancelSeat" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
-  | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut" | "joinServer">;
+  | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut" | "joinServer" | "providerOffers" | "addProvider" | "updateProvider"
+  | "providerOperationWait"> & Partial<Pick<typeof machines, "openSignInPage">>;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 

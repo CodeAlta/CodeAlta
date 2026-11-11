@@ -19,7 +19,7 @@ export function ProviderDialog({ types, providers, editing, busy, onSave, onClos
 }) {
   const { t } = useShellLanguage();
   const [chosen, setChosen] = useState<CredentialTypeView | null>(() => editing ? types.find(type => type.type === editing.type) ?? null : null);
-  const title = editing ? t("Edit {name}", { name: editing.displayName }) : chosen ? t("Add {name}", { name: chosen.displayName }) : t("Add a credential provider");
+  const title = editing ? t("Edit {name}", { name: editing.displayName }) : chosen ? t("Add {name}", { name: chosen.displayName }) : t("Add a vault");
   return <Dialog isOpen className="credential-provider-dialog" title={title} canOutsideClickClose={!busy} onClose={onClose}>
     {chosen
       ? <ProviderForm type={chosen} providers={providers} editing={editing} busy={busy} onSave={onSave} onBack={editing ? null : () => setChosen(null)} onClose={onClose} />

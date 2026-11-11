@@ -1,27 +1,28 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
-using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
-using CodeAlta.Core.Terminals;
 using CodeAlta.Fleet.NodeApi;
 
 namespace CodeAlta.Node;
 
-// Claude Code (doc/fleet/node.md, credentials on a node): its own login is in the Keychain on macOS, which a node started at boot
-// cannot read, so the node signs it in with a token of the account. claude setup-token runs here in a pseudo-terminal it needs
-// (script); the desktop opens the page it gives, the person pastes back the code that page shows, and the token it prints is kept
-// as a secret of the machine, which the provider's CLAUDE_CODE_OAUTH_TOKEN names (${secret:NAME}): resolved when the CLI starts,
-// and masked. The token never leaves the machine.
+// Claude Code (doc/fleet/node.md, credentials on a node; #414): the terms of Claude Code allow a person to sign their own unmodified
+// Claude Code in with their own subscription, and forbid a third party to collect, store, relay or intermediate a Claude credential
+// or session token. So CodeAlta takes no part in that sign-in: the person signs Claude Code in on the machine itself, with
+// Anthropic's own flow (claude auth login in a terminal there, which altanode providers sign-in starts), and Claude Code keeps its
+// login where it keeps it. The node only says whether the provider is signed in, as the probe of Claude Code found it, and how to
+// sign it in. A token an older version kept as a secret of the machine still works until it is signed out here, which removes it.
 internal sealed partial class NodeSignIns
 {
-    /// <summary>The variable of the environment of a Claude Code provider that holds a token of the account.</summary>
+    /// <summary>The variable of the environment of a Claude Code provider an older version set to a token of the account.</summary>
     internal const string ClaudeTokenVariable = "CLAUDE_CODE_OAUTH_TOKEN";
 
     private const string ClaudeType = "claude-code";
 
-    /// <summary>The name of the secret that keeps the token of a Claude Code provider.</summary>
+    // The category of the probe of a Claude Code that is not signed in (ClaudeCodeModelProviderRuntime).
+    private const string ClaudeSignedOutCategory = "claude-code-signed-out";
+
+    /// <summary>The name of the secret an older version kept the token of a Claude Code provider in.</summary>
     /// <param name="key">The key of the provider.</param>
     /// <returns>The name, such as <c>CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_1A2B3C4D</c>: the key as letters, then 128 bits of a hash of the key, so that two keys never share one.</returns>
     internal static string ClaudeSecretName(string key) => ProviderSecretName(ClaudeTokenVariable, key);
@@ -48,235 +49,57 @@ internal sealed partial class NodeSignIns
     internal static bool IsVariableName([NotNullWhen(true)] string? name) => name is { Length: <= 64 } && LocalSecretStore.IsName(name);
 
     /// <summary>
-    /// Reads what <c>claude setup-token</c> printed in its terminal: the page to open, once it asks for the code; null before. The page
-    /// is the link of the terminal it prints, or else, as a console of Windows may render it, its address in the text, on a site of
-    /// Claude only.
+    /// How a person signs a Claude Code provider of a node in: with Anthropic's own flow, on the machine, as the account the node runs
+    /// as, so that Claude Code keeps its login where the node runs it.
     /// </summary>
-    /// <param name="output">What it printed, escapes of the terminal included.</param>
-    /// <returns>The page.</returns>
-    internal static string? ReadClaudePage(string output)
-    {
-        var plain = Plain(output);
-        if (!AskCodePattern().IsMatch(plain)) return null;
-        if (ClaudeLinkPattern().Match(output) is { Success: true } link) return link.Groups["page"].Value;
-        return ClaudePagePattern().Match(plain) is { Success: true } page ? page.Value : null;
-    }
+    /// <param name="key">The key of the provider.</param>
+    /// <param name="user">The account the node runs as.</param>
+    /// <returns>The sentence.</returns>
+    internal static string ClaudeSignInSteps(string key, string user)
+        => $"Claude Code signs in on the machine itself, with Anthropic's own sign-in: in a terminal there as {user} (over SSH too), run "
+            + $"altanode providers sign-in {key}, then check it again here. CodeAlta never sees your Claude login.";
 
-    // The address of the page of the sign-in in the text, ended by what follows it.
-    [GeneratedRegex(@"https://(claude\.ai|claude\.com|console\.anthropic\.com)/[^\s""'<>]+(?=\s)", RegexOptions.CultureInvariant)]
-    private static partial Regex ClaudePagePattern();
-
-    /// <summary>Reads the token <c>claude setup-token</c> printed once the code was given; null before.</summary>
-    /// <param name="output">What it printed.</param>
-    /// <returns>The token.</returns>
-    internal static string? ReadClaudeToken(string output) => ClaudeTokenPattern().Match(Plain(output)) is { Success: true } token ? token.Value : null;
-
-    // A link of the terminal (OSC 8): ESC ] 8 ; params ; URI, ended by BEL or ESC \.
-    [GeneratedRegex(@"\u001b\]8;[^;\u0007\u001b]*;(?<page>https://[^\u0007\u001b\s]+)(?=\u0007|\u001b\\)", RegexOptions.CultureInvariant)]
-    private static partial Regex ClaudeLinkPattern();
-
-    // The whole token: what follows it ends it (a line end, a space), so that a read that stops within it gives none yet.
-    [GeneratedRegex(@"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{20,}(?=\s)", RegexOptions.CultureInvariant)]
-    private static partial Regex ClaudeTokenPattern();
-
-    // The escapes of a terminal: CSI sequences, OSC sequences, and the other ESC pairs.
-    [GeneratedRegex(@"\u001b\[[0-9;?<>=]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]", RegexOptions.CultureInvariant)]
-    private static partial Regex TerminalEscapePattern();
-
-    // A terminal app moves the cursor between its words (ESC[nG, ESC[nC) instead of printing spaces: those moves read as one.
-    [GeneratedRegex(@"\u001b\[\d*[CG]", RegexOptions.CultureInvariant)]
-    private static partial Regex CursorMovePattern();
-
-    // A console of Windows draws its screen again by placing the cursor on a line (ESC[row;colH) or moving it up and down: those
-    // moves end a line.
-    [GeneratedRegex(@"\u001b\[\d*(;\d*)?[Hf]|\u001b\[\d*[ABEF]", RegexOptions.CultureInvariant)]
-    private static partial Regex LineMovePattern();
-
-    private static string Plain(string output)
-        => TerminalEscapePattern().Replace(CursorMovePattern().Replace(LineMovePattern().Replace(output, "\n"), " "), "").Replace("\r", "", StringComparison.Ordinal);
-
-    // The Claude Code providers of the node: signed in when their token is a secret of the machine, else unknown (the CLI may
-    // keep its own login here).
+    // The Claude Code providers of the node: signed in or not as the probe of Claude Code found it, with how to sign it in on the
+    // machine; none signs in from another computer. One an older version signed in with a token it kept says so, and its Sign out
+    // removes that token.
     private IEnumerable<FleetMachineSignInItem> ClaudeItems()
     {
         IReadOnlyList<SecretInfo> secrets = [];
         try { secrets = new LocalSecretStore(Root).ListSecrets(); }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { }
-        var runs = ClaudeCanSignIn();
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or SecretStoreUnavailableException) { }
+        var states = host.ModelProviderInitializationService.CurrentStates;
         foreach (var definition in Store.LoadGlobalProviderDefinitions(includeDisabled: true).Where(static value => value.ProviderType == ClaudeType).Take(8))
         {
             var name = ClaudeSecretName(definition.ProviderKey);
-            var secret = definition.Env?.GetValueOrDefault(ClaudeTokenVariable) == $"${{secret:{name}}}"
+            var kept = definition.Env?.GetValueOrDefault(ClaudeTokenVariable) == $"${{secret:{name}}}"
                 ? secrets.FirstOrDefault(value => string.Equals(value.Name, name, StringComparison.OrdinalIgnoreCase)) : null;
-            yield return new FleetMachineSignInItem(FleetMachineSignInKinds.Provider, definition.ProviderKey, null, definition.DisplayName ?? definition.ProviderKey,
-                secret is not null ? FleetMachineSignInStates.SignedIn : FleetMachineSignInStates.Unknown, null,
-                // A token of claude setup-token lasts a year.
-                secret?.SetAt.AddYears(1), runs is null ? [FleetMachineSignInWays.Code] : [],
-                runs ?? (secret is null ? "Its own login on the machine, if it has one: a token from here also works where that cannot be read, in a service started at boot." : null));
-        }
-    }
-
-    /// <summary>Gets the executable of Claude Code; null to find <c>claude</c> on the PATH of the node. Set by tests.</summary>
-    internal string? ClaudeExecutable { get; init; }
-
-    private string? FindClaude() => ClaudeExecutable is { } path ? (File.Exists(path) ? path : null) : FindExecutable("claude");
-
-    // Why claude setup-token cannot run here from another computer; null when it can.
-    private string? ClaudeCanSignIn()
-    {
-        if (FindClaude() is not { } claude) return "Claude Code is not installed on the machine, or not on the PATH of the node.";
-        if (OperatingSystem.IsWindows())
-            return !IsBatch(claude) || IsPlainForCmd(claude) ? null : "The folder of Claude Code holds a character cmd.exe reads: run claude setup-token on the machine.";
-        return File.Exists("/usr/bin/script") ? null : "The machine has no script command, which runs claude setup-token in a terminal.";
-    }
-
-    // claude setup-token in a pseudo-terminal (script on macOS and Linux, a pseudoconsole on Windows): its page goes to the desktop,
-    // the code the person pastes to its input, and the token it prints to a secret of the machine, which the provider names. Never throws.
-    private async Task<FleetMachineSignInState> RunClaudeAsync(Attempt attempt, FleetMachineSignInStartParams parameters, CodeAltaProviderDocument definition)
-    {
-        if (parameters.Way is { } way && way != FleetMachineSignInWays.Code) throw new NotSupportedException("Claude Code signs in with the code its page shows.");
-        if (ClaudeCanSignIn() is { } why) throw new NotSupportedException(why);
-        using var terminal = ClaudeTerminal.Start(FindClaude()!);
-        // The terminal takes the code as typed, then Enter.
-        attempt.AcceptCode = code => terminal.Write(code + "\r");
-        using var kill = attempt.Lifetime.Token.Register(terminal.Kill);
-        var output = new StringBuilder();
-        var buffer = new char[4096];
-        string? token = null;
-        while (await terminal.ReadAsync(buffer, attempt.Lifetime.Token).ConfigureAwait(false) is var read and > 0)
-        {
-            if (output.Length < MaxOutput) output.Append(buffer, 0, Math.Min(read, MaxOutput - output.Length));
-            var text = output.ToString();
-            if (!attempt.Prompt.Task.IsCompleted && ReadClaudePage(text) is { } page)
+            var title = definition.DisplayName ?? definition.ProviderKey;
+            if (kept is not null)
             {
-                attempt.Prompt.TrySetResult(new FleetMachineSignInPrompt(attempt.Id, FleetMachineSignInWays.Code, page, null, null,
-                    "The code the page shows once you signed in.", attempt.ExpiresAt));
+                yield return new FleetMachineSignInItem(FleetMachineSignInKinds.Provider, definition.ProviderKey, null, title, FleetMachineSignInStates.SignedIn, null,
+                    kept.SetAt.AddYears(1), [],
+                    "Signed in with a token an older version of CodeAlta kept for it. Sign out removes that token; then sign Claude Code in on the machine.");
+                continue;
             }
 
-            if ((token = ReadClaudeToken(text)) is not null) break;
+            var state = states.FirstOrDefault(value => string.Equals(value.ProviderId.Value, definition.ProviderKey, StringComparison.OrdinalIgnoreCase));
+            var signedIn = state?.Availability == Agent.ModelProviderAvailability.Ready ? FleetMachineSignInStates.SignedIn
+                : state?.Availability == Agent.ModelProviderAvailability.Failed && state.ErrorCategory == ClaudeSignedOutCategory ? FleetMachineSignInStates.SignedOut
+                : FleetMachineSignInStates.Unknown;
+            yield return new FleetMachineSignInItem(FleetMachineSignInKinds.Provider, definition.ProviderKey, null, title, signedIn, null, null, [],
+                signedIn == FleetMachineSignInStates.SignedIn ? null : ClaudeSignInSteps(definition.ProviderKey, Environment.UserName));
         }
-
-        terminal.Kill();
-        attempt.Lifetime.Token.ThrowIfCancellationRequested();
-        if (token is null)
-        {
-            attempt.Prompt.TrySetException(new InvalidOperationException("claude setup-token ended before it gave a page to open."));
-            return new FleetMachineSignInState(attempt.Id, FleetMachineSignInStates.Failed, null, "login_failed", "claude setup-token ended without a token.");
-        }
-
-        var name = ClaudeSecretName(definition.ProviderKey);
-        new LocalSecretStore(Root).SetSecret(name, token, "machine sign-in (CodeAlta Desktop)");
-        providers.SetEnvironment(definition.ProviderKey, ClaudeTokenVariable, $"${{secret:{name}}}");
-        return new FleetMachineSignInState(attempt.Id, FleetMachineSignInStates.Completed, null, null, null);
     }
 
     // The Claude Code provider of this key; null when the key is not one.
     private CodeAltaProviderDocument? ClaudeProvider(string key)
         => Store.LoadGlobalProviderDefinitions(includeDisabled: true).FirstOrDefault(value => value.ProviderType == ClaudeType && string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
 
-    // Signs a Claude Code provider out from here: its token leaves the secrets and the provider; its own login stays.
+    // Signs a Claude Code provider out of the token an older version kept for it: the token leaves the secrets and the provider. The
+    // login Claude Code keeps itself stays: claude auth logout on the machine ends it.
     private void SignOutClaude(CodeAltaProviderDocument definition)
     {
         providers.SetEnvironment(definition.ProviderKey, ClaudeTokenVariable, null);
         new LocalSecretStore(Root).DeleteSecret(ClaudeSecretName(definition.ProviderKey));
-    }
-
-    private static bool IsBatch(string path)
-        => path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
-
-    // The terminal claude setup-token runs in, wide enough that the page and the token are printed on one line; no browser opens here.
-    private abstract class ClaudeTerminal : IDisposable
-    {
-        public static ClaudeTerminal Start(string claude) => OperatingSystem.IsWindows() ? new ConsoleTerminal(claude) : new ScriptTerminal(claude);
-
-        public abstract ValueTask<int> ReadAsync(char[] buffer, CancellationToken cancellationToken);
-
-        public abstract void Write(string text);
-
-        public abstract void Kill();
-
-        public abstract void Dispose();
-    }
-
-    // macOS and Linux: the pseudo-terminal of script.
-    private sealed class ScriptTerminal : ClaudeTerminal
-    {
-        private readonly Process _process;
-
-        public ScriptTerminal(string claude)
-        {
-            var quoted = "'" + claude.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
-            var command = $"stty cols 1000 rows 50 2>/dev/null; exec {quoted} setup-token";
-            var start = new ProcessStartInfo("/usr/bin/script")
-            {
-                RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-            };
-            // BSD script (macOS) takes the command and its words; util-linux script (Linux) a command line with -c.
-            string[] arguments = OperatingSystem.IsMacOS() ? ["-q", "/dev/null", "/bin/sh", "-c", command] : ["-q", "-e", "-c", command, "/dev/null"];
-            foreach (var argument in arguments) start.ArgumentList.Add(argument);
-            start.Environment["BROWSER"] = "true";
-            start.Environment["TERM"] = "xterm-256color";
-            _process = Process.Start(start) ?? throw new InvalidOperationException("script could not start on this machine.");
-        }
-
-        public override ValueTask<int> ReadAsync(char[] buffer, CancellationToken cancellationToken) => _process.StandardOutput.ReadAsync(buffer, cancellationToken);
-
-        public override void Write(string text)
-        {
-            _process.StandardInput.Write(text);
-            _process.StandardInput.Flush();
-        }
-
-        public override void Kill()
-        {
-            try { _process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-        }
-
-        public override void Dispose() => _process.Dispose();
-    }
-
-    // Windows: a pseudoconsole, which claude asks its questions in as in any console; a .cmd of npm runs through cmd.exe.
-    private sealed class ConsoleTerminal : ClaudeTerminal
-    {
-        private readonly PseudoTerminal _terminal;
-        private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
-        private readonly byte[] _bytes = new byte[4096];
-
-        public ConsoleTerminal(string claude)
-        {
-            var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (System.Collections.DictionaryEntry pair in Environment.GetEnvironmentVariables())
-            {
-                if (pair.Key is string name && pair.Value is string value) environment[name] = value;
-            }
-
-            environment["BROWSER"] = "true";
-            environment["TERM"] = "xterm-256color";
-            var (fileName, arguments) = IsBatch(claude)
-                ? (Path.Combine(Environment.SystemDirectory, "cmd.exe"), new[] { "/d", "/c", claude, "setup-token" })
-                : (claude, new[] { "setup-token" });
-            var folder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            _terminal = PseudoTerminal.Start(new PseudoTerminalStart(fileName, arguments, Directory.Exists(folder) ? folder : Environment.CurrentDirectory, environment,
-                PseudoTerminal.MaximumSize, 50));
-        }
-
-        // A read waits in the console: it ends with what the program printed, or with 0 once the console is closed.
-        public override async ValueTask<int> ReadAsync(char[] buffer, CancellationToken cancellationToken)
-        {
-            while (true)
-            {
-                var read = await Task.Run(() => _terminal.Read(_bytes), cancellationToken).ConfigureAwait(false);
-                if (read == 0) return 0;
-                var chars = _decoder.GetChars(_bytes, 0, read, buffer, 0, flush: false);
-                if (chars > 0) return chars;
-            }
-        }
-
-        public override void Write(string text) => _terminal.Write(Encoding.UTF8.GetBytes(text));
-
-        public override void Kill() => _terminal.Kill();
-
-        public override void Dispose() => _terminal.Dispose();
     }
 }

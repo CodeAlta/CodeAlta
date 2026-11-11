@@ -89,7 +89,7 @@ internal sealed partial class SecretsService
     public async Task<CredentialActionResult> UnlockProviderAsync(CredentialUnlockRequest request, CancellationToken cancellationToken)
     {
         if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
-        if (!Credentials!.CanPrompt) return new("refused", "This instance of CodeAlta never asks a vault to unlock: unlock it from the window of the normal instance.");
+        if (!Credentials!.CanPrompt) return new("refused", "The developer instance asks no vault to unlock: unlock it in the normal instance, or turn on Let the developer instance unlock the vaults in Settings › Secrets.");
         try
         {
             var view = await Credentials.UnlockAsync(request!.Id, string.IsNullOrEmpty(request.Password) ? null : request.Password, cancellationToken).ConfigureAwait(false);
@@ -99,6 +99,22 @@ internal sealed partial class SecretsService
         catch (KeyNotFoundException)
         {
             return new("not_found", null);
+        }
+    }
+
+    /// <summary>Lets the developer instance ask a vault to unlock on a click in its window, or no longer: a setting of the user, which both instances read.</summary>
+    [NeoRpcMethod("setDeveloperUnlock")]
+    public CredentialActionResult SetDeveloperUnlock(SecretsDeveloperUnlockRequest request)
+    {
+        if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        try
+        {
+            Credentials!.Settings.SetDeveloperInstanceUnlocks(request!.Enabled);
+            return new("ok", null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new("write_failed", exception.Message);
         }
     }
 
@@ -355,6 +371,8 @@ internal sealed partial class SecretsService
             Uses = [.. broker.ListUses().Take(50).Select(static use => new SecretUseView(use.Name, use.Use, Format(use.At), use.Outcome))],
             Verification = new VerificationView(verification.Available, verification.Reason),
             CanPrompt = broker.CanPrompt,
+            DeveloperInstance = broker.DeveloperInstance,
+            DeveloperUnlock = DeveloperUnlock(broker),
             ConfigurationProblems = [.. broker.ConfigurationProblems],
             SignIns = SignInsOf(broker, providers),
         };
@@ -409,6 +427,18 @@ internal sealed partial class SecretsService
 
     private string? RefuseCredentials(string? expectedEpoch)
         => Refuse(expectedEpoch) ?? (Credentials is null ? "unavailable" : null);
+
+    private static bool DeveloperUnlock(CredentialBroker broker)
+    {
+        try
+        {
+            return broker.Settings.DeveloperInstanceUnlocks();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     private static string StateName(CredentialProviderState state) => state switch
     {
@@ -615,6 +645,11 @@ internal sealed record SecretBindRequest(string ExpectedEpoch, string Name, stri
 /// <param name="Name">The secret.</param>
 /// <param name="Duration">How long a confirmation lasts; empty to stop asking.</param>
 internal sealed record SecretAskRequest(string ExpectedEpoch, string Name, string? Duration);
+
+/// <summary>Whether the developer instance may ask a vault to unlock.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Enabled">Whether it may.</param>
+internal sealed record SecretsDeveloperUnlockRequest(string ExpectedEpoch, bool Enabled);
 
 /// <summary>A sign-in of websites as the page shows and edits it: the references of its items in the vault, never a value.</summary>
 /// <param name="Id">Its id.</param>

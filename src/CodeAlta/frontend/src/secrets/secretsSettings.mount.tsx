@@ -48,6 +48,8 @@ const listing: SecretsList = {
   uses: [{ name: "DEPLOY_TOKEN", use: "MCP server deploy", at: "2026-11-12T09:04:00Z", outcome: "given" }],
   verification: { available: true, reason: null },
   canPrompt: true,
+  developerInstance: false,
+  developerUnlock: false,
   configurationProblems: [],
   signIns: [{ id: "github", label: "GitHub", provider: "personal", sites: ["https://github.com"], username: "op://Private/GitHub/username",
     password: "op://Private/GitHub/password", totp: "op://Private/GitHub/one-time password?attribute=otp", providerName: "1Password", icon: "1password",
@@ -59,11 +61,24 @@ const api = {
   saveProvider: async () => ({ status: "ok", message: null, provider: null }), removeProvider: async () => ({ status: "ok", message: null, provider: null }),
   unlockProvider: async () => ({ status: "ok", message: null, provider: null }), lockProvider: async () => ({ status: "ok", message: null, provider: null }),
   testProvider: async () => ({ status: "ok", message: null, provider: null }),
-  browse: async () => ({ status: "ok", message: null, path: null, entries: [{ id: "vault:v1:Private", label: "Private", kind: "folder", reference: null, detail: null }] }),
+  // Two vaults of 1Password: the search at the top finds an item in either, and an item lists its fields.
+  browse: async ({ parent }: { parent: string | null }) => {
+    const folder = (id: string, label: string, detail: string | null = null) => ({ id, label, kind: "folder", reference: null, detail });
+    const field = (id: string, reference: string, detail: string | null) => ({ id, label: id, kind: "field", reference, detail });
+    const page = (path: string | null, entries: ReturnType<typeof folder | typeof field>[]) => ({ status: "ok", message: null, path, entries });
+    switch (parent) {
+      case null: return page(null, [folder("vault:v1:Private", "Private"), folder("vault:v2:Work", "Work")]);
+      case "vault:v1:Private": return page("Private", [folder("item:v1:i1", "Anthropic", "api credential"), folder("item:v1:i2", "GitHub", "login")]);
+      case "vault:v2:Work": return page("Work", [folder("item:v2:i3", "Grafana Cloud", "api credential")]);
+      case "item:v1:i2": return page("Private › GitHub", [field("username", "op://Private/GitHub/username", null), field("password", "op://Private/GitHub/password", "concealed")]);
+      default: return page(null, []);
+    }
+  },
   bindSecret: async () => ({ status: "ok", message: null, provider: null }), setAskBeforeUse: async () => ({ status: "ok", message: null, provider: null }),
   confirmUse: async () => ({ status: "ok", message: null, provider: null }), declineUse: async () => ({ status: "ok", message: null, provider: null }),
   saveSignIn: async () => ({ status: "ok", message: null, provider: null }), removeSignIn: async () => ({ status: "ok", message: null, provider: null }),
   revokeSiteGrant: async () => ({ status: "ok", message: null, provider: null }),
+  setDeveloperUnlock: async () => ({ status: "ok", message: null, provider: null }),
 };
 // The width of the page of the Settings window: about 1250 CSS pixels in a window of 1600, about 430 in one of 900.
 function Fixture() {

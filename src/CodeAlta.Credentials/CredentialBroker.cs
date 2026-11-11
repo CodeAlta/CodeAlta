@@ -126,6 +126,13 @@ public sealed class CredentialBrokerOptions
     /// </summary>
     public bool CanPrompt { get; init; }
 
+    /// <summary>
+    /// Gets whether the host is the developer instance of CodeAlta Desktop: a user is in front of its window, and it asks a vault to
+    /// unlock only when the user lets it (<c>developer_instance = "unlock"</c> under <c>[secrets]</c>), on a click, never at start, so
+    /// that a developer instance an agent starts shows no prompt by itself.
+    /// </summary>
+    public bool DeveloperInstance { get; init; }
+
     /// <summary>Gets the clock.</summary>
     public TimeProvider Time { get; init; } = TimeProvider.System;
 
@@ -205,7 +212,10 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     public SignIns SignIns => _signIns;
 
     /// <summary>Gets whether this host can show the prompt of a vault.</summary>
-    public bool CanPrompt => _options.CanPrompt;
+    public bool CanPrompt => _options.CanPrompt || _options.DeveloperInstance && _settings.DeveloperInstanceUnlocks();
+
+    /// <summary>Gets whether this host is the developer instance of CodeAlta Desktop.</summary>
+    public bool DeveloperInstance => _options.DeveloperInstance;
 
     /// <summary>Gets what verifies the user; null where nobody can be asked.</summary>
     public IUserPresenceVerifier? Verifier => _options.Verifier;
@@ -356,7 +366,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                 generation = entry.Generation;
             }
 
-            var status = await provider.UnlockAsync(new CredentialUnlockContext { Password = password, UserPresent = _options.CanPrompt }, cancellationToken).ConfigureAwait(false);
+            var status = await provider.UnlockAsync(new CredentialUnlockContext { Password = password, UserPresent = CanPrompt }, cancellationToken).ConfigureAwait(false);
             lock (_gate)
             {
                 if (entry.Generation == generation)
@@ -675,7 +685,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     public async Task<UserPresenceResult> ConfirmAsync(string name, string? use, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
-        if (_options.Verifier is not { } verifier || !_options.CanPrompt) return UserPresenceResult.Unavailable;
+        if (_options.Verifier is not { } verifier || !CanPrompt) return UserPresenceResult.Unavailable;
         var duration = SafeAskBeforeUse(name) ?? SecretAskDurations.FifteenMinutes;
         var result = await verifier.VerifyAsync($"Use the secret {name}{(use is null ? string.Empty : $" for the {use}")}?", cancellationToken).ConfigureAwait(false);
         if (result == UserPresenceResult.Verified)
@@ -800,7 +810,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
         Record(name, use, "waits");
         if (!known) ThreadPool.UnsafeQueueUserWorkItem(static state => state.broker.Raise([state.name], always: true), (broker: this, name), preferLocal: false);
-        return _options.CanPrompt && _options.Verifier is not null
+        return CanPrompt && _options.Verifier is not null
             ? $"{name} asks before use: confirm its use{(use is null ? string.Empty : $" for the {use}")} in Settings › Secrets of CodeAlta."
             : $"{name} asks before use, and nobody can confirm it here.";
     }
@@ -1142,7 +1152,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private void Waits(ProviderEntry entry, PluginCredentialProviderSetting setting, string name, string use)
     {
         entry.WaitsFor = (name, use);
-        entry.Status = CredentialProviderStatus.Unavailable(_options.CanPrompt && _options.Verifier is not null
+        entry.Status = CredentialProviderStatus.Unavailable(CanPrompt && _options.Verifier is not null
             ? $"Its setting '{setting.Label}' names {name}, which asks before use: confirm its use for the {use} in Settings › Secrets of CodeAlta."
             : $"Its setting '{setting.Label}' names {name}, which asks before use, and nobody can confirm it here.");
     }

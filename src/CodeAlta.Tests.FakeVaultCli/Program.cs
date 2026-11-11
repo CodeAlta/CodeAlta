@@ -205,11 +205,19 @@ int Op(string[] arguments)
     var account = TakeOption(list, "--account");
     if (state["serviceAccount"]?.GetValue<bool>() == true && Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is not { Length: > 0 })
         return Fail("[ERROR] no account found for filter", 1);
+    // The accounts the 1Password app gives op, without a prompt: none while its integration with the CLI is off.
+    if (list is ["account", "list", ..])
+        return Print(state["accounts"]?.GetValue<bool>() == false ? "[]"
+            : "[{\"url\":\"my.1password.com\",\"email\":\"alice@example.com\",\"user_uuid\":\"U1\",\"account_uuid\":\"A1\",\"shorthand\":\"my\"}]");
+    // What op 2.42 answers when the 1Password app gives it no account: the integration with the CLI is off, or the app is locked.
     if (state["accounts"]?.GetValue<bool>() == false && Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is not { Length: > 0 })
-        return Fail("No accounts configured for use with 1Password CLI.", 1);
+        return Fail($"[ERROR] 2026/11/11 18:51:52 no account found for filter {account}", 1);
     var signedIn = state["signedIn"]?.GetValue<bool>() == true || Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is { Length: > 0 };
     switch (list)
     {
+        // With the 1Password app, op 2.42 says "not signed in" to whoami even after the app authorized the process.
+        case ["whoami", ..] when state["whoamiSignedOut"]?.GetValue<bool>() == true && Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is not { Length: > 0 }:
+            return Fail("[ERROR] 2026/11/11 18:59:42 account is not signed in", 1);
         case ["whoami", ..]:
             return signedIn ? Print("{\"url\":\"my.1password.com\",\"email\":\"alice@example.com\"}") : Fail("[ERROR] account is not signed in", 1);
         case ["signin", ..]:

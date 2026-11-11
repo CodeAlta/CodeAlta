@@ -108,6 +108,9 @@ internal sealed record NodeCommandHandlers(
     /// <summary>Gets what shows and changes the limits of the machine; null for none.</summary>
     public Func<NodeLimitCommandOptions, ValueTask<int>>? Limits { get; init; }
 
+    /// <summary>Gets what lists, adds, updates and signs in the providers of the running node; null for none.</summary>
+    public Func<NodeProviderCommandOptions, ValueTask<int>>? Providers { get; init; }
+
     /// <summary>Gets what tells the model servers of the running node; null for none.</summary>
     public Func<NodeLlamaCommandOptions, ValueTask<int>>? Llama { get; init; }
 
@@ -536,6 +539,35 @@ internal static class NodeCommandLine
             return handlers.Limits?.Invoke(limits) ?? handlers.NotImplemented("limits");
         });
 
+        var providers = new NodeProviderCommandOptions();
+        var providersCommand = new Command("providers", "List, add, update and sign in the providers of the running node")
+        {
+            new CommandUsage("Usage: {NAME} [list] [options]"),
+            new CommandUsage("       {NAME} available [options]"),
+            new CommandUsage("       {NAME} add <what> [options]"),
+            new CommandUsage("       {NAME} update|sign-in <key> [options]"),
+            _,
+            "The providers the sessions of this machine run on, as CodeAlta Desktop",
+            "manages them on the page of the machine.",
+            "  list       the providers, whether each is ready, and why not",
+            "  available  what the node can add: Claude Code, Codex CLI, the agents",
+            "             of the ACP registry, subscriptions, APIs",
+            "  add        adds one, installing the program it runs first when the",
+            "             machine has none (altanode providers add claude-code)",
+            "  update     updates the program a provider runs",
+            "  sign-in    signs a provider in: its page is printed, and the code it",
+            "             shows is typed back here",
+            _,
+            "Options:",
+        };
+        AddProfile(providersCommand, providers.Profile);
+        providersCommand.Add("<>", "The command and its argument");
+        providersCommand.Add((_, words) =>
+        {
+            providers.Words.AddRange(words);
+            return handlers.Providers?.Invoke(providers) ?? handlers.NotImplemented("providers");
+        });
+
         var llama = new NodeLlamaCommandOptions();
         var llamaCommand = new Command("llama", "Tell the llama.cpp builds, models and servers of the running node")
         {
@@ -709,6 +741,7 @@ internal static class NodeCommandLine
             tagsCommand,
             labelsCommand,
             limitsCommand,
+            providersCommand,
             llamaCommand,
             permissionModeCommand,
             agentsCommand,
