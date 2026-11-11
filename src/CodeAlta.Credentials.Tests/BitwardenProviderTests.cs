@@ -38,7 +38,8 @@ public sealed class BitwardenProviderTests
 
         var wrong = await provider.UnlockAsync(new CredentialUnlockContext { Password = "not-the-password" }, CancellationToken.None);
         Assert.AreEqual(CredentialProviderState.Locked, wrong.State);
-        StringAssert.Contains(wrong.Message, "Invalid master password");
+        StringAssert.Contains(wrong.Message, "refused the master password");
+        StringAssert.Contains(wrong.Detail, "Invalid master password");
 
         var ready = await provider.UnlockAsync(new CredentialUnlockContext { Password = MasterPassword }, CancellationToken.None);
         Assert.AreEqual(CredentialProviderState.Ready, ready.State);

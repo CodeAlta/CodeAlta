@@ -54,7 +54,8 @@ internal sealed class BitwardenSecretsProvider : ICredentialProvider
         VaultText.Zero(result.Output);
         return result.ExitCode == 0
             ? CredentialProviderStatus.Ready() with { Account = "machine account", ProgramPath = program }
-            : CredentialProviderStatus.Unavailable($"Bitwarden Secrets Manager: {VaultText.ErrorLine(result)}") with { ProgramPath = program };
+            : CredentialProviderStatus.Unavailable(result.Error.Contains("access token", StringComparison.OrdinalIgnoreCase)
+                ? "Bitwarden Secrets Manager refused the access token." : $"Bitwarden Secrets Manager did not answer: {result.Summary()}.").WithDetail(result) with { ProgramPath = program };
     }
 
     public ValueTask<CredentialProviderStatus> UnlockAsync(CredentialUnlockContext context, CancellationToken cancellationToken) => GetStatusAsync(cancellationToken);
@@ -128,7 +129,8 @@ internal sealed class BitwardenSecretsProvider : ICredentialProvider
         if (result.TimedOut) throw new CredentialProviderException(CredentialFailure.Failed, "Bitwarden Secrets Manager did not answer in time.");
         var error = result.Error;
         var notFound = error.Contains("404", StringComparison.Ordinal) || error.Contains("not found", StringComparison.OrdinalIgnoreCase) || error.Contains("invalid value", StringComparison.OrdinalIgnoreCase);
-        throw new CredentialProviderException(notFound ? CredentialFailure.NotFound : CredentialFailure.Failed, $"Bitwarden Secrets Manager: {VaultText.ErrorLine(result)}");
+        throw VaultText.Failure(notFound ? CredentialFailure.NotFound : CredentialFailure.Failed,
+            notFound ? "Bitwarden Secrets Manager has no such secret." : $"Bitwarden Secrets Manager failed: {result.Summary()}.", result);
     }
 
     private Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, CancellationToken cancellationToken)

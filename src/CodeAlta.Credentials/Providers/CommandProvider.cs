@@ -54,11 +54,11 @@ internal sealed class CommandProvider : ICredentialProvider
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(result.Output);
         return result.ExitCode == 0
             ? CredentialProviderStatus.Ready() with { ProgramPath = program }
-            : new CredentialProviderStatus(_shape.SignIn is { Count: > 0 } ? CredentialProviderState.SignInNeeded : CredentialProviderState.Locked, $"{_shape.DisplayName}: {result.ErrorLine()}")
+            : new CredentialProviderStatus(_shape.SignIn is { Count: > 0 } ? CredentialProviderState.SignInNeeded : CredentialProviderState.Locked, $"{_shape.DisplayName} says the vault is not open: {result.Summary()}.")
             {
                 ProgramPath = program,
                 SignInCommand = SignInCommand(),
-            };
+            }.WithDetail(result);
     }
 
     public ValueTask<CredentialProviderStatus> UnlockAsync(CredentialUnlockContext context, CancellationToken cancellationToken) => GetStatusAsync(cancellationToken);
@@ -74,7 +74,7 @@ internal sealed class CommandProvider : ICredentialProvider
         try
         {
             if (result.ExitCode != 0)
-                throw new CredentialProviderException(result.TimedOut ? CredentialFailure.Locked : CredentialFailure.Failed, $"{_shape.DisplayName}: {result.ErrorLine()}");
+                throw VaultText.Failure(result.TimedOut ? CredentialFailure.Locked : CredentialFailure.Failed, $"{_shape.DisplayName} did not give {reference}: {result.Summary()}.", result);
             var json = _shape.JsonMember is { } member ? member : _shape.JsonFromField && Split(reference).Field is { Length: > 0 } field ? field : null;
             var value = json is null ? TrimOneNewline(result.OutputText()) : Member(result.Output, json, _shape.JsonFromField ? reference : null);
             if (value.Length == 0) throw new CredentialProviderException(CredentialFailure.NotFound, $"{_shape.DisplayName} printed nothing for {reference}.");

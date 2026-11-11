@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Credentials.Providers;
 
@@ -20,19 +21,12 @@ internal static class VaultText
         return Path.GetFullPath(expanded);
     }
 
-    // The first line of an error that says something: a program that writes "Error:" alone on its first line says why on the next.
-    public static string ErrorLine(VaultCommandResult result)
-    {
-        foreach (var line in result.Error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            // The causes of bws are numbered: "0: the cause".
-            var digits = 0;
-            while (digits < line.Length && char.IsAsciiDigit(line[digits])) digits++;
-            var text = digits > 0 && digits < line.Length && line[digits] == ':' ? line[(digits + 1)..].Trim() : line;
-            if (text.Length == 0 || text.Equals("Error:", StringComparison.OrdinalIgnoreCase) || text.Equals("Error", StringComparison.OrdinalIgnoreCase)) continue;
-            return text.Length > 300 ? text[..300] : text;
-        }
+    // A failure of a program: the message says how it ended, in words of the provider; what the program wrote goes to the detail,
+    // which only the user reads, because it can hold a value the masking does not know yet.
+    public static CredentialProviderException Failure(CredentialFailure failure, string message, VaultCommandResult result)
+        => new(failure, message) { Detail = result.ErrorDetail() };
 
-        return result.ErrorLine();
-    }
+    // A status after a program failed, with what it wrote as its detail.
+    public static CredentialProviderStatus WithDetail(this CredentialProviderStatus status, VaultCommandResult result)
+        => status with { Detail = result.ErrorDetail() };
 }

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Credentials.Providers;
@@ -12,7 +13,7 @@ internal sealed class KeePassXcProvider : ICredentialProvider
 {
     internal const string TypeName = "keepassxc";
     private const string MacProgram = "/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli";
-    private static readonly string[] EntryFields = ["Password", "UserName", "URL", "Notes", "totp"];
+    private static readonly ImmutableArray<string> EntryFields = ["Password", "UserName", "URL", "Notes", "totp"];
 
     private readonly VaultCommandRunner _runner;
     private readonly string? _configuredPath;
@@ -90,7 +91,10 @@ internal sealed class KeePassXcProvider : ICredentialProvider
         if (result.ExitCode != 0)
         {
             Lock();
-            return CredentialProviderStatus.Locked(result.TimedOut ? "keepassxc-cli did not answer in time." : $"KeePassXC: {VaultText.ErrorLine(result)}") with { Account = status.Account, ProgramPath = status.ProgramPath };
+            return CredentialProviderStatus.Locked(result.TimedOut ? "keepassxc-cli did not answer in time."
+                : result.Error.Contains("Invalid credentials", StringComparison.OrdinalIgnoreCase) || result.Error.Contains("wrong key", StringComparison.OrdinalIgnoreCase)
+                    ? "KeePassXC refused the password of the database."
+                    : $"KeePassXC did not open the database: {result.Summary()}.").WithDetail(result) with { Account = status.Account, ProgramPath = status.ProgramPath };
         }
 
         lock (_gate) _password = password;
@@ -216,8 +220,8 @@ internal sealed class KeePassXcProvider : ICredentialProvider
 
         if (error.Contains("Could not find", StringComparison.OrdinalIgnoreCase) || error.Contains("unknown attribute", StringComparison.OrdinalIgnoreCase)
             || error.Contains("No TOTP", StringComparison.OrdinalIgnoreCase) || error.Contains("not found", StringComparison.OrdinalIgnoreCase))
-            return new CredentialProviderException(CredentialFailure.NotFound, $"KeePassXC: {VaultText.ErrorLine(result)}");
-        return new CredentialProviderException(CredentialFailure.Failed, reference is null ? $"KeePassXC: {VaultText.ErrorLine(result)}" : $"KeePassXC could not read {reference}: {VaultText.ErrorLine(result)}");
+            return VaultText.Failure(CredentialFailure.NotFound, reference is null ? "KeePassXC has no such entry." : $"KeePassXC has no {reference}.", result);
+        return VaultText.Failure(CredentialFailure.Failed, reference is null ? $"KeePassXC failed: {result.Summary()}." : $"KeePassXC could not read {reference}: {result.Summary()}.", result);
     }
 
     // keepassxc-cli <command> <options> [-k <key file>] [--no-password] <database> <arguments>, with the password on its standard input.

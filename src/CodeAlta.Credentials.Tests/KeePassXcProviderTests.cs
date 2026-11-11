@@ -24,7 +24,8 @@ public sealed class KeePassXcProviderTests
 
         var wrong = await provider.UnlockAsync(new CredentialUnlockContext { Password = "not-it" }, CancellationToken.None);
         Assert.AreEqual(CredentialProviderState.Locked, wrong.State);
-        StringAssert.Contains(wrong.Message, "Invalid credentials");
+        StringAssert.Contains(wrong.Message, "refused the password");
+        StringAssert.Contains(wrong.Detail, "Invalid credentials", "what the program wrote is the detail, for the user only");
 
         Assert.AreEqual(CredentialProviderState.Ready, (await provider.UnlockAsync(new CredentialUnlockContext { Password = DatabasePassword }, CancellationToken.None)).State);
         Assert.AreEqual(CredentialProviderState.Ready, (await provider.GetStatusAsync(CancellationToken.None)).State);

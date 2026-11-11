@@ -35,7 +35,14 @@ public enum SecretAvailabilityState
 /// <param name="State">The state.</param>
 /// <param name="Message">What the user reads; null for nothing more.</param>
 /// <param name="Provider">The credential provider of a secret kept in a vault; null for a secret of this computer.</param>
-public sealed record SecretAvailability(string Name, SecretAvailabilityState State, string? Message, string? Provider);
+public sealed record SecretAvailability(string Name, SecretAvailabilityState State, string? Message, string? Provider)
+{
+    /// <summary>
+    /// Gets what the program of its vault wrote about the failure, for the user only: the window shows it, an agent or a log never
+    /// gets it, because it can hold a value the masking does not know yet. Null for nothing.
+    /// </summary>
+    public string? Detail { get; init; }
+}
 
 /// <summary>A credential provider as the window and the agents see it: never a value.</summary>
 /// <param name="Id">Its id.</param>
@@ -67,6 +74,15 @@ public sealed record CredentialProviderView(string Id, string Type, string Displ
 
     /// <summary>Gets the number of its secrets held in memory now.</summary>
     public int Held { get; init; }
+
+    /// <summary>
+    /// Gets whether CodeAlta unlocked its vault since it was last locked, so that it may hold what opens it (a session key, the
+    /// password of a database) even when it holds no value: the window offers to lock it.
+    /// </summary>
+    public bool Unlocked { get; init; }
+
+    /// <summary>Gets whether the user locked it in CodeAlta: nothing is read from it until it is unlocked again.</summary>
+    public bool LockedByUser { get; init; }
 }
 
 /// <summary>A use of a secret, as the recent uses list it: never a value.</summary>
@@ -131,6 +147,7 @@ public sealed class CredentialBrokerOptions
 public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 {
     private const int MaximumUses = 200;
+    private const string LockedByUserMessage = "Locked in CodeAlta: its values were forgotten, and nothing is read from it until it is unlocked.";
     private static readonly TimeSpan StatusTimeout = TimeSpan.FromSeconds(25);
 
     private readonly CredentialBrokerOptions _options;
@@ -148,7 +165,11 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private readonly HashSet<string> _unlockedAtStart = new(StringComparer.Ordinal);
     // When an agent last had an unlock of a provider dismissed: it does not ask again for a while.
     private readonly Dictionary<string, DateTimeOffset> _agentUnlocks = new(StringComparer.Ordinal);
+    // The providers whose values expired and are to be read again: kept apart from the values, so that a resolver that sees a value
+    // expire first (and forgets it) does not take away the only sign that it must be read again.
+    private readonly HashSet<string> _stale = new(StringComparer.Ordinal);
     private readonly ITimer? _expiry;
+    private bool _refreshQueued;
     private IReadOnlyList<string> _configurationProblems = [];
     private bool _disposed;
 
@@ -322,18 +343,39 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
 
         if (entry.Provider is not { } provider) return GetProvider(id)!;
+        // Masked before the program of the vault gets it: it could write it back in an error.
+        if (!string.IsNullOrEmpty(password)) _options.Mask(password);
         await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var generation = 0;
         try
         {
+            lock (_gate)
+            {
+                // The unlock the user asks ends a lock of the user; a lock while it runs wins over it.
+                entry.LockedByUser = false;
+                generation = entry.Generation;
+            }
+
             var status = await provider.UnlockAsync(new CredentialUnlockContext { Password = password, UserPresent = _options.CanPrompt }, cancellationToken).ConfigureAwait(false);
-            lock (_gate) entry.Status = status;
+            lock (_gate)
+            {
+                if (entry.Generation == generation)
+                {
+                    entry.Status = status;
+                    entry.Unlocked = status.State == CredentialProviderState.Ready;
+                }
+            }
         }
         catch (CredentialProviderException exception)
         {
-            lock (_gate) entry.Status = new CredentialProviderStatus(CredentialProviderState.Locked, exception.Message);
+            lock (_gate)
+            {
+                if (entry.Generation == generation) entry.Status = new CredentialProviderStatus(CredentialProviderState.Locked, exception.Message) { Detail = exception.Detail };
+            }
         }
         finally
         {
+            RelockIfStale(entry, generation);
             entry.Gate.Release();
         }
 
@@ -379,7 +421,11 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
     private TimeSpan _agentUnlockPause = TimeSpan.FromMinutes(10);
 
-    /// <summary>Forgets the values a provider read, and what its vault holds to read them; null forgets every provider.</summary>
+    /// <summary>
+    /// Forgets the values a provider read, and what its vault holds to read them; null forgets every provider. Nothing is read from
+    /// it again until the user unlocks it (<see cref="UnlockAsync"/>): neither a check nor a read that ran when it was locked, whose
+    /// value is dropped.
+    /// </summary>
     /// <param name="id">The id of the provider; null for all.</param>
     public void Lock(string? id)
     {
@@ -390,14 +436,20 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             entries = [.. _providers.Values.Where(entry => id is null || entry.Definition.Id == id)];
             foreach (var entry in entries)
             {
+                // What runs on it now started before the lock: its result is dropped (see Generation).
+                entry.Generation++;
+                entry.Unlocked = false;
+                _stale.Remove(entry.Definition.Id);
                 foreach (var held in _held.Where(pair => pair.Value.Provider == entry.Definition.Id).Select(static pair => pair.Key).ToArray())
                 {
                     _held.Remove(held);
                     forgotten.Add(held);
                 }
 
-                if (entry.Provider is not null && entry.Status.State == CredentialProviderState.Ready)
-                    entry.Status = CredentialProviderStatus.Locked("Locked in CodeAlta: its values were forgotten.") with { Account = entry.Status.Account, ProgramPath = entry.Status.ProgramPath };
+                if (entry.Provider is null) continue;
+                entry.LockedByUser = true;
+                if (entry.Status.State == CredentialProviderState.Ready)
+                    entry.Status = CredentialProviderStatus.Locked(LockedByUserMessage) with { Account = entry.Status.Account, ProgramPath = entry.Status.ProgramPath };
             }
         }
 
@@ -487,6 +539,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
 
         var provider = entry.Provider ?? throw new CredentialProviderException(CredentialFailure.Failed, entry.Status.Message ?? "This provider cannot be used.");
+        ThrowIfLockedByUser(entry);
         await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -533,12 +586,15 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         if (entry is null) return GetAvailability(name)!;
         var changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var generation = 0;
         try
         {
-            await ReadBindingAsync(entry, binding, interactive: false, changed, cancellationToken).ConfigureAwait(false);
+            lock (_gate) generation = entry.Generation;
+            await ReadBindingAsync(entry, binding, interactive: false, changed, generation, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
+            RelockIfStale(entry, generation);
             entry.Gate.Release();
         }
 
@@ -721,17 +777,54 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
     }
 
-    // Under the gate: the value held for a binding, when it is the one of the binding as it is now and has not expired.
+    // Under the gate: the value held for a binding, when it is the one of the binding as it is now and has not expired. An expired
+    // value is forgotten here, and its provider is marked to be read again at once.
     private Held? Fresh(SecretBinding binding)
     {
         if (!_held.TryGetValue(binding.Name, out var held)) return null;
-        if (held.Provider != binding.Provider || held.Reference != binding.Reference || (held.ExpiresAt is { } end && end <= _options.Time.GetUtcNow()))
+        var expired = held.ExpiresAt is { } end && end <= _options.Time.GetUtcNow();
+        if (held.Provider != binding.Provider || held.Reference != binding.Reference || expired)
         {
             _held.Remove(binding.Name);
+            if (expired) MarkStale(held.Provider);
             return null;
         }
 
         return held;
+    }
+
+    // Under the gate: a value of a provider expired; it is read again without a prompt, soon.
+    private void MarkStale(string provider)
+    {
+        _stale.Add(provider);
+        if (_refreshQueued || _disposed) return;
+        _refreshQueued = true;
+        ThreadPool.UnsafeQueueUserWorkItem(static broker => _ = broker.RefreshExpiredAsync(), this, preferLocal: false);
+    }
+
+    // Under the gate of a provider, at the end of what ran on it: when the user locked it meanwhile, what that put back in the
+    // provider (a session key an unlock answered) is forgotten again.
+    private void RelockIfStale(ProviderEntry entry, int generation)
+    {
+        bool stale;
+        lock (_gate) stale = entry.Generation != generation;
+        if (!stale) return;
+        try
+        {
+            entry.Provider?.Lock();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _options.Logger?.Warn($"The credential provider {entry.Definition.Id} failed to lock: {exception.GetType().Name}");
+        }
+    }
+
+    private void ThrowIfLockedByUser(ProviderEntry entry)
+    {
+        lock (_gate)
+        {
+            if (entry.LockedByUser) throw new CredentialProviderException(CredentialFailure.Locked, LockedByUserMessage);
+        }
     }
 
     private SecretAvailability GetAvailabilityUnlocked(SecretBinding binding)
@@ -747,7 +840,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private SecretAvailability FromStatus(SecretBinding binding, ProviderEntry entry)
     {
         var name = DisplayName(entry);
-        return entry.Status.State switch
+        SecretAvailability availability = entry.Status.State switch
         {
             CredentialProviderState.Locked => new(binding.Name, SecretAvailabilityState.Locked, $"{binding.Name} is kept in {name}, which is locked: unlock it in Settings › Secrets of CodeAlta.", binding.Provider),
             CredentialProviderState.SignInNeeded => new(binding.Name, SecretAvailabilityState.SignInNeeded, $"{binding.Name} is kept in {name}, which needs a sign-in: {entry.Status.Message}", binding.Provider),
@@ -755,6 +848,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             CredentialProviderState.Ready => new(binding.Name, SecretAvailabilityState.Ready, null, binding.Provider),
             _ => new(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name} is kept in {name}: {entry.Status.Message}", binding.Provider),
         };
+        return availability with { Detail = entry.Status.Detail };
     }
 
     private string DisplayName(string provider)
@@ -780,14 +874,20 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             Settings = entry.Definition.Values,
             Secrets = bound.Length,
             Held = bound.Count(binding => Fresh(binding) is not null),
+            Unlocked = entry.Unlocked && entry.Status.State == CredentialProviderState.Ready,
+            LockedByUser = entry.LockedByUser,
         };
     }
 
     // Makes the providers those the configuration names now: a new one is created, a changed one created again, a removed one released.
+    // A provider is also created again when what opens its vault changes: a new version of a local secret a setting names (a token
+    // rotated), or the confirmation its creation waited for.
     private void Synchronize()
     {
         var definitions = _settings.Load(out var problems);
+        var versions = LocalVersions(definitions);
         List<ProviderEntry> released = [];
+        List<ProviderEntry> reopened = [];
         lock (_gate)
         {
             if (_disposed) return;
@@ -799,30 +899,98 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                 seen.Add(definition.Id);
                 var contribution = _types.Find(definition.Type);
                 var signature = definition.Signature + "\n" + (contribution is null ? "?" : RuntimeHelpersIdentity(contribution));
-                if (_providers.TryGetValue(definition.Id, out var existing) && existing.Signature == signature)
+                var opener = Opener(definition, contribution, versions);
+                if (_providers.TryGetValue(definition.Id, out var existing) && existing.Signature == signature && existing.Opener == opener
+                    && !(existing.WaitsFor is { } waits && !IsPending(waits.Name, waits.Use)))
                 {
                     existing.Order = order++;
                     existing.Definition = definition;
                     continue;
                 }
 
-                if (existing is not null) released.Add(existing);
-                var entry = new ProviderEntry(definition, contribution, signature) { Order = order++ };
+                if (existing is not null)
+                {
+                    released.Add(existing);
+                    // What still runs on the old provider is dropped.
+                    existing.Generation++;
+                }
+
+                // A lock of the user stays when the provider is created again: only an unlock ends it.
+                var entry = new ProviderEntry(definition, contribution, signature) { Order = order++, Opener = opener, LockedByUser = existing?.LockedByUser == true };
                 Create(entry);
                 _providers[definition.Id] = entry;
+                _stale.Remove(definition.Id);
                 foreach (var held in _held.Where(pair => pair.Value.Provider == definition.Id).Select(static pair => pair.Key).ToArray()) _held.Remove(held);
+                // Its configuration is the same: nothing else checks it, so it is read again here.
+                if (existing is not null && existing.Signature == signature && entry.Provider is not null) reopened.Add(entry);
             }
 
             foreach (var id in _providers.Keys.Where(id => !seen.Contains(id)).ToArray())
             {
-                released.Add(_providers[id]);
+                var gone = _providers[id];
+                gone.Generation++;
+                released.Add(gone);
                 _providers.Remove(id);
+                _stale.Remove(id);
                 foreach (var held in _held.Where(pair => pair.Value.Provider == id).Select(static pair => pair.Key).ToArray()) _held.Remove(held);
             }
         }
 
         foreach (var entry in released) Release(entry);
+        foreach (var entry in reopened) ThreadPool.UnsafeQueueUserWorkItem(static state => _ = state.broker.RefreshReopenedAsync(state.entry), (broker: this, entry), preferLocal: false);
     }
+
+    private async Task RefreshReopenedAsync(ProviderEntry entry)
+    {
+        try
+        {
+            var changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await RefreshProviderAsync(entry, interactive: false, changed, CancellationToken.None).ConfigureAwait(false);
+            Raise(changed, always: true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _options.Logger?.Warn($"The credential provider {entry.Definition.Id} could not be read again: {exception.GetType().Name}");
+        }
+    }
+
+    // The versions of the local secrets the settings of the providers name, read outside the gate.
+    private Dictionary<string, int> LocalVersions(IReadOnlyList<CredentialProviderDefinition> definitions)
+    {
+        var versions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var named = definitions.SelectMany(static definition => definition.Values.Values).OfType<string>()
+            .Any(static text => SecretReferences.TryParseLone(text.Trim(), out var parsed) && parsed.Kind == SecretReferenceKind.Secret);
+        if (!named) return versions;
+        try
+        {
+            foreach (var secret in _store.ListSecrets().Where(static secret => secret.Provider is null)) versions[secret.Name] = secret.Version;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or SecretStoreUnavailableException)
+        {
+            // The creation of the provider says why it cannot read them.
+        }
+
+        return versions;
+    }
+
+    // What opens the vault of a provider, beside its configuration: the versions of the local secrets its secret settings name.
+    private static string Opener(CredentialProviderDefinition definition, PluginCredentialProviderContribution? contribution, Dictionary<string, int> versions)
+    {
+        if (contribution is null) return string.Empty;
+        var text = new System.Text.StringBuilder();
+        foreach (var setting in contribution.Settings.Where(static setting => setting.Kind == PluginCredentialProviderSettingKind.Secret))
+        {
+            if (!definition.Values.TryGetValue(setting.Key, out var written) || written is not string reference
+                || !SecretReferences.TryParseLone(reference.Trim(), out var parsed) || parsed.Kind != SecretReferenceKind.Secret) continue;
+            text.Append(parsed.Name).Append('=').Append(versions.TryGetValue(parsed.Name, out var version) ? version.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-").Append('\n');
+        }
+
+        return text.ToString();
+    }
+
+    // Under the gate: whether a use of a secret waits for the user's confirmation.
+    private bool IsPending(string name, string use)
+        => _pending.Any(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
 
     private static string RuntimeHelpersIdentity(PluginCredentialProviderContribution contribution)
         => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(contribution).ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -861,9 +1029,29 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                     return;
                 }
 
-                if (!_store.TryGetSecret(parsed.Name, out var value))
+                // A token that asks before use is given to the provider as to any use, which the user confirms in Settings; the
+                // provider is created again once it is confirmed.
+                var use = $"credential provider {entry.Definition.Id}";
+                var asks = SafeAskBeforeUse(parsed.Name) is not null;
+                if (asks && IsPending(parsed.Name, use))
                 {
-                    entry.Status = CredentialProviderStatus.Unavailable($"Its setting '{setting.Label}' names {parsed.Name}, which is not set on this computer.");
+                    Waits(entry, setting, parsed.Name, use);
+                    return;
+                }
+
+                var store = asks ? new LocalSecretStore(_options.GlobalRoot) { BoundSecrets = this, Use = use } : _store;
+                string? value;
+                try
+                {
+                    if (!store.TryGetSecret(parsed.Name, out value))
+                    {
+                        entry.Status = CredentialProviderStatus.Unavailable($"Its setting '{setting.Label}' names {parsed.Name}, which is not set on this computer.");
+                        return;
+                    }
+                }
+                catch (SecretStoreUnavailableException) when (asks && IsPending(parsed.Name, use))
+                {
+                    Waits(entry, setting, parsed.Name, use);
                     return;
                 }
 
@@ -888,6 +1076,15 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
     }
 
+    // Under the gate: the creation of a provider waits for the confirmation of a use of the local secret a setting names.
+    private void Waits(ProviderEntry entry, PluginCredentialProviderSetting setting, string name, string use)
+    {
+        entry.WaitsFor = (name, use);
+        entry.Status = CredentialProviderStatus.Unavailable(_options.CanPrompt && _options.Verifier is not null
+            ? $"Its setting '{setting.Label}' names {name}, which asks before use: confirm its use for the {use} in Settings › Secrets of CodeAlta."
+            : $"Its setting '{setting.Label}' names {name}, which asks before use, and nobody can confirm it here.");
+    }
+
     private void Release(ProviderEntry entry)
     {
         try
@@ -905,8 +1102,17 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     {
         if (entry.Provider is not { } provider) return;
         await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var generation = 0;
         try
         {
+            lock (_gate)
+            {
+                // A provider the user locked is neither checked nor read until the user unlocks it: a check would find a vault that
+                // needs nobody (a keychain, pass) ready again.
+                if (entry.LockedByUser) return;
+                generation = entry.Generation;
+            }
+
             if (!statusKnown)
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -920,12 +1126,21 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                 {
                     status = CredentialProviderStatus.Unavailable("It did not answer in time.");
                 }
-                catch (Exception exception) when (exception is CredentialProviderException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+                catch (CredentialProviderException exception)
+                {
+                    status = CredentialProviderStatus.Unavailable(exception.Message) with { Detail = exception.Detail };
+                }
+                catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
                 {
                     status = CredentialProviderStatus.Unavailable(exception.Message);
                 }
 
-                lock (_gate) entry.Status = status;
+                lock (_gate)
+                {
+                    if (entry.Generation != generation) return;
+                    entry.Status = status;
+                    if (status.State != CredentialProviderState.Ready) entry.Unlocked = false;
+                }
             }
 
             CredentialProviderStatus now;
@@ -944,22 +1159,24 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                     continue;
                 }
 
-                await ReadBindingAsync(entry, binding, interactive, changed, cancellationToken).ConfigureAwait(false);
+                await ReadBindingAsync(entry, binding, interactive, changed, generation, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
         {
+            RelockIfStale(entry, generation);
             entry.Gate.Release();
         }
     }
 
-    // Under the gate of the provider: reads one binding, unless its value is held already.
-    private async Task ReadBindingAsync(ProviderEntry entry, SecretBinding binding, bool interactive, HashSet<string> changed, CancellationToken cancellationToken)
+    // Under the gate of the provider: reads one binding, unless its value is held already. What it read is kept only when the
+    // provider was not locked (nor created again) since the generation the caller started with.
+    private async Task ReadBindingAsync(ProviderEntry entry, SecretBinding binding, bool interactive, HashSet<string> changed, int generation, CancellationToken cancellationToken)
     {
         if (entry.Provider is not { } provider) return;
         lock (_gate)
         {
-            if (Fresh(binding) is not null) return;
+            if (entry.LockedByUser || entry.Generation != generation || Fresh(binding) is not null) return;
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -976,6 +1193,8 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             if (memory is { } duration && (expires is null || now + duration < expires)) expires = now + duration;
             lock (_gate)
             {
+                // The user locked the provider while it read: the value is not kept (it stays masked).
+                if (entry.Generation != generation || entry.LockedByUser) return;
                 _held[binding.Name] = new Held(value.Value, binding.Provider, binding.Reference, expires);
                 _problems.Remove(binding.Name);
                 changed.Add(binding.Name);
@@ -993,10 +1212,18 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             };
             lock (_gate)
             {
+                if (entry.Generation != generation) return;
                 if (exception.Failure == CredentialFailure.Locked && entry.Status.State == CredentialProviderState.Ready)
-                    entry.Status = CredentialProviderStatus.Locked(exception.Message) with { Account = entry.Status.Account, ProgramPath = entry.Status.ProgramPath };
+                {
+                    entry.Status = CredentialProviderStatus.Locked(exception.Message) with { Account = entry.Status.Account, ProgramPath = entry.Status.ProgramPath, Detail = exception.Detail };
+                    entry.Unlocked = false;
+                }
+
                 _problems[binding.Name] = new SecretAvailability(binding.Name, state,
-                    state == SecretAvailabilityState.NotFound ? $"{binding.Name} is not found in {DisplayName(entry)}: {exception.Message}" : $"{binding.Name}: {exception.Message}", binding.Provider);
+                    state == SecretAvailabilityState.NotFound ? $"{binding.Name} is not found in {DisplayName(entry)}: {exception.Message}" : $"{binding.Name}: {exception.Message}", binding.Provider)
+                {
+                    Detail = exception.Detail,
+                };
                 changed.Add(binding.Name);
             }
         }
@@ -1004,6 +1231,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             lock (_gate)
             {
+                if (entry.Generation != generation) return;
                 _problems[binding.Name] = new SecretAvailability(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name}: {DisplayName(entry)} did not answer in time.", binding.Provider);
                 changed.Add(binding.Name);
             }
@@ -1012,6 +1240,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             lock (_gate)
             {
+                if (entry.Generation != generation) return;
                 _problems[binding.Name] = new SecretAvailability(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name}: {exception.Message}", binding.Provider);
                 changed.Add(binding.Name);
             }
@@ -1026,11 +1255,18 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             ProviderEntry[] entries;
             lock (_gate)
             {
+                _refreshQueued = false;
                 if (_disposed) return;
                 var now = _options.Time.GetUtcNow();
-                var expired = _held.Where(pair => pair.Value.ExpiresAt is { } end && end <= now).Select(static pair => pair.Value.Provider).ToHashSet(StringComparer.Ordinal);
-                foreach (var name in _held.Where(pair => pair.Value.ExpiresAt is { } end && end <= now).Select(static pair => pair.Key).ToArray()) _held.Remove(name);
-                entries = [.. _providers.Values.Where(entry => expired.Contains(entry.Definition.Id))];
+                // The values that expired since, and the providers a resolver or a check already saw expire (Fresh).
+                foreach (var (name, held) in _held.Where(pair => pair.Value.ExpiresAt is { } end && end <= now).ToArray())
+                {
+                    _held.Remove(name);
+                    _stale.Add(held.Provider);
+                }
+
+                entries = [.. _providers.Values.Where(entry => _stale.Contains(entry.Definition.Id) && !entry.LockedByUser)];
+                _stale.Clear();
             }
 
             if (entries.Length == 0) return;
@@ -1077,5 +1313,20 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         public SemaphoreSlim Gate { get; } = new(1, 1);
 
         public int Order { get; set; }
+
+        // Changes when the user locks it, or when it is replaced: what started on an older generation drops its result.
+        public int Generation { get; set; }
+
+        // The user locked it: nothing is read from it until the user unlocks it.
+        public bool LockedByUser { get; set; }
+
+        // An unlock in CodeAlta made it ready: it may hold what opens its vault.
+        public bool Unlocked { get; set; }
+
+        // What opens its vault beside its configuration (the versions of the local secrets its settings name).
+        public string Opener { get; init; } = string.Empty;
+
+        // The use of a local secret its creation waits the confirmation of; null when it waits for none.
+        public (string Name, string Use)? WaitsFor { get; set; }
     }
 }

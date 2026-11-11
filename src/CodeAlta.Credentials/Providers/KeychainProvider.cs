@@ -89,8 +89,8 @@ internal sealed class KeychainProvider : ICredentialProvider
             if (result.ExitCode != 0 || result.Output.Length == 0)
             {
                 var notFound = result.ExitCode is 0 or 44 || result.ExitCode == 1 && string.IsNullOrWhiteSpace(result.Error);
-                throw new CredentialProviderException(notFound ? CredentialFailure.NotFound : CredentialFailure.Failed,
-                    notFound ? $"The keychain has no credential {reference}." : $"The keychain: {result.ErrorLine()}");
+                throw VaultText.Failure(notFound ? CredentialFailure.NotFound : CredentialFailure.Failed,
+                    notFound ? $"The keychain has no credential {reference}." : $"The keychain did not give {reference}: {result.Summary()}.", result);
             }
 
             return new CredentialValue(VaultText.TrimOneNewline(result.OutputText()));
@@ -209,15 +209,35 @@ internal static class WindowsCredentials
         }
     }
 
-    // Most programs write a text as UTF-16 (cmdkey, the Git Credential Manager), others as UTF-8. A UTF-16 text of Latin letters
-    // has zero bytes, which a UTF-8 text never has; without them a valid UTF-8 text is read as UTF-8, else as UTF-16.
+    // The blob has no encoding of its own. The tools of Windows write UTF-16LE: cmdkey, the Credential Manager of the Control Panel,
+    // the Git Credential Manager (Encoding.Unicode), Python's keyring; others write UTF-8: keytar of Node, go-keyring (the GitHub
+    // CLI). The rule, in order:
+    // 1. an even length that holds a zero byte and is valid UTF-16 is UTF-16 (a Latin text: UTF-8 never has a zero byte);
+    // 2. an even length, valid UTF-16 without control characters, whose UTF-8 reading is invalid or has control characters, is
+    //    UTF-16 (a Cyrillic, Greek or CJK text: "ЖЖ" in UTF-16 is 16 04 16 04, valid UTF-8 of two control characters);
+    // 3. valid UTF-8 is UTF-8 (an ASCII token of an even length is also valid UTF-16, of CJK characters nobody meant);
+    // 4. else UTF-16 when it is valid. What stays ambiguous is a UTF-16 text whose every byte is printable ASCII, such as a single
+    //    CJK character (中 is 2D 4E, "-N"): it is read as UTF-8.
     internal static string? Decode(byte[] bytes)
     {
         var utf16 = new UnicodeEncoding(bigEndian: false, byteOrderMark: false, throwOnInvalidBytes: true);
         var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
         var even = bytes.Length % 2 == 0;
-        if (even && Array.IndexOf(bytes, (byte)0) >= 0 && TryDecode(utf16, bytes) is { } wide) return wide.TrimEnd('\0');
-        return TryDecode(utf8, bytes) ?? (even ? TryDecode(utf16, bytes)?.TrimEnd('\0') : null);
+        var wide = even ? TryDecode(utf16, bytes)?.TrimEnd('\0') : null;
+        if (wide is not null && Array.IndexOf(bytes, (byte)0) >= 0) return wide;
+        var narrow = TryDecode(utf8, bytes);
+        if (wide is not null && !HasControl(wide) && (narrow is null || HasControl(narrow))) return wide;
+        return narrow ?? wide;
+    }
+
+    private static bool HasControl(string text)
+    {
+        foreach (var character in text)
+        {
+            if (char.IsControl(character) && character is not ('\t' or '\r' or '\n')) return true;
+        }
+
+        return false;
     }
 
     private static string? TryDecode(Encoding encoding, byte[] bytes)

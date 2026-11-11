@@ -85,19 +85,22 @@ internal sealed class PassProvider : ICredentialProvider
             : ["show", entry];
         var result = await _runner.RunAsync(program, arguments, new VaultCommandOptions
         {
-            Environment = _store is null ? null : new Dictionary<string, string>(StringComparer.Ordinal) { ["PASSWORD_STORE_DIR"] = _store },
+            Environment = ReadEnvironment(interactive),
             Timeout = interactive ? TimeSpan.FromMinutes(2) : NonInteractiveTimeout,
         }, cancellationToken).ConfigureAwait(false);
         try
         {
             if (result.TimedOut)
-                throw new CredentialProviderException(CredentialFailure.Locked, "GnuPG did not give the passphrase in time: is pinentry waiting for you?");
+                throw VaultText.Failure(CredentialFailure.Locked, "GnuPG did not give the passphrase in time: is pinentry waiting for you?", result);
             if (result.ExitCode != 0)
             {
                 var error = result.Error;
                 var notFound = error.Contains("not in the password store", StringComparison.OrdinalIgnoreCase) || error.Contains("not found", StringComparison.OrdinalIgnoreCase)
                     || error.Contains("does not exist", StringComparison.OrdinalIgnoreCase);
-                throw new CredentialProviderException(notFound ? CredentialFailure.NotFound : CredentialFailure.Failed, $"{_program}: {VaultText.ErrorLine(result)}");
+                if (!notFound && !interactive && NeedsPassphrase(error))
+                    throw VaultText.Failure(CredentialFailure.Locked, "GnuPG needs the passphrase of its key: unlock the store to let pinentry ask for it.", result);
+                throw VaultText.Failure(notFound ? CredentialFailure.NotFound : CredentialFailure.Failed,
+                    notFound ? $"The entry {entry} is not in the password store." : $"{_program} did not give {entry}: {result.Summary()}.", result);
             }
 
             var text = result.OutputText();
@@ -140,6 +143,36 @@ internal sealed class PassProvider : ICredentialProvider
             .Select(name => new CredentialBrowseEntry($"{prefix}{name}", name!, CredentialBrowseEntryKind.Field) { Reference = $"{prefix}{name}" }));
         return ValueTask.FromResult(new CredentialBrowsePage(entries) { Path = relative.Length == 0 ? null : relative.Replace("/", " › ", StringComparison.Ordinal) });
     }
+
+    // A read that may not show a prompt runs GnuPG with --pinentry-mode error: without the passphrase in its agent, it fails at
+    // once instead of starting pinentry. pass adds PASSWORD_STORE_GPG_OPTS to the options of gpg; gopass reads GOPASS_GPG_OPTS,
+    // else PASSWORD_STORE_GPG_OPTS. The options the user has there are kept.
+    internal Dictionary<string, string>? ReadEnvironment(bool interactive)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (_store is not null) environment["PASSWORD_STORE_DIR"] = _store;
+        if (!interactive)
+        {
+            foreach (var name in new[] { "PASSWORD_STORE_GPG_OPTS", "GOPASS_GPG_OPTS" })
+            {
+                var own = System.Environment.GetEnvironmentVariable(name);
+                // gopass reads PASSWORD_STORE_GPG_OPTS only when GOPASS_GPG_OPTS is not set: an empty one is left unset.
+                if (name == "GOPASS_GPG_OPTS" && string.IsNullOrWhiteSpace(own)) continue;
+                environment[name] = string.IsNullOrWhiteSpace(own) ? NoPinentry : $"{own.Trim()} {NoPinentry}";
+            }
+        }
+
+        return environment.Count == 0 ? null : environment;
+    }
+
+    private const string NoPinentry = "--pinentry-mode error";
+
+    // What gpg writes when it would need pinentry: "No pinentry", "No secret key" (the key is there, its passphrase is not given),
+    // "Inappropriate ioctl for device", or a cancellation.
+    private static bool NeedsPassphrase(string error)
+        => error.Contains("pinentry", StringComparison.OrdinalIgnoreCase) || error.Contains("No secret key", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("Inappropriate ioctl", StringComparison.OrdinalIgnoreCase) || error.Contains("cancel", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("passphrase", StringComparison.OrdinalIgnoreCase);
 
     internal static (string Entry, string? Key) Split(string reference)
     {

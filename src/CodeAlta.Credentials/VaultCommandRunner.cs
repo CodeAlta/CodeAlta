@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -7,7 +8,11 @@ namespace CodeAlta.Credentials;
 /// <summary>What a program of a vault answered.</summary>
 /// <param name="ExitCode">Its exit code; -1 when it did not end in time.</param>
 /// <param name="Output">What it wrote on its standard output, as bytes: a value is never made a text before it is needed.</param>
-/// <param name="Error">What it wrote on its error output, bounded; it can hold a value a broken program prints, so it is only logged through the masking of the host.</param>
+/// <param name="Error">
+/// What it wrote on its error output, bounded. It can hold a value (a wrapper that prints the secret it fetched before it fails), which
+/// the masking does not know yet: it is read to classify the failure, and shown to the user only (<see cref="ErrorDetail"/>), never
+/// put in a message an agent or a log gets.
+/// </param>
 /// <param name="TimedOut">Whether it was stopped because it did not end in time.</param>
 public sealed record VaultCommandResult(int ExitCode, byte[] Output, string Error, bool TimedOut)
 {
@@ -15,12 +20,28 @@ public sealed record VaultCommandResult(int ExitCode, byte[] Output, string Erro
     /// <returns>The text.</returns>
     public string OutputText() => Encoding.UTF8.GetString(Output);
 
-    /// <summary>Gets the first line of the error output, for a message: at most 300 characters.</summary>
-    /// <returns>The line, or a generic text.</returns>
-    public string ErrorLine()
+    /// <summary>Gets how it ended, for a message anybody may read: its exit code, or that it did not answer in time; never what it wrote.</summary>
+    /// <returns>The text, such as <c>it ended with code 1</c>.</returns>
+    public string Summary() => TimedOut ? "it did not answer in time" : $"it ended with code {ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// Gets the first line of the error output that says something, at most 300 characters, for the user only (the detail of a
+    /// status or a failure, which the window shows and no agent nor log gets).
+    /// </summary>
+    /// <returns>The line; null when it wrote nothing.</returns>
+    public string? ErrorDetail()
     {
-        var line = Error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault(static text => text.Length > 0);
-        return line is null ? $"it ended with code {ExitCode}" : line.Length > 300 ? line[..300] : line;
+        foreach (var line in Error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            // The causes of bws are numbered: "0: the cause"; a program that writes "Error:" alone on its first line says why on the next.
+            var digits = 0;
+            while (digits < line.Length && char.IsAsciiDigit(line[digits])) digits++;
+            var text = digits > 0 && digits < line.Length && line[digits] == ':' ? line[(digits + 1)..].Trim() : line;
+            if (text.Length == 0 || text.Equals("Error:", StringComparison.OrdinalIgnoreCase) || text.Equals("Error", StringComparison.OrdinalIgnoreCase)) continue;
+            return text.Length > 300 ? text[..300] : text;
+        }
+
+        return null;
     }
 }
 
@@ -50,7 +71,7 @@ public sealed record VaultCommandOptions
 public sealed class VaultCommandRunner
 {
     // The variables of vault sessions a program never inherits from CodeAlta's environment: a provider gives its own.
-    private static readonly string[] SessionVariables = ["OP_SERVICE_ACCOUNT_TOKEN", "OP_CONNECT_TOKEN", "OP_CONNECT_HOST", "BW_SESSION", "BWS_ACCESS_TOKEN", "BW_PASSWORD"];
+    private static readonly ImmutableArray<string> SessionVariables = ["OP_SERVICE_ACCOUNT_TOKEN", "OP_CONNECT_TOKEN", "OP_CONNECT_HOST", "BW_SESSION", "BWS_ACCESS_TOKEN", "BW_PASSWORD"];
 
     private readonly string _workingDirectory;
 
@@ -141,20 +162,23 @@ public sealed class VaultCommandRunner
         using var process = Process.Start(start) ?? throw new Win32Exception($"{Path.GetFileName(program)} did not start.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(options.Timeout);
+        // Whatever stops it (its time, the caller) ends the program at once, in every step after its start: a write to an input it
+        // does not read blocks on a full pipe, and only the end of the program unblocks it.
+        using var stop = timeout.Token.UnsafeRegister(static state => Kill((Process)state!), process);
         var output = ReadBoundedAsync(process.StandardOutput.BaseStream, options.MaximumOutput, timeout.Token);
         var error = ReadBoundedAsync(process.StandardError.BaseStream, 64 * 1024, timeout.Token);
         try
         {
-            if (options.Input is not null) await process.StandardInput.WriteAsync(options.Input.AsMemory(), timeout.Token).ConfigureAwait(false);
-            process.StandardInput.Close();
-        }
-        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
-        {
-            // It ended without reading: its exit code says why.
-        }
+            try
+            {
+                if (options.Input is not null) await process.StandardInput.WriteAsync(options.Input.AsMemory(), timeout.Token).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+            {
+                // It ended without reading (or was ended): its exit code, or the token, says why.
+            }
 
-        try
-        {
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
             var bytes = await output.ConfigureAwait(false);
             var errorBytes = await error.ConfigureAwait(false);
@@ -163,12 +187,30 @@ public sealed class VaultCommandRunner
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             Kill(process);
+            await DrainAsync(output, error).ConfigureAwait(false);
             return new VaultCommandResult(-1, [], $"{Path.GetFileName(program)} did not answer within {options.Timeout.TotalSeconds:0} seconds.", TimedOut: true);
         }
         catch (OperationCanceledException)
         {
             Kill(process);
+            await DrainAsync(output, error).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    // The readers of a program that was stopped end with it: what they read is dropped, and nothing they throw is left unobserved.
+    private static async Task DrainAsync(Task<byte[]> output, Task<byte[]> error)
+    {
+        foreach (var reader in new[] { output, error })
+        {
+            try
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(await reader.ConfigureAwait(false));
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or IOException or ObjectDisposedException)
+            {
+                // Stopped with the program.
+            }
         }
     }
 

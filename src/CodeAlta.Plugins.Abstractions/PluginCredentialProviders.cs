@@ -47,6 +47,13 @@ public sealed record CredentialProviderStatus(CredentialProviderState State, str
     /// <summary>Gets how to install its program, for <see cref="CredentialProviderState.NotInstalled"/>; null for no help.</summary>
     public CredentialProviderInstall? Install { get; init; }
 
+    /// <summary>
+    /// Gets what the program of its vault wrote about it, such as the first line of its error output, for the user only: the
+    /// host shows it in its window, never to an agent nor in a log, because a program can write a value there that the masking
+    /// does not know yet. Null for nothing.
+    /// </summary>
+    public string? Detail { get; init; }
+
     /// <summary>Creates the status of a provider that reads values without asking anybody.</summary>
     /// <param name="message">What the user reads beside it; null for nothing.</param>
     /// <returns>The status.</returns>
@@ -82,7 +89,10 @@ public enum CredentialFailure
     Failed,
 }
 
-/// <summary>Thrown by a credential provider that cannot read a value or list a vault. Its message is shown: it names no value.</summary>
+/// <summary>
+/// Thrown by a credential provider that cannot read a value or list a vault. Its message is shown, to agents too: it names no value
+/// and holds nothing a program wrote (<see cref="Detail"/> does).
+/// </summary>
 public sealed class CredentialProviderException : Exception
 {
     /// <summary>Initializes a new instance of the <see cref="CredentialProviderException"/> class.</summary>
@@ -106,6 +116,12 @@ public sealed class CredentialProviderException : Exception
 
     /// <summary>Gets why it failed.</summary>
     public CredentialFailure Failure { get; }
+
+    /// <summary>
+    /// Gets what the program of the vault wrote about the failure, for the user only: the host shows it in its window, never to an
+    /// agent nor in a log, because a program can write a value there that the masking does not know yet. Null for nothing.
+    /// </summary>
+    public string? Detail { get; init; }
 }
 
 /// <summary>A value a credential provider read.</summary>

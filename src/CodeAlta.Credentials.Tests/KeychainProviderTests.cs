@@ -53,6 +53,20 @@ public sealed class KeychainProviderTests
     }
 
     [TestMethod]
+    public void A_utf16_text_without_zero_bytes_is_not_read_as_utf8_control_characters()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // "ЖЖ" in UTF-16LE is 16 04 16 04: valid UTF-8 too, of two control characters.
+        Assert.AreEqual("ЖЖ", WindowsCredentials.Decode(Encoding.Unicode.GetBytes("ЖЖ")));
+        Assert.AreEqual("пароль", WindowsCredentials.Decode(Encoding.Unicode.GetBytes("пароль")));
+        Assert.AreEqual("пароль", WindowsCredentials.Decode(Encoding.UTF8.GetBytes("пароль")));
+        Assert.AreEqual("ΑΒΓΔ", WindowsCredentials.Decode(Encoding.Unicode.GetBytes("ΑΒΓΔ")));
+        Assert.AreEqual("Жa", WindowsCredentials.Decode(Encoding.Unicode.GetBytes("Жa")));
+        Assert.AreEqual("ghp_abcdefgh12", WindowsCredentials.Decode(Encoding.UTF8.GetBytes("ghp_abcdefgh12")), "an ASCII token of an even length stays UTF-8");
+        Assert.AreEqual("line\none", WindowsCredentials.Decode(Encoding.UTF8.GetBytes("line\none")), "a new line is not a control character that decides");
+    }
+
+    [TestMethod]
     public void The_references_of_macOS_and_Linux_name_a_service_an_account_or_attributes()
     {
         Assert.AreEqual(("github", (string?)"alice"), KeychainProvider.ServiceAccount("github/alice"));

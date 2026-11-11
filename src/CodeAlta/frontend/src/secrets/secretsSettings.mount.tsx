@@ -21,7 +21,7 @@ const command: CredentialTypeView = {
 };
 const provider = (id: string, type: CredentialTypeView, state: string, extra: Partial<CredentialProviderRpcView> = {}): CredentialProviderRpcView => ({
   id, type: type.type, displayName: type.displayName, state, message: null, typeName: type.displayName, icon: type.icon, account: null, programPath: null,
-  signInCommand: null, installCommand: null, installPage: null, cache: "session", unlockAtStart: true, unlockAsksPassword: false, secrets: 1, held: 0, settings: [], ...extra,
+  signInCommand: null, installCommand: null, installPage: null, cache: "session", unlockAtStart: true, unlockAsksPassword: false, secrets: 1, held: 0, unlocked: false, settings: [], ...extra,
 });
 const listing: SecretsList = {
   status: "ok", protection: "dpapi",

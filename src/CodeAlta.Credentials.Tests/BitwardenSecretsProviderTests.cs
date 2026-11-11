@@ -21,7 +21,8 @@ public sealed class BitwardenSecretsProviderTests
 
         var refused = await Create(vault, "0.another-token").GetStatusAsync(CancellationToken.None);
         Assert.AreEqual(CredentialProviderState.Unavailable, refused.State);
-        StringAssert.Contains(refused.Message, "Access token is not in a valid format", "the first line that says something, not \"Error:\"");
+        StringAssert.Contains(refused.Message, "refused the access token");
+        StringAssert.Contains(refused.Detail, "Access token is not in a valid format", "the first line that says something, not \"Error:\"");
 
         var missing = await ProviderHarness.Create(BitwardenSecretsProvider.Contribution(new VaultCommandRunner()), new Dictionary<string, object?> { ["path"] = Path.Combine(vault.Bin, "none.exe") })
             .GetStatusAsync(CancellationToken.None);
@@ -38,7 +39,8 @@ public sealed class BitwardenSecretsProviderTests
         Assert.AreEqual("bws-secret-value-111", (await provider.ReadAsync(SecretId, false, CancellationToken.None)).Value);
         var missing = await ProviderHarness.ReadFailsAsync(provider, "00000000-0000-0000-0000-000000000000");
         Assert.AreEqual(CredentialFailure.NotFound, missing.Failure);
-        StringAssert.Contains(missing.Message, "404");
+        StringAssert.Contains(missing.Message, "no such secret");
+        StringAssert.Contains(missing.Detail, "404");
         ProviderHarness.AssertNoArgumentHolds(vault, Token);
     }
 

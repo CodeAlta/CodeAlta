@@ -92,7 +92,7 @@ function ProviderRow({ provider, busy, run, actions, canPrompt }: {
       {provider.state === "sign_in" && provider.signInCommand && actions.runInTerminal
         && <Button size="small" icon={<AppIcon name="terminal" size={14} />} text={t("Sign in…")} disabled={busy}
           onClick={() => actions.runInTerminal!(commandLine(provider.signInCommand!))} />}
-      {provider.state === "ready" && provider.held > 0 && <Button size="small" variant="minimal" icon={<AppIcon name="lock" size={14} />} text={t("Lock")} disabled={busy}
+      {provider.state === "ready" && (provider.held > 0 || provider.unlocked) && <Button size="small" variant="minimal" icon={<AppIcon name="lock" size={14} />} text={t("Lock")} disabled={busy}
         title={t("Forget the values read from this vault until it is unlocked again.")} onClick={() => void run(() => actions.lock(provider.id))} />}
       <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} aria-label={t("Check {name}", { name: provider.displayName })} disabled={busy}
         onClick={() => void run(() => actions.test(provider.id))} />

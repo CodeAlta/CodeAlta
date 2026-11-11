@@ -89,7 +89,7 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         var result = await RunAsync(program, ["read", "--no-newline", reference], interactive ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(20), cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
-            throw new CredentialProviderException(Failure(program, result), $"1Password: {result.ErrorLine()}");
+            throw Failed(program, result);
         }
 
         var value = result.OutputText();
@@ -122,7 +122,7 @@ internal sealed class OnePasswordProvider : ICredentialProvider
             var result = await RunAsync(program, ["item", "get", itemId, "--vault", vault, "--format", "json"], TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
             try
             {
-                if (result.ExitCode != 0) throw new CredentialProviderException(Failure(program, result), $"1Password: {result.ErrorLine()}");
+                if (result.ExitCode != 0) throw Failed(program, result);
                 return OnePasswordItemFields.Read(result.Output);
             }
             finally
@@ -149,7 +149,7 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         var result = await RunAsync(program, arguments, TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
         try
         {
-            if (result.ExitCode != 0) throw new CredentialProviderException(Failure(program, result), $"1Password: {result.ErrorLine()}");
+            if (result.ExitCode != 0) throw Failed(program, result);
             using var document = JsonDocument.Parse(result.Output);
             var list = new List<(string, string, string?)>();
             foreach (var entry in document.RootElement.EnumerateArray())
@@ -202,7 +202,17 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         return CredentialProviderStatus.Ready() with { Account = account, ProgramPath = program };
     }
 
-    private CredentialProviderStatus Classify(string program, VaultCommandResult result)
+    private CredentialProviderStatus Classify(string program, VaultCommandResult result) => Classified(program, result).WithDetail(result);
+
+    // A failure of op, in words of CodeAlta: what op wrote is the detail of the status, for the user only.
+    private CredentialProviderException Failed(string program, VaultCommandResult result)
+    {
+        var failure = Failure(program, result);
+        var message = failure == CredentialFailure.NotFound ? "1Password has no such vault, item or field." : Classified(program, result).Message ?? $"1Password: {result.Summary()}.";
+        return VaultText.Failure(failure, message, result);
+    }
+
+    private CredentialProviderStatus Classified(string program, VaultCommandResult result)
     {
         var error = result.Error;
         if (result.TimedOut) return CredentialProviderStatus.Locked("1Password did not answer in time: is the 1Password app waiting for you?") with { ProgramPath = program };
@@ -217,8 +227,8 @@ internal sealed class OnePasswordProvider : ICredentialProvider
             || error.Contains("dismissed", StringComparison.OrdinalIgnoreCase))
             return CredentialProviderStatus.Locked("Unlock to let the 1Password app authorize CodeAlta.") with { ProgramPath = program };
         if (_serviceAccountToken is not null && (error.Contains("token", StringComparison.OrdinalIgnoreCase) || error.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)))
-            return CredentialProviderStatus.Unavailable($"The service account token was refused: {result.ErrorLine()}") with { ProgramPath = program };
-        return CredentialProviderStatus.Locked($"1Password: {result.ErrorLine()}") with { ProgramPath = program };
+            return CredentialProviderStatus.Unavailable("The service account token was refused.") with { ProgramPath = program };
+        return CredentialProviderStatus.Locked($"1Password: {result.Summary()}.") with { ProgramPath = program };
     }
 
     private CredentialFailure Failure(string program, VaultCommandResult result) => LooksNotFound(result.Error) ? CredentialFailure.NotFound : Classify(program, result).State switch

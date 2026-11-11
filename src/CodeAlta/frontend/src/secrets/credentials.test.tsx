@@ -23,7 +23,7 @@ const commandType: CredentialTypeView = {
 const provider = (extra: Partial<CredentialProviderRpcView>): CredentialProviderRpcView => ({
   id: "personal", type: "1password", displayName: "1Password", state: "ready", message: null, typeName: "1Password", icon: "1password", account: "alice@example.com",
   programPath: "C:\\op.exe", signInCommand: null, installCommand: null, installPage: null, cache: "session", unlockAtStart: true, unlockAsksPassword: false, secrets: 1, held: 1,
-  settings: [], ...extra,
+  unlocked: false, settings: [], ...extra,
 });
 const listing = (providers: CredentialProviderRpcView[], extra: Partial<SecretsList> = {}): SecretsList => ({
   status: "ok", protection: "dpapi", secrets: [], variables: [], ...noCredentials, providers, canPrompt: true, ...extra,
@@ -86,6 +86,15 @@ test("the developer instance offers no unlock, and a vault that takes its master
   const bitwarden = render(createElement(CredentialProviders, { listing: listing([provider({ state: "locked", held: 0, unlockAsksPassword: true })]), busy: false, run: never, onAdd: never,
     actions: { unlock: never, lock: never, test: never, remove: never, edit: never } }));
   assert.match(bitwarden, />Unlock…</);
+});
+
+test("a vault CodeAlta unlocked offers Lock even when it holds no value, such as one used only for sign-ins", () => {
+  const actions = { unlock: never, lock: never, test: never, remove: never, edit: never };
+  const html = (extra: Partial<CredentialProviderRpcView>) => render(createElement(CredentialProviders, { listing: listing([provider(extra)]), busy: false, run: never, onAdd: never, actions }));
+  assert.match(html({ type: "bitwarden", held: 0, secrets: 0, unlocked: true }), />Lock</);
+  assert.match(html({ held: 1, unlocked: false }), />Lock</);
+  assert.doesNotMatch(html({ held: 0, unlocked: false }), />Lock</, "nothing to forget");
+  assert.doesNotMatch(html({ state: "locked", held: 0, unlocked: true }), />Lock</);
 });
 
 test("a secret kept in a vault shows its vault and item, its state and Ask before use, never a version nor Rotate", () => {

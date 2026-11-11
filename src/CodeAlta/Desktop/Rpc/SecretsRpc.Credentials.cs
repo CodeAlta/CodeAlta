@@ -94,7 +94,7 @@ internal sealed partial class SecretsService
         {
             var view = await Credentials.UnlockAsync(request!.Id, string.IsNullOrEmpty(request.Password) ? null : request.Password, cancellationToken).ConfigureAwait(false);
             Changed(CredentialsOf(request.Id));
-            return new(view.Status.State == CredentialProviderState.Ready ? "ok" : "locked", view.Status.Message) { Provider = Present(view) };
+            return new(view.Status.State == CredentialProviderState.Ready ? "ok" : "locked", WithDetail(view.Status.Message, view.Status.Detail)) { Provider = Present(view) };
         }
         catch (KeyNotFoundException)
         {
@@ -120,7 +120,7 @@ internal sealed partial class SecretsService
         {
             var view = await Credentials!.TestProviderAsync(request!.Id, cancellationToken).ConfigureAwait(false);
             Changed(CredentialsOf(request.Id));
-            return new("ok", view.Status.Message) { Provider = Present(view) };
+            return new("ok", WithDetail(view.Status.Message, view.Status.Detail)) { Provider = Present(view) };
         }
         catch (KeyNotFoundException)
         {
@@ -149,7 +149,7 @@ internal sealed partial class SecretsService
         }
         catch (CredentialProviderException exception)
         {
-            return new(exception.Failure == CredentialFailure.Locked ? "locked" : "failed", exception.Message, null, []);
+            return new(exception.Failure == CredentialFailure.Locked ? "locked" : "failed", WithDetail(exception.Message, exception.Detail), null, []);
         }
     }
 
@@ -176,7 +176,7 @@ internal sealed partial class SecretsService
         var availability = await Credentials.ReadSecretAsync(name, cancellationToken).ConfigureAwait(false);
         _changed?.Invoke();
         Changed([name]);
-        return new("ok", availability.State == SecretAvailabilityState.Ready ? null : availability.Message);
+        return new("ok", availability.State == SecretAvailabilityState.Ready ? null : WithDetail(availability.Message, availability.Detail));
     }
 
     /// <summary>Makes a secret ask before use, or not.</summary>
@@ -344,7 +344,7 @@ internal sealed partial class SecretsService
                     Label = info?.Label,
                     AskBeforeUse = info?.AskBeforeUse,
                     State = availability is null ? "ready" : StateName(availability.State),
-                    StateMessage = availability?.Message,
+                    StateMessage = WithDetail(availability?.Message, availability?.Detail),
                 };
             })],
             Providers = [.. views.Select(Present)],
@@ -360,7 +360,12 @@ internal sealed partial class SecretsService
         };
     }
 
-    private static CredentialProviderRpcView Present(CredentialProviderView view) => new(view.Id, view.Type, view.DisplayName, StateName(view.Status.State), view.Status.Message)
+    // What the program of a vault wrote is shown to the user here, in the window only: an agent and the logs never get it, because it
+    // can hold a value the masking does not know yet.
+    private static string? WithDetail(string? message, string? detail)
+        => string.IsNullOrWhiteSpace(detail) ? message : message is null ? detail : $"{message} It said: {detail}";
+
+    private static CredentialProviderRpcView Present(CredentialProviderView view) => new(view.Id, view.Type, view.DisplayName, StateName(view.Status.State), WithDetail(view.Status.Message, view.Status.Detail))
     {
         TypeName = view.TypeName,
         Icon = view.Icon,
@@ -374,6 +379,7 @@ internal sealed partial class SecretsService
         UnlockAsksPassword = view.UnlockAsksPassword,
         Secrets = view.Secrets,
         Held = view.Held,
+        Unlocked = view.Unlocked,
         Settings = [.. view.Settings.Select(static pair => pair.Value switch
         {
             bool flag => new CredentialSettingValue(pair.Key) { Flag = flag },
@@ -474,6 +480,9 @@ internal sealed record CredentialProviderRpcView(string Id, string Type, string 
 
     /// <summary>The number of its secrets held in memory.</summary>
     public int Held { get; init; }
+
+    /// <summary>Whether CodeAlta unlocked it since it was last locked: it may hold what opens its vault, and the page offers to lock it.</summary>
+    public bool Unlocked { get; init; }
 
     /// <summary>Its settings as written: a secret setting holds its reference.</summary>
     public CredentialSettingValue[] Settings { get; init; } = [];

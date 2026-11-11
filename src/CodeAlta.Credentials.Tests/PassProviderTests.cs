@@ -60,6 +60,27 @@ public sealed class PassProviderTests
     }
 
     [TestMethod]
+    public async Task A_read_without_a_prompt_asks_gpg_not_to_start_pinentry_and_is_locked_at_once()
+    {
+        using var vault = NewVault("pass");
+        vault.State["pass"]!["needsPassphrase"] = true;
+        vault.Save();
+        var provider = new PassProvider(new PluginCredentialProviderContext("test", new Dictionary<string, object?> { ["path"] = vault.ProgramPath }), new VaultCommandRunner())
+        {
+            NonInteractiveTimeout = TimeSpan.FromSeconds(30),
+        };
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var failure = await ProviderHarness.ReadFailsAsync(provider, "web/github", interactive: false);
+        Assert.AreEqual(CredentialFailure.Locked, failure.Failure);
+        Assert.IsLessThan(TimeSpan.FromSeconds(15), watch.Elapsed, "gpg fails instead of waiting for pinentry");
+        StringAssert.Contains(failure.Message, "passphrase");
+        StringAssert.Contains(failure.Detail, "No pinentry");
+
+        StringAssert.Contains(provider.ReadEnvironment(interactive: false)!["PASSWORD_STORE_GPG_OPTS"], "--pinentry-mode error");
+        Assert.IsFalse(provider.ReadEnvironment(interactive: true)?.ContainsKey("PASSWORD_STORE_GPG_OPTS") == true, "a read with the user present lets pinentry ask");
+    }
+
+    [TestMethod]
     public async Task A_missing_or_unknown_program_says_so()
     {
         using var vault = NewVault("pass");

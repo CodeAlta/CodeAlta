@@ -22,6 +22,8 @@ return args switch
     ["status-ok"] => 0,
     ["status-locked"] => Fail("the vault is locked", 1),
     ["env", var name] => Print(Environment.GetEnvironmentVariable(name) ?? "(unset)"),
+    // A program that never reads its standard input: a write of a large input to it blocks.
+    ["sleep", var seconds] => Sleep(int.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture)),
     ["--version"] => Print("2.42.0"),
     _ when program == "op" => Op(args),
     _ when program == "bw" => Bw(args),
@@ -167,6 +169,15 @@ int Pass(string[] arguments, bool gopass)
         return 2;
     }
 
+    // The key needs its passphrase: gpg asked not to start pinentry fails at once, as gpg does with --pinentry-mode error.
+    if (pass["needsPassphrase"]?.GetValue<bool>() == true)
+    {
+        var options = Environment.GetEnvironmentVariable(gopass && Environment.GetEnvironmentVariable("GOPASS_GPG_OPTS") is { Length: > 0 } ? "GOPASS_GPG_OPTS" : "PASSWORD_STORE_GPG_OPTS") ?? string.Empty;
+        if (options.Contains("--pinentry-mode error", StringComparison.Ordinal)) return Fail("gpg: public key decryption failed: No pinentry\ngpg: decryption failed: No secret key", 2);
+        Thread.Sleep(TimeSpan.FromMinutes(2));
+        return 2;
+    }
+
     if (pass["store"]?.GetValue<string>() is { } store && Environment.GetEnvironmentVariable("PASSWORD_STORE_DIR") != store) return Fail("Error: the password store is not initialized.", 1);
     var entries = pass["entries"]?.AsObject() ?? [];
     string? Text(string path) => entries.FirstOrDefault(pair => pair.Key == path).Value?.GetValue<string>();
@@ -278,6 +289,14 @@ static string? TakeOption(List<string> list, string option)
     var value = list[at + 1];
     list.RemoveRange(at, 2);
     return value;
+}
+
+int Sleep(int seconds)
+{
+    // The test checks that the program was ended.
+    File.WriteAllText(Path.Combine(folder, "fake-vault.pid"), Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    Thread.Sleep(TimeSpan.FromSeconds(seconds));
+    return 0;
 }
 
 static int Print(string text)

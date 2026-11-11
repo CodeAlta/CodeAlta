@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using CodeAlta.Plugins.Abstractions;
 
@@ -13,7 +14,7 @@ internal sealed class BitwardenProvider : ICredentialProvider
 {
     internal const string TypeName = "bitwarden";
     private const string PasswordVariable = "BW_CODEALTA_PASSWORD";
-    private static readonly string[] Fields = ["password", "username", "totp", "notes", "uri"];
+    private static readonly FrozenSet<string> Fields = FrozenSet.Create(StringComparer.Ordinal, "password", "username", "totp", "notes", "uri");
 
     private readonly VaultCommandRunner _runner;
     private readonly string? _configuredPath;
@@ -63,7 +64,7 @@ internal sealed class BitwardenProvider : ICredentialProvider
         var result = await RunAsync(program, ["status"], session, TimeSpan.FromSeconds(20), cancellationToken).ConfigureAwait(false);
         try
         {
-            if (result.ExitCode != 0) return CredentialProviderStatus.Unavailable($"Bitwarden: {VaultText.ErrorLine(result)}") with { ProgramPath = program };
+            if (result.ExitCode != 0) return CredentialProviderStatus.Unavailable($"Bitwarden did not say its state: {result.Summary()}.").WithDetail(result) with { ProgramPath = program };
             string? state = null, email = null;
             try
             {
@@ -108,6 +109,7 @@ internal sealed class BitwardenProvider : ICredentialProvider
         if (string.IsNullOrEmpty(context.Password)) return CredentialProviderStatus.Locked("Type the master password of Bitwarden to unlock it.") with { Account = status.Account, ProgramPath = status.ProgramPath };
 
         var program = status.ProgramPath!;
+        // The host masked the password before it gave it (CredentialBroker.UnlockAsync).
         var result = await _runner.RunAsync(program, ["unlock", "--raw", "--passwordenv", PasswordVariable], new VaultCommandOptions
         {
             Environment = Variables(null, (PasswordVariable, context.Password)),
@@ -117,7 +119,9 @@ internal sealed class BitwardenProvider : ICredentialProvider
         {
             if (result.ExitCode != 0)
             {
-                return CredentialProviderStatus.Locked(result.TimedOut ? "Bitwarden did not answer in time." : $"Bitwarden: {VaultText.ErrorLine(result)}")
+                return CredentialProviderStatus.Locked(result.TimedOut ? "Bitwarden did not answer in time."
+                        : result.Error.Contains("master password", StringComparison.OrdinalIgnoreCase) ? "Bitwarden refused the master password."
+                        : $"Bitwarden did not unlock: {result.Summary()}.").WithDetail(result)
                     with { Account = status.Account, ProgramPath = program };
             }
 
@@ -220,7 +224,7 @@ internal sealed class BitwardenProvider : ICredentialProvider
         var at = reference.IndexOf('/');
         var itemId = at < 0 ? string.Empty : reference[..at].Trim();
         var field = at < 0 ? string.Empty : reference[(at + 1)..].Trim();
-        if (itemId.Length == 0 || !(Fields.Contains(field, StringComparer.Ordinal) || field.StartsWith("field:", StringComparison.OrdinalIgnoreCase) && field.Length > "field:".Length))
+        if (itemId.Length == 0 || !(Fields.Contains(field) || field.StartsWith("field:", StringComparison.OrdinalIgnoreCase) && field.Length > "field:".Length))
             throw new CredentialProviderException(CredentialFailure.NotFound,
                 $"'{reference}' is not a Bitwarden reference (<item id>/password, username, totp, notes, uri or field:<name>).");
         return (itemId, field);
@@ -241,7 +245,7 @@ internal sealed class BitwardenProvider : ICredentialProvider
         if (error.Contains("Not found", StringComparison.OrdinalIgnoreCase) || error.Contains("No TOTP", StringComparison.OrdinalIgnoreCase)
             || error.Contains("No notes", StringComparison.OrdinalIgnoreCase) || error.Contains("No uri", StringComparison.OrdinalIgnoreCase)
             || error.Contains("No username", StringComparison.OrdinalIgnoreCase) || error.Contains("No password", StringComparison.OrdinalIgnoreCase))
-            throw new CredentialProviderException(CredentialFailure.NotFound, $"Bitwarden: {VaultText.ErrorLine(result)}");
+            throw VaultText.Failure(CredentialFailure.NotFound, "Bitwarden has no such item or field.", result);
         if (error.Contains("not logged in", StringComparison.OrdinalIgnoreCase))
         {
             Forget(session);
@@ -254,7 +258,7 @@ internal sealed class BitwardenProvider : ICredentialProvider
             throw new CredentialProviderException(CredentialFailure.Locked, "Bitwarden is locked: unlock it with its master password.");
         }
 
-        throw new CredentialProviderException(CredentialFailure.Failed, $"Bitwarden: {VaultText.ErrorLine(result)}");
+        throw VaultText.Failure(CredentialFailure.Failed, $"Bitwarden failed: {result.Summary()}.", result);
     }
 
     private Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, string? session, TimeSpan timeout, CancellationToken cancellationToken)
