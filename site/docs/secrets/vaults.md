@@ -8,14 +8,24 @@ A secret can keep its value in a vault you already use, such as 1Password, Bitwa
 
 Each vault is a *credential provider*. Add as many as you need, several of one kind too: a personal 1Password account for the keys of your providers, a KeePassXC database for a client, a secret manager of your company for deployments.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-vaults.webp" alt="Settings, Secrets: the credential providers This computer, Personal (1Password, ready), Clients (KeePassXC, locked, with Unlock) and Team (Bitwarden, not installed, with its install command), then the secrets with the vault item each one is kept in" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Secrets with three vaults: 1Password unlocked, KeePassXC locked, Bitwarden not installed yet.</figcaption>
+</figure>
+
 ## Add a provider
 
 In CodeAlta Desktop, open **Settings > Secrets** and click **Add a provider…** under **Credential providers**.
 
-1. Choose the vault. The common ones come first, with their logo; **Other types** lists the secret managers of clouds and a command of your own.
+1. Choose the vault. The common ones come first, with their logo, then the secret managers of clouds and a command of your own.
 2. Give it an **Id**, which the secrets kept in it name (`personal` for a 1Password account), and fill the settings of its kind. A setting that is a token, such as the token of a service account, names a [secret of this computer](readme.md), never a value.
 3. Choose how long **Its values stay in memory**: until CodeAlta closes (the default), 8 hours, 1 hour or 15 minutes. After that time, a value is read from the vault again at its next use.
 4. **Unlock when CodeAlta starts**, on by default, asks the vault to unlock once, after the window shows. A vault that takes its master password in the page waits for you to click **Unlock**.
+
+<figure class="alta-figure my-4" style="max-width: 36rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-add-provider.webp" alt="The Add a credential provider window: 1Password, Bitwarden, Bitwarden Secrets Manager, KeePassXC, pass, the keychain of the system, a command, HashiCorp Vault, OpenBao, AWS Secrets Manager, Azure Key Vault, Google Secret Manager, Doppler and Infisical, each with its logo" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The kinds of vaults.</figcaption>
+</figure>
 
 When the program of the vault is not found, the provider says so, with **How to install it**: **Run in a terminal** opens a terminal of CodeAlta on the command of the package manager of your system (`winget` on Windows, `brew` on macOS), which you see run. CodeAlta downloads nothing by itself. A program installed elsewhere is set in the **Path** setting of the provider.
 
@@ -51,7 +61,13 @@ unlock_at_start = false
 - On a secret of this computer, the vault button of its row does the same for that secret: the item of the vault replaces its value. The old value is deleted, and stays masked.
 - In **Settings > Providers**, **Use a vault item…** under the key of a provider does the same for that key.
 
-**Items of the vault** lists the vaults, items and fields of the provider by name, to choose one; a value never reaches the page. A vault that cannot be listed (it is locked, or its kind does not list) takes the reference typed in **Or type the reference**, in the form its section below gives.
+**Items of the vault** lists the vaults, items and fields of the provider by name, to choose one; a value never reaches the page.
+
+<figure class="alta-figure my-4" style="max-width: 32rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-vault-picker.webp" alt="Keep a secret in a vault: the name SENTRY_AUTH_TOKEN, the vault Personal (1Password), the item Platform team › Sentry and its field credential picked" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The field of an item picked by name.</figcaption>
+</figure>
+ A vault that cannot be listed (it is locked, or its kind does not list) takes the reference typed in **Or type the reference**, in the form its section below gives.
 
 The row of the secret then shows its vault and its item, and the state of that vault, instead of a version. The record of which item each secret names is `~/.alta/secrets/bindings.json`, which holds no value.
 

@@ -127,6 +127,11 @@ Safari always runs its automation in a private window of its own: it has the iso
 An agent can sign in to a site without ever seeing a password: the user name, the password and the one-time code are typed from an item of your [vault](secrets/vaults.md), on the sites you chose.
 
 1. In **Settings > Secrets**, under **Sign-ins of websites**, click **Add a sign-in…**. Give it a name, its sites (`https://github.com`), its vault, and the fields of the item: **User name**, **Password** and, for a site that asks one, **One-time code**. **Choose…** picks each one in the vault.
+<figure class="alta-figure my-4" style="max-width: 32rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-sign-in.webp" alt="The window of the sign-in GitHub: its site https://github.com, the vault Personal (1Password), the references of its user name, password and one-time code, and the fields of the item GitHub listed under Password" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A sign-in: its sites, and the fields of a vault item picked for each value.</figcaption>
+</figure>
+
 2. When an agent comes to the sign-in form of that site, it calls `fill_login`. CodeAlta reads the site from the browser, not from the agent, and asks you on the card of the session: **Sign in to github.com with GitHub?** with **Allow for this site for 30 days**, **Allow once** or **Deny**.
 3. CodeAlta types the values into the fields of the page and submits them. The agent gets a status only, such as `signed_in`, and the values are masked in what it reads afterwards.
 
