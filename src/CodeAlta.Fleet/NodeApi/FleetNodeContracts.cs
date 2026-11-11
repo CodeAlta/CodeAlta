@@ -911,7 +911,19 @@ public sealed record FleetNodeStatus(string Name, string DeviceId, string Versio
 
     /// <summary>Gets the service that runs the node, and whether it will still run after a restart or a logout; null for a node that does not say.</summary>
     public FleetNodeServiceStatus? Service { get; init; }
+
+    /// <summary>Gets the servers the node joined and how its connection to each stands; null for a node that does not say.</summary>
+    public IReadOnlyList<FleetNodeServerStatus>? Servers { get; init; }
 }
+
+/// <summary>A server a node joined (<c>altanode join</c>), and how its connection stands, as <c>altanode status</c> says it.</summary>
+/// <param name="Url">The address of the server.</param>
+/// <param name="Organization">The name of its organization, once the node read it.</param>
+/// <param name="Link">Where the node stands there: <c>pending</c> (it waits for its approval), <c>approved</c> or <c>revoked</c>.</param>
+/// <param name="Connection">The state of its connection (<c>Online</c>, <c>Offline</c>, <c>PendingApproval</c>...); null when the node does not run one.</param>
+/// <param name="Message">Why the connection last failed or was refused; null while it holds.</param>
+/// <param name="Since">When the connection took its state; null without one.</param>
+public sealed record FleetNodeServerStatus(string Url, string? Organization, string Link, string? Connection, string? Message, DateTimeOffset? Since);
 
 /// <summary>The service that runs a node (<c>altanode install</c>), and whether it will still run after a restart or a logout.</summary>
 /// <param name="Installed">Whether a service runs the node.</param>

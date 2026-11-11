@@ -291,6 +291,29 @@ test("giving up managing a machine asks first, and a machine this computer does 
   }, options);
 });
 
+test("a paired machine that is not on the server of this computer joins it from its page, and one this computer does not manage says how", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.machine-devices')`, "the managed page");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-server')`), null, "a machine on every server of this computer offers nothing");
+
+    await page.evaluate(`window.machineFixture.show('joinable')`);
+    await page.until(`document.querySelector('.machine-server button')`, "the server section");
+    assert.match(await page.evaluate(`document.querySelector('.machine-server').textContent`) as string, /build-box is not on Home/u);
+    // The server it joined sees it offline only: the machine says why its connection fails.
+    assert.match(await page.evaluate(`document.querySelector('.machine-server-link').textContent`) as string, /^Work\s*Not connected.*System\.Net\.WebSockets\.Client/u);
+    await page.shot("machine-page-join-server");
+    await page.evaluate(`document.querySelector('.machine-server button').click()`);
+    await page.until(`window.machineFixture.calls.some(call => call.includes('joinServer'))`, "the join");
+    assert.deepEqual((await calls(page)).filter(call => "joinServer" in call), [{ joinServer: ["managed", "home"] }]);
+
+    await page.evaluate(`window.machineFixture.show('other-joinable')`);
+    await page.until(`document.querySelector('.machine-page-title')?.textContent.includes('mac-mini') && document.querySelector('.machine-server')`, "the server section of a machine not managed");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-server button')`), null, "only a computer that manages it has it join");
+    assert.match(await page.evaluate(`document.querySelector('.machine-server').textContent`) as string, /Through my server/u);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the computer that manages a machine adds and removes its labels on its page", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.machine-labels .bp6-tag')`, "the labels");

@@ -53,6 +53,21 @@ export const machineManageMessages = {
   "Managed from here": ["Gestionada desde aquí", "Gérée d’ici", "Von hier verwaltet", "ここから管理", "从此处管理"],
   "Open the page of {name}": ["Abrir la página de {name}", "Ouvrir la page de {name}", "Seite von {name} öffnen", "{name} のページを開く", "打开 {name} 的页面"],
   "Manage this machine": ["Gestionar esta máquina", "Gérer cette machine", "Diese Maschine verwalten", "このマシンを管理", "管理此机器"],
+  "Waits for its approval": ["Espera su aprobación", "Attend son approbation", "Wartet auf Freigabe", "承認待ち", "等待批准"],
+  "Not connected": ["No conectada", "Non connectée", "Nicht verbunden", "未接続", "未连接"],
+  "{name} is not on {server}: only this computer reaches it, and your other computers do not see it.": [
+    "{name} no está en {server}: solo este ordenador llega a ella, y tus otros ordenadores no la ven.",
+    "{name} n’est pas sur {server} : seul cet ordinateur l’atteint, et vos autres ordinateurs ne la voient pas.",
+    "{name} ist nicht auf {server}: Nur dieser Computer erreicht sie, und Ihre anderen Computer sehen sie nicht.",
+    "{name} は {server} にありません。このコンピューターだけが接続でき、他のコンピューターからは見えません。",
+    "{name} 不在 {server} 上：只有本机能连接它，你的其他计算机看不到它。"],
+  "Join {server}": ["Unirse a {server}", "Rejoindre {server}", "{server} beitreten", "{server} に参加", "加入 {server}"],
+  "To add it, run on {name} the command of Add a machine… > Through my server.": [
+    "Para añadirla, ejecuta en {name} el comando de Añadir una máquina… > A través de mi servidor.",
+    "Pour l’ajouter, lancez sur {name} la commande de Ajouter une machine… > Par mon serveur.",
+    "Um sie hinzuzufügen, führen Sie auf {name} den Befehl von Maschine hinzufügen… > Über meinen Server aus.",
+    "追加するには、{name} で「マシンを追加…」>「自分のサーバー経由」のコマンドを実行してください。",
+    "要添加它，请在 {name} 上运行“添加机器…”>“通过我的服务器”中的命令。"],
   "This computer sees and drives the sessions of {name}, but does not manage it. The device that installed or first paired it manages it, and can give this computer the permission from its own page of {name}.": [
     "Este ordenador ve y maneja las sesiones de {name}, pero no la gestiona. La gestiona el dispositivo que la instaló o la emparejó primero, que puede dar el permiso a este ordenador desde su propia página de {name}.",
     "Cet ordinateur voit et pilote les sessions de {name}, mais ne la gère pas. Elle est gérée par l’appareil qui l’a installée ou associée en premier, qui peut donner la permission à cet ordinateur depuis sa propre page de {name}.",

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineDeviceView, MachineProviderStatusView } from "#neoastra";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, managementProblem, managesMachine, newProviderKey, orderedDevices, permissionLabel,
-  permissionsEditable, projectSource, providerFix, providerProblem, providerState, providerStateLabel, updateSummary } from "./machineManagement";
+  permissionsEditable, projectSource, providerFix, providerProblem, providerState, providerStateLabel, serverLinkIntent, serverLinkLabel, updateSummary } from "./machineManagement";
 
 const provider = (change: Partial<MachineProviderStatusView> = {}): MachineProviderStatusView => ({ key: "openai", name: "OpenAI", type: "openai-responses", enabled: true,
   state: "not_ready", reason: "key_missing", detail: null, credential: "key", keySecret: null, signIn: false, isDefault: false, model: null, apiUrl: null, ...change });
@@ -97,4 +97,16 @@ test("Each refusal of the machine has its words, and each update its summary", (
   assert.equal(updateSummary({ status: "available", target: "4.0.1", running: "4.0.0" }), "Version {version} is available.");
   assert.equal(updateSummary({ status: "staged", target: "4.0.1", running: "4.0.0" }), "It switches to {version} once no session works.");
   assert.equal(updateSummary({ status: "up_to_date", target: null, running: "4.0.0" }), "Up to date.");
+});
+
+test("the connection of a machine to each server it joined says how it stands", () => {
+  assert.equal(serverLinkLabel("connected"), "Connected");
+  assert.equal(serverLinkIntent("connected"), "success");
+  assert.equal(serverLinkLabel("waiting"), "Waits for its approval");
+  assert.equal(serverLinkLabel("revoked"), "Revoked");
+  assert.equal(serverLinkIntent("revoked"), "danger");
+  assert.equal(serverLinkLabel("unknown"), "Not known to the server");
+  assert.equal(serverLinkLabel("disconnected"), "Not connected");
+  assert.equal(serverLinkLabel("stopped"), "Not connected");
+  assert.equal(serverLinkIntent("disconnected"), "warning");
 });

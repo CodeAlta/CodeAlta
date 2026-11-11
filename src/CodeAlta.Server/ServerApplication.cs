@@ -27,6 +27,12 @@ public static class ServerExitCodes
 
     /// <summary>For <c>run</c>: another server, or another <c>run</c> that starts one, holds the data root.</summary>
     public const int DataRootInUse = 3;
+
+    /// <summary>
+    /// For <c>run</c>: the server stopped because its .NET runtime or its application was replaced while it ran: a failure, so
+    /// that its service manager starts it again on the new files.
+    /// </summary>
+    public const int FilesReplaced = 5;
 }
 
 /// <summary>
@@ -454,6 +460,7 @@ public sealed partial class ServerApplication
                         return backup;
                     },
                     RequestRestart = restart.Cancel, PolicyPath = paths.UpdatePolicyPath, Log = message => logger.LogInformation("{Message}", message),
+                    MissingFiles = UpdateRuntimeFiles.OfThisProcess().Missing,
                 };
                 updates = new ServerUpdates(ConfigureUpdates?.Invoke(updateOptions) ?? updateOptions);
                 updates.Start();
@@ -477,9 +484,13 @@ public sealed partial class ServerApplication
             }
 
             if (updates is not null) await updates.DisposeAsync().ConfigureAwait(false);
-            if (updates?.RestartRequested == true) await _output.WriteLineAsync("Stopping CodeAlta Server to start its new version...").ConfigureAwait(false);
+            if (updates?.FilesReplaced == true) await _output.WriteLineAsync("Stopping CodeAlta Server: the files it runs from were replaced, its service starts it again on the new ones...").ConfigureAwait(false);
+            else if (updates?.RestartRequested == true) await _output.WriteLineAsync("Stopping CodeAlta Server to start its new version...").ConfigureAwait(false);
         }
 
+        // Its .NET runtime or its application was replaced: this process ends with a failure, which its service manager restarts
+        // (a launcher passes the code through, its own files being as old), and starts on the new files.
+        if (updates?.FilesReplaced == true) return ServerExitCodes.FilesReplaced;
         if (updates?.RestartRequested != true) return ServerExitCodes.Success;
         // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
         if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;

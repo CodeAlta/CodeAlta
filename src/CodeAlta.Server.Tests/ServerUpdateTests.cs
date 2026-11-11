@@ -257,7 +257,38 @@ public sealed class ServerUpdateTests
         StringAssert.Contains(store.Read().LastOutcome?.Message, "disk full");
     }
 
-    private static ServerApplication Application(RecordingRunner runner, out StringWriter output, out StringWriter error, Action<CoordinatorServer, Action>? started = null)
+    // The .NET runtime was replaced under the server (unattended upgrades on Ubuntu removed its folder): the next assembly it
+    // loads would fail, so it stops at once, without selecting a version, and ends with a failure its service manager restarts.
+    [TestMethod]
+    public async Task FilesReplacedUnderTheServer_StopIt_WithACodeItsServiceRestarts()
+    {
+        using var root = new TempDirectory();
+        var store = new UpdateVersionStore(Path.Combine(root.Path, "versions"));
+        string? missing = null;
+        var restarts = 0;
+        var updates = new ServerUpdates(new ServerUpdatesOptions
+        {
+            Store = store, Running = UpdateVersion.Parse("98.0.0"), Healthy = static _ => Task.FromResult(true),
+            Backup = static (_, _) => throw new InvalidOperationException("no backup without a switch"), RequestRestart = () => restarts++, MissingFiles = () => missing,
+        });
+        await updates.TickAsync(CancellationToken.None);
+        Assert.AreEqual(0, restarts, "nothing to do while its files are there");
+
+        missing = "/usr/lib/dotnet/shared/Microsoft.NETCore.App/10.0.14";
+        await updates.TickAsync(CancellationToken.None);
+        await updates.TickAsync(CancellationToken.None);
+        Assert.AreEqual(1, restarts, "asked once");
+        Assert.IsTrue(updates.FilesReplaced);
+        Assert.IsNull(store.Read().Current, "no version is selected");
+
+        var paths = new ServerPaths(Path.Combine(root.Path, "data"));
+        var app = Application(new RecordingRunner(0), out var output, out var error, missingFiles: static () => "/gone");
+        Assert.AreEqual(ServerExitCodes.FilesReplaced, await app.RunAsync(["run", "--urls", "http://127.0.0.1:0", "--data-root", paths.DataRoot]), error.ToString());
+        StringAssert.Contains(output.ToString(), "the files it runs from were replaced");
+    }
+
+    private static ServerApplication Application(RecordingRunner runner, out StringWriter output, out StringWriter error, Action<CoordinatorServer, Action>? started = null,
+        Func<string?>? missingFiles = null)
     {
         output = new StringWriter();
         error = new StringWriter();
@@ -269,7 +300,7 @@ public sealed class ServerUpdateTests
                 DataRoot = options.DataRoot, Urls = options.Urls, UpdateStatus = options.UpdateStatus, ConfigureLogging = static _ => { },
             },
             ConfigureLauncher = options => options with { Runner = runner, HandleSignals = false, RestartDelay = TimeSpan.Zero, DotnetRoot = null, PollInterval = TimeSpan.FromMilliseconds(20) },
-            ConfigureUpdates = static options => options with { Interval = TimeSpan.FromMilliseconds(50) },
+            ConfigureUpdates = options => options with { Interval = TimeSpan.FromMilliseconds(50), MissingFiles = missingFiles ?? options.MissingFiles },
         };
     }
 

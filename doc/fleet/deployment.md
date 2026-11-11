@@ -160,6 +160,12 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   running turns stop and stay resumable). The server copies its database first (SQLite's backup API, `backups/`); a
   rollback restores that copy, losing what the new version wrote meanwhile. A switch asked while nothing runs is taken
   at the next start, the server's database copied first there too; no server version is selected without that copy.
+- **Replaced files.** .NET loads an assembly when it is first used, so a process whose runtime folder (removed by the
+  package manager of the system for a newer patch) or application folder (removed by `dotnet tool update`) is gone
+  fails at its next new assembly. The self-update loop watches both (`UpdateRuntimeFiles`): a node drains as for a
+  switch, the server stops at once, without selecting a version. Each then exits with code 5, a failure, never 75:
+  no launcher runs on the old files, and the one above it passes the code through, so the service manager (whose
+  units restart on failure) starts the installed entry point again on the new files.
 - **The campaign.** An owner's controller device asks the server for an update of the fleet: a version (the latest
   both tool packages list, by default), a feed, now or a time (kept in UTC, with the time zone it was chosen in), the
   nodes (all by default). The server keeps it (`update_campaigns`), and at its time asks its nodes over the control

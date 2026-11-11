@@ -6,7 +6,7 @@ import { isMachineProject, isRemoteSession, machineIntent, machinePageLink, mach
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
-  permissions: ["view", "drive"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, tags: [], working: null, queued: null, sessionLimit: null, ...change });
+  permissions: ["view", "drive"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, tags: [], working: null, queued: null, sessionLimit: null, serversToJoin: [], ...change });
 
 test("The page of a paired machine is a page of Settings: machines/<id>", () => {
   assert.equal(machinePageLink("mini-id"), "machines/mini-id");

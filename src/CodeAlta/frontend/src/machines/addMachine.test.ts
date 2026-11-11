@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asksSudoPassword, hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle } from "./addMachine";
+import { asksSudoPassword, hostKeyOf, setupProblem, setupSteps, shownSetupSteps, sshTargetOf, stepTitle } from "./addMachine";
 
 test("The SSH key of an unknown computer is shown before the person trusts it", () => {
   assert.equal(hostKeyOf("host_key_unknown", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)"), "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)");
@@ -35,4 +35,10 @@ test("The checklist has five steps, each with its title, and each failure says w
   assert.match(setupProblem("dotnet_missing"), /\.NET 10/u);
   assert.match(setupProblem("local_network_blocked"), /Privacy & Security > Local Network/u, "macOS keeps the app from the network: not a firewall of the machine");
   assert.equal(setupProblem("something new"), "The setup did not go through.");
+});
+
+test("The server step shows only once the host reports it, after pairing", () => {
+  assert.deepEqual(shownSetupSteps({ connect: "done" }), ["connect", "check", "install", "service", "pair"], "a computer without a server has no server step");
+  assert.deepEqual(shownSetupSteps({ pair: "done", server: "running" }), ["connect", "check", "install", "service", "pair", "server"]);
+  assert.equal(stepTitle("server"), "Join your server");
 });

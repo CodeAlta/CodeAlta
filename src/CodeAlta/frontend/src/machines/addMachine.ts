@@ -1,10 +1,15 @@
 import type { MessageKey } from "../localization";
 
-/** The steps of a setup over SSH, in their order. */
-export type SetupStep = "connect" | "check" | "install" | "service" | "pair";
+/** The steps of a setup over SSH, in their order; `server` only when this computer is linked to a server the machine joins. */
+export type SetupStep = "connect" | "check" | "install" | "service" | "pair" | "server";
 
-/** The steps, in their order. */
+/** The steps every setup shows, in their order. */
 export const setupSteps: readonly SetupStep[] = ["connect", "check", "install", "service", "pair"];
+
+/** The steps a setup shows: the server step once the host reports it, after the others. */
+export function shownSetupSteps(reported: Partial<Record<SetupStep, unknown>>): SetupStep[] {
+  return reported.server ? [...setupSteps, "server"] : [...setupSteps];
+}
 
 /** The title of a step, as the checklist says it. */
 export function stepTitle(step: SetupStep): MessageKey {
@@ -14,6 +19,7 @@ export function stepTitle(step: SetupStep): MessageKey {
     case "install": return "Install CodeAlta Node";
     case "service": return "Start it as a service";
     case "pair": return "Pair it with this computer";
+    case "server": return "Join your server";
   }
 }
 

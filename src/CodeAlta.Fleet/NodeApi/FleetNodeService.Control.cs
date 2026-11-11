@@ -120,7 +120,20 @@ public sealed partial class FleetNodeService
             Worktrees = _worktreeCleanup.Usage,
             Sandbox = FleetNodeSandbox.Describe(_host.RuntimeService),
             Service = ReadServiceStatus(),
+            Servers = ReadServers(),
         });
+    }
+
+    // The servers the node joined, with what its connectors last said of each: that this process said it, not a node before it.
+    private List<FleetNodeServerStatus> ReadServers()
+    {
+        var store = new Server.FleetServerLinkStore(_host.CatalogOptions.FleetRoot);
+        IReadOnlyList<Server.FleetServerLink> links;
+        try { links = store.List(); }
+        catch (InvalidDataException) { return []; }
+        return [.. links.Select(link => Server.FleetServerConnections.ReadRuntimeState(store, link.Id) is { } state && state.ProcessId == Environment.ProcessId
+            ? new FleetNodeServerStatus(link.Url, link.OrganizationName, link.State, state.State, state.Message, state.Since)
+            : new FleetNodeServerStatus(link.Url, link.OrganizationName, link.State, null, null, null))];
     }
 
     // The service is read from the service manager of the OS; one that cannot be read says nothing.

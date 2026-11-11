@@ -17,4 +17,10 @@ public static class NodeExitCodes
 
     /// <summary>The command exists but is not implemented yet.</summary>
     public const int NotImplemented = 4;
+
+    /// <summary>
+    /// <c>run</c> stopped because its .NET runtime or its application was replaced while it ran: a failure, so that its service
+    /// manager starts it again on the new files.
+    /// </summary>
+    public const int FilesReplaced = 5;
 }

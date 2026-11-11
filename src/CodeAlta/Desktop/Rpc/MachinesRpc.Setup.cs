@@ -20,7 +20,8 @@ internal sealed partial class MachinesService
 
     /// <summary>
     /// Sets up CodeAlta Node on a computer reached over SSH and pairs it with this computer, saying where each step stands:
-    /// connect, check, install, service, pair; then <c>finished</c> with the machine, or <c>failed</c> with the step and why.
+    /// connect, check, install, service, pair, and server when this computer is linked to a server the machine joins (a failure
+    /// there leaves it paired); then <c>finished</c> with the machine, or <c>failed</c> with the step and why.
     /// </summary>
     [NeoRpcMethod("addOverSsh")]
     public NeoRpcChannel<MachineSetupEvent> AddOverSsh(MachineSshRequest request, CancellationToken cancellationToken)
@@ -68,7 +69,8 @@ internal sealed partial class MachinesService
                     if (_fleet!.TryPreview(link, out var preview, out _)) words = preview.Words;
                     var machine = await _fleet!.PairAsync(link, token).ConfigureAwait(false);
                     return machine.DeviceId;
-                }, step => events.Writer.TryWrite(new MachineSetupEvent(step.Step, step.State, step.Detail, step.Code, null, null, null)), cancellationToken).ConfigureAwait(false);
+                }, ServersToJoinAsync, step => events.Writer.TryWrite(new MachineSetupEvent(step.Step, step.State, step.Detail, step.Code, null, null, null)),
+                    cancellationToken).ConfigureAwait(false);
                 var host = _fleet!.Find(machineId);
                 events.Writer.TryWrite(new MachineSetupEvent(SshSetupSteps.Pair, "done", words, null, null, null, null));
                 events.Writer.TryWrite(new MachineSetupEvent("finished", "done", null, null, machineId, host?.Machine.Name, words));
@@ -92,6 +94,23 @@ internal sealed partial class MachinesService
         }, CancellationToken.None);
         await foreach (var value in events.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
         await run.ConfigureAwait(false);
+    }
+
+    // The servers of this computer a machine set up over SSH joins: a code made at each, and the approval of the key pairing
+    // pinned for the machine, as for a machine this computer manages (JoinServerAsync).
+    private async Task<IReadOnlyList<SshServerJoin>> ServersToJoinAsync(string machineId, CancellationToken cancellationToken)
+    {
+        if (ServersToJoin?.Invoke(machineId) is not { Count: > 0 } servers || ServerAddress is not { } address || CreateJoinCode is not { } code
+            || ApproveDevice is not { } approve || _fleet!.Find(machineId)?.Machine is not { Fingerprint.IsEmpty: false } machine) return [];
+        var joins = new List<SshServerJoin>();
+        foreach (var (linkId, name) in servers)
+        {
+            if (address(linkId) is not { } url) continue;
+            var token = await code(linkId, cancellationToken).ConfigureAwait(false);
+            joins.Add(new SshServerJoin(name, url, token, cancellation => approve(linkId, machine.Fingerprint, cancellation)));
+        }
+
+        return joins;
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -118,7 +137,7 @@ internal sealed record MachineSshRequest(string ExpectedEpoch, string Target, st
     string? TrustedHostKey, bool Manage = false, bool AlwaysOn = false, string? SudoPassword = null);
 
 /// <summary>Where a setup over SSH stands.</summary>
-/// <param name="Step"><c>connect</c>, <c>check</c>, <c>install</c>, <c>service</c>, <c>pair</c>, or <c>finished</c>.</param>
+/// <param name="Step"><c>connect</c>, <c>check</c>, <c>install</c>, <c>service</c>, <c>pair</c>, <c>server</c>, or <c>finished</c>.</param>
 /// <param name="State"><c>running</c>, <c>done</c> or <c>failed</c>.</param>
 /// <param name="Detail">What the step checked or changed, or what the failure said.</param>
 /// <param name="Code">Why it failed (<c>host_key_unknown</c>, <c>auth_failed</c>, <c>unknown_host</c>, <c>unreachable</c>, <c>unsupported_system</c>, <c>dotnet_missing</c>...).</param>

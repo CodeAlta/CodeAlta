@@ -467,7 +467,7 @@ internal sealed class NodeApplication
                     {
                         Store = store, Running = runningVersion, Installed = InstalledVersion(), SessionsAtWork = node.Host.RuntimeService.CountSessionsAtWork,
                         PauseAdmission = node.PauseAdmission, Healthy = () => IsHealthy(fleet, listen, serversLifetime), RequestRestart = stopRequested.Cancel,
-                        PolicyPath = NodeUpdatePaths.PolicyPath(profile), Log = static message => NodeLog(message),
+                        PolicyPath = NodeUpdatePaths.PolicyPath(profile), Log = static message => NodeLog(message), MissingFiles = UpdateRuntimeFiles.OfThisProcess().Missing,
                     };
                     updates = new NodeUpdates(ConfigureUpdates?.Invoke(updateOptions) ?? updateOptions);
                     updates.Start();
@@ -490,7 +490,11 @@ internal sealed class NodeApplication
                 }
 
                 var restart = updates?.RestartRequested == true;
-                await _output.WriteLineAsync(restart ? "Stopping CodeAlta Node to start its new version..." : "Stopping CodeAlta Node...").ConfigureAwait(false);
+                // Its .NET runtime or its application was replaced: this process ends with a failure, which its service manager
+                // restarts (a launcher passes the code through, its own files being as old), and starts on the new files.
+                var filesReplaced = updates?.FilesReplaced == true;
+                await _output.WriteLineAsync(filesReplaced ? "Stopping CodeAlta Node: the files it runs from were replaced, its service starts it again on the new ones..."
+                    : restart ? "Stopping CodeAlta Node to start its new version..." : "Stopping CodeAlta Node...").ConfigureAwait(false);
                 if (fleetUpdates is not null) await fleetUpdates.DisposeAsync().ConfigureAwait(false);
                 if (updates is not null) await updates.DisposeAsync().ConfigureAwait(false);
                 // The channels close first: no remote call reaches a runtime that stops.
@@ -504,7 +508,7 @@ internal sealed class NodeApplication
                 }
 
                 await node.StopAsync(hurry.Token).ConfigureAwait(false);
-                return (NodeExitCodes.Success, restart);
+                return filesReplaced ? (NodeExitCodes.FilesReplaced, false) : (NodeExitCodes.Success, restart);
             }
         }
         finally

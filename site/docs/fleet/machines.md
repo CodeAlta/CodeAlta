@@ -63,6 +63,7 @@ The link works once and expires after 10 minutes. Each computer is then listed a
    - **Install CodeAlta Node**: the .NET tool in `~/.dotnet/tools`, or the package of its system where only the .NET runtime is;
    - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS; with **Always on**, a service that starts at boot;
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once (and manages the machine, when you ticked it). The six words of its key are shown.
+   - **Join your server**, when this computer is connected to a [CodeAlta Server](server.md): the node joins it from itself (`altanode join`), and this computer approves the key it just paired with. Your other computers of that server then list the machine too. When this step fails, the machine stays paired: join it later from its page.
 3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
@@ -158,6 +159,8 @@ The node downloads its latest version from NuGet and switches to it as soon as n
 | `--now` | Switches without waiting: running turns stop and can be resumed |
 | `--source <feed>` | Another NuGet feed, or a folder of packages |
 
+When the system replaces the .NET the node runs on while it runs (the unattended upgrades of Ubuntu, Homebrew), or `dotnet tool update` replaces it, the node starts again on the new files by itself, once no session works, as for an update: its service starts it again. Run in a terminal, it stops and says so.
+
 If the new version does not start and connect within two minutes, the node goes back to the previous one by itself and does not take that version again unless you name it with `--version`. `altanode status` shows the version that runs and how the last update went.
 
 `dotnet tool update` works too: once the tool is newer than the version `altanode update` installed, the tool's version runs from the next start of the node.
@@ -242,6 +245,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
 | **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in with an account, ACP agents, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
 | **Secrets** | Its [secrets and variables](../secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
+| **Servers** | The servers it joined, and whether it is connected to each, or why not: a server only sees it offline. A server of this computer it is not on yet has **Join**: the machine joins it from itself, and this computer approves it, so that your other computers of that server see it |
 | **Start at boot** | Whether the node starts when the machine does, with nobody logged in, in the words of `altanode status`; when it does not, the command to run on the machine that makes it so |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
 | **Log** | **Show the log** reads its last lines |

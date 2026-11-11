@@ -46,6 +46,13 @@ export const addMachineMessages = {
   "Install CodeAlta Node": ["Instalar CodeAlta Node", "Installer CodeAlta Node", "CodeAlta Node installieren", "CodeAlta Node をインストール", "安装 CodeAlta Node"],
   "Start it as a service": ["Iniciarlo como servicio", "Le démarrer comme service", "Als Dienst starten", "サービスとして起動", "作为服务启动"],
   "Pair it with this computer": ["Emparejarlo con este ordenador", "L’associer à cet ordinateur", "Mit diesem Computer koppeln", "このコンピューターとペアリング", "与本机配对"],
+  "Join your server": ["Unirse a tu servidor", "Rejoindre votre serveur", "Ihrem Server beitreten", "サーバーに参加", "加入你的服务器"],
+  "It did not join your server: join it from its page, or with Through my server.": [
+    "No se unió a tu servidor: únelo desde su página o con A través de mi servidor.",
+    "Elle n’a pas rejoint votre serveur : faites-la rejoindre depuis sa page, ou avec Par mon serveur.",
+    "Sie ist Ihrem Server nicht beigetreten: Lassen Sie sie über ihre Seite oder mit „Über meinen Server“ beitreten.",
+    "サーバーに参加できませんでした。マシンのページから、または「自分のサーバー経由」で参加させてください。",
+    "它未加入你的服务器：请从它的页面加入，或使用“通过我的服务器”。"],
   "{name} is paired with this computer.": ["{name} está emparejada con este ordenador.", "{name} est associée à cet ordinateur.", "{name} ist mit diesem Computer gekoppelt.",
     "{name} はこのコンピューターとペアリングされました。", "{name} 已与此计算机配对。"],
   "Always on": ["Siempre activa", "Toujours active", "Immer an", "常時オン", "始终在线"],

@@ -2,7 +2,7 @@
 // machinePage.browser.test.ts through `machineFixture`: what the page asks is recorded.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { MachineDeviceView, MachineManagement, MachineProviderStatusView, MachineView, SecretView, VariableView } from "#neoastra";
+import type { MachineDeviceView, MachineManagement, MachineProviderStatusView, MachineServerLinkView, MachineView, SecretView, VariableView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
 
@@ -11,7 +11,7 @@ document.documentElement.classList.add("bp6-dark");
 const calls: string[] = [];
 const machine = (id: string, name: string, permissions: string[]): MachineView => ({ id, name, state: "online", os: "linux", version: "4.0.0", address: `${name}:2585`,
   fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 1, lastSeen: null, problem: null, permissions, pairedAt: "2026-11-01T00:00:00Z",
-  paired: true, channel: "direct", tags: [], working: null, queued: null, sessionLimit: null });
+  paired: true, channel: "direct", tags: [], working: null, queued: null, sessionLimit: null, serversToJoin: [] });
 let devices: MachineDeviceView[] = [
   { id: "me", name: "desktop", fingerprint: "HS62 JUOJ W5CV", permissions: ["view", "drive", "start", "manage"], pairedAt: "2026-11-01T00:00:00Z", revokedAt: null,
     channels: 1, isThisComputer: true },
@@ -28,15 +28,17 @@ const machinePeople = {
   others: [{ personId: "cy", name: "Cy", permissions: [] as string[] }, { personId: "dan", name: "Dan", permissions: [] as string[] }],
 };
 let projects = [{ id: "p1", name: "app", path: "/home/me/code/app", repository: "github.com/me/app" }];
+// The servers the managed machine joined, as it says its connection stands: none, but in the variant that joins another one.
+let managedServers: MachineServerLinkView[] = [];
 const view = (id: string): MachineManagement => id === "managed"
   ? { status: "ok", message: null, version: "4.0.0", sessionsAtWork: 0, updating: false, update: { running: "4.0.0", installed: "4.0.0", pendingVersion: null, pendingPhase: null,
     lastVersion: null, lastOutcome: null }, devices, projects, problems: [], providers: [{ key: "codex", name: "Codex", isDefault: true, defaultModel: "GPT-6.1", models: 3 }],
     thisDevice: "me", worktrees: { count: 3, kilobytes: 2.5 * 1024 * 1024, idleDays: 7, measuredAt: "2026-11-06T10:00:00Z" },
     sandbox: { profile: null, available: false, backend: "linux-bubblewrap", reason: "bubblewrap (`bwrap` 0.5 or later) is not installed or cannot create user namespaces.",
-      setup: "sudo apt install bubblewrap slirp4netns" },
+      setup: "sudo apt install bubblewrap slirp4netns" }, servers: managedServers,
     service: { installed: true, startsAtBoot: false, lines: ["Service: a systemd user unit (~/.config/systemd/user/altanode.service).",
       "After a restart: it waits until me logs in (lingering is off: sudo loginctl enable-linger me starts it at boot)."], fix: "sudo loginctl enable-linger me", fixWhere: "terminal" } }
-  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me", worktrees: null, sandbox: null, service: null };
+  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me", worktrees: null, sandbox: null, service: null, servers: [] };
 const api: MachinePageApi = {
   management: async request => view(request.machineId),
   limits: async () => ({ status: "ok", message: null, sessions: 3 }),
@@ -165,6 +167,7 @@ const api: MachinePageApi = {
   signOut: async request => { calls.push(JSON.stringify({ signOut: [request.kind, request.key] })); return { status: "ok", item: null, message: null }; },
   labels: async () => ({ status: "ok", message: null, labels: [...labels] }),
   setLabels: async request => { calls.push(JSON.stringify({ labels: request.labels })); labels = [...request.labels]; return { status: "ok", message: null }; },
+  joinServer: async request => { calls.push(JSON.stringify({ joinServer: [request.machineId, request.linkId] })); return { status: "ok", name: "build-box", words: "apple river stone cloud amber tiger", message: null }; },
 };
 let labels: string[] = ["gpu"];
 let signInWaits = 0;
@@ -186,8 +189,14 @@ function setSecret(name: string, value: string) {
 function Fixture() {
   const [shown, setShown] = useState("managed");
   Object.assign(window, { machineFixture: { calls, show: setShown } });
+  // A node whose connection to a server it joined fails after its .NET runtime was replaced under it: only the node knows why.
+  managedServers = shown === "joinable" ? [{ name: "Work", state: "disconnected",
+    message: "transport_error Could not load file or assembly 'System.Net.WebSockets.Client, Version=10.0.0.0'." }] : [];
   return <MachinePage key={shown} epoch="12345678-1234-1234-1234-123456789abc" api={api}
     machine={shown === "managed" ? machine("managed", "build-box", ["view", "drive", "start", "manage"])
+      // Paired before this computer had a server: not on it yet, so the person's other computers do not see it.
+      : shown === "joinable" ? { ...machine("managed", "build-box", ["view", "drive", "start", "manage"]), serversToJoin: [{ linkId: "home", name: "Home" }] }
+      : shown === "other-joinable" ? { ...machine("other", "mac-mini", ["view", "drive", "start"]), serversToJoin: [{ linkId: "home", name: "Home" }] }
       // A node of the owner's organization this computer reaches through the relay of the server: it has no pairing of its own.
       : shown === "relayed" ? { ...machine("relayed", "pc-ai", ["view", "drive", "start"]), paired: false, channel: "relayed" }
       : machine("other", "mac-mini", ["view", "drive", "start"])}

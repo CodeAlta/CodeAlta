@@ -36,6 +36,22 @@ export const permissionsEditable = (device: Pick<MachineDeviceView, "revokedAt">
 export const confirmsLoss = (device: Pick<MachineDeviceView, "isThisComputer">, permission: DevicePermission): boolean =>
   device.isThisComputer && permission === "manage";
 
+/** How the connection of a machine to a server it joined stands, in words. */
+export function serverLinkLabel(state: string): MessageKey {
+  switch (state) {
+    case "connected": return "Connected";
+    case "waiting": return "Waits for its approval";
+    case "revoked": return "Revoked";
+    case "unknown": return "Not known to the server";
+    default: return "Not connected";
+  }
+}
+
+/** The color of the state of a server link: green connected, red revoked, orange otherwise. */
+export function serverLinkIntent(state: string): "success" | "danger" | "warning" {
+  return state === "connected" ? "success" : state === "revoked" ? "danger" : "warning";
+}
+
 /** Why the page of a machine cannot be shown, in words; null when it can. */
 export function managementProblem(status: MachineManagement["status"] | MachineUpdateView["status"] | string): MessageKey | null {
   switch (status) {

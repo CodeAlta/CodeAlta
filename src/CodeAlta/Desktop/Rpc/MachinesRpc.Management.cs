@@ -52,6 +52,7 @@ internal sealed partial class MachinesService
                     ? new MachineWorktreesView(worktrees.Count, (int)Math.Min(int.MaxValue, worktrees.Bytes / 1024), worktrees.IdleDays, Format(worktrees.MeasuredAt)) : null,
                 Sandbox = status.Sandbox is { } sandbox ? new MachineSandboxView(sandbox.Profile, sandbox.Available, sandbox.Backend, sandbox.Reason, sandbox.Setup) : null,
                 Service = status.Service is { } service ? MachineServiceView.Of(service) : null,
+                Servers = [.. (status.Servers ?? []).Take(16).Select(MachineServerLinkView.Of)],
             };
         }
         catch (ObjectDisposedException) { return MachineManagement.Refused(RemoteSessionHost.Describe(host.State)); }
@@ -212,6 +213,9 @@ internal sealed record MachineManagement(string Status, string? Message, string?
     /// <summary>Gets the service that runs its node, and whether it still runs after a restart or a logout; null for a machine that does not say.</summary>
     public MachineServiceView? Service { get; init; }
 
+    /// <summary>Gets the servers it joined and how its connection to each stands; empty for none, or a machine that does not say.</summary>
+    public MachineServerLinkView[] Servers { get; init; } = [];
+
     internal static MachineManagement Refused(string status) => new(status, null, null, 0, false, null, [], [], []);
 }
 
@@ -243,6 +247,33 @@ internal sealed record MachineServiceView(bool Installed, bool StartsAtBoot, str
         // The node says the commands, with its own options and profile: the desktop shows them as they are.
         var fix = service.StartsAtBoot || string.IsNullOrWhiteSpace(service.Fix) ? null : service.Fix.Length <= 4096 ? service.Fix : null;
         return new(service.Installed, service.StartsAtBoot, [.. service.Lines], fix, fix is null ? null : service.Platform == "windows" ? "elevated" : "terminal");
+    }
+}
+
+/// <summary>A server a machine joined, and how its connection stands, as the machine says it.</summary>
+/// <param name="Name">The name of its organization, or its address.</param>
+/// <param name="State">
+/// <c>connected</c>; <c>waiting</c> for its approval; <c>revoked</c>; <c>unknown</c> to the server (removed there); <c>stopped</c> when
+/// the node runs no connection to it; <c>disconnected</c> otherwise, with <paramref name="Message"/>.
+/// </param>
+/// <param name="Message">Why the connection last failed, as the machine says it; null while it holds.</param>
+internal sealed record MachineServerLinkView(string Name, string State, string? Message)
+{
+    internal static MachineServerLinkView Of(FleetNodeServerStatus server)
+    {
+        var name = server.Organization is { Length: > 0 and <= 128 } organization ? organization : server.Url;
+        var message = server.Message is { Length: > 0 } text ? text.Length <= 1024 ? text : text[..1024] : null;
+        if (server.Link == CodeAlta.Fleet.Server.FleetServerLinkStates.Revoked) return new(name, "revoked", null);
+        return server.Connection switch
+        {
+            nameof(CodeAlta.Fleet.Server.FleetConnectorState.Online) => new(name, "connected", null),
+            nameof(CodeAlta.Fleet.Server.FleetConnectorState.PendingApproval) => new(name, "waiting", null),
+            nameof(CodeAlta.Fleet.Server.FleetConnectorState.Revoked) => new(name, "revoked", null),
+            nameof(CodeAlta.Fleet.Server.FleetConnectorState.Unauthenticated) => new(name, "unknown", message),
+            null or nameof(CodeAlta.Fleet.Server.FleetConnectorState.Stopped)
+                => new(name, server.Link == CodeAlta.Fleet.Server.FleetServerLinkStates.Pending ? "waiting" : "stopped", null),
+            _ => new(name, "disconnected", message),
+        };
     }
 }
 

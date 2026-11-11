@@ -244,6 +244,44 @@ public sealed class NodeUpdateTests
         Assert.IsNull(store.Read().Pending);
     }
 
+    // The .NET runtime was replaced under the node (unattended upgrades on Ubuntu removed its folder): the next assembly it
+    // loads would fail, so it restarts on the new files once idle, as for a switch, without selecting any version.
+    [TestMethod]
+    public void FilesReplacedUnderTheNode_RestartItWhenIdle_WithoutAVersionSwitch()
+    {
+        using var root = new NodeTestRoot();
+        var store = NodeUpdatePaths.Store(root.Profile());
+        var atWork = 1;
+        string? missing = null;
+        var paused = new List<bool>();
+        var restarts = 0;
+        var logged = new List<string>();
+        var updates = new NodeUpdates(new NodeUpdatesOptions
+        {
+            Store = store, Running = UpdateVersion.Parse("98.0.0"), SessionsAtWork = () => atWork, PauseAdmission = paused.Add, Healthy = static () => true,
+            RequestRestart = () => restarts++, DrainBound = TimeSpan.FromMinutes(10), MissingFiles = () => missing, Log = logged.Add,
+        });
+        var now = DateTimeOffset.UtcNow;
+        updates.Tick(now);
+        Assert.AreEqual(0, paused.Count, "nothing to do while its files are there");
+
+        missing = "/usr/lib/dotnet/shared/Microsoft.NETCore.App/10.0.14";
+        updates.Tick(now);
+        updates.Tick(now.AddSeconds(1));
+        Assert.IsTrue(paused[^1], "no new work while its session ends");
+        Assert.AreEqual(0, restarts, "a session at work finishes first");
+        StringAssert.Contains(logged[0], "10.0.14 is gone");
+
+        atWork = 0;
+        updates.Tick(now.AddSeconds(2));
+        Assert.AreEqual(1, restarts);
+        Assert.IsTrue(updates.RestartRequested);
+        Assert.IsTrue(updates.FilesReplaced, "the node ends as a process, its service starts it again: no launcher on the old files");
+        Assert.IsNull(store.Read().Current, "no version is selected");
+        updates.Tick(now.AddSeconds(3));
+        Assert.AreEqual(1, restarts, "asked once");
+    }
+
     [TestMethod]
     public void AWithdrawnSwitchResumesAdmission_AndOneNotStagedIsDropped()
     {

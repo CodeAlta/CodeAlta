@@ -61,7 +61,18 @@ internal static class SshSetupSteps
     public const string Install = "install";
     public const string Service = "service";
     public const string Pair = "pair";
+    public const string Server = "server";
 }
+
+/// <summary>
+/// A server the node joins at the end of a setup, when this computer is linked to one: its address, a one-time enrollment
+/// code made for this setup, and what approves the node there once it enrolled.
+/// </summary>
+/// <param name="Name">The name of the server, as the step says it.</param>
+/// <param name="Url">Its address, as <c>altanode join</c> takes it (with the pin of its own certificate when it has one).</param>
+/// <param name="Token">The one-time enrollment code.</param>
+/// <param name="ApproveAsync">Approves the key pairing pinned for the node, as an execution node.</param>
+internal sealed record SshServerJoin(string Name, string Url, string Token, Func<CancellationToken, Task> ApproveAsync);
 
 /// <summary>Where one step of a setup stands.</summary>
 /// <param name="Step">The step (<see cref="SshSetupSteps"/>).</param>
@@ -127,8 +138,22 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
     /// <param name="cancellationToken">Stops the setup.</param>
     /// <returns>The device id of the machine, now paired and managed from here.</returns>
     /// <exception cref="SshSetupException">A step failed; its code says why.</exception>
-    public async Task<string> RunAsync(SshNodeSetupRequest request, Func<string, CancellationToken, Task<string>> pair, Action<SshSetupProgress> progress,
-        CancellationToken cancellationToken)
+    public Task<string> RunAsync(SshNodeSetupRequest request, Func<string, CancellationToken, Task<string>> pair, Action<SshSetupProgress> progress,
+        CancellationToken cancellationToken) => RunAsync(request, pair, null, progress, cancellationToken);
+
+    /// <summary>
+    /// Runs the setup, then has the node join the servers <paramref name="servers"/> gives for it: <c>altanode join</c> on
+    /// the machine, and the approval of the key pairing pinned. A join that fails leaves the node paired: its step says why.
+    /// </summary>
+    /// <param name="request">The computer and the options.</param>
+    /// <param name="pair">Pairs this desktop with the link the node made; returns the device id of the machine.</param>
+    /// <param name="servers">Gives the servers the paired machine joins, by its device id; null or none for no server step.</param>
+    /// <param name="progress">Told where each step stands.</param>
+    /// <param name="cancellationToken">Stops the setup.</param>
+    /// <returns>The device id of the machine, now paired and managed from here.</returns>
+    /// <exception cref="SshSetupException">A step before the server one failed; its code says why.</exception>
+    public async Task<string> RunAsync(SshNodeSetupRequest request, Func<string, CancellationToken, Task<string>> pair,
+        Func<string, CancellationToken, Task<IReadOnlyList<SshServerJoin>>>? servers, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(pair);
@@ -226,7 +251,71 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         // altanode pair ends once the link is redeemed.
         try { await waiting.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false); }
         catch (TimeoutException) { await pairing.CancelAsync().ConfigureAwait(false); }
+        if (servers is not null) await JoinServersAsync(request, facts, toolPath, dataRoot, machineId, servers, progress, cancellationToken).ConfigureAwait(false);
         return machineId;
+    }
+
+    // The node joins each server of this computer it is not on yet, from itself (altanode join, which runs beside the node and
+    // links its default space), and this computer approves the key it paired with. The node stays paired whatever happens here.
+    private async Task JoinServersAsync(SshNodeSetupRequest request, SshMachineFacts facts, string toolPath, string? dataRoot, string machineId,
+        Func<string, CancellationToken, Task<IReadOnlyList<SshServerJoin>>> servers, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<SshServerJoin> joins;
+        try
+        {
+            joins = await servers(machineId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            progress(new(SshSetupSteps.Pair, "done"));
+            progress(new(SshSetupSteps.Server, "failed", exception.Message, "server_join_failed"));
+            return;
+        }
+
+        if (joins.Count == 0) return;
+        progress(new(SshSetupSteps.Pair, "done"));
+        progress(new(SshSetupSteps.Server, "running", string.Join(", ", joins.Select(static join => join.Name))));
+        foreach (var join in joins)
+        {
+            var joined = await ssh.RunAsync(request.Target, JoinScript(facts, toolPath, dataRoot, join.Url, join.Token, request.Name), request.TrustedHostKey, null, cancellationToken)
+                .ConfigureAwait(false);
+            if (!joined.Succeeded)
+            {
+                progress(new(SshSetupSteps.Server, "failed", $"{join.Name}: {FirstLines(joined.Error + joined.Output, 4)}", "server_join_failed"));
+                return;
+            }
+
+            try
+            {
+                await join.ApproveAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                progress(new(SshSetupSteps.Server, "failed", $"{join.Name}: {exception.Message}", "server_approve_failed"));
+                return;
+            }
+        }
+
+        progress(new(SshSetupSteps.Server, "done", string.Join(", ", joins.Select(static join => join.Name))));
+    }
+
+    // altanode join with the one-time code, without waiting for the approval this computer gives next. The code is good once,
+    // for minutes, and enrolls a device that waits: only the approval of the key pairing pinned lets it in.
+    internal static string JoinScript(SshMachineFacts facts, string toolPath, string? dataRoot, string url, string token, string? name)
+    {
+        var script = new StringBuilder(DotnetPrelude(facts));
+        script.Append("TOOLS=").Append(Quote(toolPath)).Append('\n');
+        var root = "";
+        if (dataRoot is not null)
+        {
+            script.Append("ROOT=").Append(Quote(dataRoot)).Append("\nROOT=$(cd \"$ROOT\" && pwd)\n");
+            root = " --data-root \"$ROOT\"";
+        }
+
+        script.Append("\"$TOOLS/altanode\" join ").Append(Quote(url)).Append(" --token ").Append(Quote(token)).Append(" --no-wait");
+        if (name is { Length: > 0 }) script.Append(" --name ").Append(Quote(name));
+        script.Append(root).Append('\n');
+        return script.ToString();
     }
 
     /// <summary>

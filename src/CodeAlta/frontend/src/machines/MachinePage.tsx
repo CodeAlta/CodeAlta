@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type MachineSeatsView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineServerLinkView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type MachineSeatsView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -15,13 +15,13 @@ import { MachineSignIns } from "./MachineSignIns";
 import { formatSize } from "../search/SearchSettings";
 import { loadParts, maxSessionLimit, parseSessionLimit, queuedSince } from "./seats";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
-  updateSummary, type DevicePermission } from "./machineManagement";
+  serverLinkIntent, serverLinkLabel, updateSummary, type DevicePermission } from "./machineManagement";
 
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
   | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "limits" | "setLimits" | "seats" | "startSeat" | "cancelSeat" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
-  | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut">;
+  | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut" | "joinServer">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -85,6 +85,9 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
     {failure && view?.status !== "not_manager" && <Callout compact intent="warning" role="alert" className="machine-page-failure">{t(failure)}
       {view?.message && <div className="muted-text">{view.message}</div>}
       <Button size="small" icon={<AppIcon name="refresh" size={14} />} text={t("Try again")} onClick={reload} /></Callout>}
+    {view && (view.status === "ok" || view.status === "not_manager") && (machine.serversToJoin.length > 0 || view.servers.length > 0)
+      && <ServerSection machine={machine} links={view.servers} manages={view.status === "ok"} busy={busy}
+        onJoin={linkId => void change(() => api.joinServer({ expectedEpoch: epoch, machineId: machine.id, linkId }, { timeoutMilliseconds: 60_000 }))} />}
     {view?.status === "not_manager" && <NotManaged machine={machine} device={view.thisDevice ?? null} />}
     {view?.status === "ok" && <>
       <DevicesSection view={view} busy={busy} machine={machine}
@@ -128,6 +131,31 @@ function NotManaged({ machine, device }: { machine: MachineView; device: string 
       <p className="muted-text">{t("Then paste the link it shows in Settings > Fleet > Machines > Pair a machine.")}</p></>
       : device && <><p className="muted-text">{t("On {name} itself, the owner gives it with:", { name: machine.name })}</p>
       <code className="machine-command">altanode permissions {device} --allow manage</code></>}
+  </section>;
+}
+
+/**
+ * The servers of a machine: those it joined, as it says its connection to each stands (and why it fails, which the server
+ * cannot say: it only sees the machine offline), then the servers of this computer it is not on yet, which the person's other
+ * computers there do not see it through. A computer that manages it has it join from here (it enrolls from itself, and this
+ * computer approves the key it paired with); the others are told the command of Through my server.
+ */
+function ServerSection({ machine, links, manages, busy, onJoin }: {
+  machine: MachineView; links: readonly MachineServerLinkView[]; manages: boolean; busy: boolean; onJoin: (linkId: string) => void;
+}) {
+  const { t } = useShellLanguage();
+  return <section className="machine-section machine-server" aria-label={t("Servers")}>
+    <h2>{t("Servers")}</h2>
+    {links.map(link => <div key={link.name} className="machine-server-link">
+      <span><strong>{link.name}</strong> <Tag minimal round intent={serverLinkIntent(link.state)}>{t(serverLinkLabel(link.state))}</Tag></span>
+      {link.message && <small className="muted-text">{link.message}</small>}
+    </div>)}
+    {machine.serversToJoin.map(server => <div key={server.linkId} className="machine-server-row">
+      <p className="muted-text">{t("{name} is not on {server}: only this computer reaches it, and your other computers do not see it.", { name: machine.name, server: server.name })}</p>
+      {manages && <Button icon={<AppIcon name="server" size={14} />} disabled={busy || machine.state !== "online"}
+        text={t("Join {server}", { server: server.name })} onClick={() => onJoin(server.linkId)} />}
+    </div>)}
+    {!manages && <p className="muted-text">{t("To add it, run on {name} the command of Add a machine… > Through my server.", { name: machine.name })}</p>}
   </section>;
 }
 

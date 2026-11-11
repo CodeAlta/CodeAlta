@@ -59,6 +59,12 @@ internal sealed record NodeUpdatesOptions
     /// <summary>Stops the node to start the newly selected version.</summary>
     public required Action RequestRestart { get; init; }
 
+    /// <summary>
+    /// Gets the folder this process loads its code from that is gone, its .NET runtime or its application
+    /// (<see cref="UpdateRuntimeFiles.Missing"/>); null while both are there. Null for no check.
+    /// </summary>
+    public Func<string?>? MissingFiles { get; init; }
+
     /// <summary>Gets how often the state is read.</summary>
     public TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -90,6 +96,10 @@ internal sealed class NodeUpdates : IAsyncDisposable
     private UpdateDrain? _drain;
     private DateTimeOffset? _drainFor;
     private int _restartRequested;
+    private int _filesReplaced;
+
+    // What the drain of a restart on new files is for, in the place of the time of a switch asked for.
+    private static readonly DateTimeOffset FilesReplacedDrain = DateTimeOffset.MinValue;
 
     /// <summary>Initializes a new instance of the <see cref="NodeUpdates"/> class; <see cref="Start"/> starts it.</summary>
     /// <param name="options">What it reads and drives.</param>
@@ -99,8 +109,14 @@ internal sealed class NodeUpdates : IAsyncDisposable
         _options = options;
     }
 
-    /// <summary>Gets whether the node stopped (or stops) to start a newly selected version.</summary>
+    /// <summary>Gets whether the node stopped (or stops) to start a newly selected version, or to run again on files that replaced its own.</summary>
     public bool RestartRequested => Volatile.Read(ref _restartRequested) == 1;
+
+    /// <summary>
+    /// Gets whether the node stops because the files it loads its code from were replaced (<see cref="NodeUpdatesOptions.MissingFiles"/>):
+    /// it starts again as a new process, never as a launcher in this one.
+    /// </summary>
+    public bool FilesReplaced => Volatile.Read(ref _filesReplaced) == 1;
 
     /// <summary>Starts reading the state of the versions.</summary>
     public void Start() => _loop = Task.Run(LoopAsync);
@@ -208,6 +224,13 @@ internal sealed class NodeUpdates : IAsyncDisposable
 
         if (state.Pending is not { } pending)
         {
+            // The runtime or the application was replaced under the node: it runs again on the new files once idle, as for a switch.
+            if (_options.MissingFiles?.Invoke() is { } missing)
+            {
+                RestartOnNewFiles(missing, now);
+                return;
+            }
+
             if (_drain is not null)
             {
                 // The switch was withdrawn: work is taken again.
@@ -256,6 +279,24 @@ internal sealed class NodeUpdates : IAsyncDisposable
         }
 
         _options.Log($"CodeAlta Node stops to start {target} on trial ({atWork} session(s) at work).");
+        if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
+    }
+
+    private void RestartOnNewFiles(string missing, DateTimeOffset now)
+    {
+        if (_drain is null || _drainFor != FilesReplacedDrain)
+        {
+            _drain = new UpdateDrain(false, _options.DrainBound);
+            _drainFor = FilesReplacedDrain;
+            _options.Log($"The files CodeAlta Node runs from were replaced ({missing} is gone): it starts again on the new ones when idle.");
+        }
+
+        var atWork = _options.SessionsAtWork();
+        var step = _drain.Step(atWork, now);
+        _options.PauseAdmission(step.PauseAdmission);
+        if (!step.Switch) return;
+        _options.Log($"CodeAlta Node stops to start again on its new files ({atWork} session(s) at work).");
+        Volatile.Write(ref _filesReplaced, 1);
         if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
     }
 

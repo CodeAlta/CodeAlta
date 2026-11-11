@@ -52,6 +52,12 @@ internal sealed record ServerUpdatesOptions
     /// <summary>Stops the server to start the newly selected version.</summary>
     public required Action RequestRestart { get; init; }
 
+    /// <summary>
+    /// Gets the folder this process loads its code from that is gone, its .NET runtime or its application
+    /// (<see cref="UpdateRuntimeFiles.Missing"/>); null while both are there. Null for no check.
+    /// </summary>
+    public Func<string?>? MissingFiles { get; init; }
+
     /// <summary>Gets how often the state is read.</summary>
     public TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -78,6 +84,7 @@ internal sealed class ServerUpdates : IAsyncDisposable
     private Task _loop = Task.CompletedTask;
     private bool _confirmChecked;
     private int _restartRequested;
+    private int _filesReplaced;
 
     /// <summary>Initializes a new instance of the <see cref="ServerUpdates"/> class; <see cref="Start"/> starts it.</summary>
     /// <param name="options">What it reads and drives.</param>
@@ -87,8 +94,14 @@ internal sealed class ServerUpdates : IAsyncDisposable
         _options = options;
     }
 
-    /// <summary>Gets whether the server stopped (or stops) to start a newly selected version.</summary>
+    /// <summary>Gets whether the server stopped (or stops) to start a newly selected version, or to run again on files that replaced its own.</summary>
     public bool RestartRequested => Volatile.Read(ref _restartRequested) == 1;
+
+    /// <summary>
+    /// Gets whether the server stops because the files it loads its code from were replaced (<see cref="ServerUpdatesOptions.MissingFiles"/>):
+    /// it starts again as a new process, never as a launcher in this one.
+    /// </summary>
+    public bool FilesReplaced => Volatile.Read(ref _filesReplaced) == 1;
 
     /// <summary>Starts reading the state of the versions.</summary>
     public void Start() => _loop = Task.Run(LoopAsync);
@@ -152,7 +165,21 @@ internal sealed class ServerUpdates : IAsyncDisposable
             state = store.Read();
         }
 
-        if (state.Pending is not { } pending || RestartRequested) return;
+        if (RestartRequested) return;
+        if (state.Pending is not { } pending)
+        {
+            // The runtime or the application was replaced under the server: the next assembly it loads would fail. Its requests
+            // are short, and the devices connect again by themselves: it stops at once to start again on the new files.
+            if (_options.MissingFiles?.Invoke() is { } missing)
+            {
+                _options.Log($"The files CodeAlta Server runs from were replaced ({missing} is gone): it stops to start again on the new ones.");
+                Volatile.Write(ref _filesReplaced, 1);
+                if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
+            }
+
+            return;
+        }
+
         // Each change below holds only while the switch read here still waits: one withdrawn meanwhile (a campaign a policy
         // revoked) or replaced (altaserver update) wins, and the next step takes what waits then.
         if (!UpdateVersion.TryParse(pending.Version, out var target) || !store.IsStaged(target, UpdateProduct.Server))

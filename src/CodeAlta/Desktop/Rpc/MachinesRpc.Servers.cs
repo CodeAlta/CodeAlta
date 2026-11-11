@@ -18,6 +18,15 @@ internal sealed partial class MachinesService
     /// <summary>Gets the address of a server this computer is linked to, by the id of its link; null when unknown.</summary>
     internal Func<string, string?>? ServerAddress { get; set; }
 
+    /// <summary>Gets the servers a machine can join from here (<see cref="DesktopFleetServers.ServersToJoin"/>), by its device id; null for none.</summary>
+    internal Func<string, IReadOnlyList<(string LinkId, string Name)>>? ServersToJoin { get; set; }
+
+    // A paired machine gets the servers it is not on yet; a machine reached through a server is on it already.
+    private MachineView WithServersToJoin(MachineView view, RemoteSessionHost host)
+        => host.IsPaired && ServersToJoin?.Invoke(host.Machine.DeviceId) is { Count: > 0 } servers
+            ? view with { ServersToJoin = [.. servers.Select(static server => new MachineServerView(server.LinkId, server.Name))] }
+            : view;
+
     /// <summary>Gets what makes a one-time enrollment code at a server, by the id of its link.</summary>
     internal Func<string, CancellationToken, Task<string>>? CreateJoinCode { get; set; }
 

@@ -68,7 +68,7 @@ internal sealed partial class MachinesService
     public MachinesList List(MachinesRequest request)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, _epoch, []);
-        return new("ok", _epoch, [.. _fleet!.Hosts.Select(View)]);
+        return new("ok", _epoch, [.. _fleet!.Hosts.Select(host => WithServersToJoin(View(host), host))]);
     }
 
     /// <summary>Reads a pairing link and says what it names, without connecting.</summary>
@@ -435,7 +435,18 @@ internal sealed record MachineView(string Id, string Name, string State, string?
 
     /// <summary>Gets how many sessions work at once on it; null for no limit, or an older machine.</summary>
     public int? SessionLimit { get; init; }
+
+    /// <summary>
+    /// Gets the servers of this computer the machine is not on yet, which it can join from here: a paired machine only, and
+    /// one this computer manages to join it from its page.
+    /// </summary>
+    public MachineServerView[] ServersToJoin { get; init; } = [];
 }
+
+/// <summary>A server a machine can join.</summary>
+/// <param name="LinkId">The server, by the id of this computer's link to it.</param>
+/// <param name="Name">Its organization, or its address when it has no name yet.</param>
+internal sealed record MachineServerView(string LinkId, string Name);
 
 /// <summary>The paired machines.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

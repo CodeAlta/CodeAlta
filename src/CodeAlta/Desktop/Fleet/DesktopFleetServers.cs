@@ -149,6 +149,38 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     }
 
     /// <summary>
+    /// Lists the servers a machine paired with this computer can join from here: those this computer is an approved controller
+    /// device of and connected to, whose verified device list does not have the machine yet (a machine that waits for its
+    /// approval there is one: joining again approves it). A server that removed the machine is not offered again.
+    /// </summary>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <returns>The ids of their links and their names.</returns>
+    public IReadOnlyList<(string LinkId, string Name)> ServersToJoin(string machineId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        var servers = new List<(string LinkId, string Name)>();
+        foreach (var connection in Connections)
+        {
+            if (connection.Connector is not { State: FleetConnectorState.Online } connector) continue;
+            if (CanJoin(connection.Link, connector.Devices.Current, machineId)) servers.Add((connection.Link.Id, connection.Link.OrganizationName ?? connection.Link.Url));
+        }
+
+        return servers;
+    }
+
+    /// <summary>Gets whether a machine can join a server this computer is linked to (<see cref="ServersToJoin"/>).</summary>
+    /// <param name="link">The link of this computer to the server.</param>
+    /// <param name="devices">The device list of the server, as this computer verified it; null before the first read.</param>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <returns>Whether it is offered.</returns>
+    internal static bool CanJoin(FleetServerLink link, FleetDeviceListState? devices, string machineId)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        return link.Kind == FleetDeviceKinds.Controller && link.State == FleetServerLinkStates.Approved && link.DeviceId != machineId
+            && devices is not null && !devices.Members.ContainsKey(machineId) && !devices.Removed.Contains(machineId);
+    }
+
+    /// <summary>
     /// Lists the nodes of the servers this computer is connected to, with their tags and their load, from which the members of
     /// a pool are chosen (<see cref="DesktopAutomationPlacement"/>), and the servers online: a machine leaves a pool only as a
     /// server online says, never because its server is away.
@@ -708,7 +740,15 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         if (machine.IsEmpty) throw new ArgumentException("The machine has no pinned key.", nameof(machine));
         using var client = Client(linkId);
         var approved = await client.ApproveAsync(DeviceIdentity.DeviceIdOf(machine), FleetDeviceKinds.Node, machine, cancellationToken).ConfigureAwait(false);
-        Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
+        var connector = Volatile.Read(ref _connections)?.Find(linkId)?.Connector;
+        connector?.RefreshKeys();
+        // The list read again has the machine: the servers it can join no longer offer this one (ServersToJoin).
+        if (connector?.Devices is { } devices)
+        {
+            try { await devices.RefreshAsync(cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is FleetDeviceListException or FleetServerException or HttpRequestException) { }
+        }
+
         return approved;
     }
 

@@ -4,7 +4,7 @@ import type { FleetServerView, MachineView } from "#neoastra";
 import { fleetAttention, fleetSteps, hasFleet, machineTotals, spacesFleet } from "./overviewModel";
 
 const machine = (id: string, state: string, more: Partial<MachineView> = {}): MachineView => ({ id, name: id, state, os: "linux", version: "4.1.0", address: null,
-  fingerprint: "ABCD", words: "a b c d e f", sessions: 2, lastSeen: null, problem: null, permissions: [], pairedAt: "2026-11-01T00:00:00Z", paired: true, channel: null, tags: [], working: null, queued: null, sessionLimit: null, ...more });
+  fingerprint: "ABCD", words: "a b c d e f", sessions: 2, lastSeen: null, problem: null, permissions: [], pairedAt: "2026-11-01T00:00:00Z", paired: true, channel: null, tags: [], working: null, queued: null, sessionLimit: null, serversToJoin: [], ...more });
 const server = (more: Partial<FleetServerView> = {}): FleetServerView => ({ id: "s1", url: "https://fleet.example", organization: "Acme", link: "approved", connection: "online",
   problem: null, controller: true, spaces: ["work"], recoveryKey: null, shareUrl: null, stop: null, ...more });
 

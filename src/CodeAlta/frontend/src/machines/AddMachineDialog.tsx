@@ -6,7 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { joinCommand, keyWords } from "../fleet/fleetServer";
-import { asksSudoPassword, hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle, type SetupStep } from "./addMachine";
+import { asksSudoPassword, hostKeyOf, setupProblem, setupSteps, shownSetupSteps, sshTargetOf, stepTitle, type SetupStep } from "./addMachine";
 
 /** What a failed step of a setup over SSH said: the SSH key of a computer ssh does not know yet, else the words of the step. */
 export function SetupFailureDetail({ code, detail }: { code: string; detail: string | null | undefined }) {
@@ -80,6 +80,7 @@ function ChoiceCard({ icon, title, description, detail, recommended, disabled, o
 
 type StepState = { state: "waiting" | "running" | "done" | "failed"; detail?: string | null };
 type Outcome = { failed?: { step: SetupStep; code: string; detail?: string | null }; machineId?: string; name?: string | null; words?: string | null } | null;
+type Steps = Partial<Record<SetupStep, StepState>>;
 
 /** The form of a setup over SSH, then its checklist as the host reports it. */
 function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
@@ -98,8 +99,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   // Always on asks sudo there; its password is asked only when the check says so, and forgotten once sent.
   const [alwaysOn, setAlwaysOn] = useState(false);
   const [sudoPassword, setSudoPassword] = useState("");
-  const [steps, setSteps] = useState<Record<SetupStep, StepState> | null>(null);
+  const [steps, setSteps] = useState<Steps | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // The machine is paired whatever its server step says: a failure there is told beside the outcome, not as the setup's.
+  const [serverProblem, setServerProblem] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
@@ -114,7 +117,8 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     abort.current = controller;
     setRunning(true);
     setOutcome(null);
-    setSteps(Object.fromEntries(setupSteps.map(step => [step, { state: "waiting" }])) as Record<SetupStep, StepState>);
+    setServerProblem(null);
+    setSteps(Object.fromEntries(setupSteps.map(step => [step, { state: "waiting" }])) as Steps);
     try {
       const password = alwaysOn && sudoPassword ? sudoPassword : null;
       setSudoPassword("");
@@ -134,9 +138,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   function apply(event: MachineSetupEvent) {
     if (event.step === "finished") { setOutcome({ machineId: event.machineId ?? undefined, name: event.machineName, words: event.words }); return; }
     const step = event.step as SetupStep;
-    if (!setupSteps.includes(step)) return;
+    if (!setupSteps.includes(step) && step !== "server") return;
     setSteps(current => current && { ...current, [step]: { state: event.state === "done" ? "done" : event.state === "failed" ? "failed" : "running", detail: event.detail ?? current[step]?.detail } });
-    if (event.state === "failed") setOutcome({ failed: { step, code: event.code ?? "unavailable", detail: event.detail } });
+    if (event.state === "failed" && step === "server") setServerProblem(event.detail ?? event.code ?? "");
+    else if (event.state === "failed") setOutcome({ failed: { step, code: event.code ?? "unavailable", detail: event.detail } });
   }
 
   const failure = outcome?.failed;
@@ -183,12 +188,15 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   return <>
     <DialogBody>
       <ol className="add-machine-steps" aria-label={t("Setup")}>
-        {setupSteps.map(step => <li key={step} data-state={steps[step].state}>
-          <span className="add-machine-step-icon">{steps[step].state === "running" ? <ActivitySpinner size={14} />
-            : <AppIcon name={steps[step].state === "done" ? "checked" : steps[step].state === "failed" ? "error" : "minus"} size={15} />}</span>
-          <span className="add-machine-step-main"><strong>{t(stepTitle(step))}</strong>
-            {steps[step].detail && steps[step].state !== "failed" && <small className="muted-text">{steps[step].detail}</small>}</span>
-        </li>)}
+        {shownSetupSteps(steps).map(step => {
+          const state = steps[step] ?? { state: "waiting" };
+          return <li key={step} data-state={state.state}>
+            <span className="add-machine-step-icon">{state.state === "running" ? <ActivitySpinner size={14} />
+              : <AppIcon name={state.state === "done" ? "checked" : state.state === "failed" ? "error" : "minus"} size={15} />}</span>
+            <span className="add-machine-step-main"><strong>{t(stepTitle(step))}</strong>
+              {state.detail && state.state !== "failed" && <small className="muted-text">{state.detail}</small>}</span>
+          </li>;
+        })}
       </ol>
       {failure && problem && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(problem, { host: parsed ?? target })}
         <SetupFailureDetail code={failure.code} detail={failure.detail} />
@@ -198,6 +206,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
       {outcome?.machineId && <Callout compact intent="success" role="status">
         {t(manage ? "{name} is paired with this computer and managed from here." : "{name} is paired with this computer.", { name: outcome.name ?? parsed ?? target })}
         {outcome.words && <div className="pair-machine-words add-machine-words">{keyWords(outcome.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
+      </Callout>}
+      {outcome?.machineId && serverProblem !== null && <Callout compact intent="warning" role="alert" className="add-machine-failure">
+        {t("It did not join your server: join it from its page, or with Through my server.")}
+        {serverProblem && <pre className="add-machine-detail">{serverProblem}</pre>}
       </Callout>}
     </DialogBody>
     <DialogFooter actions={<>
