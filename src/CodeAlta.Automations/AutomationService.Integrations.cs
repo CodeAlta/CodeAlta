@@ -52,7 +52,10 @@ internal sealed class AutomationIntegrationOptions
     /// </summary>
     /// <param name="globalRoot">The root of the profile, <c>~/.alta</c>.</param>
     /// <returns>The options; the service disposes their client.</returns>
-    internal static AutomationIntegrationOptions ForHost(string globalRoot)
+    internal static AutomationIntegrationOptions ForHost(string globalRoot) => ForHost(globalRoot, null);
+
+    // bound: the secrets kept in vaults the host holds, which the triggers of automations are given for their own use.
+    internal static AutomationIntegrationOptions ForHost(string globalRoot, CodeAlta.Agent.Runtime.IBoundSecretSource? bound)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
         return new AutomationIntegrationOptions
@@ -63,7 +66,8 @@ internal sealed class AutomationIntegrationOptions
             {
                 if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Automations").Warn(message);
             },
-            Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot, new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false)
+            Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot, new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false,
+                    null, bound, "triggers of automations")
                 .TryResolve(text, out var value, out var problem) ? (value, null) : (null, problem),
         };
     }

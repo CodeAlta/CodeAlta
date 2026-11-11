@@ -337,6 +337,16 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public Func<CodeAlta.Agent.ManagedPolicyState, IAsyncDisposable?>? StartManagedPolicies { get; init; }
 
+    /// <summary>
+    /// Gets whether the host has a user in front of a window, who can answer the prompt of a vault (the normal instance of
+    /// CodeAlta Desktop): its credential broker then asks the locked vaults to unlock when asked to, and at start. Off by
+    /// default: the developer instance, the terminal application, the command line and the node never prompt.
+    /// </summary>
+    public bool CredentialPrompts { get; init; }
+
+    /// <summary>Gets what verifies the user before a secret that asks before use is given; null where nobody can be asked.</summary>
+    public CodeAlta.Credentials.IUserPresenceVerifier? UserPresenceVerifier { get; init; }
+
     /// <summary>Gets what gives the transport of a provider that names a model server; null for a host without model servers.</summary>
     public Func<string, HttpMessageHandler?>? ModelServerTransports { get; init; }
 

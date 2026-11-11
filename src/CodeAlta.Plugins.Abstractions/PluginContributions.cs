@@ -56,6 +56,8 @@ public enum PluginPoint
     AutomationTrigger,
     /// <summary>Script: a script of Code Mode the plugin gives to the library.</summary>
     Script,
+    /// <summary>Credential provider type: a vault the secrets of the user can be kept in.</summary>
+    CredentialProvider,
 }
 
 /// <summary>

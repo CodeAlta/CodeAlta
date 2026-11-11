@@ -416,6 +416,10 @@ public sealed class PluginContributionRegistry
                 // A script is run by its name: a second plugin with the same name shadows the first.
                 yield return new ContributionConflictKey("script", $"script:{script.Name}", script.Name);
                 yield break;
+            case PluginCredentialProviderContribution credential:
+                // The configuration names a credential provider by its type: a second plugin with the same type shadows the first.
+                yield return new ContributionConflictKey("credential-provider", $"credential-provider:{credential.Type}", credential.Type);
+                yield break;
             case PluginUiContribution ui:
                 yield return new ContributionConflictKey("ui-region", $"ui:{ui.Region}:{ui.Name ?? ui.GetType().Name}", $"{ui.Region}:{ui.Name ?? ui.GetType().Name}");
                 yield break;
@@ -501,6 +505,7 @@ public sealed class PluginContributionRegistry
             PluginSettingContribution setting => setting.Key,
             PluginAutomationTriggerContribution trigger => trigger.Type,
             PluginScriptContribution script => script.Name,
+            PluginCredentialProviderContribution credential => credential.Type,
             _ => null,
         };
 

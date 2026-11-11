@@ -447,6 +447,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         var ownsLogging = false;
         ApplicationDatabase? applicationDatabase = null;
         ApplicationDatabase? ownedApplicationDatabase = null;
+        CodeAlta.Credentials.CredentialBroker? credentials = null;
 
         try
         {
@@ -600,6 +601,34 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     _ => null,
                 },
             };
+            // The secrets kept in vaults are read before the providers are registered, without a prompt and within a time limit:
+            // the providers, the MCP servers and the shells of the sessions are given them from the memory of the broker.
+            credentials = new CodeAlta.Credentials.CredentialBroker(new CodeAlta.Credentials.CredentialBrokerOptions
+            {
+                GlobalRoot = globalRoot,
+                Mask = secretMasker.Retain,
+                Types = new CodeAlta.Credentials.CredentialProviderTypes(new CodeAlta.Credentials.VaultCommandRunner(), pluginRuntime.GetCredentialProviderTypes),
+                Verifier = options.UserPresenceVerifier,
+                CanPrompt = options.CredentialPrompts,
+                Logger = LogManager.IsInitialized ? LogManager.GetLogger("CodeAlta.Credentials") : null,
+            });
+            if (credentials.Settings.Load(out _).Count > 0)
+            {
+                options.StartupStep?.Invoke("Reading the vaults…");
+                using var reading = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                reading.CancelAfter(TimeSpan.FromSeconds(15));
+                try
+                {
+                    await credentials.RefreshAsync(reading.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // A vault that is slow is read later: what needs it says that it is not read yet.
+                }
+            }
+
+            modelProviderRegistry.BoundSecrets = credentials;
+            pluginRuntime.Secrets.AttachBound(credentials);
             // A secret given to a provider (its key, a variable of its CLI) is masked from then on, before the provider gets it; so is
             // one a plugin gives out (an MCP server's variables and headers), told to the runtime of the plugins.
             modelProviderRegistry.SecretIssued = secretMasker.Retain;
@@ -662,7 +691,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
                         // Each secret is masked from the moment it is given, before the processes of the session take it.
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain).Read,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, credentials, "shell of a session").Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
                         new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
@@ -708,6 +737,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             host.ExternalSessions?.Start();
             // The policies of the organization kept from the last start apply before the first session attaches.
             host._managedPolicySources = options.StartManagedPolicies?.Invoke(runtimeService.ManagedPolicies);
+            host.Credentials = credentials;
             // The resumes after a limit that sessions waited for when the host last closed are armed again.
             host.Commands.Fallback.Time = options.TimeProvider ?? TimeProvider.System;
             host.Commands.Fallback.ResumeStore = new SessionResumeStore(applicationDatabase);
@@ -716,6 +746,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         }
         catch (Exception creationFailure)
         {
+            credentials?.Dispose();
             var acquisitions = new { Plugin = pluginRuntime ?? options.PrestartedPluginRuntime, Runtime = runtimeService,
                 Hub = agentHub, Providers = modelProviderRegistry, Options = options, OwnsPlugins = ownsPluginRuntime, OwnsLogging = ownsLogging };
             if (OwnedProviderEventForwarding.HasRetention(creationFailure))
@@ -908,6 +939,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private IAsyncDisposable? _managedPolicySources;
 
+    /// <summary>
+    /// Gets the credential broker of the host: the secrets kept in vaults it read, the providers of the vaults and the
+    /// confirmations of the secrets that ask before use.
+    /// </summary>
+    public CodeAlta.Credentials.CredentialBroker? Credentials { get; private set; }
+
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
         // The scripts stop first: their calls run on the sessions that close next.
@@ -918,6 +955,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
         // The policies the sources gave stay in force until the sessions closed; their readings stop.
         if (_managedPolicySources is { } sources) await sources.DisposeAsync().ConfigureAwait(false);
+        Credentials?.Dispose();
         BeginShutdownControls();
         await DisposeOwnedWorkAsync(
             () => _earlyCommandShutdown.Reported,

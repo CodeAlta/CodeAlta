@@ -206,7 +206,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             Path.Combine(_fleetRoot, AssignedFileName))
         {
             // Jira, Slack and the hooks of its servers, with the secrets of this machine: the node watches them while nobody is at the keyboard.
-            Integrations = _options.Integrations ?? AutomationIntegrationOptions.ForHost(catalog.GlobalRoot),
+            Integrations = _options.Integrations ?? AutomationIntegrationOptions.ForHost(catalog.GlobalRoot, host.Credentials),
             // A machine of a pool that lacks one of its tags arms none of its triggers.
             ArmedHere = entry => PoolProblem(entry.Id) is null,
         };

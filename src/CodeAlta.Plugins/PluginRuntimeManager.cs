@@ -116,6 +116,17 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             .OfType<PluginModelProviderContribution>()];
 
     /// <summary>
+    /// Gets the types of credential providers the running plugins contribute, in their registration order: only those of the
+    /// built-in plugins and of the plugins of the user, never those of a plugin of a project.
+    /// </summary>
+    /// <returns>The contributions.</returns>
+    public IReadOnlyList<PluginCredentialProviderContribution> GetCredentialProviderTypes()
+        => [.. _registry.GetSnapshot()
+            .Where(static registration => registration.Handle.Point == PluginPoint.CredentialProvider && registration.Scope == PluginScope.Global)
+            .Select(static registration => registration.Contribution)
+            .OfType<PluginCredentialProviderContribution>()];
+
+    /// <summary>
     /// Gets the automation triggers the running plugins contribute, in their registration order: for a type that two plugins
     /// give, the first is the one used.
     /// </summary>
