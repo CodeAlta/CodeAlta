@@ -81,7 +81,7 @@ internal sealed class DesktopSessionResources
         var running = _host.PluginRuntime.ActivePlugins
             .Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
                 && adapter.IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId), plugin.RuntimeContext.Scope, space.SpaceId)
-                && plugin.RuntimeContext.AppliesToProject(project?.Id, project?.ProjectPath))
+                && plugin.RuntimeContext.AppliesToProject(project?.Id, project?.ProjectPath, ProjectResourceRoots.Inherited(project)))
             .ToArray();
         var global = new CodeAltaConfigStore(_host.CatalogOptions).LoadGlobal();
         var resolver = new PluginRuntimeConfigResolver();

@@ -252,6 +252,24 @@ public sealed class PluginContributionRegistry
     }
 
     /// <summary>
+    /// Determines whether a contribution applies to a project, as <see cref="AppliesToProject(PluginContributionRegistration, string?, string?)"/>
+    /// does, a sub-project of a monorepo included: a contribution of a plugin of the folder of a project the sub-project
+    /// inherits its setup from (its repository) applies to it.
+    /// </summary>
+    /// <param name="registration">The contribution.</param>
+    /// <param name="projectId">The project identifier to test.</param>
+    /// <param name="projectPath">The project path to test.</param>
+    /// <param name="inheritedRoots">The folders the project inherits its setup from, the nearest first; empty for a project that is no sub-project.</param>
+    /// <returns><see langword="true"/> when the contribution applies to the project or to a folder it inherits from.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="registration"/> or <paramref name="inheritedRoots"/> is <see langword="null"/>.</exception>
+    public static bool AppliesToProject(PluginContributionRegistration registration, string? projectId, string? projectPath, IReadOnlyList<string> inheritedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(inheritedRoots);
+        return AppliesToProject(registration, projectId, projectPath)
+            || inheritedRoots.Any(root => AppliesToProject(registration, projectId: null, root));
+    }
+
+    /// <summary>
     /// Gets the id the configuration names a plugin by: the folder of its source package, else the name after
     /// <c>builtin:</c> of a plugin of the application, else its runtime key.
     /// </summary>

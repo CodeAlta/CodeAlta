@@ -128,6 +128,22 @@ public sealed class PluginRuntimeContext
         return MatchesScopedProject(projectId, projectPath);
     }
 
+    /// <summary>
+    /// Determines whether this plugin scope applies to a project, as <see cref="AppliesToProject(string?, string?)"/>
+    /// does, a sub-project of a monorepo included: a plugin of the folder of a project the sub-project inherits its setup
+    /// from (its repository) applies to it.
+    /// </summary>
+    /// <param name="projectId">The project identifier to test.</param>
+    /// <param name="projectPath">The project path to test.</param>
+    /// <param name="inheritedRoots">The folders the project inherits its setup from, the nearest first; empty for a project that is no sub-project.</param>
+    /// <returns><see langword="true"/> when the plugin applies to the project or to a folder it inherits from.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="inheritedRoots"/> is <see langword="null"/>.</exception>
+    public bool AppliesToProject(string? projectId, string? projectPath, IReadOnlyList<string> inheritedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(inheritedRoots);
+        return AppliesToProject(projectId, projectPath) || inheritedRoots.Any(root => MatchesScopedProject(null, root));
+    }
+
     /// <summary>Throws when the context is no longer valid.</summary>
     /// <exception cref="ObjectDisposedException">Thrown when the context is invalid.</exception>
     public void ThrowIfInvalid()

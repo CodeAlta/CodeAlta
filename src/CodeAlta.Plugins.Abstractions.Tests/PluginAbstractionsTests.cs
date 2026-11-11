@@ -75,6 +75,10 @@ public sealed class PluginAbstractionsTests
         Assert.IsTrue(context.AppliesToProject("project-1", null));
         Assert.IsTrue(context.AppliesToProject(null, projectPath));
         Assert.IsFalse(context.AppliesToProject("project-2", Path.Combine(Path.GetTempPath(), "other-project")));
+        // A sub-project of the folder of the plugin: it inherits the setup of that folder.
+        var subProject = Path.Combine(projectPath, "services", "billing");
+        Assert.IsTrue(context.AppliesToProject("billing", subProject, [projectPath]));
+        Assert.IsFalse(context.AppliesToProject("billing", subProject, []));
     }
 
     [TestMethod]

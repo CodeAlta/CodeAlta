@@ -48,6 +48,26 @@ public sealed class PluginContributionRegistryTests
     }
 
     [TestMethod]
+    public void AContributionOfARepository_AppliesToTheSubProjectsThatInheritFromIt()
+    {
+        var repository = Path.Combine(Path.GetTempPath(), "contoso");
+        var registration = new PluginContributionRegistration
+        {
+            Handle = PluginContributionHandle.Create("plugin", "Plugin", PluginPoint.Command, "hello", 0, 1),
+            Contribution = new object(),
+            Scope = PluginScope.Project,
+            ScopeProjectId = "contoso",
+            ScopeProjectPath = repository,
+        };
+        var billing = Path.Combine(repository, "services", "billing");
+
+        Assert.IsTrue(PluginContributionRegistry.AppliesToProject(registration, "billing", billing, [repository]));
+        Assert.IsTrue(PluginContributionRegistry.AppliesToProject(registration, "core", Path.Combine(billing, "core"), [billing, repository]));
+        Assert.IsFalse(PluginContributionRegistry.AppliesToProject(registration, "billing", billing, []), "a folder inside the repository that is no sub-project");
+        Assert.IsFalse(PluginContributionRegistry.AppliesToProject(registration, "other", Path.Combine(Path.GetTempPath(), "other"), [Path.Combine(Path.GetTempPath(), "other-repository")]));
+    }
+
+    [TestMethod]
     public void SnapshotOrdersByScopeContributionOrderPluginAndOrdinal()
     {
         var registry = new PluginContributionRegistry();

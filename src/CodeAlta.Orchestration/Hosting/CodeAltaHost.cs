@@ -524,6 +524,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
             pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();
             ownsPluginRuntime = options.PrestartedPluginRuntime is null;
+            // The plugins of the folder of a repository apply to its sub-projects, as this catalog last listed them.
+            pluginRuntime.Adapter.InheritedProjectRoots = projectCatalog.GetInheritedRoots;
             if (options.StartPlugins && options.PrestartedPluginRuntime is null)
             {
                 options.StartupStep?.Invoke("Starting the plugins…");
