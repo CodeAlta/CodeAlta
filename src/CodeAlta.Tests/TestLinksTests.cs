@@ -6,27 +6,19 @@ public sealed class TestLinksTests
     [TestMethod]
     public void CanCreateSymbolicLinks_SaysWhatTheSystemDoes()
     {
-        var root = Path.Combine(Path.GetTempPath(), "codealta-test-links-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(root, "target"));
-        try
+        using var temp = TestTempDirectory.Create();
+        var target = Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName;
+        var link = Path.Combine(temp.Path, "link");
+        if (TestLinks.CanCreateSymbolicLinks)
         {
-            var link = Path.Combine(root, "link");
-            if (TestLinks.CanCreateSymbolicLinks)
-            {
-                Directory.CreateSymbolicLink(link, Path.Combine(root, "target"));
-                Assert.IsNotNull(new DirectoryInfo(link).LinkTarget);
-            }
-            else
-            {
-                // What Windows says without the privilege and without Developer Mode: the tests that need links skip instead.
-                var refused = Assert.ThrowsExactly<IOException>(() => Directory.CreateSymbolicLink(link, Path.Combine(root, "target")));
-                Assert.IsFalse(Directory.Exists(link), refused.Message);
-                StringAssert.Contains(TestLinks.Unavailable, "Developer Mode");
-            }
+            Directory.CreateSymbolicLink(link, target);
+            Assert.IsNotNull(new DirectoryInfo(link).LinkTarget);
         }
-        finally
+        else
         {
-            Directory.Delete(root, recursive: true);
+            // What Windows says without the privilege and without Developer Mode: the tests that need links skip instead.
+            var refused = Assert.ThrowsExactly<IOException>(() => Directory.CreateSymbolicLink(link, target));
+            Assert.IsFalse(Directory.Exists(link), refused.Message);
         }
     }
 

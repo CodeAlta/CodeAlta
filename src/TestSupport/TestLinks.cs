@@ -32,13 +32,7 @@ internal static class TestLinks
 
     /// <summary>Gets whether this process can create symbolic links.</summary>
     public static bool CanCreateSymbolicLinks
-    {
-        get
-        {
-            if (!OperatingSystem.IsWindows()) return true;
-            return IsDeveloperModeOn() || HoldsPrivilege(CreateSymbolicLinkPrivilege);
-        }
-    }
+        => !OperatingSystem.IsWindows() || IsDeveloperModeOn() || HoldsPrivilege(CreateSymbolicLinkPrivilege);
 
     /// <summary>Makes the calling test inconclusive when this process cannot create symbolic links.</summary>
     /// <exception cref="Microsoft.VisualStudio.TestTools.UnitTesting.AssertInconclusiveException">This process cannot create symbolic links.</exception>

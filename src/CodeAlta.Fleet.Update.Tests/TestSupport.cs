@@ -204,8 +204,8 @@ internal sealed class FakeProcess(int id, UpdateCommand command) : IUpdateProces
 /// <summary>Starts fake processes and lets a test script each start.</summary>
 internal sealed class FakeRunner : IUpdateProcessRunner
 {
-    /// <summary>The exit code of a process whose script failed.</summary>
-    public const int ScriptFailedExitCode = 70;
+    // The exit code of a process whose script failed.
+    private const int ScriptFailedExitCode = 70;
 
     private readonly Func<FakeProcess, int, Task> _script;
     private readonly List<Exception> _failures = [];
