@@ -30,11 +30,11 @@ public sealed class NodeProviderStatusTests
         Assert.AreEqual((FleetProviderReasons.SecretMissing, "CLAUDE_TOKEN_GONE"), (named.Reason, named.Detail));
     }
 
-    // The sign-in runs the Claude Code the sessions of the provider run: its command here, not only a claude on the PATH of the node.
+    // altanode providers sign-in of Claude Code without a terminal says the command of Anthropic's own sign-in, with the Claude Code the
+    // sessions of the provider run (its command here); it never runs a sign-in it would read.
     [TestMethod]
-    public async Task ClaudeCode_SignsInWithTheCliItsSessionsRun()
+    public async Task TheTerminalSignInOfClaudeCode_SaysTheCommandOfItsOwnSignIn()
     {
-        if (!OperatingSystem.IsWindows() && !File.Exists("/usr/bin/script")) Assert.Inconclusive("claude setup-token runs under script on macOS and Linux.");
         var token = TestContext.CancellationToken;
         using var root = new NodeTestRoot();
         await using var node = await NodeHost.StartAsync(root.Options(), token);
@@ -43,9 +43,13 @@ public sealed class NodeProviderStatusTests
         File.WriteAllText(claude, "");
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(claude, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         File.WriteAllText(node.Host.CatalogOptions.ConfigPath, $"[providers.claude]\ntype = \"claude-code\"\ncommand = '{claude}'\n");
+        var output = new StringWriter();
+        var commands = new NodeProviderCommands(output, new StringWriter(), TextReader.Null) { HasTerminal = static () => false, Catalog = node.Host.CatalogOptions };
 
-        var item = (await new NodeSignIns(node.Host, new NodeProviders(node.Host, null)).ListAsync(token)).Items.Single(static value => value.Key == "claude");
+        var code = await commands.ClaudeSignInStepsAsync("claude");
 
-        CollectionAssert.AreEqual(new[] { FleetMachineSignInWays.Code }, item.Ways.ToArray(), item.Detail);
+        Assert.AreEqual((int?)NodeExitCodes.Failure, code, "nothing was signed in");
+        StringAssert.Contains(output.ToString(), $"\"{claude}\" auth login");
+        StringAssert.Contains(output.ToString(), "Anthropic's own sign-in");
     }
 }

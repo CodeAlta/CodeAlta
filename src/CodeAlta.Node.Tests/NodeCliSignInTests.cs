@@ -30,43 +30,17 @@ public sealed class NodeCliSignInTests
         Assert.AreEqual("ABCD12345", NodeSignIns.ReadPrompt(az)?.Code);
     }
 
-    // What claude setup-token prints in a terminal (macOS, Claude Code 2.1): a link of the terminal, words placed by moves of the
-    // cursor, then the question; once the code is given, the token.
+    // The secret an older version kept a token of Claude Code in: one per provider, whatever the case of its key; and the words
+    // cmd.exe would read are refused.
     [TestMethod]
-    public void WhatClaudeSetupTokenPrints_GivesItsPage_ThenItsToken()
+    public void TheSecretOfAnOlderClaudeToken_IsOnePerProvider_AndCmdWordsAreRefused()
     {
-        const string Page = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=s";
-        var link = $"\u001b[2GBrowser\u001b[10Gdidn't\u001b[17Gopen?\r\n\u001b]8;id=6oappq;{Page}\u0007{Page}\u001b]8;;\u0007\r\n";
-        Assert.IsNull(NodeSignIns.ReadClaudePage(link), "not before it asks for the code");
-        var asked = link + "\r\r\n\u001b[2GPaste\u001b[8Gcode\u001b[13Ghere\u001b[18Gif\u001b[21Gprompted\u001b[30G>\r\r\n";
-        Assert.AreEqual(Page, NodeSignIns.ReadClaudePage(asked));
-        Assert.IsNull(NodeSignIns.ReadClaudeToken(asked));
-        const string Token = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_BBBBBBBBBBBBBBBB-CCCCCCCC";
-        Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[32m\u001b[2G{Token}\u001b[0m\r\n\u001b[2GStore\u001b[8Gthis\u001b[13Gtoken\r\n"));
-        Assert.IsNull(NodeSignIns.ReadClaudeToken(asked + $"\u001b[2G{Token[..40]}"), "a read that stops within the token gives none yet");
         StringAssert.StartsWith(NodeSignIns.ClaudeSecretName("claude-work"), "CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_WORK_");
         Assert.AreNotEqual(NodeSignIns.ClaudeSecretName("claude-work"), NodeSignIns.ClaudeSecretName("claude_work"), "two providers never share a token");
         Assert.AreEqual(NodeSignIns.ClaudeSecretName("Claude"), NodeSignIns.ClaudeSecretName("claude"), "a key is one key whatever its case");
         Assert.IsTrue(CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(NodeSignIns.ClaudeSecretName(new string('k', 200))));
         Assert.IsFalse(NodeSignIns.IsPlainForCmd("login & calc"), "cmd.exe would run what follows &");
         Assert.IsTrue(NodeSignIns.IsPlainForCmd("--tenant=contoso.onmicrosoft.com"));
-    }
-
-    // What a pseudoconsole of Windows renders of claude setup-token: the screen drawn again with moves of the cursor, and the page as
-    // text when the console does not pass the link of the terminal on. Only a page of Claude is taken from the text.
-    [TestMethod]
-    public void WhatAConsoleOfWindowsRenders_GivesThePageAsText()
-    {
-        const string Page = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=s";
-        var screen = "\u001b[?25l\u001b[2J\u001b[m\u001b[HBrowser didn't open? Use the url below to sign in:\u001b[K\r\n\u001b[K\r\n"
-            + $"{Page}\u001b[K\r\n\u001b[K\r\n";
-        Assert.IsNull(NodeSignIns.ReadClaudePage(screen), "not before it asks for the code");
-        var asked = screen + "\u001b[5;1HPaste code here if prompted >\u001b[K\u001b[?25h";
-        Assert.AreEqual(Page, NodeSignIns.ReadClaudePage(asked));
-        Assert.IsNull(NodeSignIns.ReadClaudePage(asked.Replace("https://claude.com/", "https://claude.example.com/", StringComparison.Ordinal)), "a page elsewhere is not one");
-        const string Token = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_BBBBBBBBBBBBBBBB-CCCCCCCC";
-        Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[7;1H{Token}\u001b[K\r\n"));
-        Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[7;1H{Token}\u001b[K\u001b[8;1HStore"), "a move of the cursor ends the token too");
     }
 
     [TestMethod]

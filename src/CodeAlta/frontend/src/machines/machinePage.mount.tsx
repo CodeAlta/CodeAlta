@@ -163,8 +163,9 @@ const api: MachinePageApi = {
   updateProvider: async request => { calls.push(JSON.stringify({ updateProvider: request.key })); return { status: "ok", message: null, id: "op2", state: "completed", fraction: null, key: request.key }; },
   // Codex signs in with the browser of this computer and its callback, Mistral Vibe on a page the machine waits on; each ends at its second wait.
   signIns: async () => ({ status: "ok", message: null, items: [
-    ...(claudeAdded ? [{ kind: "provider", key: "claude-code", space: null, title: "Claude Code", state: signedIn.has("claude") ? "signed_in" : "unknown", account: null,
-      expiresAt: null, ways: ["code"], detail: null }] : []),
+    // Claude Code signs in on the machine itself, with Anthropic's own sign-in: no way from here, the steps instead.
+    ...(claudeAdded ? [{ kind: "provider", key: "claude-code", space: null, title: "Claude Code", state: "signed_out", account: null, expiresAt: null, ways: [],
+      detail: "Claude Code signs in on the machine itself, with Anthropic's own sign-in: in a terminal there as me (over SSH too), run altanode providers sign-in claude-code, then check it again here. CodeAlta never sees your Claude login." }] : []),
     { kind: "provider", key: "codex", space: null, title: "Codex", state: signedIn.has("codex") ? "signed_in" : "signed_out", account: signedIn.has("codex") ? "me@example.com" : null,
       expiresAt: null, ways: ["browser"], detail: null },
     { kind: "provider", key: "vibe", space: null, title: "Mistral Vibe", state: signedIn.has("vibe") ? "signed_in" : "signed_out", account: null, expiresAt: null,
@@ -178,8 +179,6 @@ const api: MachinePageApi = {
   signInStart: async request => {
     calls.push(JSON.stringify({ signInStart: [request.kind, request.key] }));
     signInWaits = 0;
-    if (request.key === "claude-code") return { status: "ok", message: null, attemptId: "claude", way: "code", page: "https://claude.com/cai/oauth/authorize?code=true&state=s1",
-      userCode: null, ask: null, expiresAt: "2026-11-07T15:00:00Z" };
     if (request.key === "agent") return { status: "ok", message: null, attemptId: "agent", way: "secret", page: "https://platform.example.com/api-keys", userCode: null,
       ask: "API key (OPENAI_API_KEY)", expiresAt: "2026-11-07T15:00:00Z" };
     return request.key === "vibe"
@@ -189,7 +188,7 @@ const api: MachinePageApi = {
   },
   signInWait: async request => {
     // A key ends its sign-in once it is typed, not before.
-    if (request.attemptId === "agent" || request.attemptId === "claude") {
+    if (request.attemptId === "agent") {
       await new Promise(resolve => setTimeout(resolve, 300));
       return signedIn.has(request.attemptId) ? { status: "completed", account: null, code: null, message: null } : { status: "waiting", account: null, code: null, message: null };
     }

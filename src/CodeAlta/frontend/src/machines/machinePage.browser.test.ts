@@ -109,7 +109,7 @@ test("the computer that manages a machine sees why each provider is not ready, g
   }, options);
 });
 
-test("the picker of a machine shows each provider with its icon and what it installs, and adds Claude Code in one click, then signs it in", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+test("the picker of a machine shows each provider with its icon and what it installs, and adds Claude Code in one click, then says how to sign it in on the machine", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const section = ".machine-providers-section";
     await page.until(`document.querySelectorAll('${section} .machine-providers li').length === 3`, "the providers of the machine");
@@ -131,22 +131,26 @@ test("the picker of a machine shows each provider with its icon and what it inst
     await page.shot("machine-provider-picker");
     await page.evaluate(type(".machine-provider-picker input", ""));
 
-    // Claude Code: the machine downloads it, with its progress, then its sign-in opens at once, its page in the browser of this computer.
+    // Claude Code: the machine downloads it, with its progress. Its sign-in is Anthropic's own, made on the machine: CodeAlta takes no
+    // part in it and says how, with the command to copy, then checks it again.
     await page.until(`document.querySelector('.machine-provider-picker [data-offer="claude-code"] button')`, "Claude Code");
     await page.evaluate(`document.querySelector('.machine-provider-picker [data-offer="claude-code"] button').click()`);
     await page.until(`document.querySelector('.machine-provider-adding')?.textContent.includes('is being downloaded')`, "the download");
-    await page.until(`document.querySelector('.machine-provider-signin-dialog input[aria-label=Code]')`, "its sign-in");
-    assert.equal(await page.evaluate(`document.querySelector('.machine-provider-signin-dialog [role=status] a')?.getAttribute('href')`), "https://claude.com/cai/oauth/authorize?code=true&state=s1");
-    await page.evaluate(type(".machine-provider-signin-dialog input[aria-label=Code]", "pasted-code"));
-    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Send");
-    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('Claude Code is signed in on build-box.')`, "signed in");
-    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
+    await page.until(`document.querySelector('.machine-signin-help')`, "how to sign it in");
+    assert.match(await page.evaluate(`document.querySelector('.machine-signin-help .bp6-dialog-body p').textContent`) as string, /altanode providers sign-in claude-code.*never sees your Claude login/u);
+    assert.equal(await page.evaluate(`document.querySelector('.machine-signin-help code')?.textContent`), "altanode providers sign-in claude-code");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.machine-signin-help input').length`), 0, "no code is typed here");
+    await page.until(`!document.querySelector('.bp6-overlay-appear-active, .bp6-overlay-enter-active')`, "the dialog settled");
+    assert.equal(await page.evaluate(`(() => { const code = document.querySelector('.machine-signin-help code'); return code.scrollWidth <= code.clientWidth + 1; })()`), true, "the whole command shows");
+    await page.shot("machine-claude-sign-in-help");
+    await page.clickText(".machine-signin-help .bp6-button", "Check again");
+    await page.until(`document.querySelector('.machine-signin-help [role=status]')?.textContent.includes('Claude Code is signed in on build-box.')`, "signed in on the machine");
+    await page.clickText(".machine-signin-help .bp6-button", "Done");
     // Its row: the version the machine installed.
     await page.until(`document.querySelector('${section} [data-provider="claude-code"] .machine-provider-program')?.textContent === 'Version 2.1.322, installed by the machine'`, "its row");
 
-    const asked = (await calls(page)).filter(call => call.addProvider || call.signInStart || call.signInCode)
-      .filter((call, index, all) => !call.signInStart || all.findIndex(other => JSON.stringify(other) === JSON.stringify(call)) === index);
-    assert.deepEqual(asked, [{ addProvider: "claude-code" }, { signInStart: ["provider", "claude-code"] }, { signInCode: "claude" }]);
+    const asked = (await calls(page)).filter(call => call.addProvider || call.signInStart || call.signInCode || call.setProvider);
+    assert.deepEqual(asked, [{ addProvider: "claude-code" }, { setProvider: "claude-code", type: null, keyGiven: false, makeDefault: false }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

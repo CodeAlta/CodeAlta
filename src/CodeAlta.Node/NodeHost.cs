@@ -215,8 +215,9 @@ public sealed class NodeHost : IAsyncDisposable
             // declare the command-line application.
             StartPlugins = options.StartPlugins,
             PluginFrontend = PluginFrontends.Cli,
-            // Nobody sits at a node: its providers are signed in from the page of the machine in CodeAlta Desktop.
-            CliSignInHint = "Sign it in from CodeAlta Desktop: Settings > Fleet > Machines, the page of this machine, Sign in… on its row",
+            // Nobody sits at a node, and CodeAlta takes no part in a Claude sign-in: the person signs Claude Code in on the machine,
+            // with Anthropic's own flow, as the account the node runs as.
+            CliSignInHint = $"Sign it in on the machine itself, with Anthropic's own sign-in: in a terminal there as {Environment.UserName}, run altanode providers sign-in followed by the key of the provider",
             PluginBuiltIns = NodeBuiltInPlugins.For(catalog),
             ModelServerTransports = options.ModelServerTransports,
             RawArguments = [],

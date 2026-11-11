@@ -195,7 +195,7 @@ The sessions of a node run on its own providers, signed in on the machine. On th
 | APIs with a key | OpenAI, Anthropic, Gemini and the other APIs: you type the key, and the machine keeps it in its secrets |
 | Model servers | A llama.cpp server of the machine |
 
-Click one: an agent is added in one step, with the progress of its download, and its sign-in opens at once (see [Sign in on a machine](#sign-in-on-a-machine)). Each provider then shows what it runs, its version, and **Install** or **Update to** when there is one. A provider that is not ready says why on its row, with what makes it ready: **Sign in…**, **Add its key…** or **Install**.
+Click one: an agent is added in one step, with the progress of its download, and its sign-in opens at once (see [Sign in on a machine](#sign-in-on-a-machine)). Claude Code is the exception: it signs in on the machine itself, and the page says how. Each provider then shows what it runs, its version, and **Install** or **Update to** when there is one. A provider that is not ready says why on its row, with what makes it ready: **Sign in…**, **Add its key…** or **Install**.
 
 When no provider of a machine is ready, a new session on it says so, with a link that opens its page.
 
@@ -207,7 +207,7 @@ On the machine of the node, `altanode providers` does the same while the node ru
 | `altanode providers available` | Lists what it can add |
 | `altanode providers add <what>` | Adds one, such as `claude-code`, installing what it runs first |
 | `altanode providers update <key>` | Updates what a provider runs |
-| `altanode providers sign-in <key>` | Signs a provider in: its page is printed, and you type back the code it shows |
+| `altanode providers sign-in <key>` | Signs a provider in: its page is printed, and you type back the code it shows. For Claude Code, it starts Claude Code's own sign-in in that terminal |
 
 A provider written by hand in the node's `~/.alta/config.toml` applies within a second, without a restart. While the file has an error, the providers run as before and the page of the machine says where the file is wrong.
 
@@ -307,11 +307,11 @@ A machine signs in to its providers, MCP servers and tools itself; nothing is co
 | GitHub Copilot, xAI, Codex CLI | A code shows here with **Copy**: enter it on the page it names |
 | `gh` of each space, and the tools whose login a space names in its CLI profiles (`gh`, `glab`, `az`, `aws`, `gcloud`) | The machine runs the login with the identity of the space and shows its page and code here, or asks for the code its page gives |
 | Mistral Vibe | Its page opens in the browser of this computer. Sign in there and choose the workspace: the machine waits for the console of Mistral and keeps the key it gives |
-| Claude Code | The machine runs `claude setup-token` (on Windows too): its page opens in the browser of this computer, and you paste back the code it shows. The machine keeps the token it gets as a secret and Claude Code uses it |
+| Claude Code | On the machine itself, with Anthropic's own sign-in: in a terminal there (over SSH too), as the account the node runs as, run `altanode providers sign-in <key>`. It starts `claude auth login` of the Claude Code the node runs, and Claude Code keeps its login. Then click **Check again** on the page of the machine. CodeAlta never sees or keeps your Claude login, as the terms of Claude Code require |
 | ACP agents that take an API key | You type the key here. The machine keeps it as a secret, names it in the agent's environment, and it never comes back to this computer |
 | Other ACP agents | They sign in on the machine itself: the list says how, such as the command to run in a terminal there. An agent that signs in with a browser it opens on its own machine cannot finish from another computer |
 
-**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine. Claude Code's token and an ACP agent's key go with their **Sign out**.
+**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine, and so does Claude Code: `claude auth logout` there ends it. An ACP agent's key goes with its **Sign out**, and so does a Claude Code token an older version of CodeAlta kept.
 
 The machine exchanges the code and keeps the token: this computer only opens the page and relays the code or the address the browser returns, which is useless without what the machine holds. If another program holds the port the browser comes back to, the sign-in says it cannot start and the machine keeps nothing half done. A sign-in waits 15 minutes at most for you, and closing its window cancels it.
 

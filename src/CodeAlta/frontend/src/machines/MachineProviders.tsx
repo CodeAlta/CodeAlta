@@ -38,6 +38,8 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
   const [machineSignIn, setMachineSignIn] = useState<MachineSignInItemView | null>(null);
   const [signIns, setSignIns] = useState<readonly MachineSignInItemView[]>([]);
   const [picking, setPicking] = useState(false);
+  // How to sign in a provider that signs in on the machine itself (Claude Code, with Anthropic's own sign-in), with Check again.
+  const [machineHelp, setMachineHelp] = useState<{ item: MachineSignInItemView; provider: MachineProviderStatusView | null } | null>(null);
   // The type whose key the form takes, chosen in the picker.
   const [keyFor, setKeyFor] = useState<MachineProviderOfferView | null>(null);
   // The provider whose program the machine installs or updates, and what it says of it.
@@ -69,6 +71,7 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
       const listed = await api.signIns({ expectedEpoch: epoch, machineId: machine.id }, { timeoutMilliseconds: 30_000 });
       const item = listed.items.find(value => value.kind === "provider" && value.key === choice.added);
       if (item && item.ways.length > 0 && item.state !== "signed_in") setMachineSignIn(item);
+      else if (item && item.ways.length === 0 && item.state !== "signed_in" && item.detail) setMachineHelp({ item, provider: null });
     } catch { /* The row offers it. */ }
   }
 
@@ -122,6 +125,8 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
       const action = programAction(provider.program);
       // A provider signed in on the machine itself (its program's login, an ACP agent's key) signs in from its row too.
       const signInItem = state !== "ready" && state !== "disabled" && (fix === null || fix === "sign_in" && !provider.signIn) ? signIns.find(item => item.key === provider.key && item.ways.length > 0 && item.state !== "signed_in") : undefined;
+      // One that signs in on the machine itself says how, with Check again.
+      const helpItem = state !== "ready" && state !== "disabled" && !signInItem ? signIns.find(item => item.key === provider.key && item.ways.length === 0 && item.state !== "signed_in" && item.detail) : undefined;
       return <li key={provider.key} data-state={state} data-provider={provider.key}>
         <span className="machine-provider-icon">{state === "preparing" || installing?.key === provider.key ? <ActivitySpinner size={14} />
           : <AppIcon name={state === "ready" ? "checked" : state === "disabled" ? "minus" : "warning"} size={14} className={state === "ready" ? "machine-ready" : undefined} />}</span>
@@ -140,6 +145,8 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
             text={action.kind === "install" ? t("Install") : t("Update to {version}", { version: action.version })} onClick={() => void install(provider)} />}
           {signInItem && !action && <Button size="small" intent="primary" icon={<AppIcon name="shield" size={13} />} text={t("Sign in…")}
             disabled={!paired} onClick={() => setMachineSignIn(signInItem)} />}
+          {helpItem && !action && <Button size="small" intent="primary" icon={<AppIcon name="shield" size={13} />} text={t("How to sign in…")}
+            onClick={() => setMachineHelp({ item: helpItem, provider })} />}
           {fix === "sign_in" && state !== "ready" && <Button size="small" intent="primary" icon={<AppIcon name="shield" size={13} />} text={t("Sign in…")}
             disabled={!paired} onClick={() => setSigningIn(provider.key)} />}
           {fix === "key" && <Button size="small" intent={state === "not_ready" ? "primary" : undefined} text={t(state === "not_ready" ? "Add its key…" : "Edit…")}
@@ -151,9 +158,57 @@ export function MachineProviders({ epoch, machine, api = machines }: { epoch: st
     {editing !== undefined && view && <ProviderDialog epoch={epoch} machine={machine} api={api} view={view} provider={editing} initialType={editing === null ? keyFor?.type : undefined}
       onClose={(saved, signIn) => { setEditing(undefined); setKeyFor(null); if (saved) reload(); if (signIn) setSigningIn(signIn); }} />}
     {machineSignIn && <SignInDialog epoch={epoch} machine={machine} api={api} item={machineSignIn} onClose={() => { setMachineSignIn(null); reload(); }} />}
+    {machineHelp && <MachineSignInHelp epoch={epoch} machine={machine} api={api} item={machineHelp.item}
+      provider={machineHelp.provider ?? providers.find(value => value.key === machineHelp.item.key) ?? null} paired={paired}
+      onClose={() => { setMachineHelp(null); reload(); }} />}
     {signingIn && <ProviderSignInDialog epoch={epoch} machine={machine} api={api} providerKey={signingIn}
       name={providers.find(provider => provider.key === signingIn)?.name ?? signingIn} onClose={() => { setSigningIn(null); reload(); }} />}
   </section>;
+}
+
+/**
+ * How a provider that signs in on the machine itself is signed in (Claude Code, with Anthropic's own sign-in, which CodeAlta takes no
+ * part in): the steps the machine gives, the command to copy, and Check again, which has the machine start the provider again so that
+ * it reads the sign-in made meanwhile.
+ */
+function MachineSignInHelp({ epoch, machine, api, item, provider, paired, onClose }: {
+  epoch: string; machine: MachineView; api: MachineProvidersApi; item: MachineSignInItemView; provider: MachineProviderStatusView | null; paired: boolean; onClose: () => void;
+}) {
+  const { t } = useShellLanguage();
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<{ ready: boolean; detail: string | null } | null>(null);
+  async function check() {
+    setChecking(true);
+    setResult(null);
+    try {
+      await api.setProvider({ expectedEpoch: epoch, machineId: machine.id, key: item.key, type: null, displayName: null, model: null, apiUrl: null, apiKey: null,
+        enabled: true, makeDefault: provider?.isDefault ?? false }, { timeoutMilliseconds: 60_000 });
+      // The machine probes it again: its state is read until it prepared.
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const listed = await api.providers({ expectedEpoch: epoch, machineId: machine.id }, { timeoutMilliseconds: 30_000 });
+        const now = listed.providers.find(value => value.key === item.key);
+        if (now && now.state !== "preparing") { setResult({ ready: now.state === "ready", detail: now.detail ?? null }); return; }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      setResult({ ready: false, detail: null });
+    } catch {
+      setResult({ ready: false, detail: null });
+    } finally { setChecking(false); }
+  }
+  return <Dialog isOpen className="machine-provider-signin-dialog machine-signin-help" title={t("Sign {name} in on {machine}", { name: item.title, machine: machine.name })} onClose={onClose}>
+    <DialogBody>
+      <p>{item.detail}</p>
+      <Copyable code value={`altanode providers sign-in ${item.key}`} label={t("Copy the command")} />
+      {result?.ready && <Callout compact intent="success" role="status" icon={<AppIcon name="checked" size={16} />}>{t("{name} is signed in on {machine}.", { name: item.title, machine: machine.name })}</Callout>}
+      {result && !result.ready && <Callout compact intent="warning" role="alert">{t("{name} is not signed in on {machine} yet.", { name: item.title, machine: machine.name })}
+        {result.detail && <div className="muted-text">{result.detail}</div>}</Callout>}
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button intent={result?.ready ? undefined : "primary"} disabled={checking || !paired} icon={checking ? <ActivitySpinner size={14} /> : <AppIcon name="refresh" size={14} />}
+        text={t("Check again")} onClick={() => void check()} />
+      <Button intent={result?.ready ? "primary" : undefined} text={t(result?.ready ? "Done" : "Close")} onClick={onClose} />
+    </>} />
+  </Dialog>;
 }
 
 /**

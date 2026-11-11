@@ -234,7 +234,8 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
         try
         {
             if (PluginAccount(parameters.Key) is { } plugin) return await RunPluginAsync(attempt, parameters, plugin).ConfigureAwait(false);
-            if (ClaudeProvider(parameters.Key) is { } claude) return await RunClaudeAsync(attempt, parameters, claude).ConfigureAwait(false);
+            // Claude Code signs in with Anthropic's own flow on the machine: CodeAlta neither runs nor relays it.
+            if (ClaudeProvider(parameters.Key) is { } claude) throw new NotSupportedException(ClaudeSignInSteps(claude.ProviderKey, Environment.UserName));
             var definition = Provider(parameters.Key);
             var ways = ProviderWays(definition.ProviderType);
             var way = parameters.Way ?? ways.FirstOrDefault()

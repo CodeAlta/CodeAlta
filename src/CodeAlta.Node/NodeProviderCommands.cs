@@ -45,6 +45,7 @@ internal sealed class NodeProviderCommands(TextWriter output, TextWriter error, 
             }).ConfigureAwait(false);
 
         var control = NodeLocalControl.Read(profile);
+        Catalog = control.Catalog;
         if (!control.NodeListens)
         {
             await error.WriteLineAsync("altanode providers: no node runs on this profile. Start it (altanode run, or its service), then try again.").ConfigureAwait(false);
@@ -144,6 +145,9 @@ internal sealed class NodeProviderCommands(TextWriter output, TextWriter error, 
             return NodeExitCodes.Failure;
         }
 
+        // Claude Code signs in with Anthropic's own flow, in this terminal: CodeAlta starts it and takes no part in it.
+        if (provider.Type == "claude-code") return await ClaudeSignInAsync(client, provider).ConfigureAwait(false);
+
         if (provider.SignIn)
         {
             var prompt = await client.StartProviderSignInAsync(provider.Key, Stop).ConfigureAwait(false);
@@ -201,6 +205,91 @@ internal sealed class NodeProviderCommands(TextWriter output, TextWriter error, 
             await client.CancelSignInAsync(started.AttemptId, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>Gets the configuration of the profile, to find the Claude Code a provider runs; set by the command.</summary>
+    internal CodeAlta.Catalog.CatalogOptions? Catalog { get; set; }
+
+    /// <summary>Gets whether this process has a terminal a person types in; replaced by tests.</summary>
+    public Func<bool> HasTerminal { get; init; } = static () => !Console.IsInputRedirected && !Console.IsOutputRedirected;
+
+    // claude auth login of the Claude Code the provider runs, in this terminal, as the account the node runs as: Anthropic's own
+    // sign-in, which keeps its login where Claude Code reads it. Nothing it prints or reads goes through CodeAlta. Then the node checks
+    // the provider again.
+    private async Task<int> ClaudeSignInAsync(Fleet.Client.FleetNodeClient client, FleetProviderStatus provider)
+    {
+        if (await ClaudeSignInStepsAsync(provider.Key).ConfigureAwait(false) is { } ended) return ended;
+        var (claude, definition) = ResolveClaude(provider.Key);
+        await output.WriteLineAsync("Claude Code signs you in with Anthropic's own sign-in; CodeAlta does not see it.").ConfigureAwait(false);
+        var start = new System.Diagnostics.ProcessStartInfo(claude!) { UseShellExecute = false };
+        start.ArgumentList.Add("auth");
+        start.ArgumentList.Add("login");
+        if (!string.IsNullOrWhiteSpace(definition?.ConfigDir))
+        {
+            var folder = definition.ConfigDir.Trim();
+            if (folder.StartsWith('~')) folder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + folder[1..];
+            start.Environment["CLAUDE_CONFIG_DIR"] = folder;
+        }
+
+        using (var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("Claude Code did not start."))
+        {
+            await process.WaitForExitAsync(Stop).ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                await error.WriteLineAsync($"altanode providers: the sign-in of Claude Code ended with the code {process.ExitCode}.").ConfigureAwait(false);
+                return NodeExitCodes.Failure;
+            }
+        }
+
+        return await CheckAgainAsync(client, provider).ConfigureAwait(false);
+    }
+
+    // The Claude Code the sessions of a provider run: its command, else the version pinned in the cache of the node, else the one
+    // installed on the machine; and the provider as the configuration writes it.
+    private (string? Claude, CodeAlta.Catalog.CodeAltaProviderDocument? Definition) ResolveClaude(string key)
+    {
+        var catalog = Catalog ?? throw new InvalidOperationException("The profile of the node is not known.");
+        var definition = new CodeAlta.Catalog.CodeAltaConfigStore(catalog).LoadGlobalProviderDefinitions(includeDisabled: true)
+            .FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
+        var command = string.IsNullOrWhiteSpace(definition?.Command) ? null : definition.Command.Trim();
+        return (new CodeAlta.Hosting.ConfiguredClaudeCodeCli(catalog.ClaudeCodeRoot).ResolveExecutable(command), definition);
+    }
+
+    /// <summary>
+    /// Says how to sign a Claude Code provider in when this process cannot start its sign-in (no terminal), or why it cannot be signed
+    /// in (not installed); null when it can start it here.
+    /// </summary>
+    /// <param name="key">The key of the provider.</param>
+    /// <returns>The exit code, or null to run the sign-in.</returns>
+    internal async Task<int?> ClaudeSignInStepsAsync(string key)
+    {
+        var (claude, _) = ResolveClaude(key);
+        if (claude is null)
+        {
+            await error.WriteLineAsync($"altanode providers: Claude Code is not installed on this machine: altanode providers update {key} installs it.").ConfigureAwait(false);
+            return NodeExitCodes.Failure;
+        }
+
+        if (HasTerminal()) return null;
+        await output.WriteLineAsync($"Claude Code signs in with Anthropic's own sign-in, in a terminal of this machine as {Environment.UserName}: run").ConfigureAwait(false);
+        await output.WriteLineAsync($"  \"{claude}\" auth login").ConfigureAwait(false);
+        await output.WriteLineAsync($"then altanode providers sign-in {key} again, or Check again on the page of the machine.").ConfigureAwait(false);
+        return NodeExitCodes.Failure;
+    }
+
+    // The node starts the provider again, so that its probe reads the sign-in made meanwhile; then says where it stands.
+    private async Task<int> CheckAgainAsync(Fleet.Client.FleetNodeClient client, FleetProviderStatus provider)
+    {
+        await client.SetProviderAsync(new FleetProviderSetParams(provider.Key, null, null, null, null, null, provider.Enabled, provider.IsDefault), Stop).ConfigureAwait(false);
+        FleetProviderStatus? now = null;
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            now = (await client.ListProvidersAsync(Stop).ConfigureAwait(false)).Providers.FirstOrDefault(value => string.Equals(value.Key, provider.Key, StringComparison.OrdinalIgnoreCase));
+            if (now?.State is not FleetProviderStates.Preparing) break;
+            await Task.Delay(500, Stop).ConfigureAwait(false);
+        }
+
+        return await EndAsync(now?.State == FleetProviderStates.Ready, provider.Name, null, now?.State == FleetProviderStates.Ready ? null : now?.Detail ?? now?.State).ConfigureAwait(false);
     }
 
     private async Task<int> EndAsync(bool signedIn, string name, string? account, string? why)
