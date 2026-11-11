@@ -87,6 +87,8 @@ CodeAlta reads 1Password through its command line tool, `op`, unlocked by the 1P
 2. In the 1Password app, open **Settings > Developer** and turn on **Integrate with 1Password CLI**.
 3. Add a provider of the kind **1Password**. With several accounts in the app, set **Account** to the sign-in address (`my.1password.com`) or the id of the account.
 
+When the row of the provider asks you to turn on **Integrate with 1Password CLI**, do it in the app, keep the app unlocked, then click **Unlock**: the app asks you to authorize CodeAlta. A sign-in typed in a terminal (`op signin`) only authorizes that terminal.
+
 A reference is the secret reference of 1Password, `op://<vault>/<item>/<field>`, such as `op://Private/Anthropic/credential`; the item list writes it for you. The Developer page of the 1Password app lists the reads of CodeAlta.
 
 For a machine without the app, such as a build machine, set **Service account token** to a secret of this computer that holds the token of a [service account](https://developer.1password.com/docs/service-accounts/). A service account cannot read the Private and Personal vaults.

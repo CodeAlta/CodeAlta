@@ -216,9 +216,14 @@ internal sealed class OnePasswordProvider : ICredentialProvider
     {
         var error = result.Error;
         if (result.TimedOut) return CredentialProviderStatus.Locked("1Password did not answer in time: is the 1Password app waiting for you?") with { ProgramPath = program };
+        // op knows no account: the 1Password app does not give it one (its integration with the CLI is off, or the app is
+        // locked), or the account set is not one of the app. The app authorizes the process that runs op, so a sign-in typed in
+        // a terminal would authorize that terminal, never CodeAlta: what the user does is turn the integration on, then Unlock.
         if (error.Contains("No accounts configured", StringComparison.OrdinalIgnoreCase) || error.Contains("no account found", StringComparison.OrdinalIgnoreCase))
-            return new CredentialProviderStatus(CredentialProviderState.SignInNeeded,
-                "Turn on Integrate with 1Password CLI in the 1Password app (Settings › Developer), or sign in with op.") { ProgramPath = program, SignInCommand = [program, "signin"] };
+            return CredentialProviderStatus.Locked(_account is null
+                ? "Unlock the 1Password app and turn on Integrate with 1Password CLI in its Settings › Developer, then Unlock here."
+                : $"Unlock the 1Password app and turn on Integrate with 1Password CLI in its Settings › Developer, then Unlock here. Check that {_account} is the sign-in address of an account of the app, or leave Account empty.")
+                with { ProgramPath = program };
         if (error.Contains("LostConnectionToApp", StringComparison.OrdinalIgnoreCase) || error.Contains("connecting to desktop app", StringComparison.OrdinalIgnoreCase)
             || error.Contains("cannot connect", StringComparison.OrdinalIgnoreCase))
             return CredentialProviderStatus.Locked("Open the 1Password app, then unlock.") with { ProgramPath = program };

@@ -205,8 +205,9 @@ int Op(string[] arguments)
     var account = TakeOption(list, "--account");
     if (state["serviceAccount"]?.GetValue<bool>() == true && Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is not { Length: > 0 })
         return Fail("[ERROR] no account found for filter", 1);
+    // What op 2.42 answers when the 1Password app gives it no account: the integration with the CLI is off, or the app is locked.
     if (state["accounts"]?.GetValue<bool>() == false && Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is not { Length: > 0 })
-        return Fail("No accounts configured for use with 1Password CLI.", 1);
+        return Fail($"[ERROR] 2026/11/11 18:51:52 no account found for filter {account}", 1);
     var signedIn = state["signedIn"]?.GetValue<bool>() == true || Environment.GetEnvironmentVariable("OP_SERVICE_ACCOUNT_TOKEN") is { Length: > 0 };
     switch (list)
     {
