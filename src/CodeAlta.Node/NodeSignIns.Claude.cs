@@ -6,6 +6,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Core.Terminals;
 using CodeAlta.Fleet.NodeApi;
+using CodeAlta.Hosting;
 
 namespace CodeAlta.Node;
 
@@ -102,9 +103,9 @@ internal sealed partial class NodeSignIns
         IReadOnlyList<SecretInfo> secrets = [];
         try { secrets = new LocalSecretStore(Root).ListSecrets(); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { }
-        var runs = ClaudeCanSignIn();
         foreach (var definition in Store.LoadGlobalProviderDefinitions(includeDisabled: true).Where(static value => value.ProviderType == ClaudeType).Take(8))
         {
+            var runs = ClaudeCanSignIn(definition);
             var name = ClaudeSecretName(definition.ProviderKey);
             var secret = definition.Env?.GetValueOrDefault(ClaudeTokenVariable) == $"${{secret:{name}}}"
                 ? secrets.FirstOrDefault(value => string.Equals(value.Name, name, StringComparison.OrdinalIgnoreCase)) : null;
@@ -119,12 +120,18 @@ internal sealed partial class NodeSignIns
     /// <summary>Gets the executable of Claude Code; null to find <c>claude</c> on the PATH of the node. Set by tests.</summary>
     internal string? ClaudeExecutable { get; init; }
 
-    private string? FindClaude() => ClaudeExecutable is { } path ? (File.Exists(path) ? path : null) : FindExecutable("claude");
+    // The executable the sessions of the provider run: its command, else the version CodeAlta pins in the cache of the node, else
+    // the Claude Code installed on the machine (on PATH or in the folders of its installers), so that the token is made by the CLI
+    // that uses it.
+    private string? FindClaude(CodeAltaProviderDocument definition)
+        => ClaudeExecutable is { } path ? (File.Exists(path) ? path : null)
+            : new ConfiguredClaudeCodeCli(new CatalogOptions { GlobalRoot = Root }.ClaudeCodeRoot)
+                .ResolveExecutable(string.IsNullOrWhiteSpace(definition.Command) ? null : definition.Command.Trim());
 
     // Why claude setup-token cannot run here from another computer; null when it can.
-    private string? ClaudeCanSignIn()
+    private string? ClaudeCanSignIn(CodeAltaProviderDocument definition)
     {
-        if (FindClaude() is not { } claude) return "Claude Code is not installed on the machine, or not on the PATH of the node.";
+        if (FindClaude(definition) is not { } claude) return "Claude Code is not installed on the machine.";
         if (OperatingSystem.IsWindows())
             return !IsBatch(claude) || IsPlainForCmd(claude) ? null : "The folder of Claude Code holds a character cmd.exe reads: run claude setup-token on the machine.";
         return File.Exists("/usr/bin/script") ? null : "The machine has no script command, which runs claude setup-token in a terminal.";
@@ -135,8 +142,8 @@ internal sealed partial class NodeSignIns
     private async Task<FleetMachineSignInState> RunClaudeAsync(Attempt attempt, FleetMachineSignInStartParams parameters, CodeAltaProviderDocument definition)
     {
         if (parameters.Way is { } way && way != FleetMachineSignInWays.Code) throw new NotSupportedException("Claude Code signs in with the code its page shows.");
-        if (ClaudeCanSignIn() is { } why) throw new NotSupportedException(why);
-        using var terminal = ClaudeTerminal.Start(FindClaude()!);
+        if (ClaudeCanSignIn(definition) is { } why) throw new NotSupportedException(why);
+        using var terminal = ClaudeTerminal.Start(FindClaude(definition)!);
         // The terminal takes the code as typed, then Enter.
         attempt.AcceptCode = code => terminal.Write(code + "\r");
         using var kill = attempt.Lifetime.Token.Register(terminal.Kill);

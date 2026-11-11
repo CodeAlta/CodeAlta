@@ -6,6 +6,7 @@ using CodeAlta.Catalog.Secrets;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Hosting;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Node;
 
@@ -17,7 +18,7 @@ namespace CodeAlta.Node;
 /// </summary>
 /// <param name="host">The runtime of the node.</param>
 /// <param name="modelCatalog">The catalog of models the providers are started with; null for none.</param>
-internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? modelCatalog) : IFleetNodeProviders
+internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? modelCatalog) : IFleetNodeProviders
 {
     /// <summary>The most providers listed.</summary>
     internal const int MaxProviders = 64;
@@ -28,11 +29,17 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
     // How long the start of a sign-in waits for its code.
     private static readonly TimeSpan PromptWait = TimeSpan.FromSeconds(60);
 
-    /// <summary>The types a provider added from the desktop can have: those that take a key, and those that sign in with a device code.</summary>
-    internal static readonly ImmutableArray<string> OfferedTypes = ["openai-responses", "anthropic", "google-genai", "mistral", "openai-chat", "copilot", "xai", "llama-cpp"];
+    /// <summary>
+    /// The types of the node a provider added from the desktop can have: Claude Code, which the node installs; those that sign in
+    /// with an account (Codex, Copilot, xAI, Mistral Vibe); those that take a key; and a model server. The agents of the plugins
+    /// (Codex CLI, the ACP registry) are added from their catalogs.
+    /// </summary>
+    internal static readonly ImmutableArray<string> OfferedTypes = ["claude-code", "codex", "copilot", "xai", "mistral-vibe", "openai-responses", "anthropic", "google-genai", "mistral",
+        "openai-chat", "llama-cpp"];
 
-    // The provider types that run a CLI with its own login on the machine, and those that need no credential.
-    private static readonly ImmutableArray<string> CliTypes = ["claude-code", "mistral-vibe", "codex-cli"];
+    // The provider types that run a CLI with its own login on the machine, and those that need no credential. Mistral Vibe runs no
+    // CLI: it signs in with the browser (ConfiguredProviderLogin).
+    private static readonly ImmutableArray<string> CliTypes = ["claude-code", "codex-cli"];
     private static readonly ImmutableArray<string> NoCredentialTypes = ["llama-cpp"];
 
     private readonly Lock _gate = new();
@@ -46,9 +53,20 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
     public async Task<FleetProviderList> ListAsync(CancellationToken cancellationToken)
     {
         var store = Store;
-        var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).Take(MaxProviders).ToArray();
         var protection = TryRead(() => new LocalSecretStore(Root).Protection);
         var types = OfferedTypes.Select(static type => new FleetProviderType(type, TypeName(type), Credential(type), SignsInWithCode(type))).ToArray();
+        CodeAltaProviderDocument[] definitions;
+        try
+        {
+            definitions = [.. store.LoadGlobalProviderDefinitions(includeDisabled: true).Take(MaxProviders)];
+        }
+        catch (InvalidDataException exception)
+        {
+            // A configuration file that does not read: the providers run as they were applied, and the page says where the file is wrong.
+            var why = exception.InnerException?.Message ?? exception.Message;
+            return new FleetProviderList([], types, protection) { ConfigurationError = why.Length <= 512 ? why : why[..512] };
+        }
+
         var providers = new List<FleetProviderStatus>(definitions.Length);
         foreach (var definition in definitions)
         {
@@ -60,7 +78,54 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
             providers.Add(status);
         }
 
-        return new FleetProviderList(providers, types, protection);
+        // The providers whose type a running plugin gives (Codex CLI, the ACP agents), with the program each runs.
+        foreach (var provider in (TryRead(store.LoadGlobalExternalProviders) ?? []).Take(MaxProviders - providers.Count))
+        {
+            if (PluginProviderTypes?.Find(provider.ProviderType) is not { } contribution) continue;
+            providers.Add(await DescribePluginAsync(provider, contribution, store, cancellationToken).ConfigureAwait(false));
+        }
+
+        return new FleetProviderList(providers, types, protection) { ConfigurationError = ConfigurationError };
+    }
+
+    // A provider of a plugin as the desktop shows it: its state from the runtime, else whether its plugin can start it; the program
+    // it runs, and the icon its plugin gives it.
+    private async Task<FleetProviderStatus> DescribePluginAsync(CodeAltaExternalProvider provider, PluginModelProviderContribution contribution, CodeAltaConfigStore store,
+        CancellationToken cancellationToken)
+    {
+        var defaultProvider = TryRead(() => store.GetEffectiveDefaultProvider());
+        var settings = PluginModelProviderTypes.CreateSettings(provider, defaultProvider);
+        var state = host.ModelProviderInitializationService.CurrentStates.FirstOrDefault(value => string.Equals(value.ProviderId.Value, provider.ProviderKey, StringComparison.OrdinalIgnoreCase));
+        string status;
+        string? reason = null, detail = null;
+        if (!settings.IsEnabled) status = FleetProviderStates.Disabled;
+        else if (state is not null && state.Descriptor.IsEnabled)
+        {
+            (status, reason, detail) = state.Availability switch
+            {
+                ModelProviderAvailability.Ready => (FleetProviderStates.Ready, (string?)null, (string?)null),
+                ModelProviderAvailability.Failed => (FleetProviderStates.Failed, FleetProviderReasons.StartFailed, Bounded(host.AgentHub.SecretMasker?.MaskText(state.StatusMessage ?? "") ?? state.StatusMessage)),
+                _ => (FleetProviderStates.Preparing, null, null),
+            };
+        }
+        else
+        {
+            status = FleetProviderStates.NotReady;
+            var registry = host.ModelProviderRegistry;
+            reason = PluginProviderTypes!.TryCreateProviderRegistration(settings, Root, registry.SecretIssued, registry.BoundSecrets, out _, out _)
+                ? FleetProviderReasons.Pending : FleetProviderReasons.Skipped;
+        }
+
+        string? icon = null;
+        try { icon = contribution.GetIconSvg?.Invoke(settings) is { Length: <= 64 * 1024 } svg ? svg : null; }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        return new FleetProviderStatus(provider.ProviderKey, Bounded(settings.DisplayName)!, provider.ProviderType, settings.IsEnabled, status, reason, detail,
+            contribution.Account is not null ? "sign_in" : "cli", null, false, string.Equals(defaultProvider, provider.ProviderKey, StringComparison.OrdinalIgnoreCase),
+            Bounded(settings.GetString("model")), null)
+        {
+            Program = await PluginProgramAsync(provider, contribution, settings, cancellationToken).ConfigureAwait(false),
+            IconSvg = icon,
+        };
     }
 
     // Whether a provider is signed in, as its stored credential says, without the network; a credential that cannot be read is not.
@@ -377,6 +442,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
 
     private void ApplyNow(CodeAltaConfigStore store, string changed)
     {
+        RememberApplied();
         var registry = host.ModelProviderRegistry;
         var enabled = store.LoadGlobalProviderDefinitions(includeDisabled: true).Where(static definition => definition.Enabled != false).ToArray();
         var applied = ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry, enabled, Root, modelCatalog);
@@ -432,7 +498,11 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
             {
                 "sign_in" => (FleetProviderReasons.SignInNeeded, (string?)null),
                 "key" => KeyProblem(definition, keySecret),
-                _ => (FleetProviderReasons.Skipped, null),
+                // A secret its environment names and the machine does not have (the token of a Claude Code signed in from here);
+                // else whether its configuration can start it at all: one that can was written after the providers were started,
+                // and is applied in a moment.
+                _ when MissingEnvironmentSecret(definition) is { } secret => (FleetProviderReasons.SecretMissing, secret),
+                _ => Composes(definition) ? (FleetProviderReasons.Pending, null) : (FleetProviderReasons.Skipped, null),
             };
         }
 
@@ -440,6 +510,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
             Bounded(definition.Model), Bounded(Masked(definition, definition.ApiUrl)))
         {
             MaxConcurrentRequests = definition.MaxConcurrentRequests is > 0 ? definition.MaxConcurrentRequests : null,
+            Program = type == ClaudeType ? ClaudeProgram(definition) : null,
         };
     }
 
@@ -449,6 +520,31 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         if (keySecret is not null && !IsSecretSet(keySecret)) return (FleetProviderReasons.SecretMissing, keySecret);
         if (keySecret is null && Optional(definition.ApiKeyEnv) is { } variable) return (FleetProviderReasons.KeyMissing, variable);
         return (FleetProviderReasons.KeyMissing, null);
+    }
+
+    // The first secret of the machine a variable of the environment of a provider names and the store does not have; null for none.
+    private string? MissingEnvironmentSecret(CodeAltaProviderDocument definition)
+    {
+        if (definition.Env is not { Count: > 0 } environment) return null;
+        foreach (var value in environment.Values)
+        {
+            if (SecretReferences.TryParseLone(value, out var reference) && reference.Kind == SecretReferenceKind.Secret && !IsSecretSet(reference.Name)) return reference.Name;
+        }
+
+        return null;
+    }
+
+    // Whether the configuration of a provider can start it, as the runtime would compose it; nothing is started.
+    private bool Composes(CodeAltaProviderDocument definition)
+    {
+        try
+        {
+            return ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(definition, Root, modelCatalog, out _, out _);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private bool IsSecretSet(string name)

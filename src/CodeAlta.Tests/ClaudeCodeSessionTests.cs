@@ -1220,6 +1220,32 @@ public sealed class ClaudeCodeSessionTests
         }
     }
 
+    // On a node of the fleet nobody sits at the machine: the message says where the person signs it in, the page of the machine in
+    // CodeAlta Desktop, never a terminal, and does not say that CodeAlta leaves its credentials alone, since the node keeps its token.
+    [TestMethod]
+    public void SignedOutCli_OnANode_PointsToThePageOfTheMachine()
+    {
+        const string Host = "Sign it in from CodeAlta Desktop: Settings > Fleet > Machines, the page of this machine, Sign in… on its row";
+        var signedOut = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", SignInHintOfHost = Host };
+        var withToken = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", SignInHintOfHost = Host,
+            EnvironmentVariables = new Dictionary<string, string> { ["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-old" } };
+
+        foreach (var sandbox in new[] { true, false })
+        {
+            var plain = ClaudeCodeSession.SignedOutMessage(signedOut, sandbox, "Not logged in · Please run /login");
+            StringAssert.Contains(plain, "not signed in on this machine");
+            StringAssert.Contains(plain, Host);
+            var refused = ClaudeCodeSession.SignedOutMessage(withToken, sandbox, "401 OAuth access token is invalid.");
+            StringAssert.Contains(refused, "refused the token this machine signed it in with");
+            StringAssert.Contains(refused, "sign it in again");
+            foreach (var message in new[] { plain, refused })
+            {
+                Assert.IsFalse(message.Contains("terminal", StringComparison.Ordinal) || message.Contains("does not handle the credentials", StringComparison.Ordinal)
+                    || message.Contains("Keychain", StringComparison.Ordinal), message);
+            }
+        }
+    }
+
     [TestMethod]
     public async Task SignedOutCli_FailsTheTurnWithTheWayToSignIn()
     {

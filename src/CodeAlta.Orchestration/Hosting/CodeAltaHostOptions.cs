@@ -316,6 +316,13 @@ public sealed class CodeAltaHostOptions
     public PluginFrontends PluginFrontend { get; init; }
 
     /// <summary>
+    /// Gets how a person signs in a provider that runs a CLI with its own login on this host, when it is driven from another
+    /// computer (<see cref="CodeAlta.Agent.ModelProviderRegistry.CliSignInHint"/>); null for the terminal command each
+    /// provider names.
+    /// </summary>
+    public string? CliSignInHint { get; init; }
+
+    /// <summary>
     /// Gets built-in plugins to activate as part of shared host composition.
     /// </summary>
     public IReadOnlyList<BuiltInPluginDefinition> PluginBuiltIns { get; init; } = Array.Empty<BuiltInPluginDefinition>();

@@ -47,6 +47,12 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public string? ConfigDirectory { get; init; }
 
     /// <summary>
+    /// Gets or initializes how the person signs Claude Code in where CodeAlta is driven from another computer (a node of the
+    /// fleet), said in place of the terminal command; null for the terminal command.
+    /// </summary>
+    public string? SignInHintOfHost { get; init; }
+
+    /// <summary>
     /// Gets or initializes the variables the CLI is started with besides those CodeAlta inherits (<c>env</c> of the
     /// provider): a token of the account (<c>CLAUDE_CODE_OAUTH_TOKEN</c>) signs it in where its login cannot be read, as
     /// in a sandbox on macOS. A sandbox gives them to the CLI with their values. What CodeAlta sets for the CLI itself
@@ -274,7 +280,8 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// the folder of Claude Code, not the folder of an account of its own.
     /// </summary>
     internal string SignInHint()
-        => ResolveConfigDirectory() is { } folder
+        => SignInHintOfHost is { Length: > 0 } host ? host
+            : ResolveConfigDirectory() is { } folder
             ? $"Start Claude Code with CLAUDE_CONFIG_DIR={folder} in a terminal (the command is in the form of the provider, in Settings > Providers) and sign in with /login"
             : "Run `claude` in a terminal and sign in with /login";
 

@@ -528,6 +528,18 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public async Task Probe_OnANode_SaysWhereTheMachineIsSignedIn()
+    {
+        var cli = new ClaudeCodeFakeCli { SignedIn = false };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions(signInHintOfHost: "Sign it in from the page of this machine"));
+
+        var probe = await runtime.ProbeAsync();
+
+        Assert.AreEqual("claude-code-signed-out", probe.ErrorCategory);
+        Assert.AreEqual("Claude Code is not signed in on this machine. Sign it in from the page of this machine.", probe.StatusMessage);
+    }
+
+    [TestMethod]
     public async Task Probe_AsksAgainAfterASignedOutCli()
     {
         var cli = new ClaudeCodeFakeCli { SignedIn = false };

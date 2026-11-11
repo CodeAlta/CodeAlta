@@ -43,6 +43,8 @@ internal sealed class NodeFleet : IAsyncDisposable
     private readonly FleetDirectListener? _listener;
     private readonly string? _listenerFile;
     private readonly Fleet.ModelServerProviderRefresh _providerModels;
+    // The watch of the configuration file, which applies a provider edited by hand.
+    private IDisposable? _configurationWatch;
 
     private NodeFleet(DeviceIdentity identity, FleetNodeService service, FleetDirectListener? listener, IReadOnlyList<string> addresses, string? listenerFile,
         Fleet.ModelServerProviderRefresh providerModels)
@@ -155,7 +157,9 @@ internal sealed class NodeFleet : IAsyncDisposable
         {
             IReadOnlyList<string> addresses = [];
             var trusted = new TrustedDeviceStore(catalog);
-            var providers = new NodeProviders(node.Host, node.ModelCatalog);
+            var providers = new NodeProviders(node.Host, node.ModelCatalog) { PluginProviderTypes = node.PluginProviderTypes };
+            // The programs the providers run follow the versions this release of CodeAlta pins, in the background.
+            _ = providers.FollowPinnedVersionsAsync(CancellationToken.None);
             service = new FleetNodeService(new FleetNodeServiceOptions
             {
                 Host = node.Host, Identity = identity, TrustedDevices = trusted, Name = name, Version = version,
@@ -204,7 +208,9 @@ internal sealed class NodeFleet : IAsyncDisposable
             // The moves this node took and a stop left unfinished end by its own decisions: a committed one is installed,
             // one never committed is undone. Those it gave away wait for the device that drove them to come back.
             _ = RecoverMovesAsync(service);
-            return new NodeFleet(identity, service, listener, addresses, file, new Fleet.ModelServerProviderRefresh(node.Host, modelServers));
+            var fleet = new NodeFleet(identity, service, listener, addresses, file, new Fleet.ModelServerProviderRefresh(node.Host, modelServers));
+            fleet._configurationWatch = providers.WatchConfiguration();
+            return fleet;
         }
         catch
         {
@@ -268,6 +274,7 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <returns>A task that completes once they stopped.</returns>
     public async ValueTask DisposeAsync()
     {
+        _configurationWatch?.Dispose();
         await _providerModels.DisposeAsync().ConfigureAwait(false);
         if (_listenerFile is not null)
         {

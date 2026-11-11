@@ -120,6 +120,18 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a paired device that manages the node: waits a while for the sign-in of a provider to end.</summary>
     public const string ControlProvidersSignInWait = "control.providers.signin.wait";
 
+    /// <summary>The owner's local control, or a device that manages the node: the providers it can add, with the program each runs there.</summary>
+    public const string ControlProvidersOffers = "control.providers.offers";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: adds a provider it offers, installing the program it runs first.</summary>
+    public const string ControlProvidersAdd = "control.providers.add";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: updates the program a provider runs.</summary>
+    public const string ControlProvidersUpdate = "control.providers.update";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: waits a while for an addition or an update of a provider to end.</summary>
+    public const string ControlProvidersOperationWait = "control.providers.operation.wait";
+
     /// <summary>The owner's local control, or a paired device that manages the node: what the node signs in (providers, MCP servers, tools) and how each stands.</summary>
     public const string ControlSignInsList = "control.signins.list";
 
@@ -1163,6 +1175,11 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetProviderSignInPrompt))]
 [JsonSerializable(typeof(FleetProviderSignInState))]
 [JsonSerializable(typeof(FleetProviderSignInWaitParams))]
+[JsonSerializable(typeof(FleetProviderOffersParams))]
+[JsonSerializable(typeof(FleetProviderOfferList))]
+[JsonSerializable(typeof(FleetProviderAddParams))]
+[JsonSerializable(typeof(FleetProviderOperationState))]
+[JsonSerializable(typeof(FleetProviderOperationWaitParams))]
 [JsonSerializable(typeof(FleetNodeServiceStatus))]
 [JsonSerializable(typeof(FleetMachineSignInList))]
 [JsonSerializable(typeof(FleetMachineSignInItem))]

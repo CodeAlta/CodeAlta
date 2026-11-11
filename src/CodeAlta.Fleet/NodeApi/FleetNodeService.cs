@@ -659,7 +659,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         }
 
         if (access.PairedOnly && _trusted.FindTrusted(caller.Fingerprint) is null)
-            throw new FleetException(FleetErrorCodes.Forbidden, null, "Only a device paired with the node may do this.");
+            throw new FleetException(FleetErrorCodes.Forbidden, null, "Only a computer paired with this machine may do this, not one that reaches it through a server: run altanode pair --manage on the machine, then pair this computer with the link.");
         return device;
     }
 

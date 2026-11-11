@@ -118,6 +118,7 @@ internal sealed class NodeApplication
                     devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync)
                     { Secrets = new NodeSecretCommands(_output, _error, Console.In).RunAsync, Labels = new NodeLabelCommands(_output, _error).RunAsync,
                         Limits = new NodeLimitCommands(_output, _error).RunAsync,
+                        Providers = new NodeProviderCommands(_output, _error, Console.In) { Stop = ClientStop }.RunAsync,
                       Llama = new NodeLlamaCommands(_output, _error) { Stop = ClientStop }.RunAsync,
                       PermissionMode = new NodePermissionModeCommands(_output, _error).RunAsync, Agents = agents.RunAsync })
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);

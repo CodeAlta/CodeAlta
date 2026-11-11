@@ -8,9 +8,10 @@ import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { managementProblem } from "./machineManagement";
 import { signInKindLabel, signInProblem, signInStateIntent, signInStateLabel } from "./signInStates";
+import { SignInPageLink, signInPageOpener } from "./SignInPageLink";
 
 /** The calls of the sign-ins of a machine. */
-export type MachineSignInsApi = Pick<typeof machines, "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut">;
+export type MachineSignInsApi = Pick<typeof machines, "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut"> & Partial<Pick<typeof machines, "openSignInPage">>;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -52,10 +53,13 @@ export function MachineSignIns({ epoch, machine, api = machines }: { epoch: stri
   if (!view && !problem) return null;
   if (problem?.key === "The machine could not do it." && !view) return null;
   const items = view?.items ?? [];
+  // A machine reached through a server only lets a computer paired with it sign it in: the buttons say so before the click.
+  const paired = machine.paired;
   return <section className="machine-section machine-signins-section" aria-label={t("Sign-ins")}>
     <div className="machine-section-head"><h2>{t("Sign-ins")}</h2></div>
     <p className="muted-text">{t("What {name} signs in to by itself: its providers and its MCP servers. The page opens in the browser of this computer; the tokens stay on {name}.", { name: machine.name })}</p>
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {view && !paired && items.length > 0 && <Callout compact intent="primary" className="machine-paired-only">{t("Only a computer paired with {name} signs it in. To do it from this one, run altanode pair --manage on {name}, then paste the link in Pair a machine… here.", { name: machine.name })}</Callout>}
     {view && items.length === 0 && <p className="muted-text">{t("Nothing of {name} signs in from here.", { name: machine.name })}</p>}
     {items.length > 0 && <ul className="machine-providers machine-signins">{items.map(item => {
       const id = `${item.kind}:${item.key}`;
@@ -70,9 +74,9 @@ export function MachineSignIns({ epoch, machine, api = machines }: { epoch: stri
         </span>
         <span className="machine-provider-actions">
           {busy === id && <ActivitySpinner size={14} />}
-          {!signedIn && item.ways.length > 0 && <Button size="small" intent="primary" icon={<AppIcon name="shield" size={13} />} text={t("Sign in…")} disabled={busy !== null}
+          {!signedIn && item.ways.length > 0 && <Button size="small" intent="primary" icon={<AppIcon name="shield" size={13} />} text={t("Sign in…")} disabled={busy !== null || !paired}
             onClick={() => setSigningIn(item)} />}
-          {signedIn && item.kind !== "cli" && <Button size="small" text={t("Sign out")} disabled={busy !== null} onClick={() => void signOut(item)} />}
+          {signedIn && item.kind !== "cli" && <Button size="small" text={t("Sign out")} disabled={busy !== null || !paired} onClick={() => void signOut(item)} />}
         </span>
       </li>;
     })}</ul>}
@@ -85,7 +89,7 @@ export function MachineSignIns({ epoch, machine, api = machines }: { epoch: stri
  * machine waits for the service), a device code shows here with Copy, the page shows a code that is pasted here, or a value the
  * machine keeps as a secret (an API key) is typed here. The dialog follows the machine until it ends.
  */
-function SignInDialog({ epoch, machine, api, item, onClose }: {
+export function SignInDialog({ epoch, machine, api, item, onClose }: {
   epoch: string; machine: MachineView; api: MachineSignInsApi; item: MachineSignInItemView; onClose: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -95,6 +99,7 @@ function SignInDialog({ epoch, machine, api, item, onClose }: {
   const [problem, setProblem] = useState<Problem>(null);
   const [code, setCode] = useState("");
   const [sending, setSending] = useState(false);
+  const open = signInPageOpener(epoch, api.openSignInPage ? { openSignInPage: api.openSignInPage } : undefined);
   useEffect(() => {
     const abort = new AbortController();
     let attempt: string | null = null;
@@ -150,16 +155,16 @@ function SignInDialog({ epoch, machine, api, item, onClose }: {
       {state === "starting" && <p className="muted-text"><ActivitySpinner size={14} /> {t("{machine} starts the sign-in…", { machine: machine.name })}</p>}
       {state === "waiting" && (prompt?.way === "browser" || prompt?.way === "page") && <Callout compact intent="primary" role="status" icon={<ActivitySpinner size={16} />}>
         <p>{t("Finish the sign-in in the browser that opened on this computer.")}</p>
-        {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{prompt.page}</a></div>}
+        {prompt.page && <SignInPageLink url={prompt.page} open={open} />}
       </Callout>}
       {state === "waiting" && prompt?.way === "device" && <Callout compact intent="primary" role="status" icon={<ActivitySpinner size={16} />} className="machine-provider-code">
         <p>{t("Open this page in your browser and enter the code:")}</p>
-        {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{prompt.page}</a></div>}
+        {prompt.page && <SignInPageLink url={prompt.page} open={open} />}
         {prompt.userCode && <Copyable code value={prompt.userCode} label={t("Copy code")} />}
       </Callout>}
       {state === "waiting" && prompt?.way === "code" && <Callout compact intent="primary" role="status">
-        <p>{t("Open this page, then paste the code it shows:")}</p>
-        {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{prompt.page}</a></div>}
+        <p>{t("Sign in on the page that opened in your browser, then paste the code it shows:")}</p>
+        {prompt.page && <SignInPageLink url={prompt.page} open={open} />}
         <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void sendCode(); }}>
           <InputGroup value={code} disabled={sending} autoComplete="off" spellCheck={false} aria-label={t("Code")} onChange={event => setCode(event.target.value)}
             rightElement={<Button size="small" intent="primary" disabled={sending || !code.trim()} text={t("Send")} onClick={() => void sendCode()} />} />
@@ -167,7 +172,7 @@ function SignInDialog({ epoch, machine, api, item, onClose }: {
       </Callout>}
       {state === "waiting" && prompt?.way === "secret" && <Callout compact intent="primary" role="status" className="machine-signin-secret">
         <p>{t("Type it here: {machine} keeps it as a secret, and it never comes back to this computer.", { machine: machine.name })}</p>
-        {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{t("Where to get it")}</a></div>}
+        {prompt.page && <SignInPageLink url={prompt.page} label={t("Where to get it")} open={open} />}
         <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void sendCode(); }}>
           <InputGroup type="password" value={code} disabled={sending} autoComplete="off" spellCheck={false} aria-label={prompt.ask ?? name} placeholder={prompt.ask ?? undefined}
             onChange={event => setCode(event.target.value)}

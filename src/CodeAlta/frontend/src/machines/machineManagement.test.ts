@@ -14,6 +14,9 @@ test("a provider the machine skipped says why, with the secret or the variable i
   assert.deepEqual(providerProblem(provider()), { key: "It has no key." });
   assert.deepEqual(providerProblem(provider({ reason: "sign_in_needed", credential: "sign_in" })), { key: "It is not signed in on the machine." });
   assert.deepEqual(providerProblem(provider({ state: "failed", reason: "start_failed", detail: "401 Unauthorized" })), { key: "It did not start: {detail}", values: { detail: "401 Unauthorized" } });
+  // A provider the node has not applied yet says so; one its configuration cannot start says that, never that a log says why.
+  assert.deepEqual(providerProblem(provider({ reason: "pending", credential: "cli" })), { key: "The machine has not applied it yet: it does in a moment." });
+  assert.deepEqual(providerProblem(provider({ reason: "skipped", credential: "cli" })), { key: "The machine cannot start it with its configuration." });
   assert.equal(providerProblem(provider({ state: "ready", reason: null })), null);
   assert.equal(providerProblem(provider({ state: "preparing", reason: null })), null);
   assert.equal(providerState(provider({ state: "something new" })), "not_ready");

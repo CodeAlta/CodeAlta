@@ -130,8 +130,41 @@ const api: MachinePageApi = {
     providerList = providerList.map(provider => provider.key === request.key ? { ...provider, state: "ready", reason: null } : provider);
     return { status: "completed", account: "octocat", code: null };
   },
+  // What the machine can add: Claude Code it installs, Codex CLI and an ACP agent of its plugins, a subscription, APIs, a model server.
+  providerOffers: async () => ({ status: "ok", message: null, error: null, offers: [
+    { id: "claude-code", type: "claude-code", name: "Claude Code", group: "agent", credential: "cli", signIn: false, description: "Anthropic's agent.", icon: null,
+      program: { state: "missing", version: "2.1.322", update: null, detail: null }, unavailable: null, catalog: null, configuredKey: null },
+    { id: "codex-cli:codex-cli", type: "codex-cli", name: "Codex CLI", group: "agent", credential: "cli", signIn: false, description: "OpenAI's Codex agent.", icon: null,
+      program: { state: "missing", version: "0.130.0", update: null, detail: null }, unavailable: null, catalog: "Codex CLI", configuredKey: null },
+    { id: "acp:gemini", type: "acp", name: "Gemini CLI", group: "agent", credential: "cli", signIn: false, description: "Google's agent.", icon: null,
+      program: { state: "runner", version: "0.9.0", update: null, detail: "npx" }, unavailable: "Node.js is not installed on the machine.", catalog: "ACP registry", configuredKey: null },
+    { id: "copilot", type: "copilot", name: "GitHub Copilot", group: "subscription", credential: "sign_in", signIn: true, description: null, icon: null, program: null, unavailable: null,
+      catalog: null, configuredKey: "copilot" },
+    { id: "anthropic", type: "anthropic", name: "Anthropic", group: "key", credential: "key", signIn: false, description: null, icon: null, program: null, unavailable: null, catalog: null,
+      configuredKey: null },
+    { id: "llama-cpp", type: "llama-cpp", name: "llama.cpp", group: "local", credential: "none", signIn: false, description: null, icon: null, program: null, unavailable: null, catalog: null,
+      configuredKey: null },
+  ] }),
+  // Claude Code is downloaded by the machine (one wait), then written: not signed in yet, with the sign-in of the machine to make.
+  addProvider: async request => {
+    calls.push(JSON.stringify({ addProvider: request.offerId }));
+    operationWaits = 0;
+    return { status: "ok", message: null, id: "op1", state: "running", fraction: 0, key: null };
+  },
+  providerOperationWait: async () => {
+    if (++operationWaits < 2) { await new Promise(resolve => setTimeout(resolve, 600)); return { status: "ok", message: "Claude Code 2.1.322 is being downloaded…", id: "op1", state: "running", fraction: 0.5, key: null }; }
+    if (!providerList.some(provider => provider.key === "claude-code")) providerList = [...providerList, { key: "claude-code", name: "Claude Code", type: "claude-code", enabled: true,
+      state: "failed", reason: "start_failed", detail: "Claude Code is not signed in on this machine.", credential: "cli", keySecret: null, signIn: false, isDefault: false, model: null,
+      apiUrl: null, program: { state: "installed", version: "2.1.322", update: null, detail: "/home/me/.alta/cache/claude-code/2.1.322/linux-x64/claude" }, icon: null }];
+    claudeAdded = true;
+    await new Promise(resolve => setTimeout(resolve, 600));
+    return { status: "ok", message: null, id: "op1", state: "completed", fraction: null, key: "claude-code" };
+  },
+  updateProvider: async request => { calls.push(JSON.stringify({ updateProvider: request.key })); return { status: "ok", message: null, id: "op2", state: "completed", fraction: null, key: request.key }; },
   // Codex signs in with the browser of this computer and its callback, Mistral Vibe on a page the machine waits on; each ends at its second wait.
   signIns: async () => ({ status: "ok", message: null, items: [
+    ...(claudeAdded ? [{ kind: "provider", key: "claude-code", space: null, title: "Claude Code", state: signedIn.has("claude") ? "signed_in" : "unknown", account: null,
+      expiresAt: null, ways: ["code"], detail: null }] : []),
     { kind: "provider", key: "codex", space: null, title: "Codex", state: signedIn.has("codex") ? "signed_in" : "signed_out", account: signedIn.has("codex") ? "me@example.com" : null,
       expiresAt: null, ways: ["browser"], detail: null },
     { kind: "provider", key: "vibe", space: null, title: "Mistral Vibe", state: signedIn.has("vibe") ? "signed_in" : "signed_out", account: null, expiresAt: null,
@@ -145,6 +178,8 @@ const api: MachinePageApi = {
   signInStart: async request => {
     calls.push(JSON.stringify({ signInStart: [request.kind, request.key] }));
     signInWaits = 0;
+    if (request.key === "claude-code") return { status: "ok", message: null, attemptId: "claude", way: "code", page: "https://claude.com/cai/oauth/authorize?code=true&state=s1",
+      userCode: null, ask: null, expiresAt: "2026-11-07T15:00:00Z" };
     if (request.key === "agent") return { status: "ok", message: null, attemptId: "agent", way: "secret", page: "https://platform.example.com/api-keys", userCode: null,
       ask: "API key (OPENAI_API_KEY)", expiresAt: "2026-11-07T15:00:00Z" };
     return request.key === "vibe"
@@ -154,9 +189,9 @@ const api: MachinePageApi = {
   },
   signInWait: async request => {
     // A key ends its sign-in once it is typed, not before.
-    if (request.attemptId === "agent") {
+    if (request.attemptId === "agent" || request.attemptId === "claude") {
       await new Promise(resolve => setTimeout(resolve, 300));
-      return signedIn.has("agent") ? { status: "completed", account: null, code: null, message: null } : { status: "waiting", account: null, code: null, message: null };
+      return signedIn.has(request.attemptId) ? { status: "completed", account: null, code: null, message: null } : { status: "waiting", account: null, code: null, message: null };
     }
     if (++signInWaits < 2) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null, message: null }; }
     signedIn.add(request.attemptId);
@@ -165,6 +200,8 @@ const api: MachinePageApi = {
   // What is typed goes to the machine; the page records only that it was sent.
   signInCode: async request => { calls.push(JSON.stringify({ signInCode: request.attemptId })); signedIn.add(request.attemptId); return { status: "completed", account: null, code: null, message: null }; },
   signInCancel: async () => ({ status: "failed", account: null, code: "canceled", message: null }),
+  // A link of a sign-in dialog opens through the host: the page records the address it asked to open.
+  openSignInPage: async request => { calls.push(JSON.stringify({ openPage: request.url })); return { status: "ok" }; },
   signOut: async request => { calls.push(JSON.stringify({ signOut: [request.kind, request.key] })); return { status: "ok", item: null, message: null }; },
   labels: async () => ({ status: "ok", message: null, labels: [...labels] }),
   setLabels: async request => { calls.push(JSON.stringify({ labels: request.labels })); labels = [...request.labels]; return { status: "ok", message: null }; },
@@ -172,6 +209,8 @@ const api: MachinePageApi = {
 };
 let labels: string[] = ["gpu"];
 let signInWaits = 0;
+let operationWaits = 0;
+let claudeAdded = false;
 const signedIn = new Set<string>();
 let providerList: MachineProviderStatusView[] = [
   { key: "codex", name: "Codex", type: "codex", enabled: true, state: "ready", reason: null, detail: null, credential: "sign_in", keySecret: null, signIn: false, isDefault: true,
@@ -198,6 +237,8 @@ function Fixture() {
       // Paired before this computer had a server: not on it yet, so the person's other computers do not see it.
       : shown === "joinable" ? { ...machine("managed", "build-box", ["view", "drive", "start", "manage"]), serversToJoin: [{ linkId: "home", name: "Home" }] }
       : shown === "other-joinable" ? { ...machine("other", "mac-mini", ["view", "drive", "start"]), serversToJoin: [{ linkId: "home", name: "Home" }] }
+      // A machine this computer manages through the relay of the server: it sees its providers and sign-ins, and gives none.
+      : shown === "managed-relayed" ? { ...machine("managed", "build-box", ["view", "drive", "start", "manage"]), paired: false, channel: "relayed" }
       // A node of the owner's organization this computer reaches through the relay of the server: it has no pairing of its own.
       : shown === "relayed" ? { ...machine("relayed", "pc-ai", ["view", "drive", "start"]), paired: false, channel: "relayed" }
       : machine("other", "mac-mini", ["view", "drive", "start"])}

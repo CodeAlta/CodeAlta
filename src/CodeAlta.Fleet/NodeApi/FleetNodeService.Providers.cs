@@ -23,6 +23,59 @@ public sealed partial class FleetNodeService
             FleetNodeJsonContext.Default.FleetProviderSignInPrompt, ControlStartProviderSignInAsync);
         On(caller, FleetNodeMethods.ControlProvidersSignInWait, change, FleetNodeJsonContext.Default.FleetProviderSignInWaitParams,
             FleetNodeJsonContext.Default.FleetProviderSignInState, ControlWaitProviderSignInAsync);
+        On(caller, FleetNodeMethods.ControlProvidersOffers, read, FleetNodeJsonContext.Default.FleetProviderOffersParams,
+            FleetNodeJsonContext.Default.FleetProviderOfferList, ControlListProviderOffersAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlProvidersAdd, change, FleetNodeJsonContext.Default.FleetProviderAddParams,
+            FleetNodeJsonContext.Default.FleetProviderOperationState, ControlAddProviderAsync);
+        On(caller, FleetNodeMethods.ControlProvidersUpdate, change, FleetNodeJsonContext.Default.FleetProviderRef,
+            FleetNodeJsonContext.Default.FleetProviderOperationState, ControlUpdateProviderAsync);
+        On(caller, FleetNodeMethods.ControlProvidersOperationWait, change, FleetNodeJsonContext.Default.FleetProviderOperationWaitParams,
+            FleetNodeJsonContext.Default.FleetProviderOperationState, ControlWaitProviderOperationAsync);
+    }
+
+    private Task<FleetProviderOfferList> ControlListProviderOffersAsync(FleetNodeCall call, FleetProviderOffersParams parameters, CancellationToken cancellationToken)
+        => Providers.ListOffersAsync(parameters.Refresh, cancellationToken);
+
+    private async Task<FleetProviderOperationState> ControlAddProviderAsync(FleetNodeCall call, FleetProviderAddParams parameters, CancellationToken cancellationToken)
+    {
+        if (parameters.OfferId is not { Length: > 0 and <= 256 } || parameters.Key is { } key && !IsProviderKey(key))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "The offer is not valid: an identifier of at most 256 characters, and a key of letters, digits, - and _.");
+        var setBy = SecretsActor(call);
+        try
+        {
+            var state = await Providers.StartAddAsync(parameters, setBy, cancellationToken).ConfigureAwait(false);
+            LogInfo($"{setBy} adds the provider of the offer {parameters.OfferId}.");
+            return state;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException)
+        {
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, exception.Message.Split(" (Parameter", 2)[0]);
+        }
+    }
+
+    private async Task<FleetProviderOperationState> ControlUpdateProviderAsync(FleetNodeCall call, FleetProviderRef parameters, CancellationToken cancellationToken)
+    {
+        if (!IsProviderKey(parameters.Key)) throw new FleetException(FleetErrorCodes.InvalidParams, null, "A provider key is letters, digits, - and _.");
+        try
+        {
+            var state = await Providers.StartUpdateAsync(parameters.Key, cancellationToken).ConfigureAwait(false);
+            LogInfo($"{SecretsActor(call)} updates the provider {parameters.Key}.");
+            return state;
+        }
+        catch (KeyNotFoundException exception)
+        {
+            throw new FleetException(FleetNodeErrorCodes.ProviderNotFound, null, exception.Message);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException)
+        {
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, exception.Message.Split(" (Parameter", 2)[0]);
+        }
+    }
+
+    private Task<FleetProviderOperationState> ControlWaitProviderOperationAsync(FleetNodeCall call, FleetProviderOperationWaitParams parameters, CancellationToken cancellationToken)
+    {
+        if (parameters.Id is not { Length: > 0 and <= 64 }) throw new FleetException(FleetErrorCodes.InvalidParams, null, "An operation is named by an identifier of at most 64 characters.");
+        return Providers.WaitOperationAsync(parameters.Id, TimeSpan.FromSeconds(Math.Clamp(parameters.WaitSeconds, 0, 25)), cancellationToken);
     }
 
     private IFleetNodeProviders Providers => _options.Providers

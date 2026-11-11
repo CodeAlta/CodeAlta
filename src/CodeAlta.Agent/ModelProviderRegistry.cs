@@ -31,6 +31,13 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public string? Application { get; init; }
 
     /// <summary>
+    /// Gets or initializes how a person signs in a provider registered here that runs a CLI with its own login, when this host
+    /// is driven from another computer (a node of the fleet): a sentence that replaces the terminal command a provider names
+    /// otherwise. Null for a host whose person sits at this computer.
+    /// </summary>
+    public string? CliSignInHint { get; init; }
+
+    /// <summary>
     /// Gets or sets what is told each value of a secret given to a provider registered here (its key, a variable of its CLI)
     /// before the provider gets it: the masking of the host, which masks it from then on, whatever the store keeps of it later.
     /// Null tells nothing.

@@ -215,6 +215,8 @@ public sealed class NodeHost : IAsyncDisposable
             // declare the command-line application.
             StartPlugins = options.StartPlugins,
             PluginFrontend = PluginFrontends.Cli,
+            // Nobody sits at a node: its providers are signed in from the page of the machine in CodeAlta Desktop.
+            CliSignInHint = "Sign it in from CodeAlta Desktop: Settings > Fleet > Machines, the page of this machine, Sign in… on its row",
             PluginBuiltIns = NodeBuiltInPlugins.For(catalog),
             ModelServerTransports = options.ModelServerTransports,
             RawArguments = [],

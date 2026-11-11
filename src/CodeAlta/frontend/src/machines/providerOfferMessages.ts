@@ -1,0 +1,46 @@
+// The words of the providers a machine can add (Settings > Fleet > Machines > a machine > Add a provider…), and of the programs
+// its providers run, in the five languages after English (es, fr, de, ja, zh-CN), merged into the dictionary of `localization.ts`.
+// English is the key.
+type Row = readonly [string, string, string, string, string];
+
+export const machineProviderOfferMessages = {
+  "{machine} has no provider ready to run it.": ["{machine} no tiene ningún proveedor listo para ejecutarla.", "{machine} n’a aucun fournisseur prêt pour l’exécuter.",
+    "{machine} hat keinen Anbieter, der sie ausführen kann.", "{machine} には実行できるプロバイダーがありません。", "{machine} 没有可运行它的提供方。"],
+  "Set up a provider on {machine}…": ["Configurar un proveedor en {machine}…", "Configurer un fournisseur sur {machine}…", "Einen Anbieter auf {machine} einrichten…",
+    "{machine} にプロバイダーを設定…", "在 {machine} 上设置提供方…"],
+  "The configuration file of {name} has an error since it was last changed: its providers run as before until it is fixed.": [
+    "El archivo de configuración de {name} tiene un error desde su último cambio: sus proveedores siguen como antes hasta que se corrija.",
+    "Le fichier de configuration de {name} contient une erreur depuis sa dernière modification : ses fournisseurs tournent comme avant jusqu’à ce qu’elle soit corrigée.",
+    "Die Konfigurationsdatei von {name} enthält seit der letzten Änderung einen Fehler: Ihre Anbieter laufen wie bisher, bis er behoben ist.",
+    "{name} の設定ファイルは前回の変更以降エラーがあります。修正されるまでプロバイダーは以前のまま動作します。",
+    "{name} 的配置文件自上次修改后存在错误：在修复之前，其提供方按原样运行。"],
+  "Filter the providers": ["Filtrar los proveedores", "Filtrer les fournisseurs", "Anbieter filtern", "プロバイダーを絞り込む", "筛选提供方"],
+  "{machine} lists what it can run…": ["{machine} enumera lo que puede ejecutar…", "{machine} liste ce qu’elle peut exécuter…", "{machine} listet auf, was sie ausführen kann…",
+    "{machine} が実行できるものを一覧にしています…", "{machine} 正在列出它可以运行的内容…"],
+  "No provider matches.": ["Ningún proveedor coincide.", "Aucun fournisseur ne correspond.", "Kein Anbieter passt.", "一致するプロバイダーはありません。", "没有匹配的提供方。"],
+  "{machine} adds {name}…": ["{machine} añade {name}…", "{machine} ajoute {name}…", "{machine} fügt {name} hinzu…", "{machine} が {name} を追加しています…", "{machine} 正在添加 {name}…"],
+  "{name} could not be added.": ["No se pudo añadir {name}.", "{name} n’a pas pu être ajouté.", "{name} konnte nicht hinzugefügt werden.", "{name} を追加できませんでした。", "无法添加 {name}。"],
+  "Agents that run on the machine": ["Agentes que se ejecutan en la máquina", "Agents qui tournent sur la machine", "Agenten, die auf der Maschine laufen", "マシン上で動くエージェント", "在该机器上运行的代理"],
+  "Subscriptions": ["Suscripciones", "Abonnements", "Abonnements", "サブスクリプション", "订阅"],
+  "APIs with a key": ["API con clave", "API avec une clé", "APIs mit Schlüssel", "キーを使う API", "使用密钥的 API"],
+  "Takes an API key": ["Usa una clave de API", "Prend une clé d’API", "Nimmt einen API-Schlüssel", "API キーを使います", "使用 API 密钥"],
+  "Runs on a model server of the machine": ["Se ejecuta en un servidor de modelos de la máquina", "Tourne sur un serveur de modèles de la machine", "Läuft auf einem Modellserver der Maschine",
+    "マシンのモデルサーバーで動きます", "在该机器的模型服务器上运行"],
+  "Needs nothing": ["No necesita nada", "N’a besoin de rien", "Braucht nichts", "何も必要ありません", "无需任何设置"],
+  "Signs in with its own account": ["Inicia sesión con su propia cuenta", "Se connecte avec son propre compte", "Meldet sich mit einem eigenen Konto an", "自身のアカウントでサインインします",
+    "使用其自己的账户登录"],
+  "Signs in with an account": ["Inicia sesión con una cuenta", "Se connecte avec un compte", "Meldet sich mit einem Konto an", "アカウントでサインインします", "使用账户登录"],
+  "Version {version} is installed": ["La versión {version} está instalada", "La version {version} est installée", "Version {version} ist installiert", "バージョン {version} がインストール済みです",
+    "已安装版本 {version}"],
+  "Found on the machine": ["Encontrado en la máquina", "Trouvé sur la machine", "Auf der Maschine gefunden", "マシン上で見つかりました", "已在该机器上找到"],
+  "Installs version {version}": ["Instala la versión {version}", "Installe la version {version}", "Installiert Version {version}", "バージョン {version} をインストールします", "安装版本 {version}"],
+  "Installs it": ["Lo instala", "L’installe", "Installiert es", "インストールします", "会安装它"],
+  "Runs with {runner}": ["Se ejecuta con {runner}", "Tourne avec {runner}", "Läuft mit {runner}", "{runner} で動きます", "通过 {runner} 运行"],
+  "Version {version}, installed by the machine": ["Versión {version}, instalada por la máquina", "Version {version}, installée par la machine", "Version {version}, von der Maschine installiert",
+    "バージョン {version}（マシンがインストール）", "版本 {version}，由该机器安装"],
+  "Installed by the machine": ["Instalado por la máquina", "Installé par la machine", "Von der Maschine installiert", "マシンがインストールしました", "由该机器安装"],
+  "Runs {path}": ["Ejecuta {path}", "Exécute {path}", "Führt {path} aus", "{path} を実行します", "运行 {path}"],
+  "Not installed on the machine": ["No está instalado en la máquina", "Pas installé sur la machine", "Nicht auf der Maschine installiert", "マシンにインストールされていません", "未安装在该机器上"],
+  "It cannot run there: {detail}": ["No puede ejecutarse allí: {detail}", "Il ne peut pas tourner là : {detail}", "Er kann dort nicht laufen: {detail}", "そこでは動きません: {detail}", "无法在那里运行：{detail}"],
+  "It cannot run there.": ["No puede ejecutarse allí.", "Il ne peut pas tourner là.", "Er kann dort nicht laufen.", "そこでは動きません。", "无法在那里运行。"],
+} as const satisfies Record<string, Row>;

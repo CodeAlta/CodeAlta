@@ -600,6 +600,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     PluginFrontends.Cli => "cli",
                     _ => null,
                 },
+                CliSignInHint = options.CliSignInHint,
             };
             // The secrets kept in vaults are read before the providers are registered, without a prompt and within a time limit:
             // the providers, the MCP servers and the shells of the sessions are given them from the memory of the broker.

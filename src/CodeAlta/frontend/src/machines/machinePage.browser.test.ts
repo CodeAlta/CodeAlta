@@ -82,14 +82,19 @@ test("the computer that manages a machine sees why each provider is not ready, g
     // Copilot signs in with a code: the machine gives it, the page shows it with Copy, and follows the machine until it is signed in.
     await page.clickText(`${section} .bp6-button`, "Sign in…");
     await page.until(`document.querySelector('.machine-provider-signin-dialog .provider-account-code code')?.textContent === 'WDJB-MJHT'`, "the code");
+    // Its page opens in the browser of this computer through the host: the window never navigates, nor opens a window of its own.
+    await page.evaluate(`document.querySelector('.machine-provider-signin-dialog .machine-provider-code-row a').click()`);
+    await page.until(`window.machineFixture.calls.some(call => call.includes('"openPage":"https://github.com/login/device"'))`, "the page opened by the host");
     await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('signed in on build-box as octocat')`, "signed in");
     await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
     await page.until(`document.querySelector('${section} li:nth-child(3)')?.dataset.state === 'ready'`, "Copilot ready");
 
-    // A new provider: its type, its key.
+    // A new provider: its type chosen in the picker, by its icon and name; its key in its form.
     await page.clickText(`${section} .bp6-button`, "Add a provider…");
-    await page.until(`document.querySelector('.machine-provider-dialog select')`, "the type");
-    await page.evaluate(choose(".machine-provider-dialog select", "anthropic"));
+    await page.until(`document.querySelector('.machine-provider-picker [data-offer="anthropic"] button')`, "the picker");
+    await page.evaluate(`document.querySelector('.machine-provider-picker [data-offer="anthropic"] button').click()`);
+    await page.until(`document.querySelector('.machine-provider-dialog input[type=password]')`, "its key");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.machine-provider-dialog select').length`), 0, "the type is the one chosen");
     await page.evaluate(type(".machine-provider-dialog input[type=password]", "sk-ant-1"));
     await page.clickText(".machine-provider-dialog .bp6-button", "Add");
     await page.until(`document.querySelectorAll('${section} li').length === 4`, "the new provider");
@@ -100,6 +105,64 @@ test("the computer that manages a machine sees why each provider is not ready, g
     assert.deepEqual(asked, [{ setProvider: "openai", type: null, keyGiven: true, makeDefault: false }, { signIn: "copilot" },
       { setProvider: "anthropic", type: "anthropic", keyGiven: true, makeDefault: false }]);
     assert.ok(!JSON.stringify(await calls(page)).includes("sk-"), "the key is never recorded by the page");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the picker of a machine shows each provider with its icon and what it installs, and adds Claude Code in one click, then signs it in", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    const section = ".machine-providers-section";
+    await page.until(`document.querySelectorAll('${section} .machine-providers li').length === 3`, "the providers of the machine");
+    await page.clickText(`${section} .bp6-button`, "Add a provider…");
+    await page.until(`document.querySelectorAll('.machine-provider-picker .machine-offer').length === 6`, "the offers");
+    // Grouped, the agents first; each with an icon, what it needs and what the machine installs.
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.machine-offer-group h3')].map(head => head.textContent)`),
+      ["Agents that run on the machine", "Subscriptions", "APIs with a key", "Model servers"]);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.machine-provider-picker .machine-offer-icon svg, .machine-provider-picker .machine-offer-icon .provider-image-icon').length`), 6,
+      "every provider has an icon");
+    assert.equal(await page.evaluate(`document.querySelector('[data-offer="claude-code"] small').textContent`), "Signs in with its own account · Installs version 2.1.322");
+    assert.equal(await page.evaluate(`document.querySelector('[data-offer="acp:gemini"] button').disabled`), true, "an agent that cannot run there");
+    assert.match(await page.evaluate(`document.querySelector('[data-offer="copilot"]').textContent`) as string, /Added/u);
+    // The filter keeps the words typed.
+    await page.evaluate(type(".machine-provider-picker input", "codex"));
+    await page.until(`document.querySelectorAll('.machine-provider-picker .machine-offer').length === 1`, "the filter");
+    await page.evaluate(type(".machine-provider-picker input", ""));
+    await page.until(`document.querySelectorAll('.machine-provider-picker .machine-offer').length === 6 && !document.querySelector('.bp6-overlay-appear-active, .bp6-overlay-enter-active')`, "the picker settled");
+    await page.shot("machine-provider-picker");
+    await page.evaluate(type(".machine-provider-picker input", ""));
+
+    // Claude Code: the machine downloads it, with its progress, then its sign-in opens at once, its page in the browser of this computer.
+    await page.until(`document.querySelector('.machine-provider-picker [data-offer="claude-code"] button')`, "Claude Code");
+    await page.evaluate(`document.querySelector('.machine-provider-picker [data-offer="claude-code"] button').click()`);
+    await page.until(`document.querySelector('.machine-provider-adding')?.textContent.includes('is being downloaded')`, "the download");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog input[aria-label=Code]')`, "its sign-in");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-provider-signin-dialog [role=status] a')?.getAttribute('href')`), "https://claude.com/cai/oauth/authorize?code=true&state=s1");
+    await page.evaluate(type(".machine-provider-signin-dialog input[aria-label=Code]", "pasted-code"));
+    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Send");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('Claude Code is signed in on build-box.')`, "signed in");
+    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
+    // Its row: the version the machine installed.
+    await page.until(`document.querySelector('${section} [data-provider="claude-code"] .machine-provider-program')?.textContent === 'Version 2.1.322, installed by the machine'`, "its row");
+
+    const asked = (await calls(page)).filter(call => call.addProvider || call.signInStart || call.signInCode)
+      .filter((call, index, all) => !call.signInStart || all.findIndex(other => JSON.stringify(other) === JSON.stringify(call)) === index);
+    assert.deepEqual(asked, [{ addProvider: "claude-code" }, { signInStart: ["provider", "claude-code"] }, { signInCode: "claude" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("a computer that manages a machine through the server sees its providers and sign-ins, gives none, and is told how", { skip: !edge, timeout: testLimit(60_000) }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.machineFixture.show("managed-relayed")`);
+    await page.until(`document.querySelectorAll('.machine-providers-section .machine-providers li').length === 3 && document.querySelectorAll('.machine-signins-section li').length > 0`, "its providers and sign-ins");
+    // Every action that gives the machine a credential waits for a pairing: disabled before the click, with the way to pair.
+    const enabled = await page.evaluate(`[...document.querySelectorAll('.machine-providers-section .bp6-button, .machine-signins-section .bp6-button')]
+      .filter(button => !button.disabled).map(button => button.textContent)`);
+    assert.deepEqual(enabled, []);
+    assert.match(await page.evaluate(`document.querySelector('.machine-providers-section .machine-paired-only').textContent`) as string, /through your server.*altanode pair --manage on build-box/u);
+    assert.match(await page.evaluate(`document.querySelector('.machine-signins-section .machine-paired-only').textContent`) as string, /Only a computer paired with build-box signs it in/u);
+    await page.evaluate(`document.querySelector('.machine-providers-section').scrollIntoView({ block: "nearest" })`);
+    await page.shot("machine-providers-relayed");
     assert.deepEqual(page.problems, []);
   }, options);
 });

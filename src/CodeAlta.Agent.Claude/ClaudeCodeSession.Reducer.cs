@@ -883,8 +883,13 @@ internal sealed partial class ClaudeCodeSession
     // What a turn that failed for the sign-in says: how to sign in. A CLI in a sandbox of macOS cannot read its sign-in,
     // which is in the Keychain: signing in again would change nothing, it needs a token of its own.
     // A token the provider gives is what the CLI signed in with, before its login: that token was refused.
+    // On a node of the fleet the node keeps the token it signed in with: signing in again from the page of the machine replaces it.
     internal static string SignedOutMessage(ClaudeCodeModelProviderRuntimeOptions options, bool sandboxedOnMacOS, string detail)
-        => options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var token) && !string.IsNullOrWhiteSpace(token)
+        => options.SignInHintOfHost is { Length: > 0 } host
+            ? (options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var given) && !string.IsNullOrWhiteSpace(given)
+                ? $"Claude Code refused the token this machine signed it in with: it may have expired or been revoked. {host} to sign it in again, then send the message again. ({detail})"
+                : $"Claude Code is not signed in on this machine. {host}, then send the message again. ({detail})")
+            : options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var token) && !string.IsNullOrWhiteSpace(token)
             ? $"Claude Code refused the token of the provider ({OAuthTokenVariable} in its Environment, Settings > Providers): it may have expired or been revoked. " +
               $"Make a new one with `claude setup-token` in a terminal and replace it, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
             : sandboxedOnMacOS

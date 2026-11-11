@@ -9,7 +9,7 @@ import { welcomeLogo } from "./welcomeLogo";
 
 const noChrome: ComposerChromeValue = {};
 
-export function NewSessionWorkspace({ project, worktree = false, cloud = false, machine = null, preferredHeight, onHeight, chrome, starting, worktreeStatus, children }: {
+export function NewSessionWorkspace({ project, worktree = false, cloud = false, machine = null, machineSetup, preferredHeight, onHeight, chrome, starting, worktreeStatus, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
   /** The next session of the project works in a new git worktree, not in the folder of the project. */
   worktree?: boolean;
@@ -17,6 +17,8 @@ export function NewSessionWorkspace({ project, worktree = false, cloud = false, 
   cloud?: boolean;
   /** The name of the paired machine the next session runs on; null for this computer. */
   machine?: string | null;
+  /** Opens the providers of that machine, when it has none ready: the welcome offers it. */
+  machineSetup?: () => void;
   /** Shown around the composer: the working folder, the MCP status. */
   chrome?: ComposerChromeValue;
   /** A session starts here: what the host does to create it, in the place of the welcome. */
@@ -38,6 +40,8 @@ export function NewSessionWorkspace({ project, worktree = false, cloud = false, 
           : worktree ? t("Next session will start in {project}, in a new git worktree.", { project: project.name })
           : t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
           : t("Ready for a new chat, in no project.")}</p>
+        {machine && machineSetup && <p className="welcome-machine-setup">{t("{machine} has no provider ready to run it.", { machine })}{" "}
+          <button type="button" className="welcome-link" onClick={machineSetup}>{t("Set up a provider on {machine}…", { machine })}</button></p>}
         {worktreeStatus}
         {cloud && project ? <p>{t("Describe the task below and send it to the cloud.")}</p> : <>
         <p>{project ? t("Use the prompt below to start a new session for {project}.", { project: project.name })

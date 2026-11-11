@@ -99,7 +99,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports))
+                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports,
+                    modelProviderRegistry.CliSignInHint))
             {
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
@@ -176,7 +177,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports))
+                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports,
+                    modelProviderRegistry.CliSignInHint))
             {
                 continue;
             }
@@ -252,14 +254,15 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
         ProviderSecretAccess? issued = null,
-        Func<string, HttpMessageHandler?>? modelServerTransports = null)
+        Func<string, HttpMessageHandler?>? modelServerTransports = null,
+        string? cliSignInHint = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(codexSubscriptionConcurrencyLimiter);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
         if (!TryCreateProviderRegistrationOfType(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
-                externalConversationHeaders, providerProcesses, application, out descriptor, out createRuntime, issued, modelServerTransports))
+                externalConversationHeaders, providerProcesses, application, out descriptor, out createRuntime, issued, modelServerTransports, cliSignInHint))
         {
             return false;
         }
@@ -285,7 +288,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
         ProviderSecretAccess? issued,
-        Func<string, HttpMessageHandler?>? modelServerTransports)
+        Func<string, HttpMessageHandler?>? modelServerTransports,
+        string? cliSignInHint)
     {
         switch (definition.ProviderType)
         {
@@ -311,7 +315,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "mistral-vibe":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case ClaudeCodeModelProviderRuntime.ProviderType:
-                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime, issued);
+                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime, issued, cliSignInHint);
             case LlamaCppProviderType:
                 return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued, modelServerTransports);
             default:
@@ -868,7 +872,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         AgentProviderProcesses? providerProcesses,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        ProviderSecretAccess? issued = null)
+        ProviderSecretAccess? issued = null,
+        string? cliSignInHint = null)
     {
         if (ResolveEnvironment(definition, stateRootPath, issued) is not { } environmentVariables)
         {
@@ -887,6 +892,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),
             ConfigDirectory = NormalizeText(definition.ConfigDir),
+            SignInHintOfHost = cliSignInHint,
             EnvironmentVariables = environmentVariables,
             // The state root of the providers is the global root: the CLI CodeAlta pins is in its cache.
             PinnedCliRoot = new CatalogOptions { GlobalRoot = stateRootPath }.ClaudeCodeRoot,
