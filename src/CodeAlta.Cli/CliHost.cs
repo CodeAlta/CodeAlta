@@ -192,8 +192,10 @@ internal sealed class CliHost : IAsyncDisposable
                     pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, includeDisabled: false);
                 },
                 // The policy the organization of a Copilot account of this computer sets narrows every session, full trust
-                // included; a test that gives its own providers, or a run offline, reads none.
-                StartManagedPolicies = environment.ConfigureModelProviders is not null || request.Offline ? null
+                // included; a run offline applies the policy kept from the last reading and reads none, and a test that
+                // gives its own providers has none.
+                StartManagedPolicies = environment.ConfigureModelProviders is not null ? null
+                    : request.Offline ? state => CopilotManagedPolicySource.StartOffline(state, storage.GlobalRoot, new CodeAltaConfigStore(catalog))
                     : state => CopilotManagedPolicySource.Start(state, storage.GlobalRoot, new CodeAltaConfigStore(catalog)),
             }, cancellationToken).ConfigureAwait(false);
             var runtime = host.RuntimeService;

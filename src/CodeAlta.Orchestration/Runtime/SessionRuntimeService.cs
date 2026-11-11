@@ -485,33 +485,76 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private string? ProviderPermissionMode(string? own, string? providerKey)
     {
         if (Governed(NormalizeOptionalText(own), providerKey) is { } mode) return mode;
+        var policy = _managedPolicies.Current;
         var configured = RawConfiguredPermissionMode(providerKey);
-        return _managedPolicies.Current.Refuses(configured) ? Governed(configured, providerKey) : null;
+        if (policy.Refuses(configured)) return Governed(configured, providerKey);
+        // A provider with modes of its own (Claude Code) that is given none starts in the one of its own settings, which
+        // the policy may refuse: under a policy that turns modes off, it is given the mode the host runs the session in.
+        if (configured is null && (policy.BypassPermissionsDisabled || policy.AssistedPermissionsDisabled)
+            && SelectionProviderOf(providerKey) is { PermissionModes.Count: > 0 } provider)
+        {
+            var host = Governed(ModeOrDefaults(null, providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions()), providerKey)!;
+            return provider.PermissionModes.Contains(host, StringComparer.Ordinal) ? host : Runtime.SessionPermissionModes.Ask;
+        }
+
+        return null;
     }
 
-    // A policy that now refuses the mode of an attached session narrows it at once, as a change of its mode by the user
-    // would: its provider is told, and the mode it is saved with no longer asks less than the policy allows.
+    // The policy the attached sessions were last narrowed to, to see what a change tightens.
+    private ManagedPolicy _appliedPolicy = ManagedPolicy.None;
+
+    // A policy that changes the modes narrows the attached sessions at once, as a change of their mode by the user would:
+    // their provider is told, and a run whose provider cannot take a narrower mode during it is stopped. A policy that now
+    // requires the sandbox stops the run of a session it sandboxes and releases its attachment, so that the provider,
+    // which may run its own tools in a process started outside the sandbox, starts again inside it at the next send.
     private void OnManagedPolicyChanged(ManagedPolicy policy)
     {
+        var before = Interlocked.Exchange(ref _appliedPolicy, policy);
+        var modes = before.BypassPermissionsDisabled != policy.BypassPermissionsDisabled || before.AssistedPermissionsDisabled != policy.AssistedPermissionsDisabled
+            || !string.Equals(before.DefaultPermissionMode, policy.DefaultPermissionMode, StringComparison.Ordinal);
+        var confine = policy.SandboxRequired && !before.SandboxRequired;
+        if (!modes && !confine) return;
         foreach (var entry in _entries.Values)
         {
             if (entry.IsTerminated || entry.Attachment.IsRetiring || !HasOwnedCommandDefaults(entry)) continue;
             var own = NormalizeOptionalText(entry.PermissionMode);
-            if (!policy.Refuses(own) && (own is not null || !policy.Refuses(RawConfiguredPermissionMode(entry.ProviderKey)))) continue;
-            _ = NarrowAttachedPermissionModeAsync(entry.SessionId, own);
+            if (modes)
+            {
+                // A mode the session ran in that the policy now refuses stops its run when the provider cannot take another one at once.
+                var refused = policy.Refuses(own) || own is null && policy.Refuses(RawConfiguredPermissionMode(entry.ProviderKey));
+                _ = NarrowAttachedPermissionModeAsync(entry.SessionId, own, abortIfNotApplied: refused);
+            }
+
+            if (confine) _ = ConfineAttachedSessionAsync(entry.SessionId);
         }
     }
 
-    private async Task NarrowAttachedPermissionModeAsync(string sessionId, string? own)
+    private async Task NarrowAttachedPermissionModeAsync(string sessionId, string? own, bool abortIfNotApplied)
     {
         try
         {
-            if (await ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } session)
-                await SetOwnedPermissionModeAsync(session, own).ConfigureAwait(false);
+            if (await ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is not { } session) return;
+            if (!await SetOwnedPermissionModeCoreAsync(session, own).ConfigureAwait(false) && abortIfNotApplied)
+                await AbortAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or SessionInUseException or IOException)
         {
             // The session went away or closes: its next attachment reads its mode under the policy.
+        }
+    }
+
+    // A session the policy now sandboxes ran without the sandbox: its run stops and its attachment is released.
+    private async Task ConfineAttachedSessionAsync(string sessionId)
+    {
+        try
+        {
+            if ((await GetSessionSandboxAsync(sessionId, CancellationToken.None).ConfigureAwait(false)).Choice.Source != CodeAlta.Sandbox.SandboxScope.Organization) return;
+            await AbortAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            await DetachRuntimeSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or SessionInUseException or IOException)
+        {
+            // The session went away or closes: its next attachment runs in the sandbox.
         }
     }
 
@@ -2296,6 +2339,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The permission mode is the one saved with the session: what attaches it does not have to know it. So is
         // how the session titles itself, which is the setting unless the session has a mode of its own.
         var savedLocalState = startNewSession ? null : await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
+        var policyAtAttach = _managedPolicies.Current;
         var permissionMode = Governed(NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode), options.ProviderKey ?? session.ResolvedProviderKey);
         // So is the sandbox chosen for the session; its scopes are read again at each command.
         var ownSandbox = NormalizeOptionalText(startNewSession ? session.Sandbox : savedLocalState?.Sandbox);
@@ -2519,6 +2563,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             _entries[session.SessionId] = entry;
             return ValueTask.FromResult(true);
         }, CancellationToken.None).ConfigureAwait(false);
+        // A policy that arrived while the session attached, before it was published, did not see it: it applies now.
+        if (!string.Equals(ProviderPermissionMode(permissionMode, entry.ProviderKey), sessionOptions.PermissionMode, StringComparison.Ordinal))
+            _ = NarrowAttachedPermissionModeAsync(session.SessionId, permissionMode, abortIfNotApplied: true);
+        if (_managedPolicies.Current.SandboxRequired && !policyAtAttach.SandboxRequired) _ = ConfineAttachedSessionAsync(session.SessionId);
 
         return sessionHandleId;
         }
@@ -2855,8 +2903,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     internal Task SetOwnedPermissionModeAsync(SessionViewDescriptor session, string? permissionMode)
     {
         ArgumentNullException.ThrowIfNull(session);
+        return SetOwnedPermissionModeCoreAsync(session, permissionMode);
+    }
+
+    // Sets the mode as SetOwnedPermissionModeAsync does; false when the session is attached and its provider could not
+    // take the mode at once (it takes it at its next turn).
+    private async Task<bool> SetOwnedPermissionModeCoreAsync(SessionViewDescriptor session, string? permissionMode)
+    {
         permissionMode = Governed(NormalizeOptionalText(permissionMode), session.ResolvedProviderKey);
-        return AdmitAsync(async () =>
+        var applied = true;
+        await AdmitAsync(async () =>
         {
             using var lease = HoldForWrite(session.SessionId);
             while (true)
@@ -2895,31 +2951,34 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 if (transition is null)
                 {
                     // Outside the actor of the session: the provider may take a moment to answer.
-                    await ApplyPermissionModeNowAsync(session.SessionId, attached).ConfigureAwait(false);
+                    applied = await ApplyPermissionModeNowAsync(session.SessionId, attached).ConfigureAwait(false);
                     return;
                 }
                 // Its failure belongs to the one that attaches.
                 await transition.ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).ConfigureAwait(false);
             }
-        }, CancellationToken.None);
+        }, CancellationToken.None).ConfigureAwait(false);
+        return applied;
     }
 
     // What a new mode changes for the requests of a session at once: those that wait for the user and that it grants
     // are allowed, and its attachment is told, so that what its provider decides by itself follows it too, during a
     // run and between runs. A provider that cannot be told takes the mode at its next turn; meanwhile the host answers
     // its requests by it.
-    private async Task ApplyPermissionModeNowAsync(string sessionId, AgentSessionHandleId? attached)
+    // Returns false when the provider could not take the mode at once.
+    private async Task<bool> ApplyPermissionModeNowAsync(string sessionId, AgentSessionHandleId? attached)
     {
         if (_sessionPermissionModes)
             await Permissions.GrantWaitingOwnedAsync(sessionId, GetPermissionPolicy(sessionId)).ConfigureAwait(false);
-        if (attached is not { } handle) return;
+        if (attached is not { } handle) return true;
         try
         {
-            await _agentHub.ApplyPermissionModeNowAsync(handle, CancellationToken.None).ConfigureAwait(false);
+            return await _agentHub.ApplyPermissionModeNowAsync(handle, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or IOException or TimeoutException)
         {
             // The attachment went away meanwhile: the next one reads the saved mode.
+            return true;
         }
     }
 

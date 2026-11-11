@@ -59,7 +59,20 @@ internal sealed class ProviderLoginService
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="stateRoot"/> or <paramref name="epoch"/> is blank.</exception>
     internal ProviderLoginService(CodeAltaConfigStore store, GlobalConfigService configuration, string stateRoot, string epoch)
-        : this(Owned(store, configuration, stateRoot), epoch)
+        : this(Owned(store, configuration, stateRoot, signInChanged: null), epoch)
+    {
+    }
+
+    /// <summary>Creates the service for an owned host that is told when a provider signs in or out.</summary>
+    /// <param name="store">The configuration store of the owned global root.</param>
+    /// <param name="configuration">The configuration service that enables a provider and applies the providers.</param>
+    /// <param name="stateRoot">The global root that holds provider credentials, as the TUI passes it.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="signInChanged">Called with the key of a provider once it signed in or out, as the policy of its account changes with it.</param>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="stateRoot"/> or <paramref name="epoch"/> is blank.</exception>
+    internal ProviderLoginService(CodeAltaConfigStore store, GlobalConfigService configuration, string stateRoot, string epoch, Action<string> signInChanged)
+        : this(Owned(store, configuration, stateRoot, signInChanged ?? throw new ArgumentNullException(nameof(signInChanged))), epoch)
     {
     }
 
@@ -254,16 +267,31 @@ internal sealed class ProviderLoginService
         }
     }
 
-    private static ProviderLoginOperations Owned(CodeAltaConfigStore store, GlobalConfigService configuration, string stateRoot)
+    private static ProviderLoginOperations Owned(CodeAltaConfigStore store, GlobalConfigService configuration, string stateRoot, Action<string>? signInChanged)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
         return new(
             () => store.LoadGlobalProviderDefinitions(includeDisabled: true),
-            (definition, mode, onPrompt, cancellationToken) => ConfiguredProviderLogin.LoginAsync(definition, stateRoot, mode, onPrompt, cancellationToken),
+            async (definition, mode, onPrompt, cancellationToken) =>
+            {
+                try
+                {
+                    return await ConfiguredProviderLogin.LoginAsync(definition, stateRoot, mode, onPrompt, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    signInChanged?.Invoke(definition.ProviderKey);
+                }
+            },
             (definition, cancellationToken) => ConfiguredProviderLogin.GetStatusAsync(definition, stateRoot, cancellationToken),
-            (definition, cancellationToken) => ConfiguredProviderLogin.SignOutAsync(definition, stateRoot, cancellationToken),
+            async (definition, cancellationToken) =>
+            {
+                var removed = await ConfiguredProviderLogin.SignOutAsync(definition, stateRoot, cancellationToken).ConfigureAwait(false);
+                signInChanged?.Invoke(definition.ProviderKey);
+                return removed;
+            },
             key => configuration.EnableProvider(key).Status == "ok",
             OpenBrowser);
     }

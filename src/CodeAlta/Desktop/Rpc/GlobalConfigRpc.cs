@@ -62,6 +62,9 @@ internal sealed partial class GlobalConfigService
     /// <summary>Gets what is done once the text of the file was saved, such as giving the log its new levels; null for nothing.</summary>
     internal Action? Saved { get; init; }
 
+    /// <summary>Gets what is done once the providers were changed and applied from a form (added, changed, removed); null for nothing.</summary>
+    internal Action? ProvidersChanged { get; init; }
+
     /// <summary>
     /// Gets what prepares a provider again once its account was signed in, by its key: a probe that starts after the
     /// sign-in; null for nothing.
@@ -938,6 +941,10 @@ internal sealed partial class GlobalConfigService
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
                 return new("apply_failed", revision, null, null, null, 0);
+            }
+            finally
+            {
+                ProvidersChanged?.Invoke();
             }
         }
     }

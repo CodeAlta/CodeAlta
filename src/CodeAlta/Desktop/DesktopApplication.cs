@@ -1180,7 +1180,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         // The file may change the levels of the log: they are taken at once.
-                        Saved = applicationLogs.Reload,
+                        // A provider added, removed or changed in the file can change the policy that applies.
+                        Saved = () => { applicationLogs.Reload(); _copilotPolicies?.RefreshSoon(); },
+                        ProvidersChanged = () => _copilotPolicies?.RefreshSoon(),
                         SecretChanged = () => host.AgentHub.SecretMasker?.Refresh(),
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
                         Spaces = host.SpaceCatalog,
@@ -1195,7 +1197,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // of the providers that stop are stopped, then the providers are registered again.
                     host.PluginRuntime.Changed += (_, _) => _ = globalConfig.ApplyPluginProviderChangesAsync();
                     builder.AddGlobalConfigService(globalConfig);
-                    providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
+                    // The policy of the organization of a Copilot account is read again once it signs in or out.
+                    providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch, _ => _copilotPolicies?.RefreshSoon());
                     builder.AddProviderLoginService(providerLogin);
                     providerUsage = new ProviderUsageService(configStore, options.CatalogRoot!, epoch);
                     builder.AddProviderUsageService(providerUsage);

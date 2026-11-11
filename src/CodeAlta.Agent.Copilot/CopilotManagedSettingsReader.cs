@@ -47,9 +47,11 @@ public sealed class CopilotManagedSettingsReader
     }
 
     /// <summary>
-    /// Resolves the managed settings of each GitHub token, and those of the computer alone when none is given. The
-    /// runtime fetches a server policy older than an hour, and serves one up to a day old from its cache when GitHub
-    /// cannot be reached.
+    /// Resolves the managed settings of each GitHub token, and those of the computer alone when none is given. The cache
+    /// of the runtime's own home is cleared first: an answer that is not <see cref="CopilotManagedSettings.FailClosed"/>
+    /// then comes from a live fetch, never from a policy the runtime kept, and CodeAlta keeps its own for when GitHub
+    /// cannot be reached. A token that cannot be resolved, or that the runtime resolves to no account, gives settings
+    /// marked <see cref="CopilotManagedSettings.FailClosed"/> with the reason, without failing the other tokens.
     /// </summary>
     /// <param name="gitHubTokens">The tokens, each the sign-in of a Copilot provider; empty for the computer alone.</param>
     /// <param name="cancellationToken">Stops the reading and the runtime.</param>
@@ -71,6 +73,8 @@ public sealed class CopilotManagedSettingsReader
         await using (client.ConfigureAwait(false))
         {
             await client.StartAsync(cancellationToken).ConfigureAwait(false);
+            // A policy the runtime kept could stand in for a failed fetch without saying so in its answer: none is kept.
+            await client.Rpc.ManagedSettings.ClearCacheAsync(cancellationToken).ConfigureAwait(false);
             var settings = new List<CopilotManagedSettings>(Math.Max(1, gitHubTokens.Count));
             // The document of a check is added to what the accounts resolve, never in their place: it only narrows.
             CopilotManagedSettings? preview = null;
@@ -89,7 +93,18 @@ public sealed class CopilotManagedSettingsReader
             foreach (var token in gitHubTokens)
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(token, nameof(gitHubTokens));
-                settings.Add(CopilotManagedSettings.From(await client.Rpc.ManagedSettings.ResolveAsync(gitHubToken: token.Trim(), clientName: ClientName, cancellationToken: cancellationToken).ConfigureAwait(false)));
+                try
+                {
+                    var resolved = CopilotManagedSettings.From(await client.Rpc.ManagedSettings.ResolveAsync(gitHubToken: token.Trim(), clientName: ClientName,
+                        cancellationToken: cancellationToken).ConfigureAwait(false));
+                    // Without an account, only the computer was read: the policy of the account is not known.
+                    settings.Add(resolved.Account is null ? resolved with { FailClosed = true, Diagnostics = [.. resolved.Diagnostics, "The account of a token could not be resolved."] } : resolved);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    // An expired token of one provider does not keep the policies of the others from applying.
+                    settings.Add(new CopilotManagedSettings { FailClosed = true, Diagnostics = [$"The policy of an account could not be read: {exception.Message}"] });
+                }
             }
 
             return preview is null ? settings : [.. settings.Select(resolved => resolved.Strictest(preview))];

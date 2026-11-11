@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Hosting;
 
@@ -123,6 +124,21 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     public static CopilotManagedPolicySource Start(ManagedPolicyState state, string globalRoot, CodeAltaConfigStore store)
         => Start(state, globalRoot, store, preview: null);
 
+    /// <summary>Starts the source of a host that stays off the network: the kept policies apply, nothing is read.</summary>
+    /// <param name="state">The policies of the host.</param>
+    /// <param name="globalRoot">The global root of CodeAlta.</param>
+    /// <param name="store">The configuration store of that root.</param>
+    /// <returns>The started source, which the host disposes.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="globalRoot"/> is blank.</exception>
+    public static CopilotManagedPolicySource StartOffline(ManagedPolicyState state, string globalRoot, CodeAltaConfigStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        var source = new CopilotManagedPolicySource(state, globalRoot, () => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        source.StartWithoutReading();
+        return source;
+    }
+
     /// <summary>Starts the source of a host that takes a document of managed settings as the policy of every account.</summary>
     /// <param name="state">The policies of the host.</param>
     /// <param name="globalRoot">The global root of CodeAlta.</param>
@@ -162,6 +178,18 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
         if (_loop is not null) throw new InvalidOperationException("The source of the Copilot policies was started already.");
         ApplyKept();
         _loop = Task.Run(() => LoopAsync(firstDelay, _stop.Token));
+    }
+
+    /// <summary>
+    /// Applies the policies kept from the last start and reads nothing, for a host that stays off the network: they
+    /// hold, a policy that must be read again at each start included, which then lets no session send.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">It was started already.</exception>
+    public void StartWithoutReading()
+    {
+        if (_loop is not null) throw new InvalidOperationException("The source of the Copilot policies was started already.");
+        ApplyKept();
+        _loop = Task.CompletedTask;
     }
 
     /// <summary>Asks for a reading soon, as when a provider was added, signed in or removed.</summary>
@@ -272,6 +300,8 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
             if (!providers.Any(provider => KeyPrefix + provider.ProviderKey == key)) _state.Remove(key);
         }
 
+        ForgetRemoved(providers);
+
         if (providers.Length == 0)
         {
             SetStatus(CopilotManagedPolicyStatus.None);
@@ -344,9 +374,11 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     {
         var folder = KeptFolder;
         if (!Directory.Exists(folder)) return;
+        var configured = ConfiguredKeys();
         foreach (var path in Directory.EnumerateFiles(folder, "*.json"))
         {
-            if (ReadKept(path) is not { } kept) continue;
+            // The policy of a provider removed since is not applied again.
+            if (ReadKept(path) is not { } kept || configured is not null && !configured.Contains(kept.ProviderKey)) continue;
             _state.Set(KeyPrefix + kept.ProviderKey, kept.ForceRefresh ? kept.Policy with { FreshPolicyMissing = true } : kept.Policy);
         }
     }
@@ -356,9 +388,10 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     {
         var folder = KeptFolder;
         if (!Directory.Exists(folder)) return;
+        var configured = ConfiguredKeys();
         foreach (var path in Directory.EnumerateFiles(folder, "*.json"))
         {
-            if (ReadKept(path) is not { ForceRefresh: true } kept) continue;
+            if (ReadKept(path) is not { ForceRefresh: true } kept || configured is not null && !configured.Contains(kept.ProviderKey)) continue;
             lock (_freshThisStart)
             {
                 if (_freshThisStart.Contains(kept.ProviderKey)) continue;
@@ -370,13 +403,54 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
 
     private string KeptFolder => Path.Combine(_globalRoot, "auth", "copilot-policy");
 
+    // The keys of the Copilot providers configured now; null when the configuration cannot be read, which keeps every policy.
+    private HashSet<string>? ConfiguredKeys()
+    {
+        try
+        {
+            return _providers().Where(static provider => provider.ProviderType == "copilot" && !string.IsNullOrWhiteSpace(provider.ProviderKey))
+                .Select(static provider => provider.ProviderKey).ToHashSet(StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    // The kept policies of the providers that are no longer configured are removed.
+    private void ForgetRemoved(IReadOnlyCollection<CodeAltaProviderDocument> providers)
+    {
+        if (!_keeps || !Directory.Exists(KeptFolder)) return;
+        var configured = providers.Select(static provider => FileName(provider.ProviderKey)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(KeptFolder, "*.json"))
+        {
+            if (configured.Contains(Path.GetFileName(path))) continue;
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Held by the other instance for a moment: the next reading removes it.
+            }
+        }
+    }
+
     private void Keep(string providerKey, ManagedPolicy policy, bool forceRefresh)
     {
         if (!_keeps) return;
         var path = Path.Combine(KeptFolder, FileName(providerKey));
         if (policy.IsEmpty && !forceRefresh)
         {
-            File.Delete(path);
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Read by the other instance for a moment: the next reading removes it.
+            }
+
             return;
         }
 
@@ -401,9 +475,8 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
             writer.WriteEndObject();
         }
 
-        var temporary = path + ".tmp";
-        File.WriteAllBytes(temporary, stream.ToArray());
-        File.Move(temporary, path, overwrite: true);
+        // The other instance of CodeAlta reads and writes the same files: each is replaced whole, and read with sharing.
+        SafeFile.WriteAllBytes(path, stream.ToArray());
     }
 
     private sealed record Kept(string ProviderKey, bool ForceRefresh, ManagedPolicy Policy);
@@ -412,7 +485,8 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     {
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            if (SafeFile.ReadAllBytes(path) is not { } bytes) return null;
+            using var document = JsonDocument.Parse(bytes);
             var root = document.RootElement;
             string? String(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
             bool Bool(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;

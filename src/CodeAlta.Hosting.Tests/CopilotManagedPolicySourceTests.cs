@@ -152,6 +152,79 @@ public sealed class CopilotManagedPolicySourceTests
     }
 
     [TestMethod]
+    public async Task OneAccountThatCannotBeRead_DoesNotKeepThePolicyOfAnotherFromApplying_AndAHostOfflineAppliesTheKeptOnes()
+    {
+        using var root = new TempRoot();
+        var (work, personal) = ("CODEALTA_TEST_COPILOT_TOKEN_" + Guid.NewGuid().ToString("N"), "CODEALTA_TEST_COPILOT_TOKEN_" + Guid.NewGuid().ToString("N"));
+        Environment.SetEnvironmentVariable(work, "gho_work");
+        Environment.SetEnvironmentVariable(personal, "gho_expired");
+        try
+        {
+            var providers = new[] { Copilot("copilot-work", work), Copilot("copilot-personal", personal) };
+            var state = new ManagedPolicyState();
+            await using (var source = Source(root, state, providers, installed: true, (_, _, _, _) => Task.FromResult<IReadOnlyList<CopilotManagedSettings>>(
+            [
+                new CopilotManagedSettings { Account = "work", ServerManaged = true, BypassPermissionsDisabled = true, ManagedKeys = ["permissions"] },
+                new CopilotManagedSettings { FailClosed = true, Diagnostics = ["The token is expired."] },
+            ])))
+            {
+                await source.RefreshAsync(CancellationToken.None);
+                Assert.IsTrue(state.Current.BypassPermissionsDisabled, "the policy of the account that was read applies");
+            }
+
+            // A host that stays off the network applies what was kept, and reads nothing.
+            var offline = new ManagedPolicyState();
+            var reads = 0;
+            await using var kept = Source(root, offline, providers, installed: true, (_, _, _, _) => { reads++; return Task.FromResult<IReadOnlyList<CopilotManagedSettings>>([]); });
+            kept.StartWithoutReading();
+            Assert.IsTrue(offline.Current.BypassPermissionsDisabled);
+            Assert.AreEqual(0, reads);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(work, null);
+            Environment.SetEnvironmentVariable(personal, null);
+        }
+    }
+
+    [TestMethod]
+    public async Task TheKeptPolicyOfARemovedProvider_IsRemoved_AndNeverAppliedAgain()
+    {
+        using var root = new TempRoot();
+        var variable = "CODEALTA_TEST_COPILOT_TOKEN_" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable(variable, "gho_test");
+        try
+        {
+            var providers = new List<CodeAltaProviderDocument> { Copilot("copilot-work", variable), Copilot("copilot-personal", variable) };
+            var strict = new CopilotManagedSettings { ServerManaged = true, BypassPermissionsDisabled = true, ForceRemoteSettingsRefresh = true, ManagedKeys = ["permissions"] };
+            var none = new CopilotManagedSettings { Account = "personal" };
+            await using (var first = Source(root, new ManagedPolicyState(), providers, installed: true, (_, _, _, _) => Task.FromResult<IReadOnlyList<CopilotManagedSettings>>([strict, none])))
+            {
+                await first.RefreshAsync(CancellationToken.None);
+            }
+
+            // The work provider is removed, then the next reading fails.
+            providers.RemoveAt(0);
+            await using (var second = Source(root, new ManagedPolicyState(), providers, installed: true, (_, _, _, _) => Task.FromResult<IReadOnlyList<CopilotManagedSettings>>([none])))
+            {
+                await second.RefreshAsync(CancellationToken.None);
+            }
+
+            var state = new ManagedPolicyState();
+            await using var third = Source(root, state, providers, installed: true, (_, _, _, _) => throw new InvalidOperationException("GitHub cannot be reached"));
+            third.Start(TimeSpan.FromHours(1));
+            await third.RefreshAsync(CancellationToken.None);
+
+            Assert.AreSame(ManagedPolicy.None, state.Current, "the policy of the removed provider is gone");
+            Assert.IsFalse(File.Exists(Path.Combine(root.Path, "auth", "copilot-policy", "copilot-work.json")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, null);
+        }
+    }
+
+    [TestMethod]
     public async Task WithoutASignIn_ThePolicyOfTheComputerApplies_AndARemovedProviderTakesItsPolicyAway()
     {
         using var root = new TempRoot();

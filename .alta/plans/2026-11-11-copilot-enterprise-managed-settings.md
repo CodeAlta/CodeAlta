@@ -115,6 +115,14 @@ and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
       Copilot account: the runtime was downloaded, the policy read and every lock shown.
 - [x] 8. **Documentation**: "Policy of your organization" in `site/docs/model-providers/setup.md`, linked from the
       permission modes and the sandbox; `doc/runtime.md` (tools and permissions); `readme.md`.
+- [x] Review by Codex / GPT-6.1 Sol / Max: every verified finding fixed. An undetermined answer (fail-closed, an
+      account the runtime cannot resolve, an expired token of one provider) only adds to the policy in force; the
+      runtime's cache is cleared before each reading, so only a live fetch is a fresh reading; `altacli --offline` applies
+      the kept policy; Claude Code is given an explicit mode under a policy that turns modes off; a policy that now
+      requires the sandbox stops and releases the attachments it sandboxes; a provider that cannot take a narrower mode
+      during a run has its run stopped; a policy that arrives while a session attaches applies at its publication; an
+      approval to run outside is checked against the policy again; sign-in, sign-out and provider changes read the
+      policy again; kept files are written through `SafeFile`, and those of removed providers are removed.
 - [ ] 9. **Validation**: .NET tests, `npm test`, `lunet build`; the reporter confirms on their enterprise.
 
 ## Not in this plan

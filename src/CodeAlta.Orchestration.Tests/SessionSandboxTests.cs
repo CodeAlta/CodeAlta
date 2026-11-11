@@ -246,6 +246,31 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task ACommandOutsideTheSandbox_AllowedAfterThePolicyKeptCommandsInside_DoesNotRun()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var router = f.Runtime.CreateSandboxToolRouter("s", "codex", [f.Project.ProjectPath]);
+        // While the user answers, the policy of the organization keeps every command in the sandbox.
+        var tools = f.RoutedTools("s", router, (request, _) =>
+        {
+            if (request is AgentCommandPermissionRequest { OutsideSandbox: true })
+                f.Runtime.ManagedPolicies.Set("copilot:test", new ManagedPolicy { RunOutsideSandboxDisallowed = true });
+            return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+        });
+        Assert.IsNull(await router.RefuseRunAsync(false, CancellationToken.None));
+        tools = f.RoutedTools("s", router, tools.Permissions);
+
+        var refused = await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "It needs the NuGet API key." });
+
+        Assert.IsFalse(refused.Success);
+        Assert.Contains("no longer lets a command run outside", refused.Error!);
+        Assert.AreEqual(0, backend.Starts.Count, "nothing ran, in the sandbox or out of it");
+    }
+
+    [TestMethod]
     public async Task ACommandOutsideTheSandbox_IsAskedWithItsReason_AndRunsHereOnlyWhenAllowed()
     {
         var backend = new InProcessBackend();

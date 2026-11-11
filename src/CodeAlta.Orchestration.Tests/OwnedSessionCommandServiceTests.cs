@@ -995,6 +995,45 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task ManagedPolicy_GivesAnExplicitMode_ToAProviderWithModesOfItsOwn_ThatWouldStartInItsOwnSettings() => Fixture.RunAsync(async f =>
+    {
+        // Claude Code given no mode starts in the one of its own settings, which may be Bypass.
+        f.Host.ModelProviderRegistry.RegisterOrReplace(
+            f.Provider.Descriptor with { PermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] }, f.Provider.CreateRuntime);
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("attach", f.SessionId, "input") { Selection = choices.Current }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.IsNull(f.Provider.Options!.PermissionMode, "no policy: the provider decides");
+
+        f.Host.RuntimeService.ManagedPolicies.Set("copilot:test", new ManagedPolicy { BypassPermissionsDisabled = true });
+        for (var attempt = 0; attempt < 400 && f.Provider.SessionPermissionMode is null; attempt++) await Task.Delay(5);
+        Assert.AreEqual(SessionPermissionModes.Ask, f.Provider.SessionPermissionMode, "the attached session is given the mode the host runs it in");
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
+    public Task ManagedPolicy_ThatNowRequiresTheSandbox_ReleasesTheAttachmentOfASessionItSandboxes() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("bypass", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Bypass } }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        var runtime = f.Host.RuntimeService;
+        Assert.AreEqual(SessionPermissionModes.Bypass, runtime.GetEffectivePermissionMode(f.SessionId), "attached");
+
+        // A provider may run its own tools in a process started outside the sandbox: the attachment goes, and the next
+        // send starts it again inside.
+        runtime.ManagedPolicies.Set("copilot:test", new ManagedPolicy { SandboxRequired = true, SandboxUnavailableBlocks = true });
+        for (var attempt = 0; attempt < 400 && runtime.GetEffectivePermissionMode(f.SessionId) != SessionPermissionModes.Ask; attempt++) await Task.Delay(5);
+        Assert.AreEqual(SessionPermissionModes.Ask, runtime.GetEffectivePermissionMode(f.SessionId), "a session that is not attached is taken to ask");
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task ManagedPolicy_ThatMustBeReadAgain_LetsNoSessionSendUntilItIs() => Fixture.RunAsync(async f =>
     {
         f.Provider.ReleaseAll();
