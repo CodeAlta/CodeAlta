@@ -292,7 +292,7 @@ internal sealed class DesktopSearchSources
             IReadOnlyList<SkillDescriptor> skills;
             try
             {
-                var projectFolders = project is null ? null : (await _host.ProjectCatalog.GetByIdAsync(project.ProjectId, cancellationToken).ConfigureAwait(false))?.SkillFolders;
+                var projectFolders = project is null ? null : (await _host.ProjectCatalog.GetByIdAsync(project.ProjectId, cancellationToken).ConfigureAwait(false))?.EffectiveSkillFolders;
                 var spaceFilter = space is null ? null : new SpaceFilter(SpaceAssignments.Empty, space.Id) { SkillFolders = space.Settings.Skills?.Folders ?? [] };
                 var query = SkillCatalogQuery.ForSession(config, _host.CatalogOptions.GlobalRoot, _profile, project?.Path, otherProjectRoots: null, spaceFilter, projectFolders)
                     with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = true, Scopes = project is null ? NonProjectScopes : ProjectScopes };

@@ -4103,7 +4103,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             project?.ProjectPath,
             projectRoots,
             space,
-            project?.SkillFolders);
+            project?.EffectiveSkillFolders);
     }
 
     /// <summary>

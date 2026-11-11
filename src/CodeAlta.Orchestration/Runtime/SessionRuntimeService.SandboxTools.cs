@@ -321,7 +321,7 @@ public sealed partial class SessionRuntimeService
             var record = await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
             var project = record?.ProjectId is { } projectId ? await _projectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
             var space = await GetSpaceFilterAsync(record?.SpaceId, project, cancellationToken).ConfigureAwait(false);
-            folders.AddRange(CodeAlta.Catalog.Skills.AddedSkillFolders.Roots(_configStore.LoadGlobalSkillFolders(), space.SpaceId, space.SkillFolders, project?.SkillFolders,
+            folders.AddRange(CodeAlta.Catalog.Skills.AddedSkillFolders.Roots(_configStore.LoadGlobalSkillFolders(), space.SpaceId, space.SkillFolders, project?.EffectiveSkillFolders,
                 UserHomeRoot, _catalogOptions.GlobalRoot).Select(static root => root.RootPath));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)

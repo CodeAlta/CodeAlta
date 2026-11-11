@@ -456,7 +456,7 @@ public sealed class AgentInstructionTemplateProvider
             project?.ProjectPath,
             otherProjectRoots: null,
             space,
-            project?.SkillFolders);
+            project?.EffectiveSkillFolders);
         return await _skillCatalog.ListAsync(
                 query with
                 {
