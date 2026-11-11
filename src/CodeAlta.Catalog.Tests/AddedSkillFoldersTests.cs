@@ -124,6 +124,37 @@ public sealed class AddedSkillFoldersTests
     }
 
     [TestMethod]
+    public async Task ASubProjectReadsTheSkillsOfTheFoldersAboveIt_TheNearestWinning_AndWhatTheyDisableStaysDisabled()
+    {
+        var repository = Directory.CreateDirectory(Path.Combine(_root, "contoso")).FullName;
+        var billing = Directory.CreateDirectory(Path.Combine(repository, "services", "billing")).FullName;
+        var core = Directory.CreateDirectory(Path.Combine(billing, "core")).FullName;
+        Skill(Path.Combine(repository, ".alta", "skills"), "release", "From the repository.");
+        Skill(Path.Combine(repository, ".alta", "skills"), "review", "From the repository, shadowed by a nearer folder.");
+        Skill(Path.Combine(repository, ".alta", "skills"), "legacy", "From the repository, which disables it.");
+        Skill(Path.Combine(billing, ".alta", "skills"), "review", "From billing, shadowed by the project itself.");
+        Skill(Path.Combine(billing, ".alta", "skills"), "invoice", "From billing.");
+        Skill(Path.Combine(core, ".agents", "skills"), "review", "From the project itself.");
+        var config = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = AltaRoot });
+        config.SaveProjectDisabledSkillNames(repository, ["legacy"]);
+        var project = new ProjectDescriptor
+        {
+            Id = Guid.NewGuid().ToString(), Slug = "contoso-core", ProjectPath = core, ParentId = Guid.NewGuid().ToString(), SubPath = "services/billing/core",
+            InheritedRoots = [billing, repository],
+        };
+
+        var skills = await new SkillCatalog().ListAsync(SkillCatalogQuery.ForProject(config, AltaRoot, Home, project, null, null) with { IncludeShadowed = false, IncludeDisabled = true });
+        string From(string name) => skills.Single(skill => skill.Name == name).Description;
+        Assert.AreEqual("From the project itself.", From("review"), "the nearest folder wins, whatever the kind of its folder of skills");
+        Assert.AreEqual("From billing.", From("invoice"));
+        Assert.AreEqual("From the repository.", From("release"));
+        Assert.IsFalse(skills.Single(skill => skill.Name == "legacy").IsEnabled, "what the repository disables stays disabled");
+
+        var alone = await new SkillCatalog().ListAsync(SkillCatalogQuery.ForProject(config, AltaRoot, Home, new ProjectDescriptor { ProjectPath = core }, null, null));
+        Assert.IsFalse(alone.Any(static skill => skill.Name == "release"), "a project that is no sub-project reads its own folder only");
+    }
+
+    [TestMethod]
     public async Task AFolderThatIsGone_HidesNoOtherSkill_AndASkillAddedLaterIsRead()
     {
         var library = Path.Combine(_root, "library");

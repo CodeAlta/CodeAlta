@@ -449,14 +449,13 @@ public sealed class AgentInstructionTemplateProvider
             return null;
         }
 
-        var query = SkillCatalogQuery.ForSession(
+        var query = SkillCatalogQuery.ForProject(
             _configStore,
             _catalogOptions.GlobalRoot,
             UserHomeRoot,
-            project?.ProjectPath,
+            project,
             otherProjectRoots: null,
-            space,
-            project?.EffectiveSkillFolders);
+            space);
         return await _skillCatalog.ListAsync(
                 query with
                 {

@@ -4096,14 +4096,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
         }
 
-        return SkillCatalogQuery.ForSession(
+        return SkillCatalogQuery.ForProject(
             _configStore,
             _catalogOptions.GlobalRoot,
             UserHomeRoot,
-            project?.ProjectPath,
+            project,
             projectRoots,
-            space,
-            project?.EffectiveSkillFolders);
+            space);
     }
 
     /// <summary>

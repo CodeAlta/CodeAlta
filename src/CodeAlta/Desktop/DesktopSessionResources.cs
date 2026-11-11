@@ -55,8 +55,8 @@ internal sealed class DesktopSessionResources
         var space = await runtime.GetSpaceFilterAsync(record.SpaceId, project, cancellationToken).ConfigureAwait(false);
         var profile = _home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        var skillQuery = SkillCatalogQuery.ForSession(new CodeAltaConfigStore(_host.CatalogOptions), _host.CatalogOptions.GlobalRoot, profile,
-            project?.ProjectPath, otherProjectRoots: null, space, project?.EffectiveSkillFolders) with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = false, ModelVisibleOnly = true };
+        var skillQuery = SkillCatalogQuery.ForProject(new CodeAltaConfigStore(_host.CatalogOptions), _host.CatalogOptions.GlobalRoot, profile,
+            project, otherProjectRoots: null, space) with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = false, ModelVisibleOnly = true };
         var skills = (await _host.SkillCatalog.ListAsync(skillQuery, cancellationToken).ConfigureAwait(false)).Select(static skill => skill.Name);
 
         var prompts = AgentPromptCatalog.InSpace(new AgentPromptCatalog().ListEffectivePrompts(new AgentPromptCatalogQuery

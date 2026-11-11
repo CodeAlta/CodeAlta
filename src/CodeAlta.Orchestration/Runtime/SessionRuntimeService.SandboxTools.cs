@@ -323,6 +323,9 @@ public sealed partial class SessionRuntimeService
             var space = await GetSpaceFilterAsync(record?.SpaceId, project, cancellationToken).ConfigureAwait(false);
             folders.AddRange(CodeAlta.Catalog.Skills.AddedSkillFolders.Roots(_configStore.LoadGlobalSkillFolders(), space.SpaceId, space.SkillFolders, project?.EffectiveSkillFolders,
                 UserHomeRoot, _catalogOptions.GlobalRoot).Select(static root => root.RootPath));
+            // The skills a sub-project inherits from the folders above it, which its sandbox may not reach otherwise.
+            foreach (var root in ProjectResourceRoots.Inherited(project))
+                folders.AddRange([Path.Combine(root, ".alta", "skills"), Path.Combine(root, ".agents", "skills"), Path.Combine(root, ".github", "skills")]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)
         {
