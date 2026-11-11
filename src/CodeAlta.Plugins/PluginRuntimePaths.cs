@@ -12,6 +12,12 @@ public sealed record PluginProjectContext
 
     /// <summary>Gets the project root path.</summary>
     public required string ProjectPath { get; init; }
+
+    /// <summary>
+    /// Gets the folders the project inherits its setup from, the nearest first: for a sub-project of a monorepo, the
+    /// declared folders above it, then its repository, whose configuration it reads under its own. Empty otherwise.
+    /// </summary>
+    public IReadOnlyList<string> InheritedRoots { get; init; } = [];
 }
 
 /// <summary>

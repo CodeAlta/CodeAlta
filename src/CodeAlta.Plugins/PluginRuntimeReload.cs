@@ -720,7 +720,8 @@ public sealed partial class PluginRuntimeManager
             new CodeAltaConfigStore(catalogOptions),
             catalogOptions.ConfigPath,
             string.IsNullOrWhiteSpace(projectRoot) ? null : Path.Combine(projectRoot, ".alta", "config.toml"),
-            projectRoot);
+            projectRoot,
+            options.ProjectContext?.InheritedRoots ?? []);
     }
 
     private static PluginRootBuildFileOptions CreateBuildFileOptions(PluginRuntimeManagerOptions options)

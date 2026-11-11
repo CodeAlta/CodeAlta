@@ -539,6 +539,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                             {
                                 ProjectId = currentProject.Id,
                                 ProjectPath = currentProject.ProjectPath,
+                                InheritedRoots = ProjectResourceRoots.Inherited(currentProject),
                             },
                             SafeMode = options.PluginSafeMode,
                             IsHeadless = options.IsHeadless,

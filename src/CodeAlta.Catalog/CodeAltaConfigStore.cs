@@ -91,6 +91,8 @@ public sealed partial class CodeAltaConfigStore
     private readonly ParsedFileCache<CodeAltaConfigDocument> _documents = new();
     private readonly ParsedFileCache<CodeAltaConfigDocument> _globalDocuments = new();
     private readonly ParsedFileCache<SpaceAssignments> _assignments = new();
+    // The texts of the configurations a sub-project inherits, merged at each read (LoadProject with inherited roots).
+    private readonly ParsedFileCache<string> _inheritedTexts = new();
 
     // The user's configuration when no file is read: the overlays alone, which do not change.
     private readonly Lazy<CodeAltaConfigDocument> _overlaysOnly;
@@ -510,6 +512,65 @@ public sealed partial class CodeAltaConfigStore
         => string.IsNullOrWhiteSpace(projectRoot)
             ? new CodeAltaConfigDocument()
             : LoadOwnedDocument(GetProjectConfigPath(projectRoot));
+
+    /// <summary>
+    /// Loads the configuration of a project with the one of the folders it inherits its setup from: for a sub-project of
+    /// a monorepo, the <c>.alta/config.toml</c> of its repository (and of the declared folders between), the farthest
+    /// first, then its own on top (<see cref="ProjectResourceRoots.Inherited"/>). What a farther one turns off stays off:
+    /// an <c>enabled = false</c> is kept, and the lists named <c>disabled</c> add up.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory.</param>
+    /// <param name="inheritedRoots">The folders it inherits from, the nearest first; empty for a project that is no sub-project.</param>
+    /// <returns>The merged configuration, or the one of the project alone when no folder it inherits from has one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="inheritedRoots"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">A configuration file cannot be read.</exception>
+    public CodeAltaConfigDocument LoadProject(string? projectRoot, IReadOnlyList<string> inheritedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(inheritedRoots);
+        if (string.IsNullOrWhiteSpace(projectRoot)) return new CodeAltaConfigDocument();
+        var inherited = inheritedRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(GetProjectConfigPath).Where(File.Exists).ToList();
+        if (inherited.Count == 0) return LoadProject(projectRoot);
+        var own = GetProjectConfigPath(projectRoot);
+        var merged = new TomlTable();
+        foreach (var path in Enumerable.Reverse(inherited).Append(own).Where(File.Exists))
+        {
+            var text = _inheritedTexts.Read(path, static (_, content) => content);
+            if (!string.IsNullOrWhiteSpace(text)) MergeInherited(merged, new ConfigLayer($"'{path}'", path, text, IsFile: true).Parse());
+        }
+
+        return merged.Count == 0 ? new CodeAltaConfigDocument() : ParseLoadedContent(own, TomlSerializer.Serialize(merged));
+    }
+
+    // Merges the configuration of a nearer folder over the one of a farther folder, as an overlay does, except for what the
+    // farther one turns off: `enabled = false` stays, and an array named `disabled` gets the values of the nearer one.
+    private static void MergeInherited(TomlTable target, TomlTable nearer)
+    {
+        foreach (var (key, value) in nearer)
+        {
+            var existingKey = CodeAltaConfigOverlay.FindKey(target, key);
+            var existing = existingKey is null ? null : target[existingKey];
+            if (existing is TomlTable farther && value is TomlTable table)
+            {
+                MergeInherited(farther, table);
+                continue;
+            }
+
+            if (existing is false && string.Equals(key, "enabled", StringComparison.OrdinalIgnoreCase)) continue;
+            if (existing is TomlArray disabled && value is TomlArray added && string.Equals(key, "disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var item in added)
+                {
+                    if (!disabled.Contains(item)) disabled.Add(item);
+                }
+
+                continue;
+            }
+
+            if (existingKey is not null && !string.Equals(existingKey, key, StringComparison.Ordinal)) target.Remove(existingKey);
+            target[existingKey ?? key] = value;
+        }
+    }
 
     /// <summary>
     /// Loads globally disabled skill names.
