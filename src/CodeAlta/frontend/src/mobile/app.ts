@@ -1198,7 +1198,7 @@ export function startMobile(window: Window & typeof globalThis) {
   // The model sheet serves the new session and the composer of a session: `modelSheetFor` is the session it shows, null for the new one.
   let modelSheetFor: string | null = null;
   const modelSheet = createSheet(document, $("model-sheet"), () => { modelSheetFor = null; }), modelSearch = $<HTMLInputElement>("model-search");
-  const newMoreSheet = createSheet(document, $("new-more-sheet"));
+  const newMoreSheet = createSheet(document, $("new-more-sheet")), promptSheet = createSheet(document, $("prompt-sheet"));
   let options: Options | null = null;
   let choice: Choice = { tier: null, provider: "", model: "", effort: "" };
   // Images go only to a model that says it reads them. A model that does not say is treated as one that does not.
@@ -1267,22 +1267,50 @@ export function startMobile(window: Window & typeof globalThis) {
     });
   }
 
-  // The chips of the bar: the tier or the model with its effort; "⋯" with the agent prompt when it is not the default one, a branch
-  // for a worktree, a shield for a permission mode.
+  // The agent prompt has its chip beside the label of the project; the chips of the bar: the tier or the model with its effort,
+  // and "⋯" with a branch for a worktree and a shield for a permission mode.
   function renderChoice() {
     if (!options) return;
     const o = options;
     const label = [choiceLabel(o, choice), choice.effort].filter(Boolean).join(" · ");
     $("new-model-name").textContent = label;
     $("new-model").setAttribute("aria-label", `Model: ${label}`);
-    const agent = newAgent.value && newAgent.value.toLowerCase() !== "default" ? o.prompts.find(p => p.id === newAgent.value)?.name ?? newAgent.value : null;
+    const agent = o.prompts.find(p => p.id === newAgent.value)?.name ?? newAgent.value;
+    $("new-prompt-name").textContent = agent;
+    $("new-prompt").setAttribute("aria-label", `Agent prompt: ${agent}`);
     const modes = offeredModes();
-    tagsOf($("new-more-text"), [...(agent ? [["bot", agent] as const] : []), ...(newWorktree.checked ? [["branch", null] as const] : []), ...(newPermission ? [["shield", null] as const] : [])]);
-    $("new-more").setAttribute("aria-label", ["More options", agent && `agent prompt ${agent}`, newWorktree.checked && "new worktree",
+    tagsOf($("new-more-text"), [...(newWorktree.checked ? [["branch", null] as const] : []), ...(newPermission ? [["shield", null] as const] : [])]);
+    $("new-more").setAttribute("aria-label", ["More options", newWorktree.checked && "new worktree",
       newPermission && `permissions ${modeName(newPermission, modes)}`].filter(Boolean).join(", "));
     if (modelSheet.shown && modelSheetFor === null) renderNewModels();
     if (newMoreSheet.shown) renderNewMore();
+    if (promptSheet.shown) renderPrompts();
   }
+
+  // The prompt sheet of the new session: each agent prompt with its description, as the agent chip of the desktop lists them.
+  function renderPrompts() {
+    if (!options) return;
+    $("prompt-list").replaceChildren(...options.prompts.map(prompt => {
+      const on = prompt.id === newAgent.value;
+      const button = make("button", on ? "on" : null);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(on));
+      button.append(make("span", null, prompt.name), ...(prompt.description ? [make("small", null, prompt.description)] : []));
+      button.addEventListener("click", () => {
+        if (!on) { newAgent.value = prompt.id; newAgent.dispatchEvent(new Event("change")); }
+        promptSheet.close();
+      });
+      const item = make("li");
+      item.append(button);
+      return item;
+    }));
+  }
+  $("new-prompt").addEventListener("click", () => {
+    if (!options) return;
+    renderPrompts();
+    promptSheet.open($("prompt-list").querySelector<HTMLElement>("button.on"));
+  });
+  $("prompt-done").addEventListener("click", () => promptSheet.close());
 
   // The model sheet of the new session: the tiers, the effort of the choice, the variants of its model, the models of its provider.
   function renderNewModels() {

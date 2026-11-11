@@ -84,7 +84,9 @@
   </main>
   <main id="create" hidden>
     <form id="new-form" class="composer-form">
-      <div class="field"><div class="field-row"><label for="new-project">Project</label><span id="new-space" class="space-tag"></span></div><select id="new-project" required></select></div>
+      <div class="field"><div class="field-row"><span class="field-lead"><label for="new-project">Project</label><span id="new-space" class="space-tag"></span></span>
+        <button id="new-prompt" type="button" class="pick-chip prompt-chip" aria-haspopup="dialog"><svg class="prompt-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 4v4M9 13v1M15 13v1"/></svg><span id="new-prompt-name" class="pick-text"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
+        <select id="new-project" required></select></div>
       <p id="new-attach-note" class="attach-note muted" role="status" hidden></p>
       <div id="new-attach-strip" class="attach-strip" hidden></div>
       <textarea id="new-text" rows="5" placeholder="What should the agent do?" aria-label="Prompt"></textarea>
@@ -153,6 +155,12 @@
       <label id="session-provider-field" class="sheet-field">Provider<select id="session-provider"></select><small id="session-provider-text" role="status"></small></label>
       <label id="session-mode-field" class="sheet-field">Permissions<select id="session-mode"></select><small id="session-mode-text"></small></label>
       <label class="check"><input id="session-queue-first" type="checkbox"> Queue rather than steer while it works</label>
+    </div>
+  </div>
+  <div id="prompt-sheet" class="sheet" hidden>
+    <div class="sheet-panel prompt-picker" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+      <div class="sheet-head"><h2 id="prompt-title">Agent prompt</h2><button id="prompt-done" class="sheet-done" type="button">Done</button></div>
+      <ul id="prompt-list" aria-label="Agent prompts"></ul>
     </div>
   </div>
   <div id="new-more-sheet" class="sheet" hidden>
