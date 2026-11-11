@@ -358,6 +358,9 @@ public sealed class SessionSandboxTests
         File.WriteAllText(Path.Combine(web.ProjectPath, ".git"), "gitdir: ../../.git/modules/web\n");
         var webGit = Directory.CreateDirectory(Path.Combine(repository, ".git", "modules", "web")).FullName;
         Directory.CreateDirectory(Path.Combine(repository, "libs"));
+        // An optional sub-project nobody added: no project lists it, and its settings are kept all the same.
+        var legacy = Directory.CreateDirectory(Path.Combine(repository, "tools", "legacy")).FullName;
+        File.AppendAllText(Path.Combine(repository, ".alta", ProjectManifest.FileName), "[projects.legacy]\npath = \"tools/legacy\"\noptional = true\n");
         f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
         await f.CreateSessionAsync("s", billing);
         var tools = f.RoutedTools("s", billing);
@@ -372,7 +375,7 @@ public sealed class SessionSandboxTests
                      Path.Combine(repository, ".alta", "projects.toml"), Path.Combine(repository, ".alta", "config.toml"), Path.Combine(billing.ProjectPath, ".alta", "config.toml"),
                      Path.Combine(web.ProjectPath, ".alta", "config.toml"), Path.Combine(web.ProjectPath, ".alta", "skills"), Path.Combine(web.ProjectPath, ".claude"),
                      Path.Combine(web.ProjectPath, ".mcp.json"), Path.Combine(web.ProjectPath, ".git"), Path.Combine(webGit, "hooks"), Path.Combine(webGit, "config"),
-                     Path.Combine(reports.ProjectPath, ".alta", "config.toml"),
+                     Path.Combine(reports.ProjectPath, ".alta", "config.toml"), Path.Combine(legacy, ".alta", "config.toml"),
                  })
         {
             CollectionAssert.Contains(policy.Protected.ToList(), settings, settings);

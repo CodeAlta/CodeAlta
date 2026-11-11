@@ -301,11 +301,17 @@ public sealed partial class SessionRuntimeService
             var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
             if (projects.FirstOrDefault(candidate => string.Equals(candidate.Id, projectId, StringComparison.OrdinalIgnoreCase)) is not { } project) return ([], []);
             var repositoryId = project.ParentId ?? project.Id;
-            var declared = projects.Where(candidate => string.Equals(candidate.ParentId, repositoryId, StringComparison.OrdinalIgnoreCase)).ToList();
+            // Every entry of the map, those listed and those nobody added (optional, or claimed by no project yet): the
+            // settings of each are out of reach, used or not.
+            var map = await _projectCatalog.ReadRepositoryMapAsync(repositoryId, cancellationToken).ConfigureAwait(false);
+            var declared = projects.Where(candidate => string.Equals(candidate.ParentId, repositoryId, StringComparison.OrdinalIgnoreCase))
+                .Select(static candidate => candidate.ProjectPath)
+                .Concat(map?.Entries.Where(static entry => entry.Folder == ProjectManifestFolderState.Ok).Select(static entry => entry.FullPath) ?? [])
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (declared.Count == 0) return ([], []);
             var worktree = _entries.TryGetValue(sessionId, out var entry) ? entry.WorktreeDirectory : null;
             var anchor = Path.GetFullPath(worktree ?? project.ProjectPath);
-            IReadOnlyList<string> folders = [.. declared.Select(candidate => Path.GetFullPath(Path.Combine(anchor, Path.GetRelativePath(project.ProjectPath, candidate.ProjectPath))))];
+            IReadOnlyList<string> folders = [.. declared.Select(folder => Path.GetFullPath(Path.Combine(anchor, Path.GetRelativePath(project.ProjectPath, folder))))];
             return (worktree is null ? ProjectResourceRoots.WriteRoots(project) : [], folders);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
