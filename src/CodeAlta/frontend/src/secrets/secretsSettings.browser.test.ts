@@ -6,7 +6,8 @@ import { testLimit } from "../testTime";
 const options = { entry: "../secrets/secretsSettings.mount.tsx", fixture: "secretsFixture", rpcFixture: "../demo-api.ts", styles: ["../secrets/secrets.css"],
   width: 1300, height: 900, reducedMotion: true } as const;
 // What each row of a list shows of its name, its reference and when it was set: cut or whole, and the name's tooltip.
-const rows = `[...document.querySelectorAll('.secret-row')].map(row => {
+// The secrets and the variables; a use that waits for a confirmation is a row of its own card.
+const rows = `[...document.querySelectorAll('.secret-row:not(.secret-pending-row)')].map(row => {
   const cut = element => !!element && element.scrollWidth > element.clientWidth + 1;
   const code = row.querySelector('.secret-name code');
   return { name: code.textContent, nameCut: cut(code), referenceCut: cut(row.querySelector('.secret-reference')), metaCut: cut(row.querySelector('.secret-meta')),
@@ -16,7 +17,7 @@ const rows = `[...document.querySelectorAll('.secret-row')].map(row => {
 test("the names of secrets and variables keep their room in a large window, and a narrow one cuts them with the whole name on hover", { skip: !edge, timeout: testLimit(90_000) },
   async () => {
     await withCanvas(async page => {
-      await page.until(`document.querySelectorAll('.secret-row').length === 5`, "the secrets and the variables");
+      await page.until(`document.querySelectorAll('.secret-row:not(.secret-pending-row)').length === 6`, "the secrets and the variables");
       await page.shot("secrets-large");
       // The page of a window of 1600 by 1000: every name, reference and date whole.
       const large = await page.evaluate(rows) as { name: string; nameCut: boolean; referenceCut: boolean; metaCut: boolean; title: string; overflow: boolean;
