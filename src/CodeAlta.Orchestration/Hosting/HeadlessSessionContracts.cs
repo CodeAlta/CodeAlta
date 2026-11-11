@@ -73,8 +73,8 @@ public sealed record HeadlessSessionRequest
     public CodeAlta.Agent.AgentSessionOptions? SessionOptions { get; init; }
 
     /// <summary>
-    /// Gets the session a new session is the child of, or null. The child is in its tree (aborts, retention) and takes
-    /// the permission mode a session it creates takes (<see cref="SessionRuntimeService.GetCreatedSessionPermissionMode"/>).
+    /// Gets the session a new session is the child of, or null. The child is in its tree (aborts, retention) and in its
+    /// space, and takes the permission mode a session it creates takes (<see cref="SessionRuntimeService.GetCreatedSessionPermissionMode"/>).
     /// </summary>
     public string? ParentSessionId { get; init; }
 

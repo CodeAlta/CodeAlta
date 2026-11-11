@@ -145,8 +145,13 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             SessionViewDescriptor descriptor;
             if (existing is null)
             {
+                // A child is in the space of its parent, as `alta session create` puts it: listed under its parent, not in
+                // the other spaces of its project as a session that records no space is.
+                var spaceId = request.ParentSessionId is { } parentId
+                    ? (await runtime.TryGetResumableSessionAsync(parentId, cancellationToken).ConfigureAwait(false))?.SpaceId
+                    : null;
                 descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, request.CreatedBy, worktreeDirectory: request.WorktreeDirectory is { } worktreeFolder ? Path.GetFullPath(worktreeFolder) : null,
-                    spaceId: null, bypass, sessionId, request.ParentSessionId, request.SessionOptions).ConfigureAwait(false);
+                    spaceId, bypass, sessionId, request.ParentSessionId, request.SessionOptions).ConfigureAwait(false);
             }
             else
             {
