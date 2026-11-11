@@ -1,6 +1,6 @@
 ---
 title: Copilot enterprise managed settings (#411)
-status: in-progress
+status: done
 created: 2026-11-11
 summary: Read the managed settings an enterprise gives its Copilot users through GitHub's official Copilot SDK, with its runtime downloaded on demand only for Copilot users, and enforce them in CodeAlta - no bypass mode, the sandbox required - for every session, whatever its provider.
 ---
@@ -123,7 +123,9 @@ and asks that CodeAlta applies them as VS Code and the Copilot CLI do.
       during a run has its run stopped; a policy that arrives while a session attaches applies at its publication; an
       approval to run outside is checked against the policy again; sign-in, sign-out and provider changes read the
       policy again; kept files are written through `SafeFile`, and those of removed providers are removed.
-- [ ] 9. **Validation**: .NET tests, `npm test`, `lunet build`; the reporter confirms on their enterprise.
+- [x] 9. **Validation**: .NET tests (Debug, and Linux in WSL), `npm test` (two browser tests that failed under load pass
+      alone), `lunet build`, CI of `main` green at `e66f2a618`. Still open: the reporter (or an enterprise with a policy)
+      confirms that GitHub delivers the policy to `CodeAlta`; a Business account without a policy resolved as both identities.
 
 ## Not in this plan
 
