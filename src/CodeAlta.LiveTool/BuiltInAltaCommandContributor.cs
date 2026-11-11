@@ -1801,7 +1801,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AddHelpText(
             command,
             "Use it once the configuration (`config.toml`) changed, the CLI or the agent of a provider was updated, or its account signed in: the providers are registered again as the configuration gives them, each with a new runtime, then tested. Sessions that run go on.",
-            "A host that does not read the configuration again (altacli, altanode, CodeAlta TUI) only tests the providers it has: `configurationApplied` of the summary says which.",
+            "altanode applies the providers changed in its configuration; a host that does not read the configuration again (altacli, CodeAlta TUI) only tests the providers it has: `configurationApplied` of the summary says which.",
             "Writes one `alta.provider.state` record per provider tested (availability, ready, modelCount, statusMessage), then an `alta.provider.refreshed` summary.",
             "Examples: `alta provider refresh`; `alta provider refresh copilot`.");
         return command;
