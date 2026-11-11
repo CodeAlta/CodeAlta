@@ -2,6 +2,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Credentials;
 using CodeAlta.LiveTool;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
@@ -72,6 +73,41 @@ public sealed class AltaCredentialCommandsTests
         var unlock = await dispatcher.InvokeAsync(["credential", "unlock", "personal"]);
         Assert.AreEqual(AltaExitCodes.PolicyDenied, unlock.ExitCode, "a host that cannot prompt never asks a vault to unlock");
         StringAssert.Contains(unlock.Stdout + unlock.Stderr, "credential.noPrompt");
+    }
+
+    [TestMethod]
+    public void The_card_of_a_binding_shows_the_reference_and_the_vault_whatever_the_label()
+    {
+        var provider = new CredentialProviderView("personal", "1password", "1Password", CredentialProviderStatus.Locked("Locked."));
+
+        var detail = BuiltInAltaCommandContributor.BindCardDetail(provider, "op://Private/Production deploy key/credential", "test token");
+
+        StringAssert.Contains(detail, "\"op://Private/Production deploy key/credential\"", "the item the vault reads, not what the agent calls it");
+        StringAssert.Contains(detail, "provider personal, type 1password");
+        StringAssert.Contains(detail, "listed as \"test token\"");
+        Assert.IsTrue(detail.IndexOf("op://", StringComparison.Ordinal) < detail.IndexOf("test token", StringComparison.Ordinal), "the reference comes first");
+        StringAssert.Contains(BuiltInAltaCommandContributor.BindCardDetail(provider, "op://a\"\n/b", "op://a\"\n/b"), "\"op://a\\\"\\n/b\"", "a reference cannot break the card");
+    }
+
+    [TestMethod]
+    public void The_card_of_a_new_provider_shows_its_type_and_every_setting_whatever_its_name()
+    {
+        using var root = new Root();
+        using var broker = root.Broker();
+        var onePassword = broker.Types.Find("1password")!;
+
+        var detail = BuiltInAltaCommandContributor.ProviderCardDetail(onePassword, "personal", "My test vault", new Dictionary<string, object?>
+        {
+            ["service_account_token"] = "${secret:OP_TOKEN}",
+            ["account"] = "evil.1password.example",
+        });
+
+        StringAssert.Contains(detail, "type 1password");
+        StringAssert.Contains(detail, "id personal");
+        StringAssert.Contains(detail, "account = \"evil.1password.example\"", "the address of the vault is on the card");
+        StringAssert.Contains(detail, "service_account_token = \"${secret:OP_TOKEN}\"", "a secret setting by its reference");
+        StringAssert.Contains(detail, "listed as \"My test vault\"");
+        StringAssert.Contains(BuiltInAltaCommandContributor.ProviderCardDetail(onePassword, "personal", null, new Dictionary<string, object?>()), "No settings.");
     }
 
     [TestMethod]

@@ -113,7 +113,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (broker.Store.ListSecrets().FirstOrDefault(secret => string.Equals(secret.Name, name, StringComparison.OrdinalIgnoreCase)) is { Provider: null })
                 return PermissionDenied(context, "secret.hasLocalValue", $"{name} has a value on this computer: the user replaces it in Settings > Secrets of CodeAlta Desktop.");
             var shown = string.IsNullOrWhiteSpace(label) ? reference.Trim() : label.Trim();
-            if (await AskCredentialAsync(context, "bind", name, $"In {view.DisplayName}: {shown}.").ConfigureAwait(false) is { } refused) return refused;
+            if (await AskCredentialAsync(context, "bind", name, BindCardDetail(view, reference.Trim(), shown)).ConfigureAwait(false) is { } refused) return refused;
             broker.Store.Bind(name, view.Id, reference.Trim(), shown, AgentSetBy(context));
             var availability = await broker.ReadSecretAsync(name, context.CancellationToken).ConfigureAwait(false);
             WriteAvailability(context, availability);
@@ -131,7 +131,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             if (!TryGetBroker(context, out var broker)) return AltaExitCodes.ServiceUnavailable;
             if (!LocalSecretStore.IsName(name) || !broker.Store.Bindings.TryGet(name, out var binding)) return NotFound(context, "secret.notBound", $"{name} is not kept in a vault.");
-            if (await AskCredentialAsync(context, "unbind", binding.Name, $"It is removed from this machine; nothing changes in {broker.GetProvider(binding.Provider)?.DisplayName ?? binding.Provider}.")
+            if (await AskCredentialAsync(context, "unbind", binding.Name, $"It is kept in {ProviderOf(broker.GetProvider(binding.Provider), binding.Provider)} as {Quote(binding.Reference)}; it is removed from this machine, and nothing changes in the vault.")
                 .ConfigureAwait(false) is { } refused) return refused;
             broker.Store.Bindings.Unbind(binding.Name);
             AltaJsonlWriter.WriteRecord(context.Stdout, new { type = "alta.secret.unbound", version = 1, correlationId = context.CorrelationId, name = binding.Name });
@@ -264,7 +264,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
             if (contribution.Settings.FirstOrDefault(setting => setting.Required && !values.ContainsKey(setting.Key)) is { } missing)
                 return UsageError(context, "credential.missingSetting", $"The setting '{missing.Key}' is required.", "credential add");
-            if (await AskCredentialAsync(context, "add_provider", providerId, $"{contribution.DisplayName}{(name is null ? string.Empty : $", shown as {name}")}.").ConfigureAwait(false) is { } refused) return refused;
+            if (await AskCredentialAsync(context, "add_provider", providerId, ProviderCardDetail(contribution, providerId, name, values)).ConfigureAwait(false) is { } refused) return refused;
             broker.Settings.Save(new CredentialProviderDefinition(providerId, contribution.Type, values) { DisplayName = string.IsNullOrWhiteSpace(name) ? null : name.Trim() });
             WriteProvider(context, await broker.TestProviderAsync(providerId, context.CancellationToken).ConfigureAwait(false));
             return AltaExitCodes.Success;
@@ -304,6 +304,58 @@ internal sealed partial class BuiltInAltaCommandContributor
         return decision.Kind is AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession or AgentPermissionDecisionKind.AllowAlways
             ? null
             : PermissionDenied(context, "credential.denied", decision.DescribeDenial());
+    }
+
+    // What a card says of a binding: the vault and the exact reference it reads, whatever label the agent gave; the label
+    // is said apart, as what the list will show.
+    internal static string BindCardDetail(CredentialProviderView provider, string reference, string label)
+        => $"In {ProviderOf(provider, provider.Id)}: {Quote(reference)}{(string.Equals(label, reference, StringComparison.Ordinal) ? string.Empty : $", listed as {Quote(label)}")}.";
+
+    // What a card says of a new provider: its type, its id and every setting with its value as it will be written (a secret
+    // setting is a reference to a secret of this computer, never a value), whatever name the agent gave it.
+    internal static string ProviderCardDetail(PluginCredentialProviderContribution contribution, string id, string? name, IReadOnlyDictionary<string, object?> values)
+    {
+        var order = contribution.Settings.Select(static setting => setting.Key).ToList();
+        var settings = values.OrderBy(pair => order.IndexOf(pair.Key)).ThenBy(static pair => pair.Key, StringComparer.Ordinal)
+            .Select(static pair => $"{pair.Key} = {Format(pair.Value)}").ToArray();
+        return $"A provider of type {contribution.Type} ({contribution.DisplayName}), id {id}{(string.IsNullOrWhiteSpace(name) ? string.Empty : $", listed as {Quote(name.Trim())}")}. "
+            + (settings.Length == 0 ? "No settings." : $"Settings: {string.Join("; ", settings)}.");
+
+        static string Format(object? value) => value switch
+        {
+            null => "(none)",
+            bool flag => flag ? "true" : "false",
+            IEnumerable<object?> list when value is not string => $"[{string.Join(", ", list.Select(static item => Quote(item?.ToString() ?? string.Empty)))}]",
+            _ => Quote(value.ToString() ?? string.Empty),
+        };
+    }
+
+    // A provider as a card names it: its name, its id and its type, which an agent does not choose for an existing one.
+    private static string ProviderOf(CredentialProviderView? provider, string id)
+        => provider is null ? $"the provider {id}" : $"{provider.DisplayName} (provider {provider.Id}, type {provider.Type})";
+
+    // A text as a card shows it: quoted, its quotes and control characters escaped, so that it cannot look like the rest of the card.
+    private static string Quote(string text)
+    {
+        var builder = new System.Text.StringBuilder(text.Length + 2).Append('"');
+        foreach (var c in text)
+        {
+            switch (c)
+            {
+                case '"': builder.Append("\\\""); break;
+                case '\\': builder.Append("\\\\"); break;
+                case '\n': builder.Append("\\n"); break;
+                case '\r': builder.Append("\\r"); break;
+                case '\t': builder.Append("\\t"); break;
+                default:
+                    if (char.IsControl(c) || (int)c is 0x200E or 0x200F or 0x2028 or 0x2029 or (>= 0x202A and <= 0x202E) or (>= 0x2066 and <= 0x2069))
+                        builder.Append("\\u").Append(((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
+                    else builder.Append(c);
+                    break;
+            }
+        }
+
+        return builder.Append('"').ToString();
     }
 
     private static string AgentSetBy(AltaCommandContext context) => $"an agent, allowed by {Environment.UserName} (CodeAlta Desktop)";
