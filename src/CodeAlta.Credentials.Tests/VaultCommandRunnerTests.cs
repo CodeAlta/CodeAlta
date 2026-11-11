@@ -12,7 +12,7 @@ public sealed class VaultCommandRunnerTests
     public async Task A_caller_that_stops_ends_a_program_that_does_not_read_its_input()
     {
         using var vault = new FakeVault("vaulttool");
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(1)); // not a limit: the moment the caller stops
         var watch = Stopwatch.StartNew();
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await new VaultCommandRunner().RunAsync(vault.ProgramPath, ["sleep", "60"],
             new VaultCommandOptions { Input = LargeInput, Timeout = TimeSpan.FromMinutes(2) }, stop.Token));
@@ -28,7 +28,7 @@ public sealed class VaultCommandRunnerTests
         try
         {
             using var process = Process.GetProcessById(int.Parse(File.ReadAllText(file), System.Globalization.CultureInfo.InvariantCulture));
-            var ended = process.WaitForExit(TimeSpan.FromSeconds(5));
+            var ended = process.WaitForExit(CodeAlta.Testing.TestTime.Seconds(5));
             if (!ended) process.Kill();
             Assert.IsTrue(ended, "the program still runs");
         }

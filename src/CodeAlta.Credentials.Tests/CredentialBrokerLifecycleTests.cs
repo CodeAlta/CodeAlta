@@ -123,7 +123,7 @@ public sealed class CredentialBrokerLifecycleTests
 
     private static async Task WaitAsync(Func<bool> condition)
     {
-        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var until = DateTime.UtcNow + CodeAlta.Testing.TestTime.Seconds(10);
         while (!condition())
         {
             if (DateTime.UtcNow > until) Assert.Fail("It did not happen in time.");

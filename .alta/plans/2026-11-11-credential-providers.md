@@ -294,8 +294,8 @@ sequenceDiagram
 - [x] 11. **RPC** (`src/CodeAlta/Desktop/Rpc/SecretsRpc.cs`, the existing `secrets` service): the types and the providers with their state; save, remove, unlock, lock, test and browse a provider; bind and unbind; the list gives the source and the state of each secret. Nothing returns a value. Tests: `SecretsRpcTests`.
 - [x] 12. **Settings > Secrets** (`src/CodeAlta/frontend/src/secrets/`): the providers card, the gallery of types with logos and what each needs, the form of a provider (its settings, how long its values stay in memory, **Unlock when CodeAlta starts**), the binding dialog with its picker (a name that has a value here is replaced after a confirmation beside its row), the source and state of each row, **Unlock** and **Lock**; **Use a vault item…** in `ProviderKeySecret.tsx`; **Unlock** where a provider is unavailable for a locked secret (its page, the composer). Logos through `scripts/generate-brand-icons.mjs` and `npm run icons`. Texts in `secrets/messages.ts` in the five languages. Tests beside the modules, and one browser test.
 - [x] 13. **`alta`, reading** (`BuiltInAltaCommandContributor.Secrets.cs`, new `BuiltInAltaCommandContributor.Credentials.cs`): `secret list` with provider and state, `secret test`, `credential types|list|status`, their help. Tests: `AltaSecretCommandsTests`, `AltaCredentialCommandsTests`, and one that a sandboxed session is refused each of them.
-- [ ] 14. **Documentation**: `site/docs/secrets.md` (credential providers, 1Password, a command, binding, with pictures), the page where the key of a provider is set, a new `doc/credentials.md` (the broker, ensure then resolve, the rules of "What this protects") linked from `doc/architecture.md`, `readme.md`.
-- [ ] 15. **Validation of phase 1**: the .NET tests, `npm test`, `lunet build`, the developer instance with the test double, and a real 1Password account.
+- [x] 14. **Documentation**: `site/docs/secrets.md` (credential providers, 1Password, a command, binding, with pictures), the page where the key of a provider is set, a new `doc/credentials.md` (the broker, ensure then resolve, the rules of "What this protects") linked from `doc/architecture.md`, `readme.md`. *The Secrets page became a folder: `site/docs/secrets/readme.md` (Ask before use included), `vaults.md` (each vault, agents, what it protects, sign-ins) and `machines.md` (altanode, a server, environments), with four pictures.*
+- [ ] 15. **Validation of phase 1**: the .NET tests, `npm test`, `lunet build`, the developer instance with the test double, and a real 1Password account. *Done but the real 1Password account, which waits for the user.*
 
 ### Phase 2: ask before use
 
@@ -303,7 +303,7 @@ sequenceDiagram
 - [x] 17. **Grants** (`CredentialBroker`, `SecretBindings`): `ask_before_use` on any secret; a grant per secret and use, with its duration; without a user, the availability is "waits for you". The recent uses keep who asked, when and the outcome, never a value. Tests.
 - [x] 18. **Verifiers** (`IUserPresenceVerifier` in `CodeAlta.Credentials`; `src/CodeAlta/Desktop/Credentials/` for Windows and macOS): availability with its reason, verification with the secret and its use in the message; none on a headless host. Tests with a fake verifier. *The verifiers are in `CodeAlta.Credentials/SystemUserPresence.cs` (hand-written WinRT and Objective-C interop), given the handle of the window by the desktop.*
 - [x] 19. **Desktop**: the switch and its duration on a secret, off with its reason where the system has no verification; **Confirm…** where a provider, an MCP server or the composer waits; the recent uses on the page, and `alta secret uses`. *The confirmation is on the page of Settings (**Confirm** at the top) and in the prompt of the system; the composer shows no button.*
-- [ ] 20. **Documentation and validation of phase 2**: the user guide, the tests, the check on Windows 11 and on a Mac.
+- [ ] 20. **Documentation and validation of phase 2**: the user guide, the tests, the check on Windows 11 and on a Mac. *Done on Windows 11 (the availability of Windows Hello); the prompt itself and the Mac are not checked.*
 
 ### Phase 3: more vaults, plugins and agents
 
@@ -314,7 +314,7 @@ sequenceDiagram
 - [x] 25. **The plugin hook**: `PluginBase.GetCredentialProviders()`, `PluginPoint.CredentialProvider`, `PluginCredentialProviderTypes` in `CodeAlta.Hosting` (added and removed with the plugin, a type `<prefix>/<name>` that shadows no built-in, never from a project plugin, the SVG of an icon made safe by the host). `PluginApiReference`, the reference of the `codealta-plugin-runtime` skill, `site/docs/plugins/developers.md`. Tests in `CodeAlta.Plugins.Tests`.
 - [x] 26. **`alta`, changing**: `secret bind|unbind`, `credential add|remove|unlock|lock`, with `AgentCredentialPermissionRequest` (journal, the card of CodeAlta Desktop, the generic prompt of the TUI, `AlwaysAsks`, `OnlyTheUserAllows`); an unlock the user dismissed is not asked again by an agent for ten minutes. Tests, the sandbox refusals included.
 - [x] 27. **Hardening**: `BW_SESSION` and `OP_SESSION_*` never pass into a sandbox (`SandboxPolicyBuilder`); the guard of vault CLIs in the shell of an agent (`AgentCommandGuard`), with its setting. Tests.
-- [ ] 28. **Documentation and validation of phase 3**: one section per vault in the user guide, the tests, a check with a real Bitwarden account and a KeePassXC database.
+- [ ] 28. **Documentation and validation of phase 3**: one section per vault in the user guide, the tests, a check with a real Bitwarden account and a KeePassXC database. *Done against the fake programs only: no real Bitwarden account nor KeePassXC database.*
 
 ### Phase 4: sign in to websites
 
@@ -325,14 +325,15 @@ sequenceDiagram
 
 ## How it is verified
 
-- [ ] `dotnet test -c <Configuration>` passes, with the new `SecretBindingsTests`, `CodeAlta.Credentials.Tests`, `AltaCredentialCommandsTests` and the extended `SecretsRpcTests`, `ConfiguredProviderRegistrationTests`, `McpRuntimeServiceTests`.
-- [ ] `npm test` passes, with the tests of `src/secrets/` and their browser test.
-- [ ] In the developer instance, on an isolated profile with the test double as `op`: add a provider, bind `ANTHROPIC_API_KEY`, see the provider **Locked**, click **Unlock**, see it ready. `store.json` holds no value for it, and `bindings.json` holds no value at all.
-- [ ] A session whose command prints the key shows `***` in its timeline and in its journal file.
-- [ ] From a sandboxed session, `alta secret list` and `alta credential list` answer the refusal of the sandbox.
-- [ ] With **Ask before use** on, starting an MCP server that names the secret shows the system prompt with the name of the server; **Cancel** leaves the server stopped with "waits for your confirmation".
+- [x] `dotnet test -c <Configuration>` passes, with the new `SecretBindingsTests`, `CodeAlta.Credentials.Tests`, `AltaCredentialCommandsTests` and the extended `SecretsRpcTests`, `ConfiguredProviderRegistrationTests`, `McpRuntimeServiceTests`.
+- [x] `npm test` passes, with the tests of `src/secrets/` and their browser test.
+- [x] In the developer instance, on an isolated profile with the test double as `op`: add a provider, bind `ANTHROPIC_API_KEY`, see the provider **Locked**, click **Unlock**, see it ready. `store.json` holds no value for it, and `bindings.json` holds no value at all.
+- [ ] A session whose command prints the key shows `***` in its timeline and in its journal file. *Covered by the masking tests (a vault value is masked from its first read), not seen in a window.*
+- [x] From a sandboxed session, `alta secret list` and `alta credential list` answer the refusal of the sandbox. *By `AltaCredentialCommandsTests` and `SandboxPolicyBuilderTests`; not in a running sandbox.*
+- [ ] With **Ask before use** on, starting an MCP server that names the secret shows the system prompt with the name of the server; **Cancel** leaves the server stopped with "waits for your confirmation". *Covered by `McpRuntimeServiceTests` with a fake verifier; the system prompt is not seen.*
 - [ ] With a real 1Password account on Windows: one Windows Hello prompt at start, none afterwards; the Developer page of the 1Password app lists the reads of CodeAlta.
-- [ ] `lunet build` passes with the new sections and pictures.
+- [x] `lunet build` passes with the new sections and pictures.
+- [x] A review by GPT-6.1 Sol (max reasoning) of the whole branch: 22 findings (10 High: sign-in values in encoded request bodies, the fill bound to the checked field, an external submit button, a sign-in changed under its card, a lock overtaken by a read, vault values in a sandbox under another name, uses shared by grants, cards that showed the agent's label, CLI error output, vault secrets in MCP arguments), each fixed with its test.
 
 ## Decisions
 
