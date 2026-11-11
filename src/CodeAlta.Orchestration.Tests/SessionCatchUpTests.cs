@@ -51,6 +51,33 @@ public sealed class SessionCatchUpTests
     }
 
     [TestMethod]
+    public async Task CatchUp_WithTurnsWhosePreviewMatchesThePreviousOne_KeepsTheUpdatedAtOfTheSummary()
+    {
+        // The session list on the phone and in the desktop sorts by UpdatedAt: a re-ingestion of turns whose preview is
+        // the same as the recorded one (a compaction, a turn without an assistant answer, a re-read that finds nothing
+        // new of substance) must not move the session to the top of the list.
+        using var temp = TempDirectory.Create();
+        var provider = new ExternalProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Preview unchanged")).SessionId;
+        await SendAsync(host, sessionId, "one");
+        var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var before = (await store.GetSessionSummaryAsync(sessionId))!.UpdatedAt;
+        Assert.AreNotEqual(default, before, "The first turn recorded an UpdatedAt.");
+
+        await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+        // A compaction-only turn: the journal gains its record but the preview text does not change.
+        provider.External = state => new AgentExternalTurns(AgentExternalTurnsStatus.Read,
+            [new AgentExternalTurn([], AgentExternalTurnOrigin.VsCode, "claude-vscode", DateTimeOffset.UtcNow, IsCompaction: true)],
+            static (turns, users, assistants) => JsonDocument.Parse($$"""{"kind":"fake","turns":{{turns}},"users":{{users}},"assistants":{{assistants}}}""").RootElement.Clone());
+        Assert.AreEqual("appended", await host.Commands.CatchUpExternalTurnsAsync(sessionId));
+
+        var after = (await store.GetSessionSummaryAsync(sessionId))!.UpdatedAt;
+        Assert.AreEqual(before, after, "The preview did not change: the summary keeps its UpdatedAt so the list stays ordered by real activity.");
+    }
+
+    [TestMethod]
     public async Task Send_CatchesUpFirst_SoThatThePromptFollowsTheTurnsMadeElsewhere()
     {
         using var temp = TempDirectory.Create();
