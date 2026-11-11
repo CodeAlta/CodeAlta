@@ -245,10 +245,25 @@ public sealed class UpdateSwitchTests
         store.Select(V1);
         store.Confirm(V1);
         var runner = new FakeRunner((process, _) => { process.Exit(3); return Task.CompletedTask; });
-        Assert.AreEqual(3, await Launcher(store, runner).RunAsync());
+        Assert.AreEqual(3, await Launcher(store, runner).RunCheckedAsync(runner));
         Assert.AreEqual("4.0.1", VersionOf(runner.Started.Single()));
         Assert.AreEqual("4.0.0", runner.Environments[0][UpdateLauncher.InstalledVersionVariable]);
         Assert.IsNotNull(runner.Environments[0][UpdateLauncher.SupervisorVariable]);
+    }
+
+    // A script that fails, as a write of the state that stays locked on a loaded machine, ends its process: a confirmed version
+    // has no trial to stop it, and the launcher would wait for it forever. The test fails with what the script said.
+    [TestMethod]
+    public async Task AScriptThatFails_EndsItsProcess_AndFailsTheTestWithItsError()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1);
+        store.Select(V1);
+        store.Confirm(V1);
+        var runner = new FakeRunner(static (_, _) => throw new UpdateException(UpdateErrorCodes.StateUnavailable, "the state stays locked"));
+        var failure = await Assert.ThrowsExactlyAsync<UpdateException>(() => Launcher(store, runner).RunCheckedAsync(runner));
+        Assert.AreEqual("the state stays locked", failure.Message);
+        Assert.AreEqual(1, runner.Started.Count);
     }
 
     // A Windows service's stop: no SIGTERM to send, so the version that runs is asked through its own channel (the local control of
@@ -276,8 +291,8 @@ public sealed class UpdateSwitchTests
                 return true;
             },
         });
-        var running = launcher.RunAsync();
-        var process = await started.Task;
+        var running = launcher.RunCheckedAsync(runner);
+        var process = await started.Task.WithinAsync(TestTime.Seconds(60));
         await stop.CancelAsync();
         Assert.AreEqual(0, await running);
         CollectionAssert.AreEqual(new[] { process.Id }, asked);
@@ -295,11 +310,11 @@ public sealed class UpdateSwitchTests
         var log = new List<string>();
 
         // The installed 4.0.0 hands over to the selected 4.0.2.
-        await Launcher(store, runner).RunAsync();
+        await Launcher(store, runner).RunCheckedAsync(runner);
 
         // dotnet tool update makes the installed entry point 4.0.3, newer than the selection: the owner's update runs, and
         // the pointer is dropped.
-        await Launcher(store, runner, log: log, installedVersion: "4.0.3").RunAsync();
+        await Launcher(store, runner, log: log, installedVersion: "4.0.3").RunCheckedAsync(runner);
         var started = string.Join(' ', runner.Started.Select(VersionOf));
         Assert.AreEqual("4.0.2 installed", started, started);
         Assert.IsNull(store.Read().Current);
@@ -311,12 +326,12 @@ public sealed class UpdateSwitchTests
         StoreWith(temp, V1);
         store.Select(V1);
         store.Confirm(V1);
-        await Launcher(store, runner, installedVersion: "4.0.3").RunAsync();
+        await Launcher(store, runner, installedVersion: "4.0.3").RunCheckedAsync(runner);
         Assert.AreEqual("4.0.1", VersionOf(runner.Started[^1]));
         Assert.AreEqual("4.0.1", store.Read().Current);
 
         // Nor does an installed entry point changed to a version that is not newer than the selected one replace it.
-        await Launcher(store, runner, installedVersion: "4.0.1").RunAsync();
+        await Launcher(store, runner, installedVersion: "4.0.1").RunCheckedAsync(runner);
         Assert.AreEqual("4.0.1", VersionOf(runner.Started[^1]));
         Assert.AreEqual("4.0.1", store.Read().Current);
     }
@@ -344,7 +359,7 @@ public sealed class UpdateSwitchTests
             await Task.Delay(30);
             process.Exit(0);
         });
-        Assert.AreEqual(0, await Launcher(store, runner).RunAsync());
+        Assert.AreEqual(0, await Launcher(store, runner).RunCheckedAsync(runner));
         CollectionAssert.AreEqual(new[] { "4.0.1", "4.0.2" }, runner.Started.Select(VersionOf).ToArray());
         var state = store.Read();
         Assert.AreEqual("4.0.2", state.Current);
@@ -367,7 +382,7 @@ public sealed class UpdateSwitchTests
             process.Exit(count == 1 ? 134 : 0);
             return Task.CompletedTask;
         });
-        var exitCode = await Launcher(store, runner, rolledBack: (trial, _) => { restored = trial; return Task.CompletedTask; }, log: log).RunAsync();
+        var exitCode = await Launcher(store, runner, rolledBack: (trial, _) => { restored = trial; return Task.CompletedTask; }, log: log).RunCheckedAsync(runner);
         Assert.AreEqual(0, exitCode, "the previous version runs and ends as it ends");
         CollectionAssert.AreEqual(new[] { "4.0.2", "4.0.1" }, runner.Started.Select(VersionOf).ToArray());
         Assert.AreEqual("pre-4.0.2.sqlite3", restored?.Backup);
@@ -397,7 +412,7 @@ public sealed class UpdateSwitchTests
             RolledBack = (trial, _) => { restored = trial; return Task.CompletedTask; },
         });
 
-        Assert.AreEqual(0, await launcher.RunAsync(), "the previous version runs and ends as it ends");
+        Assert.AreEqual(0, await launcher.RunCheckedAsync(inner), "the previous version runs and ends as it ends");
         Assert.AreEqual("4.0.1", VersionOf(inner.Started.Single()));
         Assert.AreEqual("pre-4.0.2.sqlite3", restored?.Backup);
         var state = store.Read();
@@ -416,7 +431,7 @@ public sealed class UpdateSwitchTests
         store.Select(V2, backup: "pre-4.0.2.sqlite3");
         var log = new List<string>();
         var runner = new FakeRunner((process, _) => { process.Exit(134); return Task.CompletedTask; });
-        var exitCode = await Launcher(store, runner, rolledBack: static (_, _) => throw new IOException("the disk is full"), log: log).RunAsync();
+        var exitCode = await Launcher(store, runner, rolledBack: static (_, _) => throw new IOException("the disk is full"), log: log).RunCheckedAsync(runner);
 
         // 4.0.1 never runs on the database 4.0.2 migrated: the launcher stops and says why.
         Assert.AreNotEqual(0, exitCode);
@@ -429,7 +444,7 @@ public sealed class UpdateSwitchTests
 
         UpdateTrial? restored = null;
         var next = new FakeRunner((process, _) => { process.Exit(0); return Task.CompletedTask; });
-        Assert.AreEqual(0, await Launcher(store, next, rolledBack: (trial, _) => { restored = trial; return Task.CompletedTask; }).RunAsync());
+        Assert.AreEqual(0, await Launcher(store, next, rolledBack: (trial, _) => { restored = trial; return Task.CompletedTask; }).RunCheckedAsync(next));
         Assert.AreEqual("pre-4.0.2.sqlite3", restored?.Backup, "the backup reference is kept until the restore succeeds");
         Assert.AreEqual("4.0.1", VersionOf(next.Started.Single()));
         Assert.IsNull(store.Read().RollingBack);
@@ -453,7 +468,7 @@ public sealed class UpdateSwitchTests
             TrialLimit = TimeSpan.FromMilliseconds(150), PollInterval = TimeSpan.FromMilliseconds(10), StopGrace = TimeSpan.FromMilliseconds(50),
             RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false,
         });
-        Assert.AreEqual(0, await launcher.RunAsync());
+        Assert.AreEqual(0, await launcher.RunCheckedAsync(runner));
         Assert.AreEqual(1, runner.Started[0].StopRequests);
         Assert.IsTrue(runner.Started[0].Killed);
         Assert.AreEqual("installed", VersionOf(runner.Started[1]));
@@ -470,7 +485,7 @@ public sealed class UpdateSwitchTests
         store.CountTrialStart();
         store.CountTrialStart();
         var runner = new FakeRunner((process, _) => { process.Exit(0); return Task.CompletedTask; });
-        await Launcher(store, runner).RunAsync();
+        await Launcher(store, runner).RunCheckedAsync(runner);
         Assert.AreEqual("installed", VersionOf(runner.Started.Single()));
         Assert.IsTrue(store.Read().IsBad(V1));
     }
@@ -487,7 +502,7 @@ public sealed class UpdateSwitchTests
             await Task.Delay(30);
             await stop.CancelAsync();
         });
-        Assert.AreEqual(0, await Launcher(store, runner, stop: stop.Token).RunAsync());
+        Assert.AreEqual(0, await Launcher(store, runner, stop: stop.Token).RunCheckedAsync(runner));
         Assert.AreEqual(1, runner.Started.Single().StopRequests, "the stop is passed to the version");
         var state = store.Read();
         Assert.AreEqual("4.0.1", state.Current);
@@ -504,7 +519,7 @@ public sealed class UpdateSwitchTests
         store.Confirm(V1);
         Directory.Delete(store.VersionPath(V1), recursive: true);
         var runner = new FakeRunner((process, _) => { process.Exit(0); return Task.CompletedTask; });
-        await Launcher(store, runner).RunAsync();
+        await Launcher(store, runner).RunCheckedAsync(runner);
         Assert.AreEqual("installed", VersionOf(runner.Started.Single()));
         Assert.IsNull(store.Read().Current);
     }
@@ -527,7 +542,7 @@ public sealed class UpdateSwitchTests
             await Task.Delay(20);
             process.Exit(0);
         });
-        Assert.AreEqual(0, await Launcher(store, runner).RunAsync());
+        Assert.AreEqual(0, await Launcher(store, runner).RunCheckedAsync(runner));
         Assert.AreEqual("4.0.2", VersionOf(runner.Started.Single()), "the launcher took the switch before it started a version");
         Assert.AreEqual("4.0.2", store.Read().Current);
         Assert.IsNull(store.Read().Trial);
@@ -567,7 +582,7 @@ public sealed class UpdateSwitchTests
             PollInterval = TimeSpan.FromMilliseconds(10), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false,
             Backup = version => $"before-{version}.sqlite3",
         });
-        Assert.AreEqual(0, await launcher.RunAsync());
+        Assert.AreEqual(0, await launcher.RunCheckedAsync(runner));
         CollectionAssert.AreEqual(new[] { "4.0.1", "4.0.2" }, runner.Started.Select(VersionOf).ToArray());
         Assert.AreEqual("before-4.0.2.sqlite3", backupOfTrial);
 
@@ -596,12 +611,12 @@ public sealed class UpdateSwitchTests
         {
             Assert.IsNotNull(lease);
             Assert.IsNull(new UpdateVersionStore(store.Root).TryAcquireLauncherLease(), "another launcher of the same folder is refused");
-            var busy = await Assert.ThrowsExactlyAsync<UpdateException>(() => Create(null).RunAsync());
+            var busy = await Assert.ThrowsExactlyAsync<UpdateException>(() => Create(null).RunCheckedAsync(runner));
             Assert.AreEqual(UpdateErrorCodes.LauncherBusy, busy.Code);
             Assert.AreEqual(0, runner.Started.Count);
 
             // The holder of the lease runs the version; refused by the holder of its profile, it is not blamed.
-            Assert.AreEqual(3, await Create(lease).RunAsync());
+            Assert.AreEqual(3, await Create(lease).RunCheckedAsync(runner));
         }
 
         var state = store.Read();

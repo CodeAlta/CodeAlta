@@ -204,7 +204,11 @@ internal sealed class FakeProcess(int id, UpdateCommand command) : IUpdateProces
 /// <summary>Starts fake processes and lets a test script each start.</summary>
 internal sealed class FakeRunner : IUpdateProcessRunner
 {
+    /// <summary>The exit code of a process whose script failed.</summary>
+    public const int ScriptFailedExitCode = 70;
+
     private readonly Func<FakeProcess, int, Task> _script;
+    private readonly List<Exception> _failures = [];
     private int _count;
 
     public FakeRunner(Func<FakeProcess, int, Task> script) => _script = script;
@@ -215,10 +219,47 @@ internal sealed class FakeRunner : IUpdateProcessRunner
 
     public IUpdateProcess Start(UpdateCommand command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string?> environment)
     {
-        var process = new FakeProcess(++_count, command);
+        var count = ++_count;
+        var process = new FakeProcess(count, command);
         Started.Add(process);
         Environments.Add(environment);
-        _ = Task.Run(() => _script(process, _count));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _script(process, count);
+            }
+            catch (Exception exception)
+            {
+                // A script that failed would never end its process, and a launcher that runs a confirmed version waits
+                // for it without a limit: the process ends, and the test fails with what the script said.
+                lock (_failures) _failures.Add(exception);
+                process.Exit(ScriptFailedExitCode);
+            }
+        });
         return process;
+    }
+
+    /// <summary>Throws the first failure of a script of this runner, if any.</summary>
+    public void ThrowIfScriptFailed()
+    {
+        Exception? first;
+        lock (_failures) first = _failures.FirstOrDefault();
+        if (first is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
+    }
+}
+
+/// <summary>Runs the launchers of the tests.</summary>
+internal static class FakeLaunch
+{
+    /// <summary>Runs a launcher to its end, within a limit, then fails as the first script of its runner that failed.</summary>
+    /// <param name="launcher">The launcher.</param>
+    /// <param name="runner">The runner of its fake processes.</param>
+    /// <returns>The exit code of the launcher.</returns>
+    public static async Task<int> RunCheckedAsync(this UpdateLauncher launcher, FakeRunner runner)
+    {
+        var exitCode = await launcher.RunAsync().WithinAsync(TestTime.Seconds(60));
+        runner.ThrowIfScriptFailed();
+        return exitCode;
     }
 }
