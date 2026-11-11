@@ -15,7 +15,8 @@ internal static class AltaSandboxGate
     // (prompts, spaces, labels, projects, settings), drives the window, or uses the accounts of the user to change something.
     private static readonly FrozenSet<string> Allowed = new[]
     {
-        "version", "ask", "notes", "note", "skill", "skills", "skills_activate", "tool", "provider", "model", "documentation",
+        // The providers are read; testing them again starts their programs, outside the sandbox.
+        "version", "ask", "notes", "note", "skill", "skills", "skills_activate", "tool", "provider list", "provider model list", "model", "documentation",
         "task", "plan", "tag", "review", "reminder", "job", "workflow", "script list", "script show", "script check", "script edit", "diff", "editor", "search", "sandbox list", "sandbox show", "sandbox status",
         "prompt list", "prompt show", "plugin list", "plugin status", "plugin api", "settings list", "settings get", "settings open", "release-notes",
         "project list", "project show", "project resolve", "project current", "project manifest show", "project manifest scan", "space list", "space show", "space current", "label list", "label show",

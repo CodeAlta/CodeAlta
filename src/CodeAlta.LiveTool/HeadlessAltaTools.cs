@@ -50,6 +50,12 @@ public sealed record HeadlessAltaToolsOptions
 
     /// <summary>Gets the model servers the <c>alta llama</c> commands manage; null, the default, for none (the commands do not exist).</summary>
     public IAltaModelServers? ModelServers { get; init; }
+
+    /// <summary>
+    /// Gets the configuration <c>alta provider refresh</c> applies again before it tests the providers; null, the default,
+    /// for a host that only tests the providers it has.
+    /// </summary>
+    public IAltaProviderConfiguration? ProviderConfiguration { get; init; }
 }
 
 /// <summary>
@@ -105,6 +111,7 @@ public sealed class HeadlessAltaTools : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         var services = CreateServices(host);
         if (options.ModelServers is not null) services.Add(options.ModelServers);
+        if (options.ProviderConfiguration is not null) services.Add(options.ProviderConfiguration);
         var registry = new AltaCommandRegistry(options.Registry);
         var dispatcher = new AltaCommandDispatcher(registry, services);
         // The registry is a service too: alta tool list and alta tool capability list read it.

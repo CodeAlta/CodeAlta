@@ -58,6 +58,9 @@ public sealed class NodeHost : IAsyncDisposable
     /// <summary>Gets the provider types of the plugins of the node (Codex CLI, ACP agents); null when a test gives its providers.</summary>
     internal PluginModelProviderTypes? PluginProviderTypes { get; }
 
+    /// <summary>Gets the configuration of the providers <c>alta provider refresh</c> applies, once the fleet part of the node gave its providers.</summary>
+    internal NodeAltaProviderConfiguration? ProviderConfiguration { get; private init; }
+
     /// <summary>Gets the catalog of models the providers of the node are started with.</summary>
     internal ModelsDevCatalogService ModelCatalog => _modelsDev;
 
@@ -132,8 +135,11 @@ public sealed class NodeHost : IAsyncDisposable
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes), cancellationToken).ConfigureAwait(false);
             var running = host;
+            var providerConfiguration = new NodeAltaProviderConfiguration(host.ModelProviderRegistry);
             var alta = HeadlessAltaTools.Attach(host, CreateAltaOptions(profile) with
             {
+                // `alta provider refresh`: the providers changed in config.toml start again before they are tested.
+                ProviderConfiguration = providerConfiguration,
                 // `alta llama`: the model servers of the machine; what a session starts tells it its end as a background job does.
                 ModelServers = options.ModelHost is { } modelHost
                     ? new LocalAltaModelServers(modelHost, Environment.MachineName,
@@ -150,7 +156,10 @@ public sealed class NodeHost : IAsyncDisposable
             }
 
             logger.Info($"CodeAlta Node started on {profile.StateRoot} (PID {Environment.ProcessId}).");
-            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger, automations, options.ConfigureModelProviders is null ? pluginProviderTypes : null);
+            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger, automations, options.ConfigureModelProviders is null ? pluginProviderTypes : null)
+            {
+                ProviderConfiguration = providerConfiguration,
+            };
         }
         catch
         {
