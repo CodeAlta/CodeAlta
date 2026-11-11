@@ -32,6 +32,8 @@ To set up a provider:
 
 The test checks that the provider starts and lists its models; it does not prove that every request will succeed. **Refresh** (`/model_providers_refresh`) reloads the file and tests the providers again, for example after you start a local model server.
 
+An agent can do the same for you, also when you ask from the [mobile app](../plugins/mobile.md), for example after it updated the CLI of a provider: `alta provider refresh` reloads the file and tests every provider, or the one it names, and `alta provider model refresh --provider <id>` asks a provider for its models again when it has new ones.
+
 ## The provider form
 
 The provider editor can:

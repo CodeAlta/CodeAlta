@@ -2332,6 +2332,123 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ProviderModelRefresh_AsksTheProviderForItsModelsAgain()
+    {
+        var providerId = new ModelProviderId("refreshing");
+        var provider = new StatefulProviderRuntime(providerId) { Models = [new AgentModelInfo("gpt-old")] };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, "Refreshing"), () => provider);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add<IModelProviderRegistry>(registry)
+            .Add<IModelProviderInitializationService>(new ModelProviderInitializationService(registry)));
+
+        static string[] Refs(AltaCommandResult result)
+            => ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.model.refs")
+                .GetProperty("modelRefs").EnumerateArray().Select(static item => item.GetString()!).ToArray();
+
+        var first = await dispatcher.InvokeAsync(["provider", "model", "list", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "refreshing:gpt-old" }, Refs(first));
+
+        // The provider has a new model: a list gives what it said before, a refresh asks it again.
+        provider.Models = [new AgentModelInfo("gpt-old"), new AgentModelInfo("gpt-new")];
+        var cached = await dispatcher.InvokeAsync(["provider", "model", "list", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "refreshing:gpt-old" }, Refs(cached));
+        var refreshed = await dispatcher.InvokeAsync(["provider", "model", "refresh", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, refreshed.ExitCode, refreshed.Stderr);
+        CollectionAssert.AreEqual(new[] { "refreshing:gpt-new", "refreshing:gpt-old" }, Refs(refreshed));
+
+        var missing = await dispatcher.InvokeAsync(["provider", "model", "refresh", "--provider", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode);
+    }
+
+    [TestMethod]
+    public async Task ProviderRefresh_AppliesTheConfigurationThenTestsTheProviders()
+    {
+        var ready = new StatefulProviderRuntime(new ModelProviderId("ready")) { Models = [new AgentModelInfo("gpt-one"), new AgentModelInfo("gpt-two")] };
+        var added = new StatefulProviderRuntime(new ModelProviderId("added")) { Models = [new AgentModelInfo("gpt-added")] };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(ready.ProviderId, "Ready"), () => ready);
+        // The configuration now gives a second provider: applying it registers it.
+        var configuration = new RegisteringProviderConfiguration(() =>
+        {
+            registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(ready.ProviderId, "Ready"), () => ready);
+            registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(added.ProviderId, "Added"), () => added);
+            return 2;
+        });
+        var models = new ModelProviderInitializationService(registry);
+        var services = new AltaServiceCollection()
+            .Add<IModelProviderRegistry>(registry)
+            .Add<IModelProviderInitializationService>(models);
+        var dispatcher = CreateDispatcher(services.Add<IAltaProviderConfiguration>(configuration));
+
+        var all = await dispatcher.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, all.ExitCode, all.Stderr);
+        Assert.AreEqual(1, configuration.Applied);
+        var states = ReadJsonLines(all.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.provider.state")
+            .ToDictionary(static line => line.GetProperty("providerKey").GetString()!);
+        CollectionAssert.AreEquivalent(new[] { "ready", "added" }, states.Keys.ToArray());
+        Assert.AreEqual("ready", states["ready"].GetProperty("availability").GetString());
+        Assert.IsTrue(states["ready"].GetProperty("ready").GetBoolean());
+        Assert.AreEqual(2, states["ready"].GetProperty("modelCount").GetInt32());
+        Assert.AreEqual(1, states["added"].GetProperty("modelCount").GetInt32());
+        var summary = ReadJsonLines(all.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.provider.refreshed");
+        Assert.AreEqual(2, summary.GetProperty("count").GetInt32());
+        Assert.AreEqual(2, summary.GetProperty("ready").GetInt32());
+        Assert.IsTrue(summary.GetProperty("configurationApplied").GetBoolean());
+        Assert.AreEqual(2, summary.GetProperty("registered").GetInt32());
+
+        // One provider, by name.
+        var one = await dispatcher.InvokeAsync(["provider", "refresh", "added"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, one.ExitCode, one.Stderr);
+        Assert.AreEqual("added", ReadJsonLines(one.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.provider.state").GetProperty("providerKey").GetString());
+
+        var missing = await dispatcher.InvokeAsync(["provider", "refresh", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode);
+
+        // A configuration that cannot be applied fails the command, and tests nothing.
+        configuration.Failure = new InvalidOperationException("Model provider 'ready' still has an original preparation.");
+        var failed = await dispatcher.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Failure, failed.ExitCode);
+        StringAssert.Contains(failed.Stdout + failed.Stderr, "provider.configurationFailed");
+        Assert.IsFalse(ReadJsonLines(failed.Stdout).Any(static line => line.GetProperty("type").GetString() == "alta.provider.state"));
+
+        // A host without a configuration to apply tests the providers it has.
+        var testOnly = CreateDispatcher(new AltaServiceCollection()
+            .Add<IModelProviderRegistry>(registry)
+            .Add<IModelProviderInitializationService>(models));
+        var tested = await testOnly.InvokeAsync(["provider", "refresh"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, tested.ExitCode, tested.Stderr);
+        Assert.IsFalse(ReadJsonLines(tested.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.provider.refreshed")
+            .GetProperty("configurationApplied").GetBoolean());
+    }
+
+    [TestMethod]
+    public void SandboxGate_ReadsProvidersButDoesNotTestThemAgain()
+    {
+        Assert.IsTrue(AltaSandboxGate.Allows("alta provider list"));
+        Assert.IsTrue(AltaSandboxGate.Allows("alta provider model list"));
+        Assert.IsTrue(AltaSandboxGate.Allows("alta model list"));
+        Assert.IsFalse(AltaSandboxGate.Allows("alta provider refresh"), "testing a provider starts its program outside the sandbox");
+        Assert.IsFalse(AltaSandboxGate.Allows("alta provider model refresh"));
+    }
+
+    // The providers of a configuration, which a test applies by registering them itself.
+    private sealed class RegisteringProviderConfiguration(Func<int> apply) : IAltaProviderConfiguration
+    {
+        public int Applied { get; private set; }
+
+        public Exception? Failure { get; set; }
+
+        public Task<int> ApplyAsync(CancellationToken cancellationToken)
+        {
+            if (Failure is not null) throw Failure;
+            Applied++;
+            return Task.FromResult(apply());
+        }
+    }
+
+    [TestMethod]
     public async Task TaskCreateAndPlanApproval_RecordWhatTheProposingSessionRunsWith()
     {
         using var root = TempDirectory.Create();
@@ -7315,7 +7432,7 @@ public sealed partial class AltaLiveToolTests
 
         public bool PublishIdleBeforeSendReturns { get; set; }
 
-        public IReadOnlyList<AgentModelInfo> Models { get; init; } = [];
+        public IReadOnlyList<AgentModelInfo> Models { get; set; } = [];
 
         public TaskCompletionSource? ModelsStarted { get; init; }
 
