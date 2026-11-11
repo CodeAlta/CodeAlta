@@ -8,7 +8,7 @@ are offered for reading. CodeAlta reads the Agent Skills format, so skills writt
 | Part | Where |
 | --- | --- |
 | Discovery, validation, shadowing, enablement, cache | `src/CodeAlta.Catalog/Skills/` (`SkillCatalog`, `SkillCatalogQuery`, `SkillFrontmatterReader`) |
-| Built-in skills | `src/CodeAlta.Catalog/BuiltinSkills/` (`codealta-plugin-runtime`, `document-conversion`, `ultra-profiler`) |
+| Built-in skills | `src/CodeAlta.Catalog/BuiltinSkills/` (`codealta-fleet`, `codealta-model-servers`, `codealta-monorepo`, `codealta-plugin-runtime`, `document-conversion`, `ultra-profiler`) |
 | The prompt's skill list | `AgentInstructionTemplateProvider` (`src/CodeAlta.Orchestration/Runtime`) |
 | Activation | `SessionRuntimeService`, `alta skill` (`src/CodeAlta.LiveTool`) |
 | Preferred skills | `DesktopSkillUsage` (`src/CodeAlta/Desktop`), from the Statistics plugin |
@@ -17,7 +17,8 @@ are offered for reading. CodeAlta reads the Agent Skills format, so skills writt
 
 Highest first (`SkillRootPrecedence`):
 
-1. `<project>/.alta/skills/`, then `<project>/.agents/skills/` and `<project>/.github/skills/`
+1. `<project>/.alta/skills/`, then `<project>/.agents/skills/` and `<project>/.github/skills/`; for a sub-project of a
+   monorepo, then the same folders of each folder it inherits from, the nearest first (`ProjectResourceRoots`)
 2. Folders the user added for the project, then for the space of the session, each list in its order
 3. `~/.alta/skills/`, then `~/.agents/skills/` and `~/.copilot/skills/`
 4. Folders the user added for every space
@@ -30,6 +31,10 @@ user (`[skills] folders` of the global `config.toml`, `skills.folders` of the fi
 user's file of a project): a repository never names one, so it cannot make CodeAlta, or a sandbox, read outside of it.
 A folder that is gone or cannot be read brings no skill and hides none of the others; a disk, the home folder and the
 folder of CodeAlta are refused, since walking them would read everything.
+
+A sub-project reads the skills of its repository because a monorepo shares its setup; a skill the repository disables
+stays disabled in its sub-projects, as a global disablement does in every project. The folders come from the descriptor
+the catalog computed, so a prompt walks no repository.
 
 A skill with the name of a higher one is shadowed: it stays inspectable, and only the winner can be activated. Use
 `.alta/skills/` for skills that depend on CodeAlta; the `.agents` and GitHub Copilot folders are shared with other

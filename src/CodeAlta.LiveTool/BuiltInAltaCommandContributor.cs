@@ -6146,14 +6146,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var configStore = context.Services.Get<CodeAltaConfigStore>() ?? new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = globalRoot });
         // A session sees the skills of its own space; the user, outside any session, sees every skill.
         var space = await CallerSpaceFilterAsync(context).ConfigureAwait(false);
-        var query = SkillCatalogQuery.ForSession(
-            configStore,
-            globalRoot,
-            UserHomeOf(context),
-            project?.ProjectPath,
-            otherProjectRoots: null,
-            space,
-            project?.SkillFolders);
+        // A sub-project sees the skills of the folders it inherits from, as its sessions do.
+        var query = SkillCatalogQuery.ForProject(configStore, globalRoot, UserHomeOf(context), project, otherProjectRoots: null, space);
         return SkillQueryResult.Success(query);
     }
 
@@ -6173,6 +6167,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return PromptQueryResult.Success(new AgentPromptCatalogQuery
         {
             ProjectRoot = projectRoot.ProjectRoot,
+            // A sub-project sees the prompts of the folders it inherits from, as its sessions do.
+            InheritedProjectRoots = context.Services.Get<ProjectCatalog>()?.GetInheritedRootsOfFolder(projectRoot.ProjectRoot) ?? [],
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot.ProjectRoot),
             UserCodeAltaRoot = context.Services.Get<CatalogOptions>()?.GlobalRoot ?? GetGlobalRootOrCwd(context),
             UserProfileRoot = UserHomeOf(context),
