@@ -109,6 +109,26 @@ public sealed class SubProjectCatalogTests
         var found = projects.Single(project => project.Id == billing.Id);
         Assert.AreEqual((moved, "domains/billing"), (found.ProjectPath, found.SubPath));
         Assert.AreEqual(1, projects.Count(project => project.Id == billing.Id));
+
+        // The first edit that needs its file tells it the new folder, and the edit then works.
+        Assert.AreEqual(SubProjectShowStatus.Updated, (await fixture.Projects.SetSubProjectShownAsync(repository.Id, "billing", shown: false)).Status);
+        StringAssert.Contains(await File.ReadAllTextAsync(billing.SourcePath!), "domains", "The file names the new folder.");
+        Assert.IsTrue((await fixture.Projects.LoadAsync()).Single(project => project.Id == billing.Id).Archived);
+    }
+
+    [TestMethod]
+    public async Task AFolderThatMoves_WhileItsOldFolderStays_NeverMakesTwoProjectsOfOneIdentity()
+    {
+        using var fixture = new Fixture();
+        var repository = await fixture.RepositoryAsync(Map);
+        var billing = await fixture.Projects.EnsurePersistedAsync((await fixture.Projects.LoadAsync()).Single(static project => project.DeclaredKey == "billing"));
+        Directory.CreateDirectory(Path.Combine(repository.ProjectPath, "domains", "billing"));
+        await fixture.WriteMapAsync(repository, Map.Replace("path = \"services/billing\"", "path = \"domains/billing\"", StringComparison.Ordinal));
+
+        var projects = await fixture.Projects.LoadAsync();
+        Assert.AreEqual(1, projects.Count(project => project.Id == billing.Id));
+        Assert.AreEqual(billing.ProjectPath, projects.Single(project => project.Id == billing.Id).ProjectPath, "The file keeps its folder.");
+        Assert.AreEqual(projects.Count, projects.Select(static project => project.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     [TestMethod]

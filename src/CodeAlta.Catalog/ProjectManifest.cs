@@ -192,9 +192,11 @@ public sealed class ProjectManifest
                 return null;
             }
 
-            if (string.Equals(segment, ".git", StringComparison.OrdinalIgnoreCase))
+            // The folders of settings of a project are kept out of reach of its sessions: none is a project of its own.
+            if (segment.Equals(".git", StringComparison.OrdinalIgnoreCase) || segment.Equals(".alta", StringComparison.OrdinalIgnoreCase)
+                || segment.Equals(".claude", StringComparison.OrdinalIgnoreCase))
             {
-                problem = "A sub-project cannot be inside `.git`.";
+                problem = $"A sub-project cannot be a folder of settings or be inside one (`{segment}`).";
                 return null;
             }
         }

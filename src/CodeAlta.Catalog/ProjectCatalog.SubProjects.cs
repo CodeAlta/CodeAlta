@@ -43,7 +43,10 @@ public sealed partial class ProjectCatalog
     // Where the folders of each map are, as the file system said for the map as it was read: a map read again as it was
     // keeps them, and only the folders that were missing are looked at again, so that a load walks no repository.
     private readonly object _foldersGate = new();
-    private readonly Dictionary<string, (ProjectManifest Map, Dictionary<string, (string FullPath, ProjectManifestFolderState State)> Folders)> _folders
+
+    // How long the state of the folders of a map is trusted before every folder is looked at again.
+    private const long FolderRecheckMilliseconds = 30_000;
+    private readonly Dictionary<string, (ProjectManifest Map, Dictionary<string, (string FullPath, ProjectManifestFolderState State)> Folders, long CheckedAt)> _folders
         = new(StringComparer.Ordinal);
 
     // The folders each sub-project inherits from, as the last load found them, replaced whole by each load: for the readers
@@ -244,16 +247,24 @@ public sealed partial class ProjectCatalog
     {
         var path = ProjectManifest.PathOf(repositoryPath);
         Dictionary<string, (string FullPath, ProjectManifestFolderState State)>? known = null;
+        var now = Environment.TickCount64;
+        var recheck = false;
         lock (_foldersGate)
         {
-            if (_folders.TryGetValue(path, out var kept) && ReferenceEquals(kept.Map, map)) known = kept.Folders;
+            if (_folders.TryGetValue(path, out var kept) && ReferenceEquals(kept.Map, map))
+            {
+                known = kept.Folders;
+                // A folder found inside the repository is looked at again from time to time: a link put in its place
+                // could lead out of it.
+                recheck = now - kept.CheckedAt > FolderRecheckMilliseconds;
+            }
         }
 
         var folders = new Dictionary<string, (string FullPath, ProjectManifestFolderState State)>(map.Projects.Count, StringComparer.Ordinal);
         var changed = known is null;
         foreach (var entry in map.Projects)
         {
-            if (known is not null && known.TryGetValue(entry.Key, out var seen) && seen.State != ProjectManifestFolderState.Missing)
+            if (!recheck && known is not null && known.TryGetValue(entry.Key, out var seen) && seen.State != ProjectManifestFolderState.Missing)
             {
                 folders[entry.Key] = seen;
                 continue;
@@ -264,12 +275,12 @@ public sealed partial class ProjectCatalog
             folders[entry.Key] = resolved;
         }
 
-        if (changed)
+        if (changed || recheck)
         {
             lock (_foldersGate)
             {
                 if (_folders.Count >= 256 && !_folders.ContainsKey(path)) _folders.Clear();
-                _folders[path] = (map, folders);
+                _folders[path] = (map, folders, now);
             }
         }
 
@@ -336,10 +347,12 @@ public sealed partial class ProjectCatalog
                     continue;
                 }
 
-                // A project file of this sub-project whose folder moved: the key names it.
-                if (byId.TryGetValue(DeriveSubProjectId(repository.Id, entry.Key), out var moved) && !claims.ContainsKey(moved.ProjectPath)
-                    && !Directory.Exists(moved.ProjectPath))
+                // A project file of this sub-project whose folder moved: the key names it. Its file is told the new
+                // folder before the first edit that needs it (GetEditableAsync).
+                if (byId.TryGetValue(DeriveSubProjectId(repository.Id, entry.Key), out var moved))
                 {
+                    if (claims.ContainsKey(moved.ProjectPath) || Directory.Exists(moved.ProjectPath)) continue; // Two folders, one identity: the file keeps it.
+                    moved.MovedFrom = moved.ProjectPath;
                     moved.ProjectPath = full;
                     Link(moved, repository, entry, claims);
                     continue;

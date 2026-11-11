@@ -164,6 +164,8 @@ public sealed class ProjectManifestTests
         Assert.AreEqual("libs/core", ProjectManifest.NormalizePath("./libs/core/", out _));
         Assert.IsNull(ProjectManifest.NormalizePath("libs//core", out var problem));
         Assert.IsNotNull(problem);
+        foreach (var settings in new[] { ".alta", "tools/.alta/skills", "apps/.claude", ".GIT/x" })
+            Assert.IsNull(ProjectManifest.NormalizePath(settings, out _), $"{settings}: a folder of settings is no project.");
     }
 
     [TestMethod]

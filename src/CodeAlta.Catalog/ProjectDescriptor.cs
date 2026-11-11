@@ -182,6 +182,8 @@ public sealed class ProjectDescriptor
     internal List<string>? FileSpaces { get; set; }
     internal string? FileDisplayName { get; set; }
     internal string? FileDescription { get; set; }
+    // The folder the file of a sub-project still names, when the map moved the sub-project elsewhere.
+    internal string? MovedFrom { get; set; }
 
     /// <summary>
     /// Gets the path to the source markdown file when loaded from disk.
@@ -239,6 +241,7 @@ public sealed class ProjectDescriptor
         FileSpaces = FileSpaces is null ? null : [.. FileSpaces],
         FileDisplayName = FileDisplayName,
         FileDescription = FileDescription,
+        MovedFrom = MovedFrom,
         SourcePath = SourcePath,
         MarkdownBody = MarkdownBody,
     };

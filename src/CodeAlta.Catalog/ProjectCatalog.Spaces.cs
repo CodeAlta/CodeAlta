@@ -306,7 +306,30 @@ public sealed partial class ProjectCatalog
     {
         var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is { IsSubProject: true, SourcePath: null } && !IsReadOnly) await SaveAsync(project, null, cancellationToken).ConfigureAwait(false);
+        else if (project is { MovedFrom: not null, SourcePath: not null } && !IsReadOnly) await WriteMovedPathAsync(project, cancellationToken).ConfigureAwait(false);
         return project;
+    }
+
+    // Writes the new folder of a sub-project the map moved in its file: only the `path` entry, every other byte kept.
+    private async Task WriteMovedPathAsync(ProjectDescriptor project, CancellationToken cancellationToken)
+    {
+        var snapshot = await _projectNameFiles.LoadAsync(project.SourcePath!, cancellationToken).ConfigureAwait(false);
+        var current = _serializer.DeserializeProjectMarkdown(snapshot.Text);
+        if (current.Id != project.Id || NormalizePath(current.ProjectPath) != project.MovedFrom) return;
+        var line = $"path: '{project.ProjectPath.Replace("'", "''", StringComparison.Ordinal)}'";
+        if (ReplaceEntry(snapshot.Text, "path", line) is not { } updated) return;
+        try
+        {
+            if (NormalizePath(_serializer.DeserializeProjectMarkdown(updated).ProjectPath) != project.ProjectPath) return;
+        }
+        catch (Exception exception) when (exception is YamlException or InvalidDataException)
+        {
+            return;
+        }
+
+        await SaveSourceAsync(new TextFileSaveRequest(project.SourcePath!, updated, snapshot.Encoding, snapshot.HasByteOrderMark, snapshot.Revision),
+            cancellationToken).ConfigureAwait(false);
+        project.MovedFrom = null;
     }
 
     // Writes the `spaces` entry of the front matter on one line, replaces the lines it took, or removes it
