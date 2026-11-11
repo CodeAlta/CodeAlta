@@ -237,6 +237,8 @@ Each issue of the milestone that the release solves gets a comment and is closed
   message, or a message that is only the footer: a comment is never posted without what it has to say.
 - Never post with a script that builds the bodies in code: for 2.1.0, a PowerShell `[ordered]` table indexed by
   issue number read the entry at that position, and six issues got the footer alone (fixed by editing them).
+- An issue of the milestone closed on `main` before the release gets the comment of the release too:
+  `release.py close X.Y.Z --include-closed` comments on it without closing it again.
 - Issues moved to a later milestone are told so in a comment.
 
 ## 10. Tag

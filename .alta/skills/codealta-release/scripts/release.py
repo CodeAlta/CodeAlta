@@ -20,7 +20,7 @@ Commands (each prints what it found and exits with 0 when all is well, 1 otherwi
                            puts the tour above the generated notes of the release, folded in "All changes",
                            then checks the links of the result
     site [--check FILE]    runs the site workflow of the website, waits for it, then checks the site links of FILE
-    close VERSION [--dry-run]
+    close VERSION [--dry-run] [--include-closed]
                            comments on and closes each open issue of the milestone with the message of
                            tmp/release-VERSION/comments/<issue>.md, then closes the milestone; refuses an
                            empty message and checks each comment once posted
@@ -417,9 +417,11 @@ def cmd_close(args: argparse.Namespace) -> int:
 
     version = args.version
     folder = ROOT / "tmp" / f"release-{version}" / "comments"
-    issues = gh_json("issue", "list", "--repo", REPO, "--milestone", version, "--state", "open", "--json", "number,title,author") or []
+    # Issues closed on main before the release get the comment of the release too; they are not closed again.
+    state = "all" if args.include_closed else "open"
+    issues = gh_json("issue", "list", "--repo", REPO, "--milestone", version, "--state", state, "--json", "number,title,author,state") or []
     if not issues:
-        print(f"No open issue in milestone {version}.")
+        print(f"No {'' if args.include_closed else 'open '}issue in milestone {version}.")
     # Every message is read and checked before the first one is posted.
     messages = {issue["number"]: comment_message(folder / f"{issue['number']}.md") for issue in issues}
     for issue in issues:
@@ -438,6 +440,9 @@ def cmd_close(args: argparse.Namespace) -> int:
             posted = last_comment(number)
         if posted is None or not same_text(posted["body"], messages[number]):
             raise SystemExit(f"error: the comment of #{number} is not the message ({posted['html_url']}); the issue stays open")
+        if issue.get("state") == "CLOSED":
+            print(f"  commented (closed before): {posted['html_url']}")
+            continue
         run("gh", "issue", "close", str(number), "--repo", REPO, "--reason", "completed")
         print(f"  commented and closed: {posted['html_url']}")
     if args.dry_run:
@@ -485,6 +490,7 @@ def main() -> int:
     close = commands.add_parser("close")
     close.add_argument("version")
     close.add_argument("--dry-run", action="store_true", help="check the messages and show them, post nothing")
+    close.add_argument("--include-closed", action="store_true", help="also comment on the issues of the milestone closed before the release")
     close.set_defaults(func=cmd_close)
     nuget = commands.add_parser("nuget")
     nuget.add_argument("version")
