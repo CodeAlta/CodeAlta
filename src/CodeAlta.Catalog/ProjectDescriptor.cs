@@ -154,6 +154,18 @@ public sealed class ProjectDescriptor
     [JsonPropertyName("inherited_skill_folders")]
     public List<string> InheritedSkillFolders { get; set; } = [];
 
+    /// <summary>Gets or sets the display name of the repository project of a sub-project; null otherwise. Computed, never written.</summary>
+    [JsonPropertyName("repository_name")]
+    public string? RepositoryName { get; set; }
+
+    /// <summary>Gets or sets the slug of the repository project of a sub-project; null otherwise. Computed, never written.</summary>
+    [JsonPropertyName("repository_slug")]
+    public string? RepositorySlug { get; set; }
+
+    /// <summary>Gets the folder of the repository of a sub-project, the one of the project whose map declares it; null otherwise.</summary>
+    [JsonIgnore]
+    public string? RepositoryPath => ParentId is null || InheritedRoots.Count == 0 ? null : InheritedRoots[^1];
+
     /// <summary>Gets the sandbox of the sessions of the project: its own choice, else the one of its repository.</summary>
     [JsonIgnore]
     public string? EffectiveSandbox => Sandbox ?? InheritedSandbox;
@@ -222,6 +234,8 @@ public sealed class ProjectDescriptor
         InheritedRoots = [.. InheritedRoots],
         InheritedSandbox = InheritedSandbox,
         InheritedSkillFolders = [.. InheritedSkillFolders],
+        RepositoryName = RepositoryName,
+        RepositorySlug = RepositorySlug,
         FileSpaces = FileSpaces is null ? null : [.. FileSpaces],
         FileDisplayName = FileDisplayName,
         FileDescription = FileDescription,

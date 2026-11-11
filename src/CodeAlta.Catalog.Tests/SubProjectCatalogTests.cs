@@ -41,6 +41,7 @@ public sealed class SubProjectCatalogTests
         Assert.AreEqual(ProjectCatalog.DeriveSubProjectId(repository.Id, "billing"), billing.Id);
         Assert.AreEqual((repository.Id, "services/billing", "billing"), (billing.ParentId, billing.SubPath, billing.DeclaredKey));
         Assert.AreEqual("contoso-billing", billing.Slug);
+        Assert.AreEqual(("contoso", repository.Slug, repository.ProjectPath), (billing.RepositoryName, billing.RepositorySlug, billing.RepositoryPath));
         Assert.AreEqual("Invoices.", billing.Description);
         CollectionAssert.AreEqual(new[] { "work" }, billing.Spaces, "A sub-project is in the spaces of its repository.");
         CollectionAssert.AreEqual(new[] { "contoso.payments" }, billing.DeclaredLabels);

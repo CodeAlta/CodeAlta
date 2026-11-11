@@ -329,6 +329,8 @@ public sealed partial class ProjectCatalog
         project.WriteScope = entry.Write;
         project.InheritedSandbox = repository.Sandbox;
         project.InheritedSkillFolders = [.. repository.SkillFolders];
+        project.RepositoryName = repository.DisplayName;
+        project.RepositorySlug = repository.Slug;
         // The declared folders of the same repository that hold this one, the nearest first, then the repository.
         var roots = new List<string>();
         for (var folder = Path.GetDirectoryName(project.ProjectPath); folder is not null && folder.Length > repository.ProjectPath.Length;

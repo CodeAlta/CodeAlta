@@ -555,6 +555,46 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_TellsASubProjectSessionItsRepository_InOneLineThatStaysTheSame()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var repository = Path.Combine(temp.Path, "contoso");
+        var billing = Directory.CreateDirectory(Path.Combine(repository, "services", "billing")).FullName;
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+
+        string Build(ProjectDescriptor project) => All(builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            ProviderType = "codex",
+            ProtocolFamily = "codex",
+            Session = new SessionViewDescriptor
+            {
+                SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = project.ProjectPath, Kind = SessionViewKind.ProjectSession,
+            },
+            Project = project,
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        }));
+
+        var subProject = new ProjectDescriptor
+        {
+            Id = "0b6f6d6e-0000-8000-8000-000000000001", Slug = "contoso-billing", DisplayName = "Billing", ProjectPath = billing,
+            ParentId = "0b6f6d6e-0000-8000-8000-000000000000", SubPath = "services/billing", InheritedRoots = [repository],
+            RepositoryName = "contoso", RepositorySlug = "contoso",
+        };
+        var prompt = Build(subProject);
+        var line = prompt.Split('\n').Single(static text => text.StartsWith("- Repository:", StringComparison.Ordinal));
+        Assert.AreEqual($"- Repository: contoso ({repository}); this project is its folder `services/billing`. "
+            + "Other projects of the repository: `alta project list --parent contoso`.", line.TrimEnd('\r'));
+        Assert.AreEqual(prompt, Build(subProject.Copy()), "The same sub-project gives the same prompt.");
+
+        var plain = Build(new ProjectDescriptor { Id = "0b6f6d6e-0000-8000-8000-000000000000", Slug = "contoso", DisplayName = "contoso", ProjectPath = repository });
+        Assert.IsFalse(plain.Contains("- Repository:", StringComparison.Ordinal), "A project that is no sub-project has no such line.");
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_AppendsSystemAndAgentPromptResources()
     {
         using var temp = TempDirectory.Create();
