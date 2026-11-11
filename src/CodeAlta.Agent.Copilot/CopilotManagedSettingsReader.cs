@@ -1,4 +1,6 @@
+using System.Text.Json;
 using GitHub.Copilot;
+using GitHub.Copilot.Rpc;
 
 namespace CodeAlta.Agent.Copilot;
 
@@ -15,17 +17,33 @@ public sealed class CopilotManagedSettingsReader
 
     private readonly string _executable;
     private readonly string _home;
+    private readonly string? _preview;
 
     /// <summary>Initializes a new instance of the <see cref="CopilotManagedSettingsReader"/> class.</summary>
     /// <param name="executable">The runtime's entry point (<see cref="CopilotRuntimeInstallation.Executable"/>).</param>
     /// <param name="home">The folder the runtime keeps its state in (<c>COPILOT_HOME</c>), its cache of policies included.</param>
     /// <exception cref="ArgumentException">An argument is blank.</exception>
     public CopilotManagedSettingsReader(string executable, string home)
+        : this(executable, home, preview: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CopilotManagedSettingsReader"/> class that gives, for every account, what
+    /// the runtime would enforce for a document of managed settings given as the policy of the organization
+    /// (<c>managedSettings.compose</c>): the check of the developer instance, without an enterprise.
+    /// </summary>
+    /// <param name="executable">The runtime's entry point.</param>
+    /// <param name="home">The folder the runtime keeps its state in.</param>
+    /// <param name="preview">A <c>managed-settings.json</c> taken as the server policy of every account; null to resolve them.</param>
+    /// <exception cref="ArgumentException">The entry point or the home is blank.</exception>
+    public CopilotManagedSettingsReader(string executable, string home, string? preview)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
         _executable = executable;
         _home = home;
+        _preview = string.IsNullOrWhiteSpace(preview) ? null : preview;
     }
 
     /// <summary>
@@ -54,6 +72,15 @@ public sealed class CopilotManagedSettingsReader
         {
             await client.StartAsync(cancellationToken).ConfigureAwait(false);
             var settings = new List<CopilotManagedSettings>(Math.Max(1, gitHubTokens.Count));
+            // The document of a check is added to what the accounts resolve, never in their place: it only narrows.
+            CopilotManagedSettings? preview = null;
+            if (_preview is { } path)
+            {
+                using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+                preview = CopilotManagedSettings.From(await client.Rpc.ManagedSettings.ComposeAsync(
+                    [new ManagedSettingsComposeLayer { Source = ManagedSettingsChannel.Server, Settings = document.RootElement.Clone() }], cancellationToken).ConfigureAwait(false));
+            }
+
             if (gitHubTokens.Count == 0)
             {
                 settings.Add(CopilotManagedSettings.From(await client.Rpc.ManagedSettings.ResolveAsync(clientName: ClientName, cancellationToken: cancellationToken).ConfigureAwait(false)));
@@ -65,7 +92,7 @@ public sealed class CopilotManagedSettingsReader
                 settings.Add(CopilotManagedSettings.From(await client.Rpc.ManagedSettings.ResolveAsync(gitHubToken: token.Trim(), clientName: ClientName, cancellationToken: cancellationToken).ConfigureAwait(false)));
             }
 
-            return settings;
+            return preview is null ? settings : [.. settings.Select(resolved => resolved.Strictest(preview))];
         }
     }
 }

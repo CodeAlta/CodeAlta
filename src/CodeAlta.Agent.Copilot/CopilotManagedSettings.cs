@@ -60,11 +60,26 @@ public sealed record CopilotManagedSettings
     public static CopilotManagedSettings From(ManagedSettingsResolveResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        var resolved = result.Resolved;
+        return From(result.Resolved, result.Account, result.Values?.Communication?.Support?.Url, result.Diagnostics);
+    }
+
+    /// <summary>Maps what the runtime would enforce for candidate documents (<c>managedSettings.compose</c>).</summary>
+    /// <param name="result">The answer of <c>managedSettings.compose</c>.</param>
+    /// <returns>The settings, for no account.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
+    public static CopilotManagedSettings From(ManagedSettingsComposeResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var url = Read(result.Resolved.Settings, "communication", "support", "url") is { ValueKind: JsonValueKind.String } value ? value.GetString() : null;
+        return From(result.Resolved, account: null, url, result.Diagnostics);
+    }
+
+    private static CopilotManagedSettings From(ManagedSettingsResolvedData resolved, string? account, string? supportUrl, IList<ManagedSettingsDiagnostic> diagnostics)
+    {
         var settings = resolved.Settings;
         return new CopilotManagedSettings
         {
-            Account = string.IsNullOrWhiteSpace(result.Account) ? null : result.Account.Trim(),
+            Account = string.IsNullOrWhiteSpace(account) ? null : account.Trim(),
             ServerManaged = resolved.ServerManaged,
             DeviceManaged = resolved.DeviceManaged,
             FailClosed = resolved.FailClosed,
@@ -75,10 +90,43 @@ public sealed record CopilotManagedSettings
             SandboxFailIfUnavailable = Read(settings, "sandbox", "failIfUnavailable") is { ValueKind: JsonValueKind.True },
             SandboxBypassAllowed = Read(settings, "sandbox", "allowBypass") is not { ValueKind: JsonValueKind.False },
             ForceRemoteSettingsRefresh = Read(settings, "forceRemoteSettingsRefresh") is { ValueKind: JsonValueKind.True },
-            SupportUrl = result.Values?.Communication?.Support?.Url is { Length: > 0 } url ? url.Trim() : null,
+            SupportUrl = supportUrl is { Length: > 0 } url ? url.Trim() : null,
             ManagedKeys = [.. resolved.ManagedKeys],
-            Diagnostics = [.. result.Diagnostics.Select(static diagnostic => diagnostic.Message).Where(static message => !string.IsNullOrWhiteSpace(message))],
+            Diagnostics = [.. diagnostics.Select(static diagnostic => diagnostic.Message).Where(static message => !string.IsNullOrWhiteSpace(message))],
         };
+    }
+
+    /// <summary>Combines these settings with others, keeping what is the most restrictive of each.</summary>
+    /// <param name="other">The other settings.</param>
+    /// <returns>The combined settings, for the account of these.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="other"/> is null.</exception>
+    public CopilotManagedSettings Strictest(CopilotManagedSettings other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return this with
+        {
+            ServerManaged = ServerManaged || other.ServerManaged,
+            DeviceManaged = DeviceManaged || other.DeviceManaged,
+            FailClosed = FailClosed || other.FailClosed,
+            BypassPermissionsDisabled = BypassPermissionsDisabled || other.BypassPermissionsDisabled,
+            AssistedPermissionsDisabled = AssistedPermissionsDisabled || other.AssistedPermissionsDisabled,
+            DefaultMode = NarrowerMode(DefaultMode, other.DefaultMode),
+            SandboxEnabled = SandboxEnabled || other.SandboxEnabled,
+            SandboxFailIfUnavailable = SandboxFailIfUnavailable || other.SandboxFailIfUnavailable,
+            SandboxBypassAllowed = SandboxBypassAllowed && other.SandboxBypassAllowed,
+            ForceRemoteSettingsRefresh = ForceRemoteSettingsRefresh || other.ForceRemoteSettingsRefresh,
+            SupportUrl = SupportUrl ?? other.SupportUrl,
+            ManagedKeys = [.. ManagedKeys.Union(other.ManagedKeys, StringComparer.Ordinal)],
+            Diagnostics = [.. Diagnostics.Union(other.Diagnostics, StringComparer.Ordinal)],
+        };
+    }
+
+    // The default mode that asks more: manual, then assisted, then allow-all; a mode Copilot adds later ranks as manual.
+    private static string? NarrowerMode(string? left, string? right)
+    {
+        if (left is null || right is null) return left ?? right;
+        static int Rank(string mode) => mode switch { "allow-all" => 2, "assisted" => 1, _ => 0 };
+        return Rank(right) < Rank(left) ? right : left;
     }
 
     /// <summary>

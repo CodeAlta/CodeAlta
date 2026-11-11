@@ -84,8 +84,9 @@ function validSend(request: SessionSendRequest, checkAttachments = true): boolea
 export type PluginPromptOutcome = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string>>; cancelled: boolean }>;
 
 /**
- * The outcome of a settled Send or Steer that a plugin handled (`plugin_handled`) or cancelled (`plugin_cancelled`) before
- * anything was sent to the agent, with what the plugin said; null for any other row.
+ * The outcome of a settled Send or Steer that a plugin handled (`plugin_handled`) or cancelled (`plugin_cancelled`), or
+ * that the policy of the organization refused (`policy_refused`), before anything was sent to the agent, with what the
+ * plugin or the policy said; null for any other row.
  */
 export function pluginPromptOutcome(row: Pick<SessionReceiptView, "kind" | "state" | "code" | "message">): PluginPromptOutcome | null {
   if (row.kind !== "Send" && row.kind !== "Steer" || row.state !== "terminal") return null;
@@ -96,6 +97,8 @@ export function pluginPromptOutcome(row: Pick<SessionReceiptView, "kind" | "stat
   if (row.code === "plugin_cancelled") return message
     ? { key: "A plugin cancelled this prompt: {message}", parameters: { message }, cancelled: true }
     : { key: "A plugin cancelled this prompt: nothing was sent to the agent.", cancelled: true };
+  // The policy of the organization refused it: it must be read again before a session runs.
+  if (row.code === "policy_refused" && message) return { key: "The policy of your organization stopped this prompt: {message}", parameters: { message }, cancelled: true };
   return null;
 }
 

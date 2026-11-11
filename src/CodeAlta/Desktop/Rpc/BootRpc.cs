@@ -347,6 +347,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(GlobalConfigDuplicateProviderRequest))]
 [JsonSerializable(typeof(ProviderUsageRequest))]
 [JsonSerializable(typeof(ProviderUsageResponse))]
+[JsonSerializable(typeof(ManagedPolicyRequest))]
+[JsonSerializable(typeof(ManagedPolicyResponse))]
 [JsonSerializable(typeof(ProviderLoginStatusRequest))]
 [JsonSerializable(typeof(ProviderLoginStatusResponse))]
 [JsonSerializable(typeof(ProviderLoginRequest))]

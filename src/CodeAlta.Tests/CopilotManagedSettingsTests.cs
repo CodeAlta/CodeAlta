@@ -59,6 +59,25 @@ public sealed class CopilotManagedSettingsTests
     }
 
     [TestMethod]
+    public void Strictest_KeepsWhatIsTheMostRestrictiveOfEach()
+    {
+        var account = new CopilotManagedSettings { Account = "account-1", ServerManaged = true, DefaultMode = "allow-all", SandboxBypassAllowed = true, ManagedKeys = ["model"] };
+        var preview = new CopilotManagedSettings { BypassPermissionsDisabled = true, DefaultMode = "manual", SandboxEnabled = true, SandboxBypassAllowed = false, ManagedKeys = ["sandbox"] };
+
+        var strictest = account.Strictest(preview);
+
+        Assert.AreEqual("account-1", strictest.Account);
+        Assert.IsTrue(strictest.ServerManaged);
+        Assert.IsTrue(strictest.BypassPermissionsDisabled);
+        Assert.AreEqual("manual", strictest.DefaultMode);
+        Assert.IsTrue(strictest.SandboxEnabled);
+        Assert.IsFalse(strictest.SandboxBypassAllowed);
+        CollectionAssert.AreEquivalent(new[] { "model", "sandbox" }, strictest.ManagedKeys.ToArray());
+        Assert.AreEqual("manual", preview.Strictest(account).DefaultMode, "in either order");
+        Assert.AreEqual("allow-all", account.Strictest(new CopilotManagedSettings()).DefaultMode, "a side that says nothing leaves the other");
+    }
+
+    [TestMethod]
     public void From_TheSandboxOfAnUndeterminedPolicy_IsRequired()
     {
         var settings = CopilotManagedSettings.From(new ManagedSettingsResolveResult

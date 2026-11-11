@@ -19,6 +19,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     private Task<CodeAltaHost>? _hostCreation;
     // The skills used most in the last days, for the prompts and for search: one ranking per day, kept by each session.
     private DesktopSkillUsage? _skillUsage;
+    // The reading of the policy of the organizations of the Copilot accounts, which the host started and disposes.
+    private CopilotManagedPolicySource? _copilotPolicies;
     private Task? _hostDisposal;
     private Task? _closeFlow;
     private bool _nativeConfirmed;
@@ -582,6 +584,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
                     pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, includeDisabled: false);
                 },
+                // The policy the organization of a Copilot account of this computer sets narrows every session.
+                // The developer instance can take a managed-settings.json as the policy of every Copilot account
+                // (CODEALTA_DEV_COPILOT_MANAGED_SETTINGS), to check the window without an enterprise.
+                StartManagedPolicies = state => _copilotPolicies = CopilotManagedPolicySource.Start(state, options.CatalogRoot!, new CodeAltaConfigStore(catalog),
+                    options.Developer ? Environment.GetEnvironmentVariable("CODEALTA_DEV_COPILOT_MANAGED_SETTINGS") : null),
             }, CancellationToken.None);
             });
             // The retained application flow reacts even while a native acquisition is awaiting.
@@ -1192,6 +1199,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProviderLoginService(providerLogin);
                     providerUsage = new ProviderUsageService(configStore, options.CatalogRoot!, epoch);
                     builder.AddProviderUsageService(providerUsage);
+                    builder.AddManagedPolicyService(new ManagedPolicyService(host.RuntimeService.ManagedPolicies, _copilotPolicies, epoch));
                     builder.AddSandboxSettingsService(new SandboxSettingsService(configStore, host.RuntimeService, host.Commands, host.ProjectCatalog, host.SpaceCatalog, epoch));
                     // An instance on explicit roots is automation and stays off the network: it downloads no model.
                     speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
@@ -1656,6 +1664,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddStorageService(new StorageService());
             builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddProviderUsageService(new ProviderUsageService());
+            builder.AddManagedPolicyService(new ManagedPolicyService());
             builder.AddSandboxSettingsService(new SandboxSettingsService());
             builder.AddSpeechService(new SpeechService());
             builder.AddModelServersService(new ModelServersService());

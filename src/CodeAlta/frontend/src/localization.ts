@@ -80,6 +80,7 @@ import { fleetAccessMessages } from "./fleet/access/accessMessages";
 import { fleetAuditMessages } from "./fleet/audit/auditMessages";
 import { fleetPoliciesMessages } from "./fleet/policies/policiesMessages";
 import { signInMessages } from "./fleet/signInMessages";
+import { managedPolicyMessages } from "./managedPolicy/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -3110,6 +3111,7 @@ export const messages = dictionary({
   ...cloudSessionMessages,
   ...settingsSearchMessages,
   ...startPromptMessages,
+  ...managedPolicyMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

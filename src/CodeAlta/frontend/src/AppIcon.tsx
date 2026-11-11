@@ -126,6 +126,7 @@ import {
   Settings,
   ShieldQuestion,
   Shield,
+  LockKeyhole,
   TriangleAlert,
   Sparkles,
   Square,
@@ -323,6 +324,8 @@ const icons = {
   backgroundTasks: Cog,
   question: ShieldQuestion,
   shield: Shield,
+  // A setting the policy of the organization decides.
+  lock: LockKeyhole,
   warning: TriangleAlert,
   space: Orbit,
   grip: GripVertical,

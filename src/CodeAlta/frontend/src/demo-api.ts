@@ -159,6 +159,7 @@ export const desktopShell = Object.freeze({
 });
 export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });
 export const providerUsage = Object.freeze({ read: unavailable });
+export const managedPolicy = Object.freeze({ read: unavailable, refresh: unavailable });
 export const projectFiles = Object.freeze({ read: unavailable, write: unavailable, list: unavailable, stat: unavailable, create: unavailable, rename: unavailable,
   delete: unavailable, image: unavailable, reveal: unavailable, openExternal: unavailable, search: unavailable, watch: unavailable });
 export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });

@@ -1615,6 +1615,13 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .provider-usage h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 650; }
 .provider-usage-spacer { flex: 1; }
 .provider-usage-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+/* The policy of the organization of a Copilot account: what it enforces, and the mark of a setting it decides. */
+.managed-policy-lines { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: 12.5px; }
+.managed-policy-failure { display: grid; gap: 6px; justify-items: start; }
+.managed-policy-failure p { margin: 0; }
+.managed-policy-support { margin: 0; font-size: 12.5px; }
+.managed-policy-lock { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.managed-policy-lock > svg { flex: none; }
 /* The models a provider hides: one line that says how many, the rules below it once opened. */
 .provider-model-visibility { margin: 2px 0 12px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .provider-model-visibility-toggle .bp6-button-text { display: flex; align-items: center; gap: 8px; }

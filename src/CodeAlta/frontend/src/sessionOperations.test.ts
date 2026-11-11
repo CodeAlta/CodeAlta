@@ -107,6 +107,9 @@ test("a Send or a steering prompt a plugin answered itself says so in the compos
   assert.deepEqual(text({ ...settled("plugin_handled", "Opened the ticket."), kind: "Steer" }), ["A plugin handled this prompt: Opened the ticket.", false]);
   assert.deepEqual(text({ ...settled("plugin_cancelled"), kind: "Steer" }), ["A plugin cancelled this prompt: nothing was sent to the agent.", true]);
   assert.equal(pluginPromptOutcome({ ...settled("plugin_cancelled"), kind: "Steer", state: "pending" }), null);
+  // A Send the policy of the organization refused says why, and never looks sent.
+  assert.deepEqual(text(settled("policy_refused", "The policy must be read again.")),
+    ["The policy of your organization stopped this prompt: The policy must be read again.", true]);
 
   // The message travels on the receipt in the place of a run id, within its bound.
   const capability = createMutationCapability("epoch");

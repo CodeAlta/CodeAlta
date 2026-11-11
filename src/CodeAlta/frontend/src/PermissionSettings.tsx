@@ -6,13 +6,17 @@ import { SettingsField as Field } from "./SettingsField";
 import { useSettingsEditor } from "./SettingsPage";
 import { useShellLanguage } from "./shellLanguage";
 import type { Confirmation } from "./windowPreferences";
+import { ManagedPolicyLock } from "./managedPolicy/ManagedPolicyPanel";
+import { useManagedPolicy, type ManagedPolicyApi } from "./managedPolicy/managedPolicy";
 
 /**
  * Settings page for the permissions of the sessions: the mode a session runs in when neither it nor its provider has
  * one of its own, and what a session an agent creates is given. The choices are kept by the host: the first applies to
  * the next Send of each session, the second to the next session an agent creates.
  */
-export function PermissionSettings({ permissions, confirms, tools = null }: {
+export function PermissionSettings({ permissions, confirms, tools = null, managed = null }: {
+  /** The host whose policy of the organization can lock the modes; null where the window has none. */
+  managed?: Readonly<{ epoch: string; api?: ManagedPolicyApi }> | null;
   /**
    * The host the tools every session does without are read from and written to; null where the window has none. The
    * page is given the service: it is mounted alone in tests, without the client of the host.
@@ -27,27 +31,34 @@ export function PermissionSettings({ permissions, confirms, tools = null }: {
   confirms: Readonly<Record<Confirmation, boolean>> & { set: (confirmation: Confirmation, ask: boolean) => void };
 }) {
   const { t } = useShellLanguage();
-  const mode = permissions?.review ? askPermissionMode : bypassPermissionMode;
+  const { policy } = useManagedPolicy(managed?.epoch ?? null, managed?.api);
+  // The policy of the organization turns the mode that asks nothing off: sessions ask first, whatever is chosen here.
+  const locked = policy?.bypassPermissionsDisabled === true;
+  const mode = permissions?.review || locked ? askPermissionMode : bypassPermissionMode;
   const created = permissions?.inherit ? "creator" : bypassPermissionMode;
+  const acceptEditsMode = "acceptEdits";
   return <div className="configuration-page settings-card-page" aria-label={t("Permissions")}>
     <header className="page-heading"><span className="eyebrow">{t("Agent & models")}</span><h1>{t("Permissions")}</h1>
       <p>{t("What the sessions do without asking you.")}</p></header>
     <div className="settings-grid"><Card className="appearance-settings" aria-labelledby="settings-agent-permissions-title">
       <h2 id="settings-agent-permissions-title">{t("Agent permissions")}</h2>
       <Field setting="permissions.default_mode" label={t("Default mode")} htmlFor="settings-permission-mode"
-        notice={<p className="settings-field-help">{t(permissionModeDescription(mode)!)} {t("A session can have a mode of its own.")}</p>}>
-        <HTMLSelect id="settings-permission-mode" value={mode} disabled={!permissions}
+        notice={<><p className="settings-field-help">{t(permissionModeDescription(mode)!)} {t("A session can have a mode of its own.")}</p>
+          {locked && policy && <ManagedPolicyLock policy={policy} />}</>}>
+        <HTMLSelect id="settings-permission-mode" value={mode} disabled={!permissions || locked}
           onChange={event => permissions?.set(event.target.value === askPermissionMode)}>
           {[bypassPermissionMode, askPermissionMode].map(value => <option key={value} value={value}>{t(permissionModeName(value)!)}</option>)}
         </HTMLSelect>
       </Field>
       <Field setting="permissions.created_sessions" label={t("Sessions created by agents")} htmlFor="settings-permission-created"
-        notice={<p className="settings-field-help">{t(permissions?.inherit
+        notice={<><p className="settings-field-help">{t(permissions?.inherit
           ? "A session an agent creates asks what the session that creates it asks."
-          : "A session an agent creates does not ask you.")}</p>}>
+          // Where the policy turns Bypass off, a session an agent creates gets the widest mode it allows.
+          : locked ? permissionModeDescription(acceptEditsMode)! : "A session an agent creates does not ask you.")}</p>
+          {locked && !permissions?.inherit && policy && <ManagedPolicyLock policy={policy} />}</>}>
         <HTMLSelect id="settings-permission-created" value={created} disabled={!permissions}
           onChange={event => permissions?.setInherit(event.target.value === "creator")}>
-          <option value={bypassPermissionMode}>{t(permissionModeName(bypassPermissionMode)!)}</option>
+          <option value={bypassPermissionMode}>{t(permissionModeName(locked ? acceptEditsMode : bypassPermissionMode)!)}</option>
           <option value="creator">{t("Same as the session that creates them")}</option>
         </HTMLSelect>
       </Field>

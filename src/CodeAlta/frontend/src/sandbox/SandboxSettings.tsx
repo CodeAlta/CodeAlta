@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, Card, HTMLSelect, InputGroup, Radio, RadioGroup, Tag, TagInput } from "@blueprintjs/core";
-import { sandboxSettings, type SandboxCheckEvent, type SandboxProfileItem, type SandboxScopeItem, type SandboxSettingsResponse } from "#neoastra";
+import { sandboxSettings, type ManagedPolicyResponse, type SandboxCheckEvent, type SandboxProfileItem, type SandboxScopeItem, type SandboxSettingsResponse } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { SettingsField as Field } from "../SettingsField";
 import { RemoveButton, SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
+import { ManagedPolicyLock } from "../managedPolicy/ManagedPolicyPanel";
+import { useManagedPolicy, type ManagedPolicyApi } from "../managedPolicy/managedPolicy";
 import { notSandboxed, resolveSandboxProfile, sandboxScopeKinds, type ResolvedSandboxProfile as Resolved, type SandboxApi, type SandboxScopeKind } from "./sandboxChoices";
 
 const workspaceProfile = "workspace";
@@ -50,7 +52,9 @@ type CheckRun = Readonly<{ profile: string; steps: readonly SandboxCheckEvent[];
  * choose a sandbox, each a link to where it is chosen. A change is saved at once, except the edit of a profile, saved
  * with its button.
  */
-export function SandboxSettings({ epoch, api = sandboxSettings, onOpenScope }: {
+export function SandboxSettings({ epoch, api = sandboxSettings, onOpenScope, policyApi }: {
+  /** The policy of the organization, which can require the sandbox; the host's when not given. */
+  policyApi?: ManagedPolicyApi;
   /** The host; null where the window does not own one. */
   epoch: string | null;
   api?: SandboxApi;
@@ -58,6 +62,7 @@ export function SandboxSettings({ epoch, api = sandboxSettings, onOpenScope }: {
   onOpenScope?: (scope: SandboxScopeItem) => void;
 }) {
   const { t } = useShellLanguage();
+  const { policy } = useManagedPolicy(epoch, policyApi);
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor<SandboxSettingsResponse>(options => epoch
     ? api.read({ expectedEpoch: epoch }, options) : Promise.resolve({ status: "unavailable", availability: null, allSessions: null, profiles: [], scopes: [] }), epoch ?? "");
   const [selected, setSelected] = useState<string | null>(null);
@@ -108,7 +113,8 @@ export function SandboxSettings({ epoch, api = sandboxSettings, onOpenScope }: {
     <div className="sandbox-settings-top">
       <SandboxStatus epoch={epoch!} api={api} availability={availability} profiles={names} preferred={listing.allSessions ?? workspaceProfile} />
       <EverySession profiles={names} value={listing.allSessions} disabled={busy}
-        onChange={profile => void mutate(() => api.saveAllSessions({ expectedEpoch: epoch, profile }, { timeoutMilliseconds: 30_000 }))} />
+        onChange={profile => void mutate(() => api.saveAllSessions({ expectedEpoch: epoch, profile }, { timeoutMilliseconds: 30_000 }))}
+        lock={policy?.sandboxRequired ? policy : null} />
     </div>
     <Card className="appearance-settings sandbox-profiles" aria-labelledby="sandbox-profiles-title">
       <h2 id="sandbox-profiles-title">{t("Profiles")}</h2>
@@ -218,7 +224,9 @@ export function everySessionChoice(profiles: readonly string[], value: string | 
 }
 
 // The sandbox of every session that no other place sandboxes: none, or a profile.
-function EverySession({ profiles, value, disabled, onChange }: { profiles: readonly string[]; value: string | null; disabled: boolean; onChange: (profile: string | null) => void }) {
+function EverySession({ profiles, value, disabled, onChange, lock = null }: { profiles: readonly string[]; value: string | null; disabled: boolean; onChange: (profile: string | null) => void;
+  /** The policy of the organization when it requires the sandbox: a session that nothing sandboxes runs in workspace. */
+  lock?: ManagedPolicyResponse | null }) {
   const { t } = useShellLanguage();
   const { sandboxed, known } = everySessionChoice(profiles, value);
   const [chosen, setChosen] = useState(known ?? (profiles.includes(workspaceProfile) ? workspaceProfile : profiles[0] ?? workspaceProfile));
@@ -238,6 +246,7 @@ function EverySession({ profiles, value, disabled, onChange }: { profiles: reado
       </HTMLSelect>
     </RadioGroup>
     <p className="settings-field-help">{t("A provider, a model, a space, a project or a session can choose otherwise.")}</p>
+    {lock && <><p className="settings-field-help">{t("Every session runs in the sandbox.")}</p><ManagedPolicyLock policy={lock} /></>}
   </Card>;
 }
 

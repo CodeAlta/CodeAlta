@@ -45,6 +45,7 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     private readonly CopilotRuntimeInstaller _installer;
     private readonly Func<string, string, IReadOnlyList<string>, CancellationToken, Task<IReadOnlyList<CopilotManagedSettings>>> _read;
     private readonly TimeProvider _time;
+    private readonly bool _keeps = true;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private readonly Lock _statusGate = new();
@@ -60,9 +61,27 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="globalRoot"/> is blank.</exception>
     public CopilotManagedPolicySource(ManagedPolicyState state, string globalRoot, Func<IReadOnlyList<CodeAltaProviderDocument>> providers)
-        : this(state, globalRoot, providers, new CopilotRuntimeInstaller(Path.Combine(globalRoot, "cache", "copilot-runtime")),
-            static (executable, home, tokens, cancellationToken) => new CopilotManagedSettingsReader(executable, home).ReadAsync(tokens, cancellationToken), TimeProvider.System)
+        : this(state, globalRoot, providers, preview: null)
     {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CopilotManagedPolicySource"/> class, on the network, that takes a
+    /// document of managed settings as the policy of the organization of every account: the check of the developer
+    /// instance, without an enterprise (<see cref="CopilotManagedSettingsReader(string, string, string?)"/>).
+    /// </summary>
+    /// <param name="state">The policies of the host.</param>
+    /// <param name="globalRoot">The global root of CodeAlta.</param>
+    /// <param name="providers">Gives the providers configured now.</param>
+    /// <param name="preview">The <c>managed-settings.json</c>; null to read the policies of the accounts.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="globalRoot"/> is blank.</exception>
+    public CopilotManagedPolicySource(ManagedPolicyState state, string globalRoot, Func<IReadOnlyList<CodeAltaProviderDocument>> providers, string? preview)
+        : this(state, globalRoot, providers, new CopilotRuntimeInstaller(Path.Combine(globalRoot, "cache", "copilot-runtime")),
+            (executable, home, tokens, cancellationToken) => new CopilotManagedSettingsReader(executable, home, preview).ReadAsync(tokens, cancellationToken), TimeProvider.System)
+    {
+        // What a check reads is not the policy of the accounts: the next start, of any instance, must not apply it.
+        _keeps = string.IsNullOrWhiteSpace(preview);
     }
 
     /// <summary>Initializes a new instance of the <see cref="CopilotManagedPolicySource"/> class, for tests.</summary>
@@ -102,9 +121,20 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="globalRoot"/> is blank.</exception>
     public static CopilotManagedPolicySource Start(ManagedPolicyState state, string globalRoot, CodeAltaConfigStore store)
+        => Start(state, globalRoot, store, preview: null);
+
+    /// <summary>Starts the source of a host that takes a document of managed settings as the policy of every account.</summary>
+    /// <param name="state">The policies of the host.</param>
+    /// <param name="globalRoot">The global root of CodeAlta.</param>
+    /// <param name="store">The configuration store of that root.</param>
+    /// <param name="preview">The <c>managed-settings.json</c>; null to read the policies of the accounts.</param>
+    /// <returns>The started source, which the host disposes.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="globalRoot"/> is blank.</exception>
+    public static CopilotManagedPolicySource Start(ManagedPolicyState state, string globalRoot, CodeAltaConfigStore store, string? preview)
     {
         ArgumentNullException.ThrowIfNull(store);
-        var source = new CopilotManagedPolicySource(state, globalRoot, () => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        var source = new CopilotManagedPolicySource(state, globalRoot, () => store.LoadGlobalProviderDefinitions(includeDisabled: true), preview);
         source.Start(TimeSpan.FromSeconds(5));
         return source;
     }
@@ -333,6 +363,7 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
 
     private void Keep(string providerKey, ManagedPolicy policy, bool forceRefresh)
     {
+        if (!_keeps) return;
         var path = Path.Combine(KeptFolder, FileName(providerKey));
         if (policy.IsEmpty && !forceRefresh)
         {

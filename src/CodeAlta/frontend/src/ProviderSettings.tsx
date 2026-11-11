@@ -6,6 +6,8 @@ import { ProviderAccount } from "./ProviderAccount";
 import { ProviderKeySecret } from "./secrets/ProviderKeySecret";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { ProviderUsagePanel } from "./UsageLimits";
+import { ManagedPolicyPanel } from "./managedPolicy/ManagedPolicyPanel";
+import type { ManagedPolicyApi } from "./managedPolicy/managedPolicy";
 import { ProviderModelVisibility } from "./ProviderModelVisibility";
 import { hasSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
@@ -82,7 +84,7 @@ function ProviderContextSize({ epoch, providerId, model, value, disabled, readMo
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null, secretKeys = globalConfig }: {
+export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null, secretKeys = globalConfig, policy }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
   /** Moves the key of a provider into a secret of this machine; the host by default. */
   secretKeys?: Pick<typeof globalConfig, "keepKeyAsSecret">;
@@ -97,6 +99,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   providerSessions?: (key: string) => number;
   /** Reads the usage of the subscription of a provider that has one. */
   usage?: Pick<typeof providerUsage, "read">;
+  /** The policy of the organization a Copilot provider shows; the host's when not given. */
+  policy?: ManagedPolicyApi;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
   readModels?: typeof modelCatalog.models;
   probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
@@ -500,6 +504,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
               </>}
             {original && original.type === form.type && hasSubscriptionUsage(form.type)
               && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
+            {/* The organization of a Copilot account can set a policy that every session follows. */}
+            {original && original.type === form.type && form.type === "copilot" && <ManagedPolicyPanel key={`${original.key}:policy`} epoch={epoch} api={policy} />}
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
             {/* Few people need it: folded, last, under a line that says what it hides. */}
