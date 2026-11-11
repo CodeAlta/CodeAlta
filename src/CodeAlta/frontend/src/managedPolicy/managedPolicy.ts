@@ -33,36 +33,76 @@ export function downloadSize(reading: ManagedPolicyReading | null | undefined): 
   return { received: megabytes(Math.min(reading.receivedKilobytes ?? 0, reading.totalKilobytes)), total: megabytes(reading.totalKilobytes) };
 }
 
+/** How often the policy of a host is read again: soon while a reading is under way, else now and then. */
+export const managedPolicyPollMilliseconds = Object.freeze({ underWay: 1_500, idle: 15_000 });
+
+/** The timers a poller schedules its reads with; given, so that tests drive the time. */
+export type PollTimers = Readonly<{ set: (callback: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
+const realTimers: PollTimers = Object.freeze({ set: (callback, milliseconds) => setTimeout(callback, milliseconds), clear: timer => clearTimeout(timer as ReturnType<typeof setTimeout>) });
+
+/**
+ * Reads the policy of the host of one epoch: at once, then again after each read, failed ones included, soon while a
+ * reading is under way. A policy can arrive while a page shows (the first reading a moment after the start). Once
+ * stopped, as when the host of another epoch takes over, nothing it reads or refreshes is given any more.
+ */
+export function createManagedPolicyPoller(epoch: string, api: ManagedPolicyApi, onChange: (policy: ManagedPolicyResponse | null, refreshing: boolean) => void,
+  timers: PollTimers = realTimers) {
+  let stopped = false;
+  let timer: unknown = null;
+  let refreshing = false;
+  let policy: ManagedPolicyResponse | null = null;
+  const abort = new AbortController();
+  const publish = () => { if (!stopped) onChange(policy, refreshing || readingUnderWay(policy?.copilot)); };
+  const schedule = () => {
+    if (stopped) return;
+    if (timer !== null) timers.clear(timer);
+    timer = timers.set(() => { timer = null; void read(); },
+      refreshing || readingUnderWay(policy?.copilot) ? managedPolicyPollMilliseconds.underWay : managedPolicyPollMilliseconds.idle);
+  };
+  const read = async () => {
+    try {
+      const value = await api.read({ expectedEpoch: epoch }, { signal: abort.signal, timeoutMilliseconds: 8_000 });
+      if (!stopped) { policy = value; publish(); }
+    } catch {
+      // The page shows what it read last; the next read says where it stands.
+    } finally {
+      schedule();
+    }
+  };
+  void read();
+  return {
+    /** Reads the managed settings of the accounts again; the first reading downloads the runtime and can take minutes. */
+    refresh() {
+      if (stopped || refreshing) return;
+      refreshing = true;
+      publish();
+      schedule();
+      void api.refresh({ expectedEpoch: epoch }, { timeoutMilliseconds: 600_000 })
+        .then(value => { if (!stopped) policy = value; }, () => { /* The next read says where it stands. */ })
+        .finally(() => { refreshing = false; publish(); schedule(); });
+    },
+    /** Stops reading: what is still on its way is dropped. */
+    stop() {
+      stopped = true;
+      abort.abort();
+      if (timer !== null) timers.clear(timer);
+      timer = null;
+    },
+  };
+}
+
 /** The policy of a host, read when the component shows, then every 15 seconds, every second and a half while its reading is under way. */
 export function useManagedPolicy(epoch: string | null, api: ManagedPolicyApi = managedPolicy) {
-  const [policy, setPolicy] = useState<ManagedPolicyResponse | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [read, setRead] = useState(0);
-  const alive = useRef(true);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => { setPolicy(null); }, [epoch]);
+  const [state, setState] = useState<Readonly<{ policy: ManagedPolicyResponse | null; refreshing: boolean }>>({ policy: null, refreshing: false });
+  const poller = useRef<ReturnType<typeof createManagedPolicyPoller> | null>(null);
   useEffect(() => {
+    setState({ policy: null, refreshing: false });
     if (!epoch) return;
-    const abort = new AbortController();
-    void api.read({ expectedEpoch: epoch }, { signal: abort.signal, timeoutMilliseconds: 8_000 })
-      .then(value => { if (!abort.signal.aborted) setPolicy(value); }, () => { /* The page shows what it read last. */ });
-    return () => abort.abort();
-  }, [api, epoch, read]);
-  const underWay = refreshing || readingUnderWay(policy?.copilot);
-  // A policy can arrive while the page is shown (the first reading a moment after the start): it is read again, soon
-  // while a reading is under way. The read is the policy the host holds, not a reading of the accounts.
-  useEffect(() => {
-    if (!epoch) return;
-    const timer = setTimeout(() => setRead(value => value + 1), underWay ? 1_500 : 15_000);
-    return () => clearTimeout(timer);
-  }, [epoch, underWay, policy]);
-  const refresh = useCallback(() => {
-    if (!epoch) return;
-    setRefreshing(true);
-    // The first reading downloads the runtime: it can take minutes, while the reads above show its progress.
-    void api.refresh({ expectedEpoch: epoch }, { timeoutMilliseconds: 600_000 })
-      .then(value => { if (alive.current) setPolicy(value); }, () => { /* The next read says where it stands. */ })
-      .finally(() => { if (alive.current) { setRefreshing(false); setRead(value => value + 1); } });
+    // One poller per host: the answers of the host of an earlier epoch are dropped with its poller.
+    const current = createManagedPolicyPoller(epoch, api, (policy, refreshing) => setState({ policy, refreshing }));
+    poller.current = current;
+    return () => { current.stop(); if (poller.current === current) poller.current = null; };
   }, [api, epoch]);
-  return { policy, refreshing: underWay, refresh };
+  const refresh = useCallback(() => poller.current?.refresh(), []);
+  return { policy: state.policy, refreshing: state.refreshing, refresh };
 }

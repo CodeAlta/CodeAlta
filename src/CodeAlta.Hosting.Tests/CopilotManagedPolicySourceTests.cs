@@ -114,6 +114,44 @@ public sealed class CopilotManagedPolicySourceTests
     }
 
     [TestMethod]
+    public async Task AnUndeterminedReading_NeverWeakensThePolicyInForce_NorReplacesTheKeptOne()
+    {
+        using var root = new TempRoot();
+        var variable = "CODEALTA_TEST_COPILOT_TOKEN_" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable(variable, "gho_test");
+        try
+        {
+            var providers = new[] { Copilot("copilot", variable) };
+            var strict = new CopilotManagedSettings
+            {
+                ServerManaged = true, BypassPermissionsDisabled = true, SandboxBypassAllowed = false, ForceRemoteSettingsRefresh = true, ManagedKeys = ["permissions", "sandbox"],
+            };
+            await using (var first = Source(root, new ManagedPolicyState(), providers, installed: true, (_, _, _, _) => Task.FromResult<IReadOnlyList<CopilotManagedSettings>>([strict])))
+            {
+                await first.RefreshAsync(CancellationToken.None);
+            }
+
+            // GitHub cannot be reached and the runtime has nothing cached: it answers that the policy is undetermined.
+            var undetermined = new CopilotManagedSettings { FailClosed = true, Diagnostics = ["The server policy could not be fetched."] };
+            for (var start = 0; start < 2; start++)
+            {
+                var state = new ManagedPolicyState();
+                await using var source = Source(root, state, providers, installed: true, (_, _, _, _) => Task.FromResult<IReadOnlyList<CopilotManagedSettings>>([undetermined]));
+                source.Start(TimeSpan.FromHours(1));
+                await source.RefreshAsync(CancellationToken.None);
+
+                Assert.IsTrue(state.Current.BypassPermissionsDisabled, $"start {start}: the policy in force stays");
+                Assert.IsTrue(state.Current.RunOutsideSandboxDisallowed, $"start {start}");
+                Assert.IsTrue(state.Current.FreshPolicyMissing, $"start {start}: an undetermined answer is no fresh reading");
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, null);
+        }
+    }
+
+    [TestMethod]
     public async Task WithoutASignIn_ThePolicyOfTheComputerApplies_AndARemovedProviderTakesItsPolicyAway()
     {
         using var root = new TempRoot();

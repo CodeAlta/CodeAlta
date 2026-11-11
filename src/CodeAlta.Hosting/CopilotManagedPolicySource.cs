@@ -311,6 +311,15 @@ public sealed class CopilotManagedPolicySource : IAsyncDisposable
         foreach (var providerKey in providerKeys)
         {
             var policy = Map(settings, providerKey, now);
+            if (settings.FailClosed)
+            {
+                // The runtime could not determine the policy (a failed fetch): what it answers only adds to the policy in
+                // force, which is neither replaced nor kept again, and it is no reading of this start.
+                var held = _state.Policies.TryGetValue(KeyPrefix + providerKey, out var current) ? current : ManagedPolicy.None;
+                _state.Set(KeyPrefix + providerKey, ManagedPolicy.Combine([held, policy]));
+                continue;
+            }
+
             lock (_freshThisStart) _freshThisStart.Add(providerKey);
             _state.Set(KeyPrefix + providerKey, policy);
             Keep(providerKey, policy, settings.ForceRemoteSettingsRefresh);
