@@ -56,7 +56,8 @@ export function SubProjectsWindow({ epoch, project, api, onClose, onOpenMap, onS
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  // Set again on each mount: StrictMode runs the cleanup once before the window is used.
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const read = useCallback(async () => {
     try {
@@ -432,11 +433,15 @@ function AddPane({ api, epoch, projectId, map, busy, error, onAdd }: {
       {candidates === null ? <li className="subprojects-none"><ActivitySpinner size={14} /> {t("Loading…")}</li>
         : addable.length === 0 ? <li className="subprojects-none">{t("No folder to add: every folder found is declared already.")}</li>
         : addable.map(candidate => <li key={candidate.path}>
-          <Checkbox checked={chosen.has(candidate.path)} disabled={busy} onChange={event => setChosen(current => {
-            const next = new Set(current);
-            if (event.currentTarget.checked) next.add(candidate.path); else next.delete(candidate.path);
-            return next;
-          })} labelElement={<span className="subprojects-candidate">
+          <Checkbox checked={chosen.has(candidate.path)} disabled={busy} onChange={event => {
+            // Read now: the event is gone when the update runs.
+            const checked = event.currentTarget.checked;
+            setChosen(current => {
+              const next = new Set(current);
+              if (checked) next.add(candidate.path); else next.delete(candidate.path);
+              return next;
+            });
+          }} labelElement={<span className="subprojects-candidate">
             <AppIcon name={candidate.submodule ? "branch" : "folder"} size={14} /><code>{candidate.path}</code>
             {candidate.submodule && <span className="subprojects-chip">{t("Submodule")}</span>}
             {candidate.markers.length > 0 && <small>{candidate.markers.join(", ")}</small>}
