@@ -189,10 +189,10 @@ internal sealed partial class WorkspaceService
         // Conservative JSON bound: six bytes per UTF-16 unit, 512 bytes per row for property names,
         // booleans/timestamps/punctuation, and 2048 reserved for the snapshot/envelope. Each session
         // additionally reserves 64 bytes for createdAt (33 ISO characters, quotes/property/comma,
-        // including a possibly escaped '+' offset). Keep the overall cap below 1 MiB RPC default.
+        // including a possibly escaped '+' offset). Keep the overall cap below 1 MiB RPC default. The projects take
+        // at most a third of it, so that the many sub-projects of a monorepo leave the sessions most of the room.
         var remaining = 700 * 1024 - 2048;
-        // The projects take at most this much of it, so that the sessions keep room beside the many sub-projects of a monorepo.
-        var projectsRemaining = 320 * 1024;
+        var projectsRemaining = 240 * 1024;
         var names = projects.GroupBy(static project => project.Id, StringComparer.Ordinal).ToDictionary(static group => group.Key, static group => group.First().DisplayName, StringComparer.Ordinal);
         // The projects of their own first: sub-projects come after them, so that a large map never pushes them out.
         foreach (var project in projects.OrderBy(static value => value.IsSubProject).ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)

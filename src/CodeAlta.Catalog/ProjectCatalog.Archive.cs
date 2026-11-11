@@ -14,7 +14,13 @@ public sealed partial class ProjectCatalog
     public async Task<ProjectArchiveSnapshot?> ReadArchiveAsync(string projectId, string projectPath, CancellationToken cancellationToken = default)
     {
         // An archive starts here: a sub-project nobody used gets its file, which the archive edits.
-        if (ProjectId.TryParse(projectId, out _)) await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false);
+        // A catalog that cannot be loaded is not a reason to answer otherwise: the read below fails closed on it.
+        if (ProjectId.TryParse(projectId, out _))
+        {
+            try { await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is SharpYaml.YamlException or InvalidDataException or ArgumentException or FormatException
+                or IOException or UnauthorizedAccessException) { }
+        }
         var source = await ReadArchiveSourceAsync(projectId, projectPath, cancellationToken).ConfigureAwait(false);
         return source is null ? null : new(source.Value.Project.Archived, source.Value.Path, source.Value.Snapshot.Revision);
     }

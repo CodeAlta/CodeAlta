@@ -248,7 +248,7 @@ public sealed class DesktopWorkspaceTests
                 sessions = [Session("a"), Session("b")];
                 break;
             case "row limits":
-                projects = Enumerable.Range(0, 201).Select(i => Project($"p{i:D3}")).ToArray();
+                projects = Enumerable.Range(0, WorkspaceService.MaximumProjects + 1).Select(i => Project($"p{i:D4}")).ToArray();
                 sessions = Enumerable.Range(0, 501).Select(i => Session($"s{i:D3}")).ToArray();
                 break;
             case "display scalar boundary":
@@ -291,7 +291,7 @@ public sealed class DesktopWorkspaceTests
         }
         var result = WorkspaceService.ProjectSnapshot(projects, sessions);
         Assert.IsTrue(result.Configured);
-        Assert.IsTrue(result.Projects.Length <= 200);
+        Assert.IsTrue(result.Projects.Length <= WorkspaceService.MaximumProjects);
         Assert.IsTrue(result.Sessions.Length <= 500);
         if (row == "persisted metadata")
         {
@@ -310,8 +310,11 @@ public sealed class DesktopWorkspaceTests
         }
         if (row == "row limits")
         {
-            Assert.AreEqual(200, result.Projects.Length);
-            Assert.AreEqual(500, result.Sessions.Length);
+            // The projects stop at their share of the wire budget, and the sessions keep most of it.
+            Assert.IsTrue(result.Projects.Length > 600, result.Projects.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Assert.IsTrue(result.Sessions.Length > 400, result.Sessions.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var few = WorkspaceService.ProjectSnapshot(projects[..201], sessions);
+            Assert.AreEqual((201, 500), (few.Projects.Length, few.Sessions.Length), "Two hundred projects leave every session listed.");
             Assert.IsTrue(result.ProjectsTruncated && result.SessionsTruncated);
         }
         if (row == "display scalar boundary")
