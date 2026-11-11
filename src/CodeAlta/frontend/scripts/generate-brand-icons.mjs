@@ -39,6 +39,12 @@ const simpleIcons = [
   ["bitbucket", "Bitbucket", "#1868DB", "#579DFF"], ["trello", "Trello", "#1868DB", "#579DFF"],
   ["git", "Git", "#F05032"], ["gitlab", "GitLab", "#FC6D26"], ["linear", "Linear", "#5E6AD2", "#8C95EE"],
   ["zedindustries", "Zed", "#084CCF", "#5B8DEF"], ["sublimetext", "Sublime Text", "#FF9800"],
+  // The vaults the secrets can be kept in (Settings > Secrets).
+  ["1password", "1Password", "#145FE4", "#5B8DFF"], ["bitwarden", "Bitwarden", "#175DDC", "#5B8FF2"], ["vaultwarden", "Vaultwarden"],
+  ["keepassxc", "KeePassXC", "#5A9A3C", "#6CAC4D"], ["vault", "HashiCorp Vault", "#A48600", "#FFEC6E"], ["openbao", "OpenBao", "#336D5C", "#5FB596"],
+  ["gnuprivacyguard", "GnuPG", "#0093DD", "#3BB2F0"], ["proton", "Proton", "#6D4AFF", "#9C87FF"], ["keeper", "Keeper", "#B28A00", "#FFC700"],
+  ["dashlane", "Dashlane", "#0E353D", "#6CC9C3"], ["lastpass", "LastPass", "#D32D27", "#F05A55"], ["passbolt", "Passbolt", "#D40101", "#FF5A5A"],
+  ["googlecloud", "Google Cloud", "#4285F4", "#7AA9F7"], ["apple", "Apple"],
 ];
 // The marks neither package has, drawn here in the same 24 by 24 box: the external editors the app opens folders in.
 const localIcons = [

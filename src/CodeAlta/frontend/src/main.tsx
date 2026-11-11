@@ -6645,7 +6645,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
-      : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} runInTerminal={command => void (async () => {
+        const reply = await terminalWorkspace.hub.create(null, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
+        if (reply?.status !== "ok" || !reply.terminal) { showToast({ intent: "danger", icon: "error", timeout: 8000, message: t("The terminal could not be started.") }); return; }
+        closeSettings();
+        showTerminal(reply.terminal);
+        terminalWorkspace.hub.input(reply.terminal.id, command + "\r");
+      })()} />
       : settingsSection === "fleet" ? <FleetOverview epoch={owned ? status!.hostEpoch : null} spaces={spacesState.spaces} modelServersApi={modelServersApi} />
       : settingsSection === "machines" ? <MachinesSettings key={machineFocus ? `${machineFocus.id}:${machineFocus.ticket}` : ""} epoch={owned ? status!.hostEpoch : null}
         initialMachine={machineFocus?.id ?? null} />

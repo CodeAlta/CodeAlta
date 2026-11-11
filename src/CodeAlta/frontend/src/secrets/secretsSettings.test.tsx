@@ -7,13 +7,15 @@ import { ShellLanguageContext } from "../shellLanguage";
 import { ProviderKeySecret } from "./ProviderKeySecret";
 import { SecretsBody, type SecretsActions } from "./SecretsSettings";
 import { isSecretName, referenceOf, secretNameProblem, suggestedSecretName } from "./secrets";
+import { localSecret, noCredentials } from "./credentials";
 
 const never = () => assert.fail("rendering must not act");
 const actions: SecretsActions = { setSecret: never, rotateSecret: never, deleteSecret: never, setVariable: never, deleteVariable: never };
 const listing: SecretsList = {
   status: "ok", protection: "dpapi",
-  secrets: [{ name: "GRAFANA_TOKEN", version: 2, setBy: "alex (CodeAlta Desktop)", setAt: "2026-11-03T10:00:00Z" }],
+  secrets: [localSecret({ name: "GRAFANA_TOKEN", version: 2, setBy: "alex (CodeAlta Desktop)", setAt: "2026-11-03T10:00:00Z" })],
   variables: [{ name: "GRAFANA_URL", value: "https://grafana.example", version: 1, setBy: "alex (altanode)", setAt: "2026-11-02T10:00:00Z" }],
+  ...noCredentials,
 };
 const render = (element: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
   { value: { locale: "en", choice: "en", setLanguage: never } }, element));
@@ -43,7 +45,7 @@ test("a variable shows its value, editable, and its reference", () => {
 });
 
 test("a machine without a secret says so, and Add shows a form whose value is hidden", () => {
-  const empty: SecretsList = { status: "ok", protection: null, secrets: [], variables: [] };
+  const empty: SecretsList = { status: "ok", protection: null, secrets: [], variables: [], ...noCredentials };
   assert.match(render(createElement(SecretsBody, { listing: empty, busy: false, run: never, actions })), /No secret on this machine\./);
 
   const html = render(createElement(SecretsBody, { listing: empty, busy: false, adding: true, run: never, actions }));

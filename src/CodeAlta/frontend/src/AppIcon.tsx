@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import {
   KeyRound,
+  Fingerprint,
   Sigma,
   House,
   Orbit,
@@ -334,6 +335,7 @@ const icons = {
   inherit: Layers,
   sandbox: Box,
   secret: KeyRound,
+  fingerprint: Fingerprint,
   help: CircleHelp,
   fleet: Waypoints,
   people: UsersRound,

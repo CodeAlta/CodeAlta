@@ -543,6 +543,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ModelServerTransports = modelServerTransports.Resolve,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
+                // The normal instance asks a locked vault to unlock; the developer instance never does, beside the one the user works in.
+                CredentialPrompts = !options.Developer,
+                // Windows Hello opens over the window of CodeAlta; Touch ID needs no window.
+                UserPresenceVerifier = CodeAlta.Credentials.SystemUserPresence.ForThisSystem(() => window is { IsClosed: false } shown && OperatingSystem.IsWindows()
+                    ? shown.GetNativeHandle(NeoNativeHandleKind.Win32Hwnd).Value : 0),
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
                 // The user's setting decides, read at every send. The launch flag of the isolated-roots mode
                 // still forces the review on for a host started with it.
@@ -947,7 +952,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null)
                 {
                     // Jira and Slack, with the secrets of this computer, while the desktop runs; the hooks of a server go to its machines.
-                    Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot),
+                    Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot, host.Credentials),
                 };
                 // The triggers of CodeAlta, and those the plugins give, as they run now.
                 Automations.AutomationBuiltInSources.AddProjectTrigger(automations, host.ProjectCatalog);
@@ -1160,7 +1165,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelServersService(modelServers is null ? new ModelServersService() : new ModelServersService(modelServers, epoch));
                     // A secret set here is masked at once in the sessions of the host.
                     builder.AddSecretsService(new SecretsService(new CodeAlta.Catalog.Secrets.LocalSecretStore(host.CatalogOptions.GlobalRoot), epoch,
-                        () => host.AgentHub.SecretMasker?.Refresh()));
+                        () => host.AgentHub.SecretMasker?.Refresh())
+                    {
+                        Credentials = host.Credentials,
+                    });
                     builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
                     {
                         Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },
@@ -1196,6 +1204,27 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // A plugin that starts, stops or is built again brings or takes its provider types: the running turns
                     // of the providers that stop are stopped, then the providers are registered again.
                     host.PluginRuntime.Changed += (_, _) => _ = globalConfig.ApplyPluginProviderChangesAsync();
+                    if (host.Credentials is { } credentials)
+                    {
+                        // A secret kept in a vault that can be given now (a vault unlocked, a secret bound, a use confirmed)
+                        // brings the providers that were left out for want of it.
+                        credentials.Changed += (_, change) => _ = globalConfig.ApplySecretsChangedAsync(change.Names);
+                        // A plugin that starts can bring the type of a provider: the vaults are read again.
+                        host.PluginRuntime.Changed += (_, _) => _ = credentials.RefreshAsync();
+                        // The vaults that are locked are asked to unlock once, after the window is shown, in the normal instance only.
+                        _ = Task.Run(async () =>
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                            try
+                            {
+                                await credentials.UnlockAtStartAsync().ConfigureAwait(false);
+                            }
+                            catch (Exception exception) when (exception is not OutOfMemoryException)
+                            {
+                                LogManager.GetLogger("CodeAlta.Credentials").Warn($"The vaults were not unlocked at start: {exception.Message}");
+                            }
+                        });
+                    }
                     builder.AddGlobalConfigService(globalConfig);
                     // The policy of the organization of a Copilot account is read again once it signs in or out.
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch, _ => _copilotPolicies?.RefreshSoon());

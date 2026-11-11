@@ -698,6 +698,30 @@ internal sealed partial class GlobalConfigService
     /// adapter type, its endpoint, the variable of its key and what its service needs. It is added disabled: the user
     /// gives it a credential, or signs in, and enables it.
     /// </summary>
+    /// <summary>
+    /// Gives a provider its key from a secret that is set already, such as one kept in a vault: the configuration names it with
+    /// <c>api_key_secret</c>, and a key the file held is removed.
+    /// </summary>
+    [NeoRpcMethod("useSecretForKey")]
+    public GlobalConfigSaveResponse UseSecretForKey(GlobalConfigKeepKeyRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var key = request.Key?.Trim();
+        var name = request.SecretName?.Trim();
+        if (string.IsNullOrEmpty(key) || key.Length > 64) return new("invalid", null, "A provider key is required.", null, null, 0);
+        if (!CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(name)) return new("invalid", null, "A name is letters, digits and _, not starting with a digit.", null, null, 0);
+        if (!IsSecretSet(name)) return new("invalid", null, $"The secret {name} is not set on this machine.", null, null, 0);
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        {
+            if (definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } definition)
+                return "The provider no longer exists in the configuration.";
+            definition.ApiKeySecret = name;
+            definition.ApiKey = null;
+            store.SaveGlobalProviderDefinitions(definitions);
+            return null;
+        });
+    }
+
     [NeoRpcMethod("keepKeyAsSecret")]
     public GlobalConfigSaveResponse KeepKeyAsSecret(GlobalConfigKeepKeyRequest request)
     {

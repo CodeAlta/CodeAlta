@@ -10,7 +10,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// and written.
 /// </summary>
 [NeoRpcService("secrets", Version = 1)]
-internal sealed class SecretsService
+internal sealed partial class SecretsService
 {
     private const int MaximumNameLength = 128;
     private readonly LocalSecretStore? _store;
@@ -36,9 +36,16 @@ internal sealed class SecretsService
     /// <summary>Gets who sets a value from this window, as the store records it.</summary>
     internal string SetBy { get; init; } = $"{Environment.UserName} (CodeAlta Desktop)";
 
-    /// <summary>Lists the secrets, by name, and the variables.</summary>
+    /// <summary>Lists the secrets, by name, and the variables; with a broker, the vaults, their types and what waits for a confirmation.</summary>
     [NeoRpcMethod("list")]
-    public SecretsList List(SecretsRequest request)
+    public async Task<SecretsList> ListAsync(SecretsRequest request, CancellationToken cancellationToken)
+    {
+        var list = List(request);
+        return list.Status == "ok" ? await WithCredentialsAsync(list, cancellationToken).ConfigureAwait(false) : list;
+    }
+
+    /// <summary>Lists the secrets, by name, and the variables, without the vaults.</summary>
+    internal SecretsList List(SecretsRequest request)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, [], []);
         try
@@ -114,14 +121,58 @@ internal sealed record SecretsRequest(string ExpectedEpoch);
 /// <param name="Protection">What protects the values of the secrets (<c>dpapi</c>, <c>keychain</c>, <c>libsecret</c>, <c>file</c>); null while none is set.</param>
 /// <param name="Secrets">The secrets, by name.</param>
 /// <param name="Variables">The variables, with their values.</param>
-internal sealed record SecretsList(string Status, string? Protection, SecretView[] Secrets, VariableView[] Variables);
+internal sealed record SecretsList(string Status, string? Protection, SecretView[] Secrets, VariableView[] Variables)
+{
+    /// <summary>The credential providers of the user.</summary>
+    public CredentialProviderRpcView[] Providers { get; init; } = [];
+
+    /// <summary>The types of providers the page offers.</summary>
+    public CredentialTypeView[] Types { get; init; } = [];
+
+    /// <summary>The uses of secrets that wait for a confirmation.</summary>
+    public PendingUseView[] Pending { get; init; } = [];
+
+    /// <summary>The recent uses of the secrets, the newest first.</summary>
+    public SecretUseView[] Uses { get; init; } = [];
+
+    /// <summary>Whether the system can verify the user, for the secrets that ask before use; null without a broker.</summary>
+    public VerificationView? Verification { get; init; }
+
+    /// <summary>Whether this instance asks a vault to unlock; the developer instance never does.</summary>
+    public bool CanPrompt { get; init; }
+
+    /// <summary>What is wrong with the tables of the configuration that were left out.</summary>
+    public string[] ConfigurationProblems { get; init; } = [];
+}
 
 /// <summary>A secret as the page shows it: never its value.</summary>
 /// <param name="Name">Its name.</param>
 /// <param name="Version">Its version.</param>
 /// <param name="SetBy">Who set its value.</param>
 /// <param name="SetAt">When, in ISO 8601.</param>
-internal sealed record SecretView(string Name, int Version, string SetBy, string SetAt);
+internal sealed record SecretView(string Name, int Version, string SetBy, string SetAt)
+{
+    /// <summary>The id of the credential provider that keeps its value; null for a value of this computer.</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>The name of that provider.</summary>
+    public string? ProviderName { get; init; }
+
+    /// <summary>The icon of that provider.</summary>
+    public string? Icon { get; init; }
+
+    /// <summary>What the user picked in the vault.</summary>
+    public string? Label { get; init; }
+
+    /// <summary>How long a confirmation lasts when it asks before use; null when it does not ask.</summary>
+    public string? AskBeforeUse { get; init; }
+
+    /// <summary><c>ready</c>, <c>locked</c>, <c>sign_in</c>, <c>not_installed</c>, <c>waits</c>, <c>not_found</c> or <c>unavailable</c>.</summary>
+    public string State { get; init; } = "ready";
+
+    /// <summary>What the user reads beside its state.</summary>
+    public string? StateMessage { get; init; }
+}
 
 /// <summary>A variable as the page shows it.</summary>
 /// <param name="Name">Its name.</param>

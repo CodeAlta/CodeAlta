@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { MachineDeviceView, MachineManagement, MachineProviderStatusView, MachineServerLinkView, MachineView, SecretView, VariableView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
+import { localSecret, noCredentials } from "../secrets/credentials";
 
 document.documentElement.classList.add("bp6-dark");
 
@@ -76,7 +77,7 @@ const api: MachinePageApi = {
       : { status: "staged", running: "4.0.0", latest: "4.0.1", target: "4.0.1", message: null };
   },
   // The secrets of the machine: by name, never their values; a rotation of one that is gone is refused as the machine does.
-  secrets: async () => ({ status: "ok", protection: "libsecret", secrets: [...secrets.values()].map(secret => ({ name: secret.name, version: secret.version, setBy: secret.setBy, setAt: secret.setAt })), variables: [...variables.values()] }),
+  secrets: async () => ({ status: "ok", protection: "libsecret", secrets: [...secrets.values()].map(secret => localSecret(secret)), variables: [...variables.values()], ...noCredentials }),
   setSecret: async request => { calls.push(JSON.stringify({ setSecret: request.name, machine: request.machineId })); setSecret(request.name, request.value); return { status: "ok", message: null }; },
   rotateSecret: async request => {
     calls.push(JSON.stringify({ rotateSecret: request.name }));
@@ -183,7 +184,7 @@ let providerList: MachineProviderStatusView[] = [
 const secrets = new Map<string, SecretView & { value: string }>();
 const variables = new Map<string, VariableView>([["GRAFANA_URL", { name: "GRAFANA_URL", value: "https://grafana.example", version: 1, setBy: "build-box owner", setAt: "2026-11-02T09:00:00Z" }]]);
 function setSecret(name: string, value: string) {
-  secrets.set(name, { name, value, version: (secrets.get(name)?.version ?? 0) + 1, setBy: "desktop (manage)", setAt: "2026-11-03T09:00:00Z" });
+  secrets.set(name, { ...localSecret({ name, version: (secrets.get(name)?.version ?? 0) + 1, setBy: "desktop (manage)", setAt: "2026-11-03T09:00:00Z" }), value });
 }
 
 function Fixture() {

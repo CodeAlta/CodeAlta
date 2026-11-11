@@ -73,6 +73,7 @@ import { modelServersMessages } from "./modelServers/messages";
 import { addMachineMessages } from "./machines/addMachineMessages";
 import { createServerMessages } from "./fleet/createServerMessages";
 import { secretMessages } from "./secrets/messages";
+import { credentialMessages } from "./secrets/credentialMessages";
 import { fleetMessages } from "./fleet/messages";
 import { fleetSecretMessages } from "./fleet/secretsMessages";
 import { fleetBudgetMessages } from "./fleet/budgetsMessages";
@@ -3040,6 +3041,7 @@ export const messages = dictionary({
   ...addMachineMessages,
   ...createServerMessages,
   ...secretMessages,
+  ...credentialMessages,
   ...fleetMessages,
   ...fleetSecretMessages,
   ...fleetBudgetMessages,
