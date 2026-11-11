@@ -181,7 +181,20 @@ public static class SandboxPolicyBuilder
     {
         ArgumentNullException.ThrowIfNull(name);
         var upper = name.ToUpperInvariant();
-        return SecretNameParts.Any(upper.Contains) || upper.EndsWith("_KEY", StringComparison.Ordinal);
+        return SecretNameParts.Any(upper.Contains) || upper.EndsWith("_KEY", StringComparison.Ordinal) || IsVaultSessionName(name);
+    }
+
+    /// <summary>
+    /// Gets whether a variable holds the session of a vault, which opens the whole vault: <c>BW_SESSION</c> of Bitwarden,
+    /// <c>OP_SESSION_*</c> of 1Password. Such a variable never enters a sandbox, even when its profile names it.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    /// <returns>True for the session of a vault.</returns>
+    public static bool IsVaultSessionName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var upper = name.ToUpperInvariant();
+        return upper is "BW_SESSION" or "OP_SERVICE_ACCOUNT_TOKEN" or "OP_CONNECT_TOKEN" or "BWS_ACCESS_TOKEN" || upper.StartsWith("OP_SESSION_", StringComparison.Ordinal);
     }
 
     // The variables that load code into a process as it starts (a startup hook of .NET, a profiler, a preloaded
@@ -212,9 +225,10 @@ public static class SandboxPolicyBuilder
         }
 
         // What the profile passes on, by name, secrets included: the user named them.
+        // A session of a vault never enters a sandbox, even named: it opens the whole vault.
         foreach (var name in profile.Env)
         {
-            if (Lookup(host.Environment, name) is { } value) environment[name] = value;
+            if (!IsVaultSessionName(name) && Lookup(host.Environment, name) is { } value) environment[name] = value;
         }
 
         environment["HOME"] = sandboxHome;

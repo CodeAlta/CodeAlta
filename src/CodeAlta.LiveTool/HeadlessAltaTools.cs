@@ -131,7 +131,10 @@ public sealed class HeadlessAltaTools : IAsyncDisposable
     {
         var permissions = host.RuntimeService.Permissions;
         var configStore = new CodeAltaConfigStore(host.CatalogOptions);
-        return new AltaServiceCollection()
+        var services = new AltaServiceCollection();
+        // The vaults of the secrets, for `alta credential` and `alta secret test`.
+        if (host.Credentials is { } credentials) services.Add(credentials);
+        return services
             .Add<ISessionRetentionAdmission>(host.RetentionProtection)
             .Add(host.CatalogOptions)
             .Add(host.SessionViewCatalog.TextFiles)

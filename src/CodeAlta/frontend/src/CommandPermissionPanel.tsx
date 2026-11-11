@@ -208,6 +208,9 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       ? entry.browser.site
         ? t("Open {site} in your browser {browser}?", { site: entry.browser.site, browser: entry.browser.browser })
         : t("Let the agent use your browser {browser}?", { browser: entry.browser.browser })
+      : entry.kind === "credential" && entry.credential
+      ? t(entry.credential.action === "bind" ? "Keep the secret {name} in a vault?" : entry.credential.action === "unbind" ? "Stop keeping the secret {name} in a vault?"
+        : entry.credential.action === "add_provider" ? "Add the credential provider {name}?" : "Remove the credential provider {name}?", { name: entry.credential.subject })
       : t(entry.outsideSandbox ? "Run outside the sandbox?" : entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
     <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
     {entry.kind === "skill" && entry.skill
@@ -235,6 +238,11 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
         <p className="detail">{entry.browser.site
           ? t("The agent reads and acts on the pages of this site and its subdomains with your sign-ins.")
           : t("The agent works in tabs of its own, with your sign-ins and cookies. Each new site is asked first.")}</p>
+      </>
+      : entry.kind === "credential" && entry.credential
+      ? <>
+        <p className="detail" data-permission-credential>{entry.credential.detail}</p>
+        <p className="detail">{t("An agent asks to change where your secrets are kept. It never reads a value.")}</p>
       </>
       : entry.kind === "commandExecution"
       ? <><pre data-permission-command>{entry.command}</pre>

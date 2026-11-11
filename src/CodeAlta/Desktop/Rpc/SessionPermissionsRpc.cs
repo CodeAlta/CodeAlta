@@ -75,6 +75,8 @@ internal sealed class SessionPermissionsService
                         && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Skill is null,
                     "skill" => value.Skill is { } skill && Identity(skill.Server) && Identity(skill.Name) && Text(skill.Uri, 1024, true)
                         && skill.FileCount >= 0 && skill.TotalBytes is >= 0 and <= int.MaxValue && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Browser is null,
+                    "credential" => value.Credential is { } credential && Identity(credential.Action) && Identity(credential.Subject) && Text(credential.Detail, 1024, true)
+                        && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Skill is null && value.Browser is null,
                     _ => false,
                 };
                 if (entry?.Handle is not { } handle || entry.Request is not { } summary || handle.Attempt is null
@@ -93,6 +95,7 @@ internal sealed class SessionPermissionsService
                         ? new(skillSummary.Server, skillSummary.Name, skillSummary.Uri, skillSummary.FileCount, (int)skillSummary.TotalBytes, skillSummary.Dynamic)
                         : null,
                     Browser = summary.Browser is { } browserSummary ? new(browserSummary.Browser, browserSummary.Profile, browserSummary.Site) : null,
+                    Credential = summary.Credential is { } credentialSummary ? new(credentialSummary.Action, credentialSummary.Subject, credentialSummary.Detail) : null,
                 });
             }
             // Four complete commands, each <=6,144 text + 512 identity UTF-16 units. Worst-case six-byte
@@ -208,7 +211,12 @@ internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle H
 
     /// <summary>The user's browser a <c>browser</c> request asks to drive, and the site; null for another kind.</summary>
     public SessionPermissionBrowserEntry? Browser { get; init; }
+
+    /// <summary>The change of the vaults a <c>credential</c> request asks; null for another kind.</summary>
+    public SessionPermissionCredentialEntry? Credential { get; init; }
 }
+/// <summary>A change of where the secrets are kept that an agent asks: never a value.</summary>
+internal sealed record SessionPermissionCredentialEntry(string Action, string Subject, string Detail);
 /// <summary>The user's own browser a permission asks to drive: for the session, or for a <paramref name="Site"/>, which can be allowed from now on.</summary>
 internal sealed record SessionPermissionBrowserEntry(string Browser, string Profile, string? Site);
 /// <summary>The skill of an MCP server a permission asks to load: <paramref name="Dynamic"/> ones are allowed once only.</summary>

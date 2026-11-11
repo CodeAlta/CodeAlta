@@ -230,9 +230,15 @@ function shaped(entry: SessionPermissionCommand): boolean {
   if (entry.kind === "browser") {
     const browser = entry.browser;
     return !!browser && identity(browser.browser) && identity(browser.profile) && (browser.site === null || identity(browser.site))
-      && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null && entry.skill == null;
+      && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null && entry.skill == null && entry.credential == null;
   }
-  return entry.skill == null && entry.browser == null && (entry.kind === "commandExecution"
+  if (entry.kind === "credential") {
+    const credential = entry.credential;
+    return !!credential && ["bind", "unbind", "add_provider", "remove_provider"].includes(credential.action) && identity(credential.subject)
+      && text(credential.detail, 1024, true) && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null
+      && entry.skill == null && entry.browser == null;
+  }
+  return entry.skill == null && entry.browser == null && entry.credential == null && (entry.kind === "commandExecution"
     ? text(entry.command, 4096, true) && text(entry.workingDirectory, 1024, true) && entry.grantRoot === null
     : entry.kind === "fileChange"
     ? text(entry.grantRoot, 1024, true) && entry.command === null && entry.workingDirectory === null

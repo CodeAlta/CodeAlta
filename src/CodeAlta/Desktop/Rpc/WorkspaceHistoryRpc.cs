@@ -223,6 +223,10 @@ internal sealed partial class WorkspaceService
                     name = "Browser permission";
                     text = permission.Site is { } site ? $"**Site:** {site}\n\n**Browser:** {permission.Browser} ({permission.Profile})" : $"**Browser:** {permission.Browser} ({permission.Profile})";
                     break;
+                case AgentCredentialPermissionRequest permission:
+                    type = "permissionCredential"; kind = permission.Kind; interactionId = permission.InteractionId;
+                    name = "Credential permission"; text = $"**{permission.Action}:** `{permission.Subject}`\n\n{permission.Detail}";
+                    break;
                 case AgentUserInputRequest input:
                     type = "userInputRequest"; kind = "UserInput"; interactionId = input.InteractionId;
                     name = "User input requested"; text = FormatUserInput(input);

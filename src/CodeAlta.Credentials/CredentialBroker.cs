@@ -145,6 +145,8 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private readonly List<PendingSecretUse> _pending = [];
     private readonly LinkedList<SecretUseRecord> _uses = new();
     private readonly HashSet<string> _unlockedAtStart = new(StringComparer.Ordinal);
+    // When an agent last had an unlock of a provider dismissed: it does not ask again for a while.
+    private readonly Dictionary<string, DateTimeOffset> _agentUnlocks = new(StringComparer.Ordinal);
     private readonly ITimer? _expiry;
     private IReadOnlyList<string> _configurationProblems = [];
     private bool _disposed;
@@ -335,6 +337,42 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         Raise(changed, always: true);
         return GetProvider(id)!;
     }
+
+    /// <summary>
+    /// Says whether an agent may ask a vault to unlock now: not while another unlock it asked runs, nor for a while after the user
+    /// dismissed one, so that an agent cannot keep showing the prompt of a vault.
+    /// </summary>
+    /// <param name="id">The id of the provider.</param>
+    /// <param name="pause">How long a dismissed unlock is not asked again.</param>
+    /// <returns>True when it may; it must then call <see cref="EndAgentUnlock"/>.</returns>
+    public bool TryBeginAgentUnlock(string id, TimeSpan pause)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        lock (_gate)
+        {
+            var now = _options.Time.GetUtcNow();
+            if (_agentUnlocks.TryGetValue(id, out var until) && until > now) return false;
+            // While it runs, nothing else of an agent asks.
+            _agentUnlocks[id] = now + TimeSpan.FromMinutes(3);
+            _agentUnlockPause = pause;
+            return true;
+        }
+    }
+
+    /// <summary>Ends an unlock an agent asked: a dismissed one pauses the next ones.</summary>
+    /// <param name="id">The id of the provider.</param>
+    /// <param name="dismissed">Whether the vault is still locked after it.</param>
+    public void EndAgentUnlock(string id, bool dismissed)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        lock (_gate)
+        {
+            if (dismissed) _agentUnlocks[id] = _options.Time.GetUtcNow() + _agentUnlockPause;
+            else _agentUnlocks.Remove(id);
+        }
+    }
+
+    private TimeSpan _agentUnlockPause = TimeSpan.FromMinutes(10);
 
     /// <summary>Forgets the values a provider read, and what its vault holds to read them; null forgets every provider.</summary>
     /// <param name="id">The id of the provider; null for all.</param>

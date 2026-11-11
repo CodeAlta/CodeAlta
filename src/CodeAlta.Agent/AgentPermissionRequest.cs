@@ -18,6 +18,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentFileChangePermissionRequest), "fileChange")]
 [JsonDerivedType(typeof(AgentSkillPermissionRequest), "skill")]
 [JsonDerivedType(typeof(AgentBrowserPermissionRequest), "browser")]
+[JsonDerivedType(typeof(AgentCredentialPermissionRequest), "credential")]
 public abstract record AgentPermissionRequest(
     ModelProviderId ProviderId,
     string SessionId,
@@ -165,6 +166,34 @@ public sealed record AgentBrowserPermissionRequest(
 {
     /// <summary>The kind of the request.</summary>
     public const string BrowserKind = "browser";
+}
+
+/// <summary>
+/// Permission request of an agent to change where the secrets of the user are kept: bind a secret to an item of a vault, add
+/// or remove a credential provider. It is asked in every permission mode: no mode answers it for the user, and a host without
+/// a user denies it.
+/// </summary>
+/// <param name="ProviderId">The model provider identifier.</param>
+/// <param name="SessionId">The session identifier.</param>
+/// <param name="Timestamp">The event timestamp.</param>
+/// <param name="RunId">Optional run identifier.</param>
+/// <param name="InteractionId">Stable interaction identifier.</param>
+/// <param name="Action">What the agent asks: <c>bind</c>, <c>unbind</c>, <c>add_provider</c> or <c>remove_provider</c>.</param>
+/// <param name="Subject">What it is about: the name of the secret, or the id of the provider.</param>
+/// <param name="Detail">What happens, in a sentence: the vault and the item, or the type of the provider. Never a value.</param>
+public sealed record AgentCredentialPermissionRequest(
+    ModelProviderId ProviderId,
+    string SessionId,
+    DateTimeOffset Timestamp,
+    AgentRunId? RunId,
+    string InteractionId,
+    string Action,
+    string Subject,
+    string Detail)
+    : AgentPermissionRequest(ProviderId, SessionId, Timestamp, RunId, InteractionId, Kind: AgentCredentialPermissionRequest.CredentialKind)
+{
+    /// <summary>The kind of the request.</summary>
+    public const string CredentialKind = "credential";
 }
 
 /// <summary>

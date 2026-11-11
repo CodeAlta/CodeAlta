@@ -168,6 +168,27 @@ public sealed class CredentialProviderSettings
         return found;
     }
 
+    /// <summary>
+    /// Gets whether the user lets the shells of agents run the programs of the configured vaults (<c>agent_vault_commands = "allow"</c>
+    /// under <c>[secrets]</c>); by default they are refused.
+    /// </summary>
+    /// <returns>True when the user allows them.</returns>
+    public bool AgentVaultCommandsAllowed()
+    {
+        try
+        {
+            var content = CodeAlta.Core.IO.SafeFile.ReadAllText(_configPath);
+            if (string.IsNullOrWhiteSpace(content)) return false;
+            var model = TomlSerializer.Deserialize<TomlTable>(content) ?? [];
+            return model.TryGetValue("secrets", out var node) && node is TomlTable table && table.TryGetValue("agent_vault_commands", out var value)
+                && value is string text && string.Equals(text, "allow", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TomlException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Writes a provider: its table gets these values, and loses the keys of its type it no longer has.</summary>
     /// <param name="definition">The provider.</param>
     /// <exception cref="ArgumentException">The id or a key is not valid.</exception>

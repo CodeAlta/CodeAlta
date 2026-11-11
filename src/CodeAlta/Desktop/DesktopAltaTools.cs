@@ -133,6 +133,8 @@ internal static class DesktopAltaTools
             .Add(host.CodeModeScripts)
             // The bridge of the sends of the host: a send through `alta session send` gives the plugins what a send of the window does.
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new CodeAlta.Orchestration.Runtime.Plugins.PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
+        // The vaults of the secrets, for `alta credential` and `alta secret test`.
+        if (host.Credentials is { } credentials) services.Add(credentials);
         if (changes is not null) services.Add(changes);
         if (editor is not null) services.Add(editor);
         if (terminals is not null) services.Add(terminals);

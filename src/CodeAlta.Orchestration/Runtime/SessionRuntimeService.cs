@@ -4013,6 +4013,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <param name="sessionId">The session.</param>
     internal AgentRunId? LastRunIdOf(string sessionId) => _entries.TryGetValue(sessionId, out var entry) ? entry.LastRunId : null;
 
+    /// <summary>
+    /// Gets or sets the guard of the programs of the configured vaults in the shells of agents; null for a host without a
+    /// credential broker.
+    /// </summary>
+    public CodeAlta.Credentials.VaultCommandGuard? VaultCommands { get; set; }
+
     internal const string CommitRefusal = "The user reviews the changes of this session before they are committed, and no review approved the work tree as it is now. "
         + "Do not commit: when the work is done and verified, run `alta review request changes` and end your turn; commit after the review approves the changes, and only them.";
 
@@ -4020,6 +4026,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private Agent.Runtime.Tools.AgentCommandGuard CreateCommandGuard(string sessionId)
         => async (command, workingDirectory, cancellationToken) =>
         {
+            // The program of a vault the secrets are kept in is out of the reach of agents: they name a secret instead.
+            if (VaultCommands?.Check(command) is { } vault) return vault;
             if (!Agent.Runtime.Tools.AgentGitCommands.IsCommit(command) || !GetEffectiveReviewBeforeCommit(sessionId))
             {
                 return null;

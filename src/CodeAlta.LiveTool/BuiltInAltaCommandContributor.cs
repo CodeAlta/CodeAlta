@@ -171,6 +171,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateSecretCommand(context.Invocation);
         }
 
+        // The vaults of the secrets, in a host with a credential broker.
+        if (context.Invocation.Services.Get<CodeAlta.Credentials.CredentialBroker>() is not null)
+        {
+            yield return CreateCredentialCommand(context.Invocation);
+        }
+
         yield return CreateSandboxCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
         yield return CreateJobCommand(context.Invocation);
@@ -360,6 +366,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (fleet) policies.AddRange(FleetAuditPolicies);
         if (fleet) policies.AddRange(FleetPolicyPolicies);
         if (secrets) policies.AddRange(SecretPolicies);
+        if (context.Services.Get<CodeAlta.Credentials.CredentialBroker>() is not null) policies.AddRange(CredentialPolicies);
         if (secrets) policies.AddRange(ManifestPolicies);
         if (llama) policies.AddRange(LlamaPolicies);
         return policies;

@@ -738,6 +738,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             // The policies of the organization kept from the last start apply before the first session attaches.
             host._managedPolicySources = options.StartManagedPolicies?.Invoke(runtimeService.ManagedPolicies);
             host.Credentials = credentials;
+            runtimeService.VaultCommands = new CodeAlta.Credentials.VaultCommandGuard(credentials);
             // The resumes after a limit that sessions waited for when the host last closed are armed again.
             host.Commands.Fallback.Time = options.TimeProvider ?? TimeProvider.System;
             host.Commands.Fallback.ResumeStore = new SessionResumeStore(applicationDatabase);

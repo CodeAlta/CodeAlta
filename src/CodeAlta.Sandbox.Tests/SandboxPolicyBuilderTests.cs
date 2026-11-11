@@ -454,7 +454,7 @@ public sealed class SandboxPolicyBuilderTests
     [TestMethod]
     public void SecretNames_AreRecognized()
     {
-        foreach (var name in new[] { "GITHUB_TOKEN", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "SIGNING_KEY", "azure_credentials" })
+        foreach (var name in new[] { "GITHUB_TOKEN", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "SIGNING_KEY", "azure_credentials", "BW_SESSION", "OP_SESSION_my", "OP_SERVICE_ACCOUNT_TOKEN" })
             Assert.IsTrue(SandboxPolicyBuilder.IsSecretName(name), name);
         foreach (var name in new[] { "PATH", "GIT_AUTHOR_NAME", "CODEALTA_SESSION_ID", "KUBECONFIG", "GIT_SSH_COMMAND" })
             Assert.IsFalse(SandboxPolicyBuilder.IsSecretName(name), name);
