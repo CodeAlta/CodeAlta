@@ -105,6 +105,30 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task A_1Password_app_that_authorized_CodeAlta_makes_it_ready_though_whoami_says_not_signed_in()
+    {
+        using var vault = new FakeVault();
+        vault.State["whoamiSignedOut"] = true;
+        vault.Save();
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\npath = \"{vault.TomlPath}\"\nunlock_at_start = false\n");
+        new LocalSecretStore(vault.Profile).Bind("ANTHROPIC_API_KEY", "personal", "op://Private/Anthropic/credential", "label", "alice");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        await broker.RefreshAsync();
+        var locked = broker.GetProvider("personal")!.Status;
+        Assert.AreEqual((CredentialProviderState.Locked, "alice@example.com"), (locked.State, locked.Account), "the account the app gives is known before it authorizes CodeAlta");
+        Assert.IsFalse(vault.Calls().Any(static call => call.StartsWith("read", StringComparison.Ordinal) || call.StartsWith("vault", StringComparison.Ordinal)),
+            "nothing that would show the prompt of the app runs without the user");
+
+        var unlocked = await broker.UnlockAsync("personal", null);
+        Assert.AreEqual((CredentialProviderState.Ready, "alice@example.com"), (unlocked.Status.State, unlocked.Status.Account), unlocked.Status.Message);
+        Assert.AreEqual("sk-ant-fake-value-1234", broker.ReadBound("ANTHROPIC_API_KEY", "provider anthropic").Value, "the secrets of the vault are read once it is unlocked");
+        Assert.AreEqual(CredentialProviderState.Ready, (await broker.TestProviderAsync("personal")).Status.State, "a check after the unlock keeps it ready");
+
+        broker.Lock("personal");
+        Assert.IsNull(broker.ReadBound("ANTHROPIC_API_KEY", "provider anthropic").Value);
+    }
+
+    [TestMethod]
     public async Task A_service_account_token_is_a_secret_of_this_computer_given_in_the_environment_of_op()
     {
         using var vault = new FakeVault();
