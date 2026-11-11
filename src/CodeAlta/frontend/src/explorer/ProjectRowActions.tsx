@@ -34,6 +34,8 @@ export type ProjectRowAuthority = {
   sessions?: ScopeSessionActions;
   /** Opens the window of the git worktrees of a project. Absent where they cannot be managed. */
   worktrees?: (project: WorkspaceProject) => void;
+  /** Opens the window of the sub-projects of a repository: of the project, or of the repository of a sub-project. Absent where they cannot be managed. */
+  subProjects?: (project: WorkspaceProject) => void;
   /**
    * The canvases of plugins that are about a project: the first few are lines of the menu, and `more` says the page has others.
    * Absent where no canvas can be opened.
@@ -149,6 +151,14 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
     owner.search.set(value.project, excluded);
   }
 
+  function subProjectsAction(original: Review) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.subProjects || !current(value) || modalDialogOpen()) return;
+    dismiss();
+    owner.subProjects(value.project);
+  }
+
   function worktreesAction(original: Review) {
     const value = review.current;
     const owner = latest.current;
@@ -243,6 +253,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         ...(authority?.labels ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => labelsAction(visible) }] : []),
         ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
+        ...(authority?.subProjects && !project.archived ? [{ key: "subprojects", label: t(project.parentId ? "Sub-projects of the repository…" : "Sub-projects…"),
+          icon: "files" as const, onSelect: () => subProjectsAction(visible) }] : []),
         ...(authority?.sandbox && !project.archived ? [{ key: "sandbox", label: `${t("Sandbox")}…`, icon: "sandbox" as const, onSelect: () => sandboxAction(visible) }] : []),
         // The folder of the project outside CodeAlta: in the editor the user chose, and in the file manager of the system.
         ...(external.opener && !project.archived && external.editor ? [{ key: "external-editor", label: t("Open in {editor}", { editor: external.editor.name }),

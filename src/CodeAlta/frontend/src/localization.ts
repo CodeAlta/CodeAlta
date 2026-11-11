@@ -55,6 +55,7 @@ import { claudeCodeOpenMessages } from "./claudeCodeOpen/messages";
 import { mcpAppMessages } from "./mcpApps/messages";
 import { mobileCanvasMessages } from "./mobile/canvas/messages";
 import { labelMessages } from "./labels/messages";
+import { subProjectMessages } from "./subprojects/messages";
 import { sessionSettingsMessages } from "./sessionSettings/messages";
 import { composerCommandMessages } from "./composerCommandMessages";
 import { sideQuestionMessages } from "./sideQuestion/messages";
@@ -3099,6 +3100,7 @@ export const messages = dictionary({
   ...mcpAppMessages,
   ...mobileCanvasMessages,
   ...labelMessages,
+  ...subProjectMessages,
   ...sessionSettingsMessages,
   ...composerCommandMessages,
   ...sideQuestionMessages,

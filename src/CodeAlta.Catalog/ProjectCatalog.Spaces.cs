@@ -305,7 +305,7 @@ public sealed partial class ProjectCatalog
     private async Task<ProjectDescriptor?> GetEditableAsync(string projectId, CancellationToken cancellationToken)
     {
         var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
-        if (project is { IsSubProject: true, SourcePath: null }) await SaveAsync(project, null, cancellationToken).ConfigureAwait(false);
+        if (project is { IsSubProject: true, SourcePath: null } && !IsReadOnly) await SaveAsync(project, null, cancellationToken).ConfigureAwait(false);
         return project;
     }
 

@@ -70,6 +70,8 @@ export type ProjectRailLabels = Readonly<{
   drag?: (project: WorkspaceProject, from: string | null) => Readonly<{ onPointerDown?: (event: PointerEvent<HTMLElement>) => void }> | undefined;
   /** Where a project dragged onto the title of the projects of no label would drop: it then loses the label it was dragged out of. */
   otherDrop?: "into";
+  /** The name of the repository of a sub-project, shown dimmed before its name away from the group of its repository; null for none. */
+  repository?: (project: WorkspaceProject) => string | null;
 }>;
 
 export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer, filter, labels, unfoldable }: {
@@ -168,8 +170,10 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
       {newSession(project.id, t("New session on {name}", { name: project.name }), t("New session"))}
     </li>{primary ? branch(project.id) : null}</Fragment>;
   };
-  const row = (project: WorkspaceProject, place = "", from: string | null = null) => {
+  // Inside: listed in the group of its repository, where the name of the repository is the title above it.
+  const row = (project: WorkspaceProject, place = "", from: string | null = null, inside = false) => {
     if (project.machineId) return machineRow(project, place);
+    const repository = inside ? null : labels?.repository?.(project) ?? null;
     const primary = !listed.has(project.id);
     listed.add(project.id);
     const favorite = !!tree?.favorite(project.id);
@@ -178,11 +182,11 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     const running = terminals?.count(project.id) ?? 0;
     return <Fragment key={`${place}:${project.id}`}><ProjectRowActions project={project} authority={actions} drop={drop?.(project)} drag={labels?.drag?.(project, from)}
       favorite={tree ? { value: favorite, set: value => tree.setFavorite(project, value) } : undefined}>
-      <button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
-        data-scope={project.id} onClick={event => select(project.id, event.detail > 0)} onDoubleClick={() => onKeep?.(project.id)}>
+      <button type="button" title={`${repository ? `${repository} › ` : ""}${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
+        data-scope={project.id} data-sub-project={project.subPath ? "true" : undefined} onClick={event => select(project.id, event.detail > 0)} onDoubleClick={() => onKeep?.(project.id)}>
         {twist(project.id)}
         <span className="project-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name={project.archived ? "archive" : open(project.id) ? "open" : "folder"} size={15} /></span>
-        <strong>{project.name}</strong>{!labels?.groups.length && labels?.badges?.(project)}{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
+        {repository && <span className="project-repository-prefix">{repository} ›</span>}<strong>{project.name}</strong>{!labels?.groups.length && labels?.badges?.(project)}{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
       </button>
       {tree && <button type="button" className="icon-button project-row-action project-favorite-trigger" data-on={favorite}
         aria-label={t(favorite ? "Remove {name} from favorites" : "Add {name} to favorites", { name: project.name })}
@@ -223,7 +227,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
       return <Fragment key={`label:${group.label.id}`}>{shown.row(group)}{!shown.folded(group.label.id) && (group.projects.length > 0 || inner.length > 0)
         && <li className="project-label-branch" style={group.label.color ? { "--label-color": group.label.color } as CSSProperties : undefined}>
           <ul className="project-label-children">
-            {group.projects.map(project => row(project, `label:${group.label.id}`, group.label.id))}
+            {group.projects.map(project => row(project, `label:${group.label.id}`, group.label.repository ? null : group.label.id, !!group.label.repository))}
             {inner.map(label)}
           </ul>
         </li>}</Fragment>;

@@ -35,7 +35,7 @@ import { ReleaseNotesDialog } from "./releaseNotes/ReleaseNotesDialog";
 import { readReleaseNotesPage, readReleaseNotesPreferences, startupReleaseNotes, writeReleaseNotesPreferences, type ReleaseNotesPreferences } from "./releaseNotes/releaseNotes";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
-  boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, subProjects as subProjectsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sideQuestion as sideQuestionApi, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, conversationHeld, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
   type ReminderListRequest,
   type ReminderListResponse,
@@ -180,9 +180,13 @@ import { copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, o
 import { claudeCodeOpenHostApi } from "./claudeCodeOpen/hostApi";
 import { ConversationElsewhereBanner, ConversationElsewhereLine, promptFocusTarget, useConversationElsewhere } from "./claudeCodeOpen/ConversationElsewhereNotice";
 import { openElsewhereEntries } from "./claudeCodeOpen/openElsewhereEntries";
-import { projectRailGroups, projectRailProjection } from "./explorer/projectRail";
+import { projectRailGroups, projectRailProjection, projectTitle, repositoryProjectIds } from "./explorer/projectRail";
+import { RepositoryRailRow } from "./subprojects/RepositoryRailRow";
+import { SubProjectsWindow } from "./subprojects/SubProjectsWindow";
+import { monorepoSetupPrompt } from "./subprojects/subProjects";
+import "./subprojects/subprojects.css";
 import { createLabelsHub } from "./labels/labelsHub";
-import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, projectLabels } from "./labels/labels";
+import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, ownLabels, projectLabels } from "./labels/labels";
 import { LabelRailRow, type LabelRowEditing } from "./labels/LabelRailRow";
 import { LabelDragGhost, LabelFormPopover } from "./labels/LabelViews";
 import { LabelSettings } from "./labels/LabelSettings";
@@ -924,7 +928,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     fewer: (id: string) => setSubAgentExtra(id, 0),
   };
   const [notesVisible, setNotesVisible] = useState(true);
-  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "reminders" | "file" | "worktrees" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "reminders" | "file" | "worktrees" | "subProjects" | null>(null);
+  // The repository whose sub-projects the window of the sub-projects shows; it lasts as long as that window.
+  const [subProjectsProject, setSubProjectsProject] = useState<Readonly<{ id: string; name: string; path: string }> | null>(null);
   // The project whose git worktrees the window of the worktrees shows; it lasts as long as that window.
   const [worktreesProject, setWorktreesProject] = useState<Readonly<{ id: string; name: string; path: string }> | null>(null);
   // The folder chosen with "+" that the Open project window opens on; it lasts as long as that window.
@@ -1346,7 +1352,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const outcome = await labelsHub.create(name, { icon: icon || null, color: color || null, space: labelSpace });
     setNewLabel(outcome.ok ? null : { busy: false, error: outcome.message ?? t("The label could not be created.") });
   }
-  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: labelsState.labels, update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
+  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: ownLabels(labelsState.labels), update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
     create: (name, look) => labelsHub.create(name, { ...look, space: look.parent ? null : labelSpace }) }), [labelsState.labels, labelsHub, labelSpace]);
   // A label dragged before, after or under another one; a project dragged onto a label gets it, and leaves the label
   // it was dragged out of unless Ctrl or Alt is held; dropped on the projects of no label, it leaves that label.
@@ -2515,6 +2521,42 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     openEditor(project, { path: null, line: null, column: null, explorer: true });
   }
   // The window of the git worktrees of a project: `/worktree`, and the menu of a project.
+  // The window of the sub-projects of a repository: the one named, or the repository of a sub-project.
+  function openSubProjects(id: string) {
+    if (!owned || dialog || searchOpen || currentView.current !== "workspace" || modalDialogOpen()) return;
+    const projects = catalog.current?.projects ?? currentSnapshot.current?.projects ?? [];
+    const named = projects.find(project => project.id === id);
+    const repository = named?.parentId ? projects.find(project => project.id === named.parentId) ?? named : named;
+    if (!repository) return;
+    setSubProjectsProject({ id: repository.id, name: repository.name, path: repository.path });
+    setDialog("subProjects");
+  }
+  // A new session of a repository whose prompt asks an agent to set it up as a monorepo: the user reads it and sends it.
+  function setUpMonorepo(id: string) {
+    setDialog(null);
+    showScopeDraft(id, true, true);
+    let tries = 0;
+    const put = () => {
+      const request = askPluginComposer("draft", null, monorepoSetupPrompt);
+      if (!request.handled && ++tries < 20) setTimeout(put, 50);
+    };
+    setTimeout(put, 0);
+  }
+  // A folder just added that is a repository with sub-projects, or that looks like a monorepo, says so once.
+  async function announceSubProjects(id: string, name: string) {
+    const epoch = currentHostEpoch.current;
+    if (!epoch || !owned) return;
+    try {
+      const reply = await subProjectsApi.inspect({ expectedEpoch: epoch, projectId: id }, { timeoutMilliseconds: 15_000 });
+      if (reply.status !== "ok" || !creationAlive.current) return;
+      if (reply.declared > 0) showToast({ intent: "primary", icon: "info-sign", timeout: 20_000,
+        message: t(reply.declared === 1 ? "{name} declares {count} sub-project." : "{name} declares {count} sub-projects.", { name, count: reply.declared }),
+        action: { text: t("Choose…"), onClick: () => openSubProjects(id) } }, `subprojects:${id}`);
+      else if (reply.monorepo) showToast({ intent: "primary", icon: "info-sign", timeout: 20_000,
+        message: t("{name} looks like a monorepo: its folders can be projects of their own.", { name }),
+        action: { text: t("Set up as a monorepo…"), onClick: () => setUpMonorepo(id) } }, `subprojects:${id}`);
+    } catch { /* The project is added all the same. */ }
+  }
   function openWorktrees(project: Readonly<{ id: string; name: string; path: string }> | null = editedProject()) {
     if (!owned || !project || dialog || searchOpen || currentView.current !== "workspace" || modalDialogOpen()) return;
     setDialog("worktrees");
@@ -6074,11 +6116,20 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             labels={labelsState.available ? {
               groups: railGroups,
               folded: id => !filterView && isLabelFolded(projectTree, id),
-              row: group => <LabelRailRow group={group} labels={spaceLabels} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
-                onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))} editing={owned ? labelEditing : undefined}
-                drop={railDrag.view?.over?.labelId === group.label.id ? railDrag.view.over.place : undefined}
-                drag={owned ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined}
+              row: group => group.repository
+                // The title of a repository: its sub-projects come from its map, and it is moved with its project.
+                ? <RepositoryRailRow key={group.label.id} group={group} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
+                  onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))}
+                  actions={owned ? { subProjects: openSubProjects, setUp: setUpMonorepo } : undefined}
+                  activity={labelActivity(repositoryProjectIds(group.repository.id, projectListing?.projects ?? []))} />
+                : <LabelRailRow group={group} labels={spaceLabels} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
+                onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))}
+                // The labels of a map are the team's: they are not changed, moved or dropped onto here.
+                editing={owned && !group.label.repository ? labelEditing : undefined}
+                drop={!group.label.repository && railDrag.view?.over?.labelId === group.label.id ? railDrag.view.over.place : undefined}
+                drag={owned && !group.label.repository ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined}
                 activity={labelActivity(labelSubtreeProjects(group.label.id, spaceLabels))} />,
+              repository: project => projectTitle(project, catalog.current?.projects ?? projectListing?.projects ?? []).repository,
               badges: project => <ProjectLabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
               drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
@@ -6135,8 +6186,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 || !!projectRenameTarget || projectArchive.locked || projectDeletion.locked || !!projectDeleteTarget || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive, delete: beginProjectDelete,
               worktrees: owned ? project => openWorktrees(project) : undefined,
+              subProjects: owned ? project => openSubProjects(project.id) : undefined,
               sandbox: owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: sandboxSettings } : undefined,
-              labels: owned && labelsState.available ? (project, close) => <ProjectLabelsPopover projectId={project.id} projectName={project.name} labels={spaceLabels}
+              labels: owned && labelsState.available ? (project, close) => <ProjectLabelsPopover projectId={project.id} projectName={project.name} labels={ownLabels(spaceLabels)}
                 assign={labelsHub.assign} create={(name, projectIds) => labelsHub.create(name, { space: labelSpace }, projectIds)} onClose={close} /> : undefined,
               search: owned && searchOn ? { excluded: project => isExcluded(localSearchHub.getSnapshot(), "project", project.id),
                 set: (project, excluded) => void localSearchHub.setExcluded("project", project.id, excluded).then(status => {
@@ -6690,6 +6742,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         setSessionId(nextSession);
         navigate("workspace");
         focusPromptSoon();
+        void announceSubProjects(id, fresh.projects.find(project => project.id === id)?.name ?? path);
         return true;
       }} onClose={() => setDialog(null)} />}
     {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
@@ -6745,6 +6798,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           });
         }} />;
     })()}
+    {dialog === "subProjects" && subProjectsProject && owned && status?.hostEpoch && <SubProjectsWindow epoch={status.hostEpoch} project={subProjectsProject} api={subProjectsApi}
+      onClose={() => setDialog(null)} onChanged={() => { readSessionList.current(); void labelsHub.refresh(); }}
+      onOpenMap={() => { const project = subProjectsProject; setDialog(null); openEditor(project, { path: ".alta/projects.toml", line: null, column: null, explorer: true }); }}
+      onSetUp={() => setUpMonorepo(subProjectsProject.id)}
+      onOpenProject={id => { setDialog(null); selectProject(id); }} />}
     {dialog === "worktrees" && worktreesProject && owned && status?.hostEpoch && <WorktreeManager epoch={status.hostEpoch} project={worktreesProject}
       onClose={() => setDialog(null)} onChanged={refreshSessionList}
       onShowChanges={row => { const project = worktreesProject; setDialog(null); showChanges(project, null, row.project ? null : row.folder); }} />}
@@ -6997,7 +7055,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     // The changes of where the session works: its worktree while the folder is there.
     const shown = worktree && !worktree.missing ? worktree.path : null;
     return ({ context: !remote && id !== undefined && name !== undefined && path !== undefined
-    ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
+    ? <WorkspaceChip epoch={epoch} project={{ id, name, path, repositoryName: project?.repositoryName ?? null, subPath: project?.subPath ?? null }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
       // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
       folderSwitch={switchFolder && epoch && sessionId && !place && !archived ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
@@ -7012,7 +7070,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote]);
+  }, [epoch, id, name, path, project?.repositoryName, project?.subPath, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote]);
 }
 
 // The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.

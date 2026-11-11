@@ -93,7 +93,32 @@ export type RailLabelGroup = Readonly<{
   ancestors: readonly string[];
   /** Its projects, in the order of the list. */
   projects: readonly WorkspaceProject[];
+  /**
+   * The repository whose group this is: its title stands for the repository, its first project is the repository itself
+   * (the sessions at its root), then its sub-projects. Absent for a label.
+   */
+  repository?: WorkspaceProject;
 }>;
+
+/** The identifier of the group of a repository among the labels of the Explorer: it folds as a label does. */
+export const repositoryGroupId = (projectId: string): string => `repository:${projectId}`;
+
+/** Whether a project is a sub-project of a repository. */
+export const isSubProject = (project: WorkspaceProject): boolean => !!project.parentId && !!project.subPath;
+
+/**
+ * The name of a project with its repository before it, for the one list and the composer: `contoso › Billing`. A
+ * project that is no sub-project, or whose repository is not listed, is named alone.
+ */
+export function projectTitle(project: WorkspaceProject, projects: readonly WorkspaceProject[] = []): Readonly<{ repository: string | null; name: string }> {
+  if (!isSubProject(project)) return { repository: null, name: project.name };
+  return { repository: project.repositoryName ?? projects.find(value => value.id === project.parentId)?.name ?? null, name: project.name };
+}
+
+/** The projects of the group of a repository: the repository, then its sub-projects. */
+export function repositoryProjectIds(repositoryId: string, projects: readonly WorkspaceProject[]): ReadonlySet<string> {
+  return new Set([repositoryId, ...projects.filter(project => project.parentId === repositoryId && isSubProject(project)).map(project => project.id)]);
+}
 
 /** A part of the Explorer: the favorite projects, the projects of a label, and those of no label. */
 export type RailGroup = Readonly<{ kind: "favorites"; projects: readonly WorkspaceProject[] }> | Readonly<{ kind: "other"; projects: readonly WorkspaceProject[] }> | RailLabelGroup;
@@ -109,24 +134,66 @@ export type RailGroup = Readonly<{ kind: "favorites"; projects: readonly Workspa
  * @param labels The labels of the space, in the order of their tree.
  * @param keepEmpty Whether a label without a project listed is shown; not while the list is filtered.
  */
-export function projectRailGroups(projects: readonly WorkspaceProject[], favorites: number, labels: readonly Label[], keepEmpty = true): readonly RailGroup[] {
-  if (!labels.length) return [];
+export function projectRailGroups(projects: readonly WorkspaceProject[], favorites: number, allLabels: readonly Label[], keepEmpty = true): readonly RailGroup[] {
+  // The labels of the user make the tree; those of the map of a repository nest in the group of that repository.
+  const labels = allLabels.filter(label => !label.repository);
+  const listed = new Set(projects.map(project => project.id));
+  // A repository is a group when one of its sub-projects is listed with it.
+  const subProjects = new Map<string, WorkspaceProject[]>();
+  for (const project of projects) {
+    if (!isSubProject(project) || !listed.has(project.parentId!)) continue;
+    subProjects.set(project.parentId!, [...subProjects.get(project.parentId!) ?? [], project]);
+  }
+  if (!labels.length && !subProjects.size) return [];
   const first = projects.slice(0, favorites), rest = projects.slice(favorites);
   const groups: RailGroup[] = [];
   if (first.length) groups.push({ kind: "favorites", projects: first });
+  const repositories = projects.filter(project => subProjects.has(project.id));
+  const grouped = new Set(repositories.flatMap(repository => subProjects.get(repository.id)!.map(project => project.id)));
+  // Where each repository goes: under the first label of the user it has, in the order of the tree, else at the top.
+  const home = new Map<string, string>();
+  for (const label of labels) for (const repository of repositories) if (!home.has(repository.id) && label.projectIds.includes(repository.id)) home.set(repository.id, label.id);
+  const placedRepositories = new Set<string>();
+  const placeRepository = (repository: WorkspaceProject, above: readonly string[]) => {
+    if (placedRepositories.has(repository.id)) return;
+    placedRepositories.add(repository.id);
+    const id = repositoryGroupId(repository.id);
+    const members = subProjects.get(repository.id)!;
+    const declared = allLabels.filter(label => label.repository === repository.id);
+    const declaredIds = new Set(declared.map(label => label.id));
+    const ownLabels = (project: WorkspaceProject) => declared.some(label => label.projectIds.includes(project.id));
+    const projectIds = [repository.id, ...members.map(project => project.id)];
+    const label: Label = { id, name: repository.name, description: repository.path, icon: null, color: null, order: 0, parent: null, favorite: false,
+      space: null, projectIds, repository: repository.id };
+    groups.push({ kind: "label", label, path: [], depth: above.length, ancestors: above, repository,
+      projects: [repository, ...members.filter(project => !ownLabels(project))] });
+    const inner = [...above, id];
+    const placeDeclared = (value: Label, depth: number, path: readonly string[]) => {
+      if (depth > declared.length) return;
+      groups.push({ kind: "label", label: value, path: [], depth: path.length, ancestors: path,
+        projects: members.filter(project => value.projectIds.includes(project.id)) });
+      for (const child of declared) if (child.parent === value.id) placeDeclared(child, depth + 1, [...path, value.id]);
+    };
+    for (const value of declared) if (!value.parent || !declaredIds.has(value.parent)) placeDeclared(value, 0, inner);
+  };
   const placed = new Set<string>();
   const place = (label: Label, above: readonly string[], detached: boolean, skipFavorites: boolean) => {
     if (placed.has(label.id) || above.length >= labels.length) return;
     placed.add(label.id);
     groups.push({ kind: "label", label, path: detached ? labelAncestors(label, labels) : [], depth: above.length, ancestors: above,
-      projects: rest.filter(project => label.projectIds.includes(project.id)) });
+      projects: rest.filter(project => label.projectIds.includes(project.id) && home.get(project.id) !== label.id) });
+    for (const repository of repositories) if (home.get(repository.id) === label.id) placeRepository(repository, [...above, label.id]);
     for (const child of labels) if (child.parent === label.id && !(skipFavorites && child.favorite)) place(child, [...above, label.id], false, skipFavorites);
   };
   // A favorite label under a favorite one stays in it.
   for (const label of labels) if (label.favorite && !labelAncestors(label, labels).some(above => above.favorite)) place(label, [], label.parent !== null, false);
+  // The repositories that no label of the user holds come after the favorite labels.
+  for (const repository of repositories) if (!home.has(repository.id)) placeRepository(repository, []);
   for (const label of labels) if (label.parent === null && !label.favorite) place(label, [], false, true);
+  // A repository whose label is in no group shown here (a favorite sub-label moved up) is listed at the top.
+  for (const repository of repositories) placeRepository(repository, []);
   const labeled = new Set(labels.flatMap(label => label.projectIds));
-  const other = rest.filter(project => !labeled.has(project.id));
+  const other = rest.filter(project => !labeled.has(project.id) && !grouped.has(project.id) && !subProjects.has(project.id));
   if (other.length) groups.push({ kind: "other", projects: other });
   if (keepEmpty) return groups;
   // A label is left out when neither it nor a label under it lists a project.

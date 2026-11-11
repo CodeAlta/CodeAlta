@@ -1,0 +1,92 @@
+/* The group of a repository in the Explorer: its title is a label of its own, drawn in the color of folders. */
+.ide-shell .project-label-row.project-repository-row { --label-color: #d1980b; }
+.ide-shell .project-repository-row .project-repository-icon { color: var(--label-color); }
+.ide-shell .project-repository-row + .project-label-branch { --label-color: #d1980b; }
+/* A sub-project shown away from its repository names it first, dimmed: the name of the repository shrinks first. */
+.ide-shell .project-repository-prefix { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ide-shell .project-repository-prefix + strong { flex-shrink: 0; }
+
+/* The window of the sub-projects of a repository: its tabs, the list on the left and what is selected on the right. */
+.subprojects-repository { margin-left: 10px; color: var(--muted); font-weight: 400; }
+dialog.subprojects-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.subprojects-dialog:has(> .app-window) > .app-window > .app-window-body > .subprojects { flex: 1 1 auto; }
+.subprojects { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }
+.subprojects .bp6-callout { width: auto; }
+.subprojects-bar { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 40px; padding: 4px 10px 4px 12px; border-bottom: 1px solid var(--line); }
+.subprojects-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--panel-2); }
+.subprojects-tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.subprojects-tab:hover { color: var(--text); }
+.subprojects-tab[aria-selected="true"] { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+.subprojects-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.subprojects-tab-count { min-width: 18px; padding: 0 5px; border-radius: 8px; background: color-mix(in srgb, var(--muted) 18%, transparent); font-size: 11px; font-weight: 500; text-align: center; }
+.subprojects-spacer { flex: 1 1 auto; }
+.subprojects-summary { flex: none; margin: 0; padding: 6px 14px; color: var(--muted); font-size: 12px; }
+.subprojects-problems { flex: none; margin: 8px 12px 0; font-size: 12px; }
+.subprojects-problems-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.subprojects-problems ul { margin: 6px 0 0 18px; padding: 0; overflow-wrap: anywhere; }
+.subprojects-problems code { margin-right: 4px; }
+.subprojects-empty { flex: 1 1 auto; min-height: 0; padding: 16px; }
+.subprojects-empty .bp6-non-ideal-state-visual + h4 + div { max-width: 560px; }
+.subprojects-empty-actions { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+.subprojects-body { display: grid; flex: 1 1 auto; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.1fr); min-height: 0; border-top: 1px solid var(--line); }
+.subprojects-list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.subprojects-filter, .subprojects-new-label { flex: none; margin: 8px 10px; }
+.subprojects-new-label { align-self: flex-start; }
+.subprojects-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0 0 8px; overflow: auto; list-style: none; }
+.subprojects-row { display: flex; align-items: center; gap: 4px; padding: 0 8px 0 10px; }
+.subprojects-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.subprojects-row:hover:not([aria-current="true"]) { background: var(--panel-2); }
+.subprojects-switch.bp6-control { flex: none; margin: 0; }
+.subprojects-row-main { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 4px 6px; border: 0; background: transparent;
+  color: var(--text); text-align: left; cursor: pointer; }
+.subprojects-row-main:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.subprojects-row-text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.subprojects-row-text strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.subprojects-row-text code, .subprojects-form-head code { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; background: none; padding: 0; box-shadow: none; }
+.subprojects-row[data-state="hidden"] .subprojects-row-text strong, .subprojects-row[data-state="optional"] .subprojects-row-text strong { color: var(--muted); font-weight: 500; }
+.subprojects-row[data-state="missing"] .subprojects-row-text, .subprojects-row[data-state="outside"] .subprojects-row-text { opacity: .65; }
+.subprojects-row-tags { display: flex; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; min-width: 0; max-width: 55%; }
+.subprojects-chip { flex: none; padding: 1px 7px; border-radius: 9px; background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.subprojects-chip[data-state="missing"], .subprojects-chip[data-state="outside"] { background: color-mix(in srgb, #cd4246 16%, transparent); color: #cd4246; }
+.subprojects-none { padding: 12px 16px; color: var(--muted); font-size: 12px; }
+.subprojects-detail { min-width: 0; min-height: 0; overflow: auto; }
+.subprojects-hint { margin: 0; padding: 4px 0; color: var(--muted); font-size: 12px; }
+.subprojects-detail > .subprojects-hint { padding: 16px; }
+
+.subprojects-form { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; }
+.subprojects-form .bp6-form-group { margin-bottom: 10px; }
+.subprojects-form-head { display: flex; align-items: center; gap: 8px; min-height: 30px; margin-bottom: 8px; }
+.subprojects-form-head strong { font-size: 15px; }
+.subprojects-form-head .bp6-button { margin-left: auto; }
+.subprojects-label-choices { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.subprojects-label-choices .bp6-control { margin: 0; }
+.subprojects-error { margin: 6px 0; }
+.subprojects-form-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.subprojects-form-actions > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.subprojects-add { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+.subprojects-add-bar { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px 6px; }
+.subprojects-add-bar .bp6-form-group { margin: 0; }
+.subprojects-add-bar .subprojects-hint { flex-basis: 100%; }
+.subprojects-add > .subprojects-error { margin: 0 14px 6px; }
+.subprojects-candidates { flex: 1 1 auto; min-height: 0; margin: 0; padding: 4px 14px; overflow: auto; list-style: none; }
+.subprojects-candidates .bp6-control { margin: 2px 0; }
+.subprojects-candidate { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.subprojects-candidate code { background: none; padding: 0; box-shadow: none; }
+.subprojects-candidate small { color: var(--muted); }
+.subprojects-add > .subprojects-form-actions { margin: 0; padding: 8px 14px; border-top: 1px solid var(--line); background: var(--panel-2); }
+.subprojects-add-folder { display: inline-flex; align-items: center; gap: 6px; }
+.subprojects-add-folder .bp6-input-group { width: 240px; }
+
+/* A narrow window puts what is selected under the list. */
+@container (max-width: 640px) {
+  .subprojects-body { grid-template-columns: 1fr; grid-template-rows: minmax(160px, 1fr) auto; }
+  .subprojects-list-pane { border-right: 0; border-bottom: 1px solid var(--line); }
+  .subprojects-row-tags { display: none; }
+}
+
+/* The composer of a sub-project names its repository first, dimmed. */
+.workspace-chip-repository { min-width: 0; max-width: 18ch; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.workspace-popover dd code { margin-left: 6px; color: var(--muted); font-size: 11px; background: none; padding: 0; box-shadow: none; }

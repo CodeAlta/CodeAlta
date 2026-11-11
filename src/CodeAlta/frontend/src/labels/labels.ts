@@ -23,6 +23,8 @@ export type Label = Readonly<{
   space: string | null;
   /** The projects whose file names it, archived ones included. */
   projectIds: readonly string[];
+  /** The repository project whose map declares it: a label the window shows under that repository and does not change; null for a label of the user. */
+  repository?: string | null;
 }>;
 
 /** The longest name of a label. */
@@ -48,7 +50,8 @@ export function readLabels(items: readonly LabelItem[] | null | undefined): read
       icon: text(item.icon, 64) ? item.icon : null, color: brandColor(item.color) ?? null,
       order: typeof item.order === "number" && Number.isFinite(item.order) ? item.order : 0,
       parent: identifier(item.parent) ? item.parent : null, favorite: item.favorite === true, space: identifier(item.space) ? item.space : null,
-      projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [] });
+      projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [],
+      repository: text(item.repository, 256) ? item.repository : null });
   }
   return labels.map(label => label.parent && !seen.has(label.parent) ? { ...label, parent: null } : label);
 }
@@ -59,8 +62,14 @@ export function sameLabels(left: readonly Label[], right: readonly Label[]): boo
     const other = right[index];
     return label.id === other.id && label.name === other.name && label.description === other.description && label.icon === other.icon
       && label.color === other.color && label.order === other.order && label.parent === other.parent && label.favorite === other.favorite
-      && label.space === other.space && label.projectIds.length === other.projectIds.length && label.projectIds.every((id, at) => id === other.projectIds[at]);
+      && label.space === other.space && (label.repository ?? null) === (other.repository ?? null)
+      && label.projectIds.length === other.projectIds.length && label.projectIds.every((id, at) => id === other.projectIds[at]);
   });
+}
+
+/** The labels of the user, which the user changes: not those the map of a repository declares. */
+export function ownLabels(labels: readonly Label[]): readonly Label[] {
+  return labels.some(label => label.repository) ? labels.filter(label => !label.repository) : labels;
 }
 
 /** The labels a space shows: those of that space and those of every space, in the order of their tree. */

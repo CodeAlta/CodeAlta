@@ -10,7 +10,7 @@ import { useShellLanguage } from "../shellLanguage";
 import type { SpaceProject } from "../spaces/SpaceDialog";
 import { SpaceIcon } from "../spaces/SpaceViews";
 import { spaceColors, type Space } from "../spaces/spaces";
-import { canMoveLabel, labelBrand, labelDepth, labelNameProblem, labelPath, maximumLabelDepth, maximumLabelDescription, maximumLabelName, type Label } from "./labels";
+import { canMoveLabel, labelBrand, labelDepth, labelNameProblem, labelPath, maximumLabelDepth, maximumLabelDescription, maximumLabelName, ownLabels, type Label } from "./labels";
 import { labelMoveTarget, useRailDrag, type RailDrag, type RailDrop } from "./labelDrag";
 import type { LabelOutcome, LabelsHub } from "./labelsHub";
 import { LabelBadge, LabelDragGhost, LabelFormPopover, type LabelLook } from "./LabelViews";
@@ -49,7 +49,8 @@ export function LabelSettings({ hub, spaces, projects, shownId, canEdit }: {
 }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
-  const labels = state.labels;
+  // The labels of the maps of the repositories are the team's: they are changed in the map, not here.
+  const labels = ownLabels(state.labels);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const [selected, setSelected] = useState<string | null>(null);

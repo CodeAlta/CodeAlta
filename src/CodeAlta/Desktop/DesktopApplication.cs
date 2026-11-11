@@ -1249,6 +1249,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost)).ReadAsync,
                     });
                     builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch));
+                    builder.AddSubProjectsService(new SubProjectsService(host.ProjectCatalog, spaceView, epoch));
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
@@ -1686,6 +1687,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddStartPromptsService(new StartPromptsService());
             builder.AddSpacesService(new SpacesService());
             builder.AddLabelsService(new LabelsService());
+            builder.AddSubProjectsService(new SubProjectsService());
             builder.AddSpaceIdentityService(new SpaceIdentityService());
             builder.AddSecretsService(new SecretsService());
             builder.AddPromptImagesService(new PromptImagesService());

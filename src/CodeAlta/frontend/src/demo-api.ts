@@ -261,6 +261,11 @@ export const spaces = Object.freeze({ list: async () => ({ status: "unavailable"
 // The labels of the projects need a host that keeps them: the demo has none.
 export const labels = Object.freeze({ list: async () => ({ status: "unavailable", labels: [] }),
   create: unavailable, update: unavailable, move: unavailable, delete: unavailable, assign: unavailable });
+// The sub-projects of a monorepo need a host that keeps the projects: the demo has none.
+export const subProjects = Object.freeze({ map: async () => ({ status: "unavailable", map: null }),
+  inspect: async () => ({ status: "unavailable", declared: 0, optional: 0, monorepo: false, claimedBy: null, workspaces: [] }),
+  scan: async () => ({ status: "unavailable", candidates: [], truncated: false, message: null }),
+  show: unavailable, add: unavailable, update: unavailable, remove: unavailable, label: unavailable });
 // The browser demo is a single window: the page is the main window, and no other can be opened.
 export const windows = Object.freeze({ current: async () => ({ status: "unavailable", window: null, pageState: null, restoreAtStartup: true, canDrag: false, windows: [] }),
   list: async () => ({ status: "unavailable", windows: [], restoreAtStartup: true }), watch: unavailable, report: async () => ({ status: "unavailable" }), moveTab: unavailable, refuseMove: unavailable,

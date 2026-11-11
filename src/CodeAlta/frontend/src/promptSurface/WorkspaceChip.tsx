@@ -22,7 +22,7 @@ import { worktrees as worktreesApi } from "#neoastra";
  * folder of the project.
  */
 export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshKey, worktree = null, place, folderSwitch, onWorktreeGone, onShowChanges, onOpenEditor, onOpenTerminal, branches, pullRequest }: {
-  epoch: string | null; project: Readonly<{ id: string; name: string; path: string }>; read: ProjectGitRead; refreshKey?: unknown;
+  epoch: string | null; project: Readonly<{ id: string; name: string; path: string; repositoryName?: string | null; subPath?: string | null }>; read: ProjectGitRead; refreshKey?: unknown;
   /** The session the chip is about; null before it exists. The external editor and the file manager open the folder it works in. */
   sessionId?: string | null;
   /** The git worktree the session works in, as the session records it; null for the folder of the project. */
@@ -76,6 +76,7 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
   const popover = <div className="workspace-popover" role="group" aria-label={t("Workspace")}>
     <header><AppIcon name="folder" size={16} /><strong>{t("Workspace")}</strong></header>
     <dl>
+      {project.repositoryName && <><dt>{t("Repository")}</dt><dd><strong>{project.repositoryName}</strong>{project.subPath && <code>{project.subPath}</code>}</dd></>}
       <dt>{t("Project")}</dt><dd><strong>{project.name}</strong></dd>
       {worktree && <><dt>{t("Worktree")}</dt><dd data-missing={worktree.missing || undefined}><AppIcon name="worktree" size={14} /><span>{worktree.name}</span>
         {worktree.missing && <small>{t("removed")}</small>}</dd></>}
@@ -110,8 +111,10 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
   return <div ref={element} className="workspace-chip" role="group" aria-label={t("Workspace")} data-worktree={worktree ? worktree.missing ? "missing" : "yes" : undefined}>
     <PopoverNext content={popover} placement="bottom-end" isOpen={open === "project"} onInteraction={opens("project")} popoverClassName="workspace-chip-popover">
       <button type="button" className="workspace-chip-part workspace-chip-project" aria-haspopup="dialog" aria-expanded={open === "project"}
-        aria-label={`${t("Workspace")}: ${project.name}`} title={`${project.name}\n${project.path}`}>
-        <AppIcon name="folder" size={14} /><strong className="workspace-chip-name">{project.name}</strong><AppIcon name="chevronDown" size={13} className="workspace-chip-caret" />
+        aria-label={`${t("Workspace")}: ${project.repositoryName ? `${project.repositoryName} › ` : ""}${project.name}`}
+        title={`${project.repositoryName ? `${project.repositoryName} › ` : ""}${project.name}\n${project.path}`}>
+        <AppIcon name="folder" size={14} />{project.repositoryName && <span className="workspace-chip-repository">{project.repositoryName} ›</span>}
+        <strong className="workspace-chip-name">{project.name}</strong><AppIcon name="chevronDown" size={13} className="workspace-chip-caret" />
       </button>
     </PopoverNext>
     {workPlace}

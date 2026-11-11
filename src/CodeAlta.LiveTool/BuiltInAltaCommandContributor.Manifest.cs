@@ -1,4 +1,3 @@
-using System.IO.Enumeration;
 using CodeAlta.Catalog;
 using XenoAtom.CommandLine;
 
@@ -18,33 +17,6 @@ internal sealed partial class BuiltInAltaCommandContributor
         Mutating("project manifest remove", requiresRuntime: false, supportsCatalogOnlyContext: true),
         Mutating("project manifest label", requiresRuntime: false, supportsCatalogOnlyContext: true),
     ];
-
-    // Folders a scan never goes into: what a build, a package manager or a tool writes, and the folders of git and CodeAlta.
-    private static readonly HashSet<string> ScanSkipped = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".git", ".alta", ".claude", ".vs", ".vscode", ".idea", "node_modules", "bin", "obj", "dist", "build", "out", "target", ".next", ".nuxt",
-        "coverage", "__pycache__", ".venv", "venv", ".gradle", ".terraform", "artifacts", "TestResults",
-    };
-
-    // What marks a folder as a project of its own when a scan is given no marker.
-    private static readonly string[] DefaultScanMarkers =
-    [
-        "package.json", "*.csproj", "*.fsproj", "*.sln", "*.slnx", "Cargo.toml", "go.mod", "pyproject.toml", "setup.py", "pom.xml", "build.gradle",
-        "build.gradle.kts", "Gemfile", "composer.json", "mix.exs", "Package.swift", "CMakeLists.txt", "BUILD.bazel", "project.json", "deno.json",
-        "AGENTS.md",
-    ];
-
-    // The files at the root of a repository that tell how it is organized, for an agent to read before it proposes projects.
-    private static readonly (string File, string Kind)[] WorkspaceFiles =
-    [
-        ("pnpm-workspace.yaml", "pnpm"), ("package.json", "npm"), ("lerna.json", "lerna"), ("nx.json", "nx"), ("turbo.json", "turborepo"),
-        ("rush.json", "rush"), ("Cargo.toml", "cargo"), ("go.work", "go"), ("WORKSPACE", "bazel"), ("WORKSPACE.bazel", "bazel"), ("MODULE.bazel", "bazel"),
-        ("pants.toml", "pants"), ("settings.gradle", "gradle"), ("settings.gradle.kts", "gradle"), ("pom.xml", "maven"), (".gitmodules", "git-submodules"),
-        ("CODEOWNERS", "codeowners"), (".github/CODEOWNERS", "codeowners"), ("docs/CODEOWNERS", "codeowners"),
-    ];
-
-    private const int MaximumScanFolders = 20_000;
-    private const int MaximumScanCandidates = 2_000;
 
     private static Command CreateProjectManifestCommand(AltaCommandContext context)
     {
@@ -272,88 +244,33 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.invalidDepth", "--depth is a number from 1 to 8.", CommandPath);
         }
 
-        var patterns = new List<string[]>();
-        foreach (var glob in globs)
+        var map = await catalog!.ReadManifestAsync(repository.ProjectPath, context.CancellationToken).ConfigureAwait(false);
+        ProjectManifestScan scan;
+        try
         {
-            var normalized = glob.Trim().Replace('\\', '/').Trim('/');
-            if (normalized.Length == 0 || normalized.Split('/').Any(static part => part is "" or "." or ".."))
-            {
-                return UsageError(context, "usage.invalidGlob", $"`{glob}` is not a pattern of folders inside the repository.", CommandPath);
-            }
-
-            patterns.Add(normalized.Split('/'));
+            scan = ProjectManifestScanner.Scan(repository.ProjectPath, map, globs, markers, depth, context.CancellationToken);
+        }
+        catch (ArgumentException exception)
+        {
+            return UsageError(context, "usage.invalidGlob", exception.Message, CommandPath);
         }
 
-        var root = repository.ProjectPath;
-        var map = await catalog!.ReadManifestAsync(root, context.CancellationToken).ConfigureAwait(false);
-        var declared = map.Projects.ToDictionary(static entry => entry.Path, static entry => entry.Key, StringComparer.OrdinalIgnoreCase);
-        var submodules = ReadSubmodulePaths(root);
-        var wanted = markers.Count > 0 ? markers : DefaultScanMarkers;
-        var maximumDepth = patterns.Count == 0 ? depth : patterns.Max(static pattern => pattern.Contains("**") ? 8 : pattern.Length);
-        var candidates = new List<Dictionary<string, object?>>();
-        var visited = 0;
-        var truncated = false;
-        var queue = new Queue<(string Full, string Relative, int Depth)>();
-        queue.Enqueue((root, string.Empty, 0));
-        while (queue.Count > 0)
+        foreach (var candidate in scan.Candidates)
         {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            var (full, relative, level) = queue.Dequeue();
-            if (level > 0)
+            AltaJsonlWriter.WriteRecord(context.Stdout, new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                var matches = patterns.Count == 0 || patterns.Any(pattern => GlobMatches(pattern, 0, relative.Split('/'), 0));
-                var found = matches ? FindMarkers(full, wanted) : [];
-                var submodule = File.Exists(Path.Combine(full, ".git")) || submodules.Contains(relative);
-                if (matches && (found.Count > 0 || submodule || patterns.Count > 0 && markers.Count == 0))
-                {
-                    if (candidates.Count >= MaximumScanCandidates) { truncated = true; break; }
-                    candidates.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["type"] = "alta.project.manifest.candidate",
-                        ["version"] = 1,
-                        ["correlationId"] = context.CorrelationId,
-                        ["path"] = relative,
-                        ["key"] = ProjectManifest.KeyFrom(relative),
-                        ["markers"] = found,
-                        ["submodule"] = submodule ? true : null,
-                        ["declared"] = declared.GetValueOrDefault(relative),
-                    });
-                }
-            }
-
-            if (level >= maximumDepth) continue;
-            IEnumerable<string> children;
-            try
-            {
-                children = Directory.EnumerateDirectories(full);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            foreach (var child in children.Order(StringComparer.OrdinalIgnoreCase))
-            {
-                var name = Path.GetFileName(child);
-                if (ScanSkipped.Contains(name) || name.StartsWith('.') && level == 0 && name is not ".github") continue;
-                try
-                {
-                    // A link is not followed: it may lead out of the repository, or back into it.
-                    if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0) continue;
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                    continue;
-                }
-
-                if (++visited > MaximumScanFolders) { truncated = true; queue.Clear(); break; }
-                queue.Enqueue((child, relative.Length == 0 ? name : relative + "/" + name, level + 1));
-            }
+                ["type"] = "alta.project.manifest.candidate",
+                ["version"] = 1,
+                ["correlationId"] = context.CorrelationId,
+                ["path"] = candidate.Path,
+                ["key"] = candidate.Key,
+                ["markers"] = candidate.Markers,
+                ["submodule"] = candidate.Submodule ? true : null,
+                ["declared"] = candidate.Declared,
+            });
         }
 
-        foreach (var candidate in candidates) AltaJsonlWriter.WriteRecord(context.Stdout, candidate);
-        var workspaces = WorkspaceFiles.Where(file => File.Exists(Path.Combine(root, file.File))).ToArray();
-        foreach (var (file, kind) in workspaces)
+        foreach (var (file, kind) in scan.WorkspaceFiles)
         {
             AltaJsonlWriter.WriteRecord(context.Stdout, new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -371,12 +288,12 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["version"] = 1,
             ["correlationId"] = context.CorrelationId,
             ["projectId"] = repository.Id,
-            ["projectPath"] = root,
-            ["count"] = candidates.Count,
-            ["foldersVisited"] = Math.Min(visited, MaximumScanFolders),
-            ["truncated"] = truncated,
-            ["submodules"] = submodules.Order(StringComparer.Ordinal).ToArray(),
-            ["solutions"] = Directory.EnumerateFiles(root, "*.sln*").Select(Path.GetFileName).Order(StringComparer.Ordinal).Take(50).ToArray(),
+            ["projectPath"] = repository.ProjectPath,
+            ["count"] = scan.Candidates.Count,
+            ["foldersVisited"] = scan.FoldersVisited,
+            ["truncated"] = scan.Truncated,
+            ["submodules"] = scan.Submodules,
+            ["solutions"] = scan.Solutions,
         });
         return AltaExitCodes.Success;
     }
@@ -466,63 +383,6 @@ internal sealed partial class BuiltInAltaCommandContributor
         });
         if (result.Status == ProjectManifestChangeStatus.Updated) NotifySpacesChanged(context);
         return AltaExitCodes.Success;
-    }
-
-    // Whether the parts of a path match the parts of a pattern: `*` and `?` within a name, `**` for any folders.
-    private static bool GlobMatches(string[] pattern, int at, string[] parts, int part)
-    {
-        if (at == pattern.Length) return part == parts.Length;
-        if (pattern[at] == "**")
-        {
-            for (var skip = part; skip <= parts.Length; skip++)
-                if (GlobMatches(pattern, at + 1, parts, skip)) return true;
-            return false;
-        }
-
-        return part < parts.Length && FileSystemName.MatchesSimpleExpression(pattern[at], parts[part], ignoreCase: true)
-            && GlobMatches(pattern, at + 1, parts, part + 1);
-    }
-
-    // The files of a folder that a marker names, at most a few.
-    private static List<string> FindMarkers(string folder, IReadOnlyList<string> markers)
-    {
-        var found = new List<string>();
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(folder))
-            {
-                var name = Path.GetFileName(file);
-                if (markers.Any(marker => FileSystemName.MatchesSimpleExpression(marker, name, ignoreCase: true)) && found.Count < 8) found.Add(name);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-
-        return found;
-    }
-
-    // The folders `.gitmodules` names, relative to the root.
-    private static HashSet<string> ReadSubmodulePaths(string root)
-    {
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            var file = Path.Combine(root, ".gitmodules");
-            if (!File.Exists(file) || new FileInfo(file).Length > 256 * 1024) return paths;
-            foreach (var line in File.ReadLines(file))
-            {
-                var trimmed = line.Trim();
-                if (!trimmed.StartsWith("path", StringComparison.Ordinal) || trimmed.IndexOf('=') is not (> 0 and var equals)) continue;
-                if (trimmed[..equals].Trim() != "path") continue;
-                if (ProjectManifest.NormalizePath(trimmed[(equals + 1)..].Trim(), out _) is { } path) paths.Add(path);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-
-        return paths;
     }
 
     private sealed class ManifestProjectOptions

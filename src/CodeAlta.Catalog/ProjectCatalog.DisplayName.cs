@@ -45,10 +45,11 @@ public sealed partial class ProjectCatalog
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
-        var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        // A rename starts here: a sub-project nobody used gets its file, which the rename edits.
+        var project = await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is null || project.Id != projectId || project.ProjectPath != projectPath) return null;
         var source = await ReadNameSourceAsync(project, projectId, projectPath, cancellationToken).ConfigureAwait(false);
-        return source is null ? null : new(source.Value.Name, source.Value.Path, source.Value.Snapshot.Revision);
+        return source is null ? null : new(project.DisplayName, source.Value.Path, source.Value.Snapshot.Revision);
     }
 
     /// <summary>Conditionally renames only the display name in an existing canonical or legacy project file.</summary>

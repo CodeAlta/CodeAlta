@@ -13,6 +13,8 @@ public sealed partial class ProjectCatalog
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public async Task<ProjectArchiveSnapshot?> ReadArchiveAsync(string projectId, string projectPath, CancellationToken cancellationToken = default)
     {
+        // An archive starts here: a sub-project nobody used gets its file, which the archive edits.
+        if (ProjectId.TryParse(projectId, out _)) await GetEditableAsync(projectId, cancellationToken).ConfigureAwait(false);
         var source = await ReadArchiveSourceAsync(projectId, projectPath, cancellationToken).ConfigureAwait(false);
         return source is null ? null : new(source.Value.Project.Archived, source.Value.Path, source.Value.Snapshot.Revision);
     }

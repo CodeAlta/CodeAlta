@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject } from "#neoastra";
 import type { Label } from "../labels/labels";
-import { projectRailGroups, type RailGroup } from "./projectRail";
+import { projectRailGroups, projectTitle, type RailGroup } from "./projectRail";
 
 const project = (id: string): WorkspaceProject => ({ id, name: id, path: `/${id}`, archived: false });
 const label = (id: string, projectIds: string[], look: Partial<Label> = {}): Label =>
@@ -44,4 +44,36 @@ test("a favorite label comes first; a favorite sub-label moves up alone, with it
 test("while the list is filtered, a label without a project listed is left out, unless a label under it has one", () => {
   const labels = [label("infra", []), label("helm", ["b"], { parent: "infra" }), label("empty", [])];
   assert.deepEqual(shape(projectRailGroups([project("b")], 0, labels, false)), ["infra@0:", "helm@1:b"]);
+});
+
+const sub = (id: string, parent: string, path = `/${parent}/${id}`): WorkspaceProject =>
+  ({ id, name: id, path, archived: false, parentId: parent, subPath: id, repositoryName: parent.toUpperCase() });
+
+test("a repository with sub-projects is a group: its own row first, its labels of the map nested, the rest after", () => {
+  const projects = [project("contoso"), sub("billing", "contoso"), sub("web", "contoso"), sub("tools", "contoso"), project("solo")];
+  const labels = [label("contoso.backend", ["billing"], { repository: "contoso" }), label("contoso.frontend", ["web"], { repository: "contoso" })];
+  const groups = projectRailGroups(projects, 0, labels);
+  assert.deepEqual(shape(groups), ["repository:contoso@0:contoso,tools", "contoso.backend@1:billing", "contoso.frontend@1:web", "other:solo"]);
+  const group = groups[0];
+  assert.ok(group.kind === "label" && group.repository?.id === "contoso");
+  const backend = groups[1];
+  assert.ok(backend.kind === "label");
+  assert.deepEqual(backend.ancestors, ["repository:contoso"], "The labels of a map are listed in the group of their repository.");
+});
+
+test("a repository goes under the first label of the user it has, and its sub-projects keep the labels of the user", () => {
+  const projects = [project("contoso"), sub("billing", "contoso"), project("solo")];
+  const labels = [label("work", ["contoso", "billing"]), label("contoso.backend", ["billing"], { repository: "contoso" })];
+  assert.deepEqual(shape(projectRailGroups(projects, 0, labels)), ["work@0:billing", "repository:contoso@1:contoso", "contoso.backend@2:billing", "other:solo"]);
+});
+
+test("a sub-project whose repository is not listed is a project like the others", () => {
+  assert.deepEqual(projectRailGroups([sub("billing", "contoso")], 0, []), []);
+  assert.deepEqual(projectTitle(sub("billing", "contoso")), { repository: "CONTOSO", name: "billing" });
+  assert.deepEqual(projectTitle(project("solo")), { repository: null, name: "solo" });
+});
+
+test("while the list is filtered, a repository whose projects do not match is left out", () => {
+  const projects = [project("solo")];
+  assert.deepEqual(shape(projectRailGroups(projects, 0, [label("contoso.backend", ["billing"], { repository: "contoso" })], false)), []);
 });

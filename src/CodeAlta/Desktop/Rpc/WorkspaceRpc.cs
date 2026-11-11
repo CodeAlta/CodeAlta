@@ -17,6 +17,9 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("workspace", Version = 1)]
 internal sealed partial class WorkspaceService
 {
+    /// <summary>The most projects a snapshot lists: room for the sub-projects of monorepos.</summary>
+    internal const int MaximumProjects = 1000;
+
     private readonly Func<CancellationToken, Task<WorkspaceSnapshot>>? _read;
 
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads)
@@ -188,15 +191,24 @@ internal sealed partial class WorkspaceService
         // additionally reserves 64 bytes for createdAt (33 ISO characters, quotes/property/comma,
         // including a possibly escaped '+' offset). Keep the overall cap below 1 MiB RPC default.
         var remaining = 700 * 1024 - 2048;
-        foreach (var project in projects.OrderBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
+        // The projects take at most this much of it, so that the sessions keep room beside the many sub-projects of a monorepo.
+        var projectsRemaining = 320 * 1024;
+        var names = projects.GroupBy(static project => project.Id, StringComparer.Ordinal).ToDictionary(static group => group.Key, static group => group.First().DisplayName, StringComparer.Ordinal);
+        // The projects of their own first: sub-projects come after them, so that a large map never pushes them out.
+        foreach (var project in projects.OrderBy(static value => value.IsSubProject).ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(value => value.Id, StringComparer.Ordinal).ThenBy(value => value.ProjectPath, StringComparer.Ordinal))
         {
-            if (displayedProjects.Count == 200) break;
+            if (displayedProjects.Count == MaximumProjects) break;
             var name = DisplayText(string.IsNullOrWhiteSpace(project.DisplayName) ? project.Id : project.DisplayName, ref shortened);
-            var cost = 512 + 6 * (project.Id.Length + name.Length + project.ProjectPath.Length);
-            if (cost > remaining) break;
+            var subPath = project.SubPath is { Length: <= 1024 } sub ? sub : null;
+            var parentId = project.ParentId is { Length: <= 256 } parent && subPath is not null ? parent : null;
+            var repositoryName = parentId is not null && names.TryGetValue(parentId, out var repository) && !string.IsNullOrWhiteSpace(repository)
+                ? DisplayText(repository, ref shortened) : null;
+            var cost = 192 + 6 * (project.Id.Length + name.Length + project.ProjectPath.Length + (parentId?.Length ?? 0) + (subPath?.Length ?? 0) + (repositoryName?.Length ?? 0));
+            if (cost > remaining || cost > projectsRemaining) break;
             remaining -= cost;
-            displayedProjects.Add(new WorkspaceProject(project.Id, name, project.ProjectPath, project.Archived));
+            projectsRemaining -= cost;
+            displayedProjects.Add(new WorkspaceProject(project.Id, name, project.ProjectPath, project.Archived) { ParentId = parentId, SubPath = subPath, RepositoryName = repositoryName });
         }
         // The archived sessions come after the others: the rows the lists keep are the ones they show.
         foreach (var session in sessions.OrderBy(static value => value.ViewState?.Archived == true).ThenByDescending(value => value.UpdatedAt)
@@ -340,6 +352,19 @@ internal sealed record WorkspaceProject(string Id, string Name, string Path, boo
     // The state of that machine: "online", "connecting", "offline" or "unauthorized"; absent for a project of the catalog.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MachineState { get; init; }
+
+    // The repository project whose map declares this sub-project, which the Explorer lists it under; absent for a
+    // project that is no sub-project.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ParentId { get; init; }
+
+    // The folder of the sub-project in its repository, such as "services/billing"; absent with ParentId.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubPath { get; init; }
+
+    // The name of that repository, which the window shows before the name of the sub-project away from its group.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RepositoryName { get; init; }
 }
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
