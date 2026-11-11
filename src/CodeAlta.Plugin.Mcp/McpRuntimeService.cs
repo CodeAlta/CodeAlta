@@ -822,7 +822,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         var key = effective.Definition.Key;
         if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) return null;
         // The list answers only for a start with the same values: the same variables and headers, the same session variables.
-        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), ReaderOf(context.Request.Home, key), out var definition, out _)) return null;
+        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), ReaderOf(context.Request, effective.Definition), out var definition, out _)) return null;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
         var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
         var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
@@ -973,17 +973,20 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
         // The tokens of a server are kept under its address as the file writes it, also when a variable is part of it.
         var tokenUrl = effective.Definition.Url;
-        var read = ReaderOf(context.Request.Home, key);
-        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), read, out var definition, out var missing))
+        // One reading of the secrets for the validation and the start: a secret given for each use is taken once.
+        var secrets = ReaderOf(context.Request, effective.Definition);
+        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), secrets, out var definition, out var missing))
         {
             // Not kept: a secret kept in a vault that is locked, or that waits for a confirmation, is read again at the next request.
             return ServerRuntimeState.Failed(missing);
         }
 
-        var validation = ValidateRuntimeDefinition(definition, read);
+        var validation = ValidateRuntimeDefinition(definition, secrets.Read);
         if (validation is not null)
         {
-            return Cache(cacheKey, ServerRuntimeState.Failed(validation));
+            // A secret or a variable of the store that gave nothing (not set, locked in its vault, waiting for a confirmation) is
+            // read again at the next request; a definition that is wrong stays failed.
+            return secrets.StoreValueMissing ? ServerRuntimeState.Failed(validation) : Cache(cacheKey, ServerRuntimeState.Failed(validation));
         }
 
         var timeoutMs = NormalizeTimeout(serverPolicy?.StartupTimeoutMs ?? context.Policy.StartupTimeoutMs, 30000);
@@ -996,7 +999,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         McpClient? client = null;
         try
         {
-            transport = CreateTransport(definition, tokenUrl, context.Request, timeoutMs);
+            transport = CreateTransport(definition, tokenUrl, context.Request, timeoutMs, secrets);
             client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget, AdvertiseApps, LoadsSkills), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
@@ -1075,7 +1078,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         }
     }
 
-    private IClientTransport CreateTransport(McpServerDefinition definition, string? tokenUrl, McpRuntimeRequest request, int timeoutMs)
+    private IClientTransport CreateTransport(McpServerDefinition definition, string? tokenUrl, McpRuntimeRequest request, int timeoutMs, ServerSecrets secrets)
     {
         if (definition.Transport == McpTransportKind.Stdio)
         {
@@ -1085,13 +1088,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 Command = definition.Command!,
                 Arguments = definition.Args.ToArray(),
                 WorkingDirectory = definition.Cwd,
-                EnvironmentVariables = StdioEnvironment(definition, request.Environment, ReaderOf(request.Home, definition.Key)),
+                EnvironmentVariables = StdioEnvironment(definition, request.Environment, secrets.Read),
                 ShutdownTimeout = CreateStdioShutdownTimeout(timeoutMs),
             };
             return new ObservingClientTransport(new StdioClientTransport(options, NullLoggerFactory.Instance));
         }
 
-        var headers = ExpandDictionary(definition.Headers, ReaderOf(request.Home, definition.Key)).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+        var headers = ExpandDictionary(definition.Headers, secrets.Read).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
         var httpOptions = new HttpClientTransportOptions
         {
             Name = definition.Key,
@@ -1586,8 +1589,57 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     // profile by secret:NAME or var:NAME: ${secret:NAME} and ${var:NAME} are resolved as ${NAME} is.
     // Each secret read is told to the masking of the host (SecretIssued) before the server gets it.
     // A secret kept in a vault is given from what the host holds, for the use of this server, which a secret that asks before use names.
-    private Func<string, string?> ReaderOf(McpHome home, string server)
-        => SecretReferenceResolver.ForMachine(home.Root, SecretIssued, BoundSecrets?.Invoke(), $"MCP server {server}").Read;
+    // One reader is one use: what validates a start and what starts it read the same values, so that a confirmation of each use
+    // is taken once, by the start.
+    private ServerSecrets ReaderOf(McpRuntimeRequest request, McpServerDefinition definition)
+        => new(SecretReferenceResolver.ForMachine(request.Home.Root, SecretIssued, BoundSecrets?.Invoke(), UseOf(request, definition)), request.Home.Root);
+
+    /// <summary>
+    /// Gets the use a server is given its secrets for, as a secret that asks before use names it: the server, the file that
+    /// defines it (its project for the file of a project), and the space of the session, so that a confirmation given for one
+    /// server never lets another server of the same name have the secret.
+    /// </summary>
+    internal static string UseOf(McpRuntimeRequest request, McpServerDefinition definition)
+    {
+        var origin = definition.SourcePath == McpConfigDiscovery.SessionServersPath
+            ? $"a session ({(string.IsNullOrWhiteSpace(definition.Command) ? McpRedactor.RedactUrl(definition.Url) : definition.Command)}){(string.IsNullOrWhiteSpace(request.ProjectDirectory) ? string.Empty : $" in {Path.GetFullPath(request.ProjectDirectory)}")}"
+            : definition.SourcePath;
+        return $"MCP server {definition.Key} of {origin}{(string.IsNullOrWhiteSpace(request.SpaceId) ? string.Empty : $" in the space {request.SpaceId}")}";
+    }
+
+    // The values of the references of a server for one start: each reference is read once, and a reference to a secret or a
+    // variable of the store that gives nothing (not set, kept in a vault that is locked, waiting for a confirmation) is noted,
+    // so that the failure it causes is not kept: the next request reads it again.
+    private sealed class ServerSecrets(SecretReferenceResolver resolver, string root)
+    {
+        private readonly Dictionary<string, string?> _values = new(StringComparer.Ordinal);
+        private SecretBindings? _bindings;
+
+        public bool StoreValueMissing { get; private set; }
+
+        public string? Read(string key)
+        {
+            if (_values.TryGetValue(key, out var value)) return value;
+            value = resolver.Read(key);
+            _values[key] = value;
+            if (value is null && (key.StartsWith("secret:", StringComparison.Ordinal) || key.StartsWith("var:", StringComparison.Ordinal))) StoreValueMissing = true;
+            return value;
+        }
+
+        // Whether a key names a secret kept in a vault; a file of bindings that cannot be read says yes, so that nothing is given.
+        public bool IsKeptInVault(string key)
+        {
+            if (!key.StartsWith("secret:", StringComparison.Ordinal)) return false;
+            try
+            {
+                return (_bindings ??= new LocalSecretStore(root).Bindings).TryGet(key["secret:".Length..], out _);
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+    }
 
     /// <summary>Gets or sets what gives the secrets kept in vaults the host holds; null for a host without them.</summary>
     internal Func<CodeAlta.Agent.Runtime.IBoundSecretSource?>? BoundSecrets { get; set; }
@@ -1602,17 +1654,27 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     // Resolves ${NAME} in the command, its arguments, its folder and the address, after the folder variables of a server of
     // CodeAlta's file of the project, which also starts in the project folder. The values of environment variables and
     // headers are resolved where they are used, so that a diagnostic can name the one that fails.
+    // A secret kept in a vault is never put in the command line of a server, which other programs of this computer can read: it
+    // is refused before it is read, and a secret of this computer stays allowed there, as configurations already use it.
     private static bool TryExpandConnectionFields(
         McpServerDefinition definition,
         string? projectDirectory,
-        Func<string, string?> read,
+        ServerSecrets secrets,
         out McpServerDefinition expanded,
         [NotNullWhen(false)] out McpRuntimeDiagnostic? diagnostic)
     {
         definition = McpExternalVariables.ResolveProjectFolders(definition, projectDirectory, McpConfigDiscovery.GetUserHome(null));
         string? missing = null;
         string? field = null;
-        string? Expand(string? value, string fieldName)
+        string? inVault = null;
+        string? ReadArgument(string key)
+        {
+            if (!secrets.IsKeptInVault(key)) return secrets.Read(key);
+            inVault ??= key["secret:".Length..];
+            return string.Empty;
+        }
+
+        string? Expand(string? value, string fieldName, Func<string, string?> read)
         {
             if (value is null || missing is not null || !TryExpandEnvironmentVariables(value, read, out var result, out var variable))
             {
@@ -1629,10 +1691,23 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             return result;
         }
 
-        var command = Expand(definition.Command, "command");
-        var args = definition.Args.Count == 0 ? definition.Args : definition.Args.Select(arg => Expand(arg, "args")!).ToArray();
-        var cwd = Expand(definition.Cwd, "cwd");
-        var url = Expand(definition.Url, "url");
+        var command = Expand(definition.Command, "command", ReadArgument);
+        var args = definition.Args.Count == 0 ? definition.Args : definition.Args.Select(arg => Expand(arg, "args", ReadArgument)!).ToArray();
+        if (inVault is not null)
+        {
+            expanded = definition;
+            diagnostic = new McpRuntimeDiagnostic
+            {
+                Code = "vault_secret_in_arguments",
+                Server = definition.Key,
+                Transport = FormatTransport(definition.Transport),
+                Message = $"Invalid MCP server '{definition.Key}': its command line references ${{secret:{inVault}}}, which is kept in a vault: such a secret is never given in the arguments of a server. Give it in 'env' (or in 'headers' for an HTTP server).",
+            };
+            return false;
+        }
+
+        var cwd = Expand(definition.Cwd, "cwd", secrets.Read);
+        var url = Expand(definition.Url, "url", secrets.Read);
         if (missing is not null)
         {
             expanded = definition;

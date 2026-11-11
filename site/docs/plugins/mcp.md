@@ -115,7 +115,7 @@ A file with both `mcpServers` and `servers` is invalid. A server defines exactly
 | `type` | both | `stdio`, `local` (Copilot's name for stdio), `http` or `sse`. |
 | `tools` | Copilot files | Kept as is; not used by CodeAlta. |
 
-`${NAME}` and `${NAME:-default}` are expanded in `command`, `args`, `cwd`, `url`, and the values of `env` and `headers`. A missing variable without a default is reported (`environment_variable_not_found`), and the placeholder is never sent. In the file of a project, `${workspaceFolder}`, `${workspaceFolderBasename}` and `${userHome}` are also the project folder, its name and your home folder, so a server can run a script of the project, such as `"args": ["${workspaceFolder}/.alta/mcp/server.mjs"]`, or simply `"args": [".alta/mcp/server.mjs"]`.
+`${NAME}` and `${NAME:-default}` are expanded in `command`, `args`, `cwd`, `url`, and the values of `env` and `headers`. A missing variable without a default is reported (`environment_variable_not_found`), and the placeholder is never sent. A secret kept in a vault is refused in `command` and `args` (`vault_secret_in_arguments`), since other programs can read the command line of a process: give it in `env`, or in `headers` for a remote server. In the file of a project, `${workspaceFolder}`, `${workspaceFolderBasename}` and `${userHome}` are also the project folder, its name and your home folder, so a server can run a script of the project, such as `"args": ["${workspaceFolder}/.alta/mcp/server.mjs"]`, or simply `"args": [".alta/mcp/server.mjs"]`.
 
 ```json
 {
