@@ -46,6 +46,27 @@ public sealed class BrowserPluginTests
     }
 
     [TestMethod]
+    public async Task AGlobalChatOfASeparateProfile_GivesAPageNoFileOfTheProfile()
+    {
+        using var folder = new TempFolder();
+        // The profile of alta --profile: a folder of any name, which a global chat works in.
+        var profile = Directory.CreateDirectory(Path.Combine(folder.Path, "work-profile", "auth")).Parent!.FullName;
+        await File.WriteAllTextAsync(Path.Combine(profile, "config.toml"), "[x]");
+        await File.WriteAllTextAsync(Path.Combine(profile, "auth", "provider.json"), "{}");
+        var host = new BrowserPluginHost(profile) { HasUser = false, StartTimeout = BrowserStart, SecretRoots = [profile, profile] };
+        host.WorkFolder = (_, _) => ValueTask.FromResult<string?>(profile);
+        await using var session = Session(host, BrowserProfileKind.Isolated, new BrowserSettings());
+
+        foreach (var file in new[] { "config.toml", Path.Combine("auth", "provider.json") })
+        {
+            StringAssert.Contains(await session.CheckAsync(new Uri(Path.Combine(profile, file)), BrowserRequestKind.Page, true, CancellationToken.None), "secrets", file);
+        }
+
+        var files = await session.FilesAsync(CancellationToken.None);
+        Assert.ThrowsExactly<CodeAlta.Browser.Tools.BrowserToolException>(() => files.ResolveRead("config.toml", "filePaths"));
+    }
+
+    [TestMethod]
     public async Task Guards_KeepFilesToTheSessionFolders_AndThePortsOfCodeAltaOut()
     {
         using var folder = new TempFolder();

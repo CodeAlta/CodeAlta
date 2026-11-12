@@ -30,12 +30,19 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
     /// <summary>Gets the folders and files never written, also inside the write roots: those a sandbox protects.</summary>
     public IReadOnlyList<string> ReadOnly { get; init; } = [];
 
+    /// <summary>
+    /// Gets the folders of CodeAlta that hold its settings, credentials and sessions (its global and state roots, which
+    /// a separate profile puts anywhere): a page never gets a file in them, whatever its name, as it never gets one of
+    /// <c>~/.alta</c>. The worktrees CodeAlta keeps there are not part of them.
+    /// </summary>
+    public IReadOnlyList<string> SecretRoots { get; init; } = [];
+
     /// <summary>Resolves a path a tool reads.</summary>
     /// <exception cref="BrowserToolException">The path is outside the folders, or names a file of secrets.</exception>
     public string ResolveRead(string path, string argument)
     {
         var (full, target) = Resolve(path, argument, ReadRoots, "read from");
-        if (IsSecret(full) || IsSecret(target)) throw new BrowserToolException("not-allowed", $"The file of \"{argument}\" looks like it holds secrets ({Path.GetFileName(target)}): a page never gets such a file.");
+        if (IsSecretFile(full) || IsSecretFile(target)) throw new BrowserToolException("not-allowed", $"The file of \"{argument}\" looks like it holds secrets ({Path.GetFileName(target)}): a page never gets such a file.");
         return full;
     }
 
@@ -128,7 +135,7 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
         }
 
         var allowed = opened.Length != 0 && roots.Any(root => IsWithin(opened, RealPath(root))) && !Denied.Any(entry => IsWithin(opened, RealPath(entry)))
-            && (write ? !ReadOnly.Any(entry => IsWithin(opened, RealPath(entry))) : !IsSecret(opened));
+            && (write ? !ReadOnly.Any(entry => IsWithin(opened, RealPath(entry))) : !IsSecretFile(opened));
         if (allowed) return stream;
         stream.Dispose();
         // A file this call created where it must not write is removed: it is empty.
@@ -156,7 +163,7 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
             return false;
         }
 
-        return ReadRoots.Any(root => IsWithin(target, RealPath(root))) && !Denied.Any(entry => IsWithin(target, RealPath(entry))) && !IsSecret(fullPath) && !IsSecret(target);
+        return ReadRoots.Any(root => IsWithin(target, RealPath(root))) && !Denied.Any(entry => IsWithin(target, RealPath(entry))) && !IsSecretFile(fullPath) && !IsSecretFile(target);
     }
 
     private (string Full, string Target) Resolve(string path, string argument, IReadOnlyList<string> roots, string verb)
@@ -241,6 +248,51 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
         var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         var full = Path.TrimEndingDirectorySeparator(path);
         return string.Equals(full, folder, comparison) || full.StartsWith(folder + Path.DirectorySeparatorChar, comparison);
+    }
+
+    // A file of secrets by its name, or inside a folder of CodeAlta.
+    private bool IsSecretFile(string path) => IsSecret(path) || IsInSecretRoot(path, SecretRoots);
+
+    /// <summary>
+    /// Whether a full path is inside one of the folders of CodeAlta (<see cref="SecretRoots"/>), as written or once their
+    /// links are followed, but in the worktrees CodeAlta keeps there (<c>worktrees/&lt;repository&gt;/&lt;name&gt;</c>).
+    /// </summary>
+    /// <param name="path">The full path, as written or as the system resolves it.</param>
+    /// <param name="roots">The folders of CodeAlta.</param>
+    public static bool IsInSecretRoot(string path, IReadOnlyList<string> roots)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root)) continue;
+            string full, real;
+            try
+            {
+                full = Path.GetFullPath(root);
+                real = RealPath(root);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+            {
+                // A folder whose path cannot be resolved: everything is kept from a page rather than nothing.
+                return true;
+            }
+
+            foreach (var folder in full == real ? new[] { full } : new[] { full, real })
+            {
+                if (IsWithin(path, folder) && !InWorktree(path, folder)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Inside a worktree of the folder of CodeAlta, which a session works in as in the folder of its project.
+    private static bool InWorktree(string path, string root)
+    {
+        var worktrees = Path.Combine(root, "worktrees");
+        if (!IsWithin(path, worktrees)) return false;
+        var parts = Path.GetRelativePath(worktrees, path).Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 && parts[0] != "..";
     }
 
     /// <summary>Whether a path names a file that holds secrets, or a file inside a folder of secrets.</summary>

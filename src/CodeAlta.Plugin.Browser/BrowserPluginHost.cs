@@ -72,6 +72,20 @@ public sealed class BrowserPluginHost
     /// <summary>Gets the state root of the application.</summary>
     public string StateRoot { get; }
 
+    /// <summary>
+    /// Gets the folders of CodeAlta that hold its settings, credentials and sessions, which a page never reads and the
+    /// server of the files of projects never serves, wherever they are and whatever their names: the global and state
+    /// roots, which a separate profile puts anywhere (<see cref="CodeAlta.Browser.Tools.BrowserFiles.SecretRoots"/>).
+    /// None when none are given: the folders are then known by their names alone (<c>.alta</c>).
+    /// </summary>
+    public IReadOnlyList<string> SecretRoots
+    {
+        get => _secretRoots ?? [];
+        init => _secretRoots = [.. (value ?? throw new ArgumentNullException(nameof(value))).Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)];
+    }
+
+    private readonly IReadOnlyList<string>? _secretRoots;
+
     /// <summary>Gets the folder of the browser's own files: <c>&lt;state root&gt;/browser</c>.</summary>
     public string Root => Path.Combine(StateRoot, "browser");
 

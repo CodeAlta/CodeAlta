@@ -69,7 +69,7 @@ public sealed class BrowserPlugin : PluginBase
     // Orders the changes of the settings in memory, which a choice of the toolbar makes at once, before it is written.
     private readonly Lock _settingsGate = new();
     private readonly CancellationTokenSource _stopping = new();
-    private readonly ProjectFileServer _files = new();
+    private readonly ProjectFileServer _files;
     private readonly ProjectPages _projectPages;
     // The client of the source locators: it follows no redirection itself, so that each one is checked.
     private readonly HttpClient _http = SourceLocator.CreateClient();
@@ -83,6 +83,7 @@ public sealed class BrowserPlugin : PluginBase
     {
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
+        _files = new ProjectFileServer(() => host.SecretRoots);
         _pool = new BrowserPool(host);
         _projectPages = new ProjectPages(_files, host.PortOwners);
     }

@@ -153,7 +153,7 @@ internal sealed class CliHost : IAsyncDisposable
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             var catalog = new CatalogOptions { GlobalRoot = storage.GlobalRoot, StateRoot = storage.StateRoot, Config = request.Config };
             // The browsers of the sessions: headless, in profiles of CodeAlta only, since nobody is there to agree to the user's own.
-            var browser = new BrowserPluginHost(storage.StateRoot) { HasUser = false };
+            var browser = new BrowserPluginHost(storage.StateRoot) { HasUser = false, SecretRoots = [storage.GlobalRoot, storage.StateRoot] };
             host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = storage.GlobalRoot,

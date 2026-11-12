@@ -30,6 +30,7 @@ internal sealed class ProjectFileServer : IAsyncDisposable
     private readonly Dictionary<string, string> _roots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _tokens = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Func<CancellationToken, Task<string>>> _pages = new(StringComparer.Ordinal);
+    private readonly Func<IReadOnlyList<string>>? _secretRoots;
 
     // The first segment of the addresses of the pages CodeAlta makes, which no token of a folder is.
     private const string PagesSegment = "_codealta";
@@ -37,6 +38,19 @@ internal sealed class ProjectFileServer : IAsyncDisposable
     private Task? _loop;
     private int _port;
     private int _disposed;
+
+    /// <summary>Creates a server that keeps no folder of CodeAlta apart but by its name (<c>.alta</c>).</summary>
+    public ProjectFileServer()
+    {
+    }
+
+    /// <summary>Creates a server that never serves a file of the folders of CodeAlta (<see cref="BrowserFiles.SecretRoots"/>).</summary>
+    /// <param name="secretRoots">The folders of CodeAlta, read at each request.</param>
+    public ProjectFileServer(Func<IReadOnlyList<string>> secretRoots)
+    {
+        ArgumentNullException.ThrowIfNull(secretRoots);
+        _secretRoots = secretRoots;
+    }
 
     /// <summary>Gets the origin of the server once it runs, as <c>http://127.0.0.1:port</c>; null before.</summary>
     public string? Origin
@@ -203,7 +217,9 @@ internal sealed class ProjectFileServer : IAsyncDisposable
                 return;
             }
 
-            using var stream = context.Request.Url is { } url && Map(url) is { } found && Readable(found.Root, found.File, out var real) ? OpenChecked(found.Root, real) : null;
+            var secretRoots = _secretRoots?.Invoke() ?? [];
+            using var stream = context.Request.Url is { } url && Map(url) is { } found && Readable(found.Root, found.File, out var real, secretRoots)
+                ? OpenChecked(found.Root, real, secretRoots) : null;
             if (stream is null)
             {
                 response.StatusCode = 404;
@@ -233,14 +249,18 @@ internal sealed class ProjectFileServer : IAsyncDisposable
     }
 
     // A file of the folder, also once its links are followed, that holds no secret, by its name or by the one it leads to.
-    internal static bool Readable(string root, string file, out string real)
+    internal static bool Readable(string root, string file, out string real) => Readable(root, file, out real, []);
+
+    // secretRoots: the folders of CodeAlta, never served whatever their names (a profile in a folder of a project).
+    internal static bool Readable(string root, string file, out string real, IReadOnlyList<string> secretRoots)
     {
         real = file;
         try
         {
             if (!File.Exists(file)) return false;
             real = BrowserFiles.RealPath(file);
-            return BrowserFiles.IsWithin(real, root) && !IsPrivate(Path.GetRelativePath(root, file)) && !IsPrivate(Path.GetRelativePath(root, real));
+            return BrowserFiles.IsWithin(real, root) && !IsPrivate(Path.GetRelativePath(root, file)) && !IsPrivate(Path.GetRelativePath(root, real))
+                && !BrowserFiles.IsInSecretRoot(Path.GetFullPath(file), secretRoots) && !BrowserFiles.IsInSecretRoot(real, secretRoots);
         }
         catch (IOException)
         {
@@ -251,7 +271,9 @@ internal sealed class ProjectFileServer : IAsyncDisposable
     // Opens a file Readable accepted, then checks what was opened: a file or a folder of its path replaced by a link
     // between the check and the opening could lead out of the folder or to a file of secrets. Where the system does
     // not tell the path of an opened file, the path is resolved again, which leaves a smaller window.
-    internal static FileStream? OpenChecked(string root, string real)
+    internal static FileStream? OpenChecked(string root, string real) => OpenChecked(root, real, []);
+
+    internal static FileStream? OpenChecked(string root, string real, IReadOnlyList<string> secretRoots)
     {
         FileStream stream;
         try
@@ -274,7 +296,8 @@ internal sealed class ProjectFileServer : IAsyncDisposable
             opened = string.Empty;
         }
 
-        if (opened.Length != 0 && BrowserFiles.IsWithin(opened, root) && !IsPrivate(Path.GetRelativePath(root, opened))) return stream;
+        if (opened.Length != 0 && BrowserFiles.IsWithin(opened, root) && !IsPrivate(Path.GetRelativePath(root, opened))
+            && !BrowserFiles.IsInSecretRoot(opened, secretRoots)) return stream;
         stream.Dispose();
         return null;
     }

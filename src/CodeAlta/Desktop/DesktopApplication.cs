@@ -387,7 +387,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             uiLifetime = ui;
             var uiSessions = new Ui.DesktopUiSessions();
             // The web browsers sessions drive: what the browser plugin learns of a session comes once the host runs.
-            var browserHost = new CodeAlta.Plugin.Browser.BrowserPluginHost(options.StateRoot ?? options.CatalogRoot!);
+            // A page never reads the files of the profile, wherever it is (--profile).
+            var browserHost = new CodeAlta.Plugin.Browser.BrowserPluginHost(options.StateRoot ?? options.CatalogRoot!)
+            {
+                SecretRoots = [options.CatalogRoot!, options.StateRoot ?? options.CatalogRoot!],
+            };
             // The Search plugin exists before the host; the index it signals is created once the host runs.
             var searchRelay = new Search.DesktopSearchRelay();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));

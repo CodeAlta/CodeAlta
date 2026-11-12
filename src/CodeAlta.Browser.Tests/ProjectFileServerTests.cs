@@ -49,6 +49,30 @@ public sealed class ProjectFileServerTests
     }
 
     [TestMethod]
+    public async Task AProfileInAFolderOfTheProject_IsNeverServed()
+    {
+        using var folder = new BrowserPluginTests.TempFolder();
+        var root = Directory.CreateDirectory(Path.Combine(folder.Path, "project")).FullName;
+        var profile = Directory.CreateDirectory(Path.Combine(root, "profile", "auth")).Parent!.FullName;
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"), "<p>page</p>");
+        await File.WriteAllTextAsync(Path.Combine(profile, "auth", "provider.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(profile, "config.toml"), "[x]");
+
+        await using var server = new ProjectFileServer(() => [profile]);
+        var page = server.Address(root, Path.Combine(root, "index.html"));
+        using var http = new HttpClient();
+        Assert.AreEqual("<p>page</p>", await http.GetStringAsync(page));
+        foreach (var path in new[] { "profile/auth/provider.json", "profile/config.toml" })
+        {
+            Assert.AreEqual(HttpStatusCode.NotFound, (await http.GetAsync(new Uri(page, path))).StatusCode, path);
+        }
+
+        var (realRoot, realProfile) = (BrowserFiles.RealPath(root), BrowserFiles.RealPath(profile));
+        Assert.IsTrue(ProjectFileServer.Readable(realRoot, Path.Combine(realProfile, "config.toml"), out _), "by its name alone, it would be served");
+        Assert.IsFalse(ProjectFileServer.Readable(realRoot, Path.Combine(realProfile, "config.toml"), out _, [profile]));
+    }
+
+    [TestMethod]
     public async Task AFileADevServerIsWriting_IsServedStill()
     {
         using var folder = new BrowserPluginTests.TempFolder();

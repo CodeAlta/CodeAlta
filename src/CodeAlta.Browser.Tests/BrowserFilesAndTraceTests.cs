@@ -36,6 +36,58 @@ public sealed class BrowserFilesAndTraceTests
     }
 
     [TestMethod]
+    public void AProfileInAFolderOfAnyName_KeepsItsFilesFromAPage_AsTheFolderOfCodeAltaDoes()
+    {
+        // A global chat of a separate profile works in the folder of the profile, which a page may read from.
+        var profile = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", "work-profile-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(profile, "auth"));
+            File.WriteAllText(Path.Combine(profile, "auth", "provider.json"), "{\"key\":\"secret\"}");
+            File.WriteAllText(Path.Combine(profile, "config.toml"), "[x]");
+            var worktree = Directory.CreateDirectory(Path.Combine(profile, "worktrees", "repo", "airy")).FullName;
+            File.WriteAllText(Path.Combine(worktree, "page.png"), "png");
+            var before = new BrowserFiles(profile, [profile], [profile], Path.Combine(profile, "tmp"));
+            Assert.AreEqual(Path.Combine(profile, "config.toml"), before.ResolveRead("config.toml", "filePaths"), "by its name, the folder holds no secret");
+
+            var files = new BrowserFiles(profile, [profile], [profile], Path.Combine(profile, "tmp")) { SecretRoots = [profile] };
+            foreach (var secret in new[] { "config.toml", Path.Combine("auth", "provider.json") })
+            {
+                StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveRead(secret, "filePaths")).Message, "holds secrets", secret);
+                Assert.IsFalse(files.CanRead(Path.Combine(profile, secret)), secret);
+            }
+
+            // Through a link of another name, too.
+            var outside = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", "link-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+            try
+            {
+                if (TestLinks.CanCreateSymbolicLinks)
+                {
+                    var link = Path.Combine(outside, "profile");
+                    Directory.CreateSymbolicLink(link, profile);
+                    var linked = new BrowserFiles(outside, [outside], [outside], Path.Combine(outside, "tmp")) { SecretRoots = [link] };
+                    Assert.ThrowsExactly<BrowserToolException>(() => linked.ResolveRead(Path.Combine(profile, "config.toml"), "filePaths"));
+                    Assert.IsFalse(BrowserFiles.IsInSecretRoot(Path.Combine(outside, "other.txt"), [link]));
+                    Assert.IsTrue(BrowserFiles.IsInSecretRoot(Path.Combine(BrowserFiles.RealPath(profile), "config.toml"), [link]));
+                }
+            }
+            finally
+            {
+                Directory.Delete(outside, recursive: true);
+            }
+
+            // A session in a worktree CodeAlta keeps there gives a page the files of its project.
+            var inWorktree = new BrowserFiles(worktree, [worktree], [worktree], Path.Combine(profile, "tmp")) { SecretRoots = [profile] };
+            Assert.AreEqual(Path.Combine(worktree, "page.png"), inWorktree.ResolveRead("page.png", "filePaths"));
+            Assert.IsTrue(BrowserFiles.IsInSecretRoot(Path.Combine(profile, "worktrees", "repo"), [profile]), "the folder of the worktrees itself is not a worktree");
+        }
+        finally
+        {
+            Directory.Delete(profile, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task AFolderReplacedByALinkAfterTheCheck_IsRefusedWhenTheFileIsOpened()
     {
         var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;

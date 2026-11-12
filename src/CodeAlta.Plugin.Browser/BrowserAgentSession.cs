@@ -397,13 +397,15 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
             {
                 Denied = sandbox.Denied,
                 ReadOnly = sandbox.ReadOnly,
+                SecretRoots = _host.SecretRoots,
             };
         }
 
+        // The folders of CodeAlta are checked by their paths: a separate profile is in a folder of any name.
         var shared = Path.Combine(_host.Root, "files");
         return folder is null
-            ? new BrowserFiles(shared, [shared], [shared], files)
-            : new BrowserFiles(folder, [folder, shared], [folder, shared], files);
+            ? new BrowserFiles(shared, [shared], [shared], files) { SecretRoots = _host.SecretRoots }
+            : new BrowserFiles(folder, [folder, shared], [folder, shared], files) { SecretRoots = _host.SecretRoots };
     }
 
     /// <summary>
