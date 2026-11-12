@@ -82,7 +82,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
                 SandboxNetworkProxy? proxy = null;
                 try
                 {
-                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, reserved);
+                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, reserved, CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
                     var client = await SandboxWorkerClient.StartAsync(_backend, policy, _commandLine(), proxy?.Endpoint,
                         new SandboxWorkerInit(start.SessionId, start.ProviderId, policy.WorkingDirectory, [policy.WorkingDirectory, .. start.Folders.Writable],
                             start.Folders.Scratchpad, Host().HomeDirectory, start.CommandGuard), cancellationToken).ConfigureAwait(false);
@@ -137,7 +137,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         SandboxNetworkProxy? proxy = null;
         try
         {
-            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts());
+            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts(), CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
             var process = await _backend.StartAsync(policy, SandboxCommandLine.Create(launch.FileName, launch.Arguments), proxy?.Endpoint, cancellationToken).ConfigureAwait(false);
             return new AgentProcess(process, proxy);
         }

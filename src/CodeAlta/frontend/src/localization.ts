@@ -6,6 +6,7 @@ import { documentationMessages } from "./documentation/messages";
 import { findInSessionMessages } from "./findInPage/messages";
 import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
+import { networkMessages } from "./network/messages";
 import { sessionBranchMessages } from "./sessionBranch/messages";
 import { sessionChildrenMessages } from "./sessionChildren/messages";
 import { sessionArchiveMessages } from "./sessionArchive/messages";
@@ -3056,6 +3057,7 @@ export const messages = dictionary({
   ...documentationMessages,
   ...findInSessionMessages,
   ...storageMessages,
+  ...networkMessages,
   ...sessionBranchMessages,
   ...sessionChildrenMessages,
   ...sessionArchiveMessages,

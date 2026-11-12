@@ -169,6 +169,7 @@ export const externalEditors = Object.freeze({ list: unavailable, set: unavailab
 export const cloudSessions = Object.freeze({ readiness: unavailable, start: unavailable, startState: unavailable, cancelStart: unavailable, bringHere: unavailable,
   details: unavailable, send: unavailable, continueHere: unavailable });
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
+export const network = Object.freeze({ read: unavailable, save: unavailable, check: unavailable });
 export const secrets = Object.freeze({ list: async () => ({ status: "unavailable", protection: null, secrets: [], variables: [] }),
   setSecret: async () => ({ status: "unavailable", message: null }), rotateSecret: async () => ({ status: "unavailable", message: null }),
   deleteSecret: async () => ({ status: "unavailable", message: null }), setVariable: async () => ({ status: "unavailable", message: null }),

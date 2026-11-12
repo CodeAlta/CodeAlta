@@ -45,6 +45,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         if (attachments is null) return Invalid(jsonl, fileError!);
         if (schema is { } outputSchema) prompt += CliStructuredOutput.Instruction(outputSchema);
         if (!CliStorage.TryResolve(options, environment, out var storage, out error)) return Invalid(jsonl, error!);
+        if (environment.ApplyNetwork) CodeAlta.Hosting.CodeAltaNetwork.Start(storage!.GlobalRoot);
         if (!CliConfig.TryCreate(options, environment, storage!.GlobalRoot, out var config, out error)) return Invalid(jsonl, error!);
 
         var ownsLogging = environment.InitializeLogging && CliLogging.Initialize(storage.StateRoot, output, options.Verbose);

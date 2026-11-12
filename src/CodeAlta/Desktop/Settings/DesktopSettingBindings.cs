@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Logging;
+using CodeAlta.Catalog.Network;
 using CodeAlta.Catalog.Storage;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Catalog.Worktrees;
@@ -41,6 +42,9 @@ internal sealed class DesktopSettingSources
 
     /// <summary>Gets what applies log levels once they are saved; null where the log takes them at the next start.</summary>
     public Action? LoggingSaved { get; init; }
+
+    /// <summary>Gets what applies the proxy once it is saved; null where it applies at the next start.</summary>
+    public Action? ProxySaved { get; init; }
 }
 
 /// <summary>
@@ -138,6 +142,23 @@ internal static class DesktopSettingBindings
             if (refused is null) sources.LoggingSaved?.Invoke();
             return refused;
         });
+
+        // The proxy: the mode is changed here too; the address, the hosts and the authentication on the page, which checks them.
+        Add("network.proxy.mode", () => SettingValues.Of(ProxySettings.NameOf(config.LoadGlobalProxySettings().Mode)), value =>
+        {
+            if (ProxySettings.ParseMode(value.GetString()) is not { } mode) return "Unknown proxy mode.";
+            var refused = Locked(config, () =>
+            {
+                var settings = config.LoadGlobalProxySettings() with { Mode = mode };
+                return settings.GetError() ?? Do(() => config.SaveGlobalProxySettings(settings));
+            });
+            if (refused is null) sources.ProxySaved?.Invoke();
+            return refused;
+        });
+        Add("network.proxy.url", () => SettingValues.Of(config.LoadGlobalProxySettings().Url ?? ""), null);
+        Add("network.proxy.no_proxy", () => SettingValues.Of(config.LoadGlobalProxySettings().Bypass), null);
+        Add("network.proxy.authentication", () => SettingValues.Of(ProxySettings.NameOf(config.LoadGlobalProxySettings().Authentication)), null);
+        Add("network.proxy.user", () => SettingValues.Of(config.LoadGlobalProxySettings().User ?? ""), null);
 
         Bool("models.fallback.enabled", () => Models(config).Fallback.Enabled, value => SaveFallback(config, fallback => fallback with { Enabled = value }));
         Bool("models.fallback.on_quota", () => Models(config).Fallback.OnQuota, value => SaveFallback(config, fallback => fallback with { OnQuota = value }));

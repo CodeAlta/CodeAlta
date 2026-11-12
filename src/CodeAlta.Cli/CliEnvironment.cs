@@ -29,6 +29,12 @@ internal sealed record CliEnvironment
     /// <summary>Gets whether the run sets up the logging of the process (a test leaves the process-wide logging alone).</summary>
     public bool InitializeLogging { get; init; }
 
+    /// <summary>
+    /// Gets whether the run applies the proxy of its profile (<c>[network.proxy]</c>) to the process: its HTTP clients and the
+    /// programs it starts (a test leaves the proxy and the environment of the process alone).
+    /// </summary>
+    public bool ApplyNetwork { get; init; }
+
     /// <summary>Gets whether SIGINT, SIGTERM and Ctrl+C abort the run (a test cancels its token instead).</summary>
     public bool HandleSignals { get; init; }
 
@@ -78,6 +84,7 @@ internal sealed record CliEnvironment
             TempRoot = Path.GetTempPath(),
             GetVariable = Environment.GetEnvironmentVariable,
             InitializeLogging = true,
+            ApplyNetwork = true,
             HandleSignals = true,
             ExitProcess = Environment.Exit,
         };

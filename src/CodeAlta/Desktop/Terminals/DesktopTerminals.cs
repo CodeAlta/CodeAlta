@@ -98,6 +98,12 @@ internal sealed class DesktopTerminals
     /// </summary>
     internal Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? Identity { get; init; }
 
+    /// <summary>
+    /// Gets or initializes what sets the proxy of the application in the environment of a terminal, which on Windows reads
+    /// the variables of the user again (<c>[network.proxy]</c>); null for none.
+    /// </summary>
+    internal Action<IDictionary<string, string>>? Network { get; init; }
+
     /// <summary>The command interpreters a terminal can start, the default one first.</summary>
     public IReadOnlyList<TerminalProfile> Profiles => _profiles.List();
 
@@ -145,6 +151,7 @@ internal sealed class DesktopTerminals
         try
         {
             var environment = TerminalEnvironment.Create(id, _version);
+            Network?.Invoke(environment);
             foreach (var (name, value) in Identity?.Invoke(request)?.Variables ?? []) environment[name] = value;
             var arguments = profile.Arguments;
             if (request.Integration)
@@ -203,6 +210,7 @@ internal sealed class DesktopTerminals
         try
         {
             var environment = TerminalEnvironment.Create(id, _version);
+            Network?.Invoke(environment);
             foreach (var (name, value) in program.Environment)
             {
                 if (value is null) environment.Remove(name);

@@ -1714,6 +1714,58 @@ public sealed partial class CodeAltaConfigStore
         Save(_options.ConfigPath, document);
     }
 
+    /// <summary>
+    /// Reads the proxy of CodeAlta (<c>[network.proxy]</c>). A file that is missing gives the defaults: as the system says.
+    /// </summary>
+    /// <returns>The settings.</returns>
+    /// <exception cref="InvalidDataException">The table, or the configuration, is not valid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public Network.ProxySettings LoadGlobalProxySettings()
+        => Network.ProxySettings.Read(ReadSharedGlobalDocument().Network?.Proxy);
+
+    /// <summary>
+    /// Reads the proxy of CodeAlta (<c>[network.proxy]</c>) at the start of an application, which starts whatever the file
+    /// says: a configuration that cannot be read gives the defaults (as the system says), and the reason.
+    /// </summary>
+    /// <param name="settings">The settings, or the defaults when they cannot be read.</param>
+    /// <param name="error">Why they could not be read, or null.</param>
+    /// <returns>True when the settings were read.</returns>
+    public bool TryLoadGlobalProxySettings(out Network.ProxySettings settings, out string? error)
+    {
+        try
+        {
+            settings = LoadGlobalProxySettings();
+            error = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            settings = Network.ProxySettings.Default;
+            error = exception.GetBaseException().Message;
+            return false;
+        }
+    }
+
+    /// <summary>Saves the proxy of CodeAlta (<c>[network.proxy]</c>). The defaults are not written.</summary>
+    /// <param name="settings">The settings.</param>
+    /// <exception cref="ArgumentNullException">The settings are null.</exception>
+    /// <exception cref="ArgumentException">The settings are not valid (<see cref="Network.ProxySettings.GetError"/>).</exception>
+    /// <exception cref="InvalidDataException">The existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveGlobalProxySettings(Network.ProxySettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
+        var table = settings.ToDocument();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        document.Network = table is null ? null : new CodeAltaNetworkSettingsDocument { Proxy = table };
+        Save(_options.ConfigPath, document);
+    }
+
     /// <summary>Saves the global choices for speech to prompt. Defaults are not written.</summary>
     /// <exception cref="ArgumentNullException">The settings are null.</exception>
     /// <exception cref="InvalidDataException">The model or the existing configuration is invalid.</exception>
@@ -1984,6 +2036,7 @@ public sealed partial class CodeAltaConfigStore
         NormalizeDocument(document);
         _ = Storage.StorageSettings.Read(document.Storage);
         _ = Speech.SpeechSettings.Read(document.Speech);
+        _ = Network.ProxySettings.Read(document.Network?.Proxy);
         _ = Search.SearchSettings.Read(document.Search);
         _ = ModelTiers.ModelSettings.Read(document.Models);
         _ = AttributionSettings.Read(document.Commits, document.ExternalWriting);
@@ -2387,6 +2440,23 @@ public sealed partial class CodeAltaConfigStore
                 if (retention is { Enabled: null, Amount: null, Unit: null }) storage.SessionRetention = null;
             }
             if (storage is { ClearScratchpadOnStartup: null, SessionRetention: null }) document.Storage = null;
+        }
+
+        if (document.Network is { } network)
+        {
+            // Only the defaults are omitted: an invalid value survives, so that validation reports it.
+            if (network.Proxy is { } proxy)
+            {
+                if (string.Equals(proxy.Mode?.Trim(), Network.ProxySettings.SystemName, StringComparison.OrdinalIgnoreCase)) proxy.Mode = null;
+                if (string.Equals(proxy.Authentication?.Trim(), Network.ProxySettings.NoneName, StringComparison.OrdinalIgnoreCase)) proxy.Authentication = null;
+                if (string.IsNullOrWhiteSpace(proxy.Url)) proxy.Url = null;
+                if (string.IsNullOrWhiteSpace(proxy.User)) proxy.User = null;
+                if (string.IsNullOrWhiteSpace(proxy.PasswordSecret)) proxy.PasswordSecret = null;
+                if (proxy.NoProxy is { Count: 0 }) proxy.NoProxy = null;
+                if (proxy is { Mode: null, Url: null, NoProxy: null, Authentication: null, User: null, PasswordSecret: null }) network.Proxy = null;
+            }
+
+            if (network.Proxy is null) document.Network = null;
         }
 
         if (document.Speech is { } speech)

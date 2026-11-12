@@ -37,6 +37,12 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
 
     /// <summary>The token of the start that waits for this application's window; null when none does.</summary>
     internal string? StartToken { get; init; }
+
+    /// <summary>
+    /// The proxy of the process, applied from the configuration at the start of an owned instance, before the first HTTP
+    /// request; null for a start that owns no profile. The settings change it while the application runs.
+    /// </summary>
+    internal CodeAltaNetwork? Network { get; init; }
     internal bool ReviewOwnedCommandPermissions { get; init; }
     internal bool EnableOwnedUserInput { get; init; }
 

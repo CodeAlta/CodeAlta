@@ -25,6 +25,7 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
         var folder = Path.GetFullPath(options.Project ?? environment.CurrentDirectory, environment.CurrentDirectory);
         if (!Directory.Exists(folder)) return Invalid($"The project folder '{folder}' does not exist.");
         if (!CliStorage.TryResolve(options, environment, out var storage, out error)) return Invalid(error!);
+        if (environment.ApplyNetwork) CodeAlta.Hosting.CodeAltaNetwork.Start(storage!.GlobalRoot);
         if (!CliConfig.TryCreate(options, environment, storage!.GlobalRoot, out var config, out error)) return Invalid(error!);
 
         var ownsLogging = environment.InitializeLogging && CliLogging.Initialize(storage.StateRoot, output, options.Verbose);

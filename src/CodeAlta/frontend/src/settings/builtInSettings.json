@@ -38,6 +38,7 @@
     { "group": "Advanced", "pages": [
       { "id": "config", "label": "Configuration file", "icon": "config", "keywords": ["config.toml", "toml", "file"] },
       { "id": "storage", "label": "Storage", "icon": "database", "keywords": ["disk", "retention", "delete", "scratchpad", "space"] },
+      { "id": "network", "label": "Network", "icon": "globe", "keywords": ["proxy", "http_proxy", "https_proxy", "no_proxy", "firewall", "corporate", "internet", "connection"] },
       { "id": "mcpHost", "label": "CodeAlta MCP", "icon": "remote", "keywords": ["mcp", "server", "tailscale", "remote", "token"] } ] },
     { "group": "Diagnostics", "pages": [
       { "id": "logs", "label": "Application Logs", "icon": "logs", "keywords": ["log", "level", "debug", "trace"] },
@@ -279,6 +280,19 @@
       "kind": "boolean", "default": true, "owner": "host", "agents": "read", "writable": false },
     { "id": "mcp_host.tailnet", "page": "mcpHost", "section": "CodeAlta MCP server", "label": "Listen on the Tailscale network", "keywords": ["tailscale", "remote", "network"],
       "kind": "boolean", "default": false, "owner": "host", "agents": "read", "writable": false },
+    { "id": "network.proxy.mode", "page": "network", "section": "Proxy", "label": "Proxy", "help": "How CodeAlta and the programs it starts reach the internet.",
+      "keywords": ["proxy", "http_proxy", "https_proxy", "direct", "system proxy", "manual proxy"],
+      "kind": "choice", "choices": [{ "value": "system", "label": "Use the system settings" }, { "value": "none", "label": "No proxy" }, { "value": "manual", "label": "Manual proxy configuration" }],
+      "default": "system", "owner": "host", "agents": "read" },
+    { "id": "network.proxy.url", "page": "network", "section": "Proxy", "label": "Proxy address", "keywords": ["proxy", "host", "port", "url"],
+      "kind": "text", "default": "", "owner": "host", "agents": "read", "writable": false },
+    { "id": "network.proxy.no_proxy", "page": "network", "section": "Proxy", "label": "No proxy for", "help": "Hosts, domains, addresses and CIDR ranges reached directly. This computer always is.",
+      "keywords": ["no_proxy", "bypass", "exceptions", "intranet"], "kind": "list", "default": [], "owner": "host", "agents": "read", "writable": false },
+    { "id": "network.proxy.authentication", "page": "network", "section": "Proxy", "label": "Proxy authentication", "keywords": ["proxy", "password", "ntlm", "kerberos", "credentials"],
+      "kind": "choice", "choices": [{ "value": "none", "label": "None" }, { "value": "account", "label": "My account (integrated)" }, { "value": "password", "label": "User name and password" }],
+      "default": "none", "owner": "host", "agents": "read", "writable": false },
+    { "id": "network.proxy.user", "page": "network", "section": "Proxy", "label": "User name", "keywords": ["proxy", "login", "account"],
+      "kind": "text", "default": "", "owner": "host", "agents": "read", "writable": false },
     { "id": "logging.level", "page": "logs", "section": "What is written to the log", "label": "Level", "keywords": ["log", "debug", "trace", "verbose"],
       "kind": "choice", "choices": [{ "value": "trace", "text": "trace" }, { "value": "debug", "text": "debug" }, { "value": "info", "text": "info" }, { "value": "warn", "text": "warn" }, { "value": "error", "text": "error" }],
       "default": "info", "owner": "host", "agents": "readWrite" }

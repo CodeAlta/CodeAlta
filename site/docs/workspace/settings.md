@@ -203,6 +203,30 @@ Cleanup runs at the **next startup**, never at once. Session cleanup runs on loc
 
 **File sizes** shows what takes room in your profile (sessions, scratchpads, saved Statistics, database, configuration, extensions, caches and logs), for information only. **Refresh** measures again.
 
+## Network proxy
+
+**Settings > Advanced > Network** sets how CodeAlta and the programs it starts (agent CLIs such as `claude`, `codex` and `copilot`, git, npm, MCP servers, the shells of sessions, terminals) reach the internet:
+
+- **Use the system settings**, the default: the variables `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` of the environment CodeAlta started in, else the proxy of the operating system. The page says which proxy that is now.
+- **No proxy**: directly; the programs CodeAlta starts get no proxy variable.
+- **Manual proxy configuration**: the address of your proxy (`http://proxy.example.com:8080`), and **No proxy for**: hosts, domains (`corp.example.com` also covers its subdomains), addresses and CIDR ranges (`10.0.0.0/8`) reached directly. This computer always is. The programs get `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, in both cases.
+
+**Proxy authentication** of a manual proxy is **None**, **My account (integrated)**, the account CodeAlta runs under (Windows integrated authentication, Kerberos), or **User name and password**. The password is kept as the [secret](../secrets/readme.md) `NETWORK_PROXY_PASSWORD`, never in `config.toml`; the programs CodeAlta starts receive it in the address of the proxy.
+
+**Check connection** requests an address, `https://www.codealta.io` or the endpoint of a provider, through the settings as the page shows them, saved or not, and says how it answered and through which proxy.
+
+**Save** applies at once: to every request CodeAlta makes from then on, and to the programs it starts. Agent CLIs, MCP servers and terminals already running keep their proxy until they restart (restart a session's provider, the server, or CodeAlta). A [sandboxed session](../sessions/sandbox.md) always goes through the proxy of its sandbox, which reaches the internet through a manual proxy. CodeAlta TUI and `altacli` apply the same settings when they start.
+
+```toml
+[network.proxy]
+mode = "manual"                        # system (default), none or manual
+url = "http://proxy.example.com:8080"
+no_proxy = ["*.corp.example.com", "10.0.0.0/8"]
+authentication = "password"            # none (default), account or password
+user = "CORP\\jdoe"
+password_secret = "NETWORK_PROXY_PASSWORD"
+```
+
 ## Providers and models
 
 {{ alta_shot "alta-desktop-model-providers.webp" "alta-model-providers.png" "Model provider configuration with validation controls" "Provider setup, endpoint details, credential options, and tests live in one place." }}

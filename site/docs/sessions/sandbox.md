@@ -167,7 +167,7 @@ The sandbox is built on [MXC](https://github.com/microsoft/mxc), Microsoft's pol
 - **macOS**: built in, on Apple silicon. The files that run programs later cannot be replaced, but a sandboxed command can still move a folder that holds them, such as `.git`, and change them there. The commands of Xcode or of its Command Line Tools (`git`, `python3`) and of Homebrew run there. MSBuild builds with one node (`-m:1`), and `dotnet test` does not run: no process of a sandbox listens on a port. A test project of Microsoft.Testing.Platform runs as a program: `dotnet build <tests> -m:1`, then `dotnet run --project <tests> --no-build` (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
 - **Linux**: install `bubblewrap`, and `slirp4netns` for a network. On Ubuntu 24.04 and later, `bwrap` and `unshare` also need an AppArmor profile that allows user namespaces (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
 
-On macOS and Linux, a sandbox with a network reaches it through a proxy of CodeAlta, which programs find in `HTTPS_PROXY`: a program that ignores that variable reaches no host.
+On macOS and Linux, a sandbox with a network reaches it through a proxy of CodeAlta, which programs find in `HTTPS_PROXY`: a program that ignores that variable reaches no host. With a [manual proxy](../workspace/settings.md#network-proxy), that proxy of CodeAlta reaches the hosts the sandbox may reach through yours, signed in with its user name and password; the names must still resolve on this computer.
 
 **Check** says what is missing. Where the sandbox cannot run, a sandboxed session runs no command at all: it never runs them without the sandbox.
 

@@ -304,6 +304,7 @@ import { reasoningShown } from "./promptSurface/promptSurface";
 import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
+import { NetworkSettings } from "./network/NetworkSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { SecretsSettings } from "./secrets/SecretsSettings";
 import { SecretUsePrompt } from "./secrets/SecretUsePrompt";
@@ -409,6 +410,7 @@ import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./cloudSessions/cloudSessions.css";
 import "./mcpHost/mcpHost.css";
+import "./network/network.css";
 import "./machines/machines.css";
 import "./secrets/secrets.css";
 import "./fleet/fleet.css";
@@ -6654,6 +6656,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
+      : settingsSection === "network" ? <NetworkSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} runInTerminal={command => void (async () => {
         const reply = await terminalWorkspace.hub.create(null, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
         if (reply?.status !== "ok" || !reply.terminal) { showToast({ intent: "danger", icon: "error", timeout: 8000, message: t("The terminal could not be started.") }); return; }

@@ -1,0 +1,17 @@
+/* Settings page of the network: the proxy and the check of the connection. */
+.network-block { max-width: 720px; margin-top: 16px; }
+.network-block > h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.network-modes { display: grid; gap: 4px; margin: 4px 0 10px; }
+.network-mode { display: inline-grid; gap: 2px; vertical-align: top; }
+.network-mode small, .network-field small, .network-note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.network-manual { display: grid; gap: 12px; margin: 0 0 12px 26px; }
+.network-field { display: grid; gap: 4px; }
+.network-field > span { color: var(--muted); font-size: 12px; }
+.network-field input, .network-field textarea { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.network-field textarea { width: 100%; resize: vertical; }
+.network-field .bp6-html-select { max-width: 320px; }
+.network-actions { display: flex; gap: 8px; margin: 10px 0 6px; }
+.network-block > .bp6-callout { margin: 8px 0; }
+.network-check { display: flex; gap: 8px; margin-bottom: 4px; }
+.network-check .bp6-input-group { flex: 1 1 auto; min-width: 0; }
+.network-check input { font-family: var(--bp-typography-family-mono); font-size: 12px; }

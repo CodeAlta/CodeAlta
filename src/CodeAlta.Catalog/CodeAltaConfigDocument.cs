@@ -116,6 +116,10 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("logging")]
     public CodeAltaLoggingSettingsDocument? Logging { get; set; }
 
+    /// <summary>Gets or sets how CodeAlta and the programs it starts reach the network: its proxy. Read from the user's file only.</summary>
+    [JsonPropertyName("network")]
+    public CodeAltaNetworkSettingsDocument? Network { get; set; }
+
     /// <summary>
     /// Gets or sets what the sessions of a project work under over the identity of their space: its CLI profiles,
     /// <c>[identity.cli.&lt;name&gt;]</c> with <c>env</c>, <c>check</c> and <c>login</c>. Read from a project file only, as a
@@ -289,6 +293,42 @@ public sealed class CodeAltaLoggingSettingsDocument
     /// <summary>Gets or sets the level of a feature, by the id of the feature (<c>issues = "debug"</c>).</summary>
     [JsonPropertyName("features")]
     public Dictionary<string, string>? Features { get; set; }
+}
+
+/// <summary>Represents how CodeAlta and the programs it starts reach the network, from the global <c>[network]</c> table.</summary>
+public sealed class CodeAltaNetworkSettingsDocument
+{
+    /// <summary>Gets or sets the proxy, <c>[network.proxy]</c>; as the system says when absent.</summary>
+    [JsonPropertyName("proxy")]
+    public CodeAltaProxySettingsDocument? Proxy { get; set; }
+}
+
+/// <summary>Represents the proxy of CodeAlta, <c>[network.proxy]</c> (<see cref="CodeAlta.Catalog.Network.ProxySettings"/>).</summary>
+public sealed class CodeAltaProxySettingsDocument
+{
+    /// <summary>Gets or sets the mode: <c>system</c> (when absent), <c>none</c> or <c>manual</c>.</summary>
+    [JsonPropertyName("mode")]
+    public string? Mode { get; set; }
+
+    /// <summary>Gets or sets the address of the manual proxy, such as <c>http://proxy.example.com:8080</c>.</summary>
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    /// <summary>Gets or sets the hosts, domains, addresses and CIDR ranges reached without the manual proxy.</summary>
+    [JsonPropertyName("no_proxy")]
+    public List<string>? NoProxy { get; set; }
+
+    /// <summary>Gets or sets how CodeAlta signs in to the manual proxy: <c>none</c> (when absent), <c>account</c> or <c>password</c>.</summary>
+    [JsonPropertyName("authentication")]
+    public string? Authentication { get; set; }
+
+    /// <summary>Gets or sets the user name of the <c>password</c> authentication.</summary>
+    [JsonPropertyName("user")]
+    public string? User { get; set; }
+
+    /// <summary>Gets or sets the name of the CodeAlta secret that keeps the password of the <c>password</c> authentication.</summary>
+    [JsonPropertyName("password_secret")]
+    public string? PasswordSecret { get; set; }
 }
 
 /// <summary>Global-only automatic storage maintenance preferences.</summary>

@@ -127,6 +127,22 @@ internal static class CodeAltaConfigDocumentCopy
             Logging = document.Logging is { } logging
                 ? new CodeAltaLoggingSettingsDocument { Level = logging.Level, Features = Copy(logging.Features, static level => level) }
                 : null,
+            Network = document.Network is { } network
+                ? new CodeAltaNetworkSettingsDocument
+                {
+                    Proxy = network.Proxy is { } proxy
+                        ? new CodeAltaProxySettingsDocument
+                        {
+                            Mode = proxy.Mode,
+                            Url = proxy.Url,
+                            NoProxy = Copy(proxy.NoProxy),
+                            Authentication = proxy.Authentication,
+                            User = proxy.User,
+                            PasswordSecret = proxy.PasswordSecret,
+                        }
+                        : null,
+                }
+                : null,
             Identity = Copy(document.Identity),
         };
     }

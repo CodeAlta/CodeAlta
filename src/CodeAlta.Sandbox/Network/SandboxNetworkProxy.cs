@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
 
@@ -12,7 +13,9 @@ namespace CodeAlta.Sandbox.Network;
 /// <remarks>
 /// It takes <c>CONNECT</c> (HTTPS and any TLS) and plain HTTP requests. It resolves the names itself and refuses an
 /// address of this computer or of its networks (loopback, private, link-local, cloud metadata), except the local ports
-/// of the profile, so that a name that points at this computer does not lead the sandbox to its services.
+/// of the profile, so that a name that points at this computer does not lead the sandbox to its services. A host it lets
+/// through is reached directly, or through the upstream proxy it was given (the manual proxy of CodeAlta), which then
+/// connects to it.
 /// </remarks>
 public sealed class SandboxNetworkProxy : IAsyncDisposable
 {
@@ -23,16 +26,18 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     private readonly IReadOnlyList<string>? _hosts;
     private readonly IReadOnlySet<int> _localPorts;
     private readonly IReadOnlySet<int> _reservedPorts;
+    private readonly IWebProxy? _upstream;
     private readonly CancellationTokenSource _closing = new();
     private readonly ConcurrentQueue<string> _refusals = new();
     private readonly Task _accepting;
 
-    private SandboxNetworkProxy(TcpListener listener, IReadOnlyList<string>? hosts, IReadOnlySet<int> localPorts, IReadOnlySet<int> reservedPorts)
+    private SandboxNetworkProxy(TcpListener listener, IReadOnlyList<string>? hosts, IReadOnlySet<int> localPorts, IReadOnlySet<int> reservedPorts, IWebProxy? upstream)
     {
         _listener = listener;
         _hosts = hosts;
         _localPorts = localPorts;
         _reservedPorts = reservedPorts;
+        _upstream = upstream;
         _accepting = Task.Run(AcceptAsync);
     }
 
@@ -50,13 +55,27 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     /// <exception cref="ArgumentNullException">An argument other than <paramref name="hosts"/> is null.</exception>
     /// <exception cref="SocketException">No port could be listened on.</exception>
     public static SandboxNetworkProxy Start(IEnumerable<string>? hosts, IEnumerable<int> localPorts, IEnumerable<int> reservedPorts)
+        => Start(hosts, localPorts, reservedPorts, upstream: null);
+
+    /// <summary>Starts a proxy on a free loopback port that reaches the hosts it lets through over an upstream proxy.</summary>
+    /// <param name="hosts">The host patterns of the profile (<see cref="SandboxHostPattern"/>), or null for every host of the internet.</param>
+    /// <param name="localPorts">The ports of this computer the sandbox may reach.</param>
+    /// <param name="reservedPorts">Ports of this computer that are never reached, whatever the profile: CodeAlta's own.</param>
+    /// <param name="upstream">
+    /// The proxy asked, for each connection, how to reach a host the sandbox may reach: a host it does not bypass goes through
+    /// the proxy it names, with the user name and password of its credentials (Basic); null to reach every host directly.
+    /// </param>
+    /// <returns>The proxy.</returns>
+    /// <exception cref="ArgumentNullException">An argument other than <paramref name="hosts"/> and <paramref name="upstream"/> is null.</exception>
+    /// <exception cref="SocketException">No port could be listened on.</exception>
+    public static SandboxNetworkProxy Start(IEnumerable<string>? hosts, IEnumerable<int> localPorts, IEnumerable<int> reservedPorts, IWebProxy? upstream)
     {
         ArgumentNullException.ThrowIfNull(localPorts);
         ArgumentNullException.ThrowIfNull(reservedPorts);
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var reserved = reservedPorts.ToHashSet();
-        return new SandboxNetworkProxy(listener, hosts is null ? null : [.. hosts], localPorts.Where(port => !reserved.Contains(port)).ToHashSet(), reserved);
+        return new SandboxNetworkProxy(listener, hosts is null ? null : [.. hosts], localPorts.Where(port => !reserved.Contains(port)).ToHashSet(), reserved, upstream);
     }
 
     /// <summary>Says whether the sandbox may reach a host and port, as the proxy decides it (also for the <c>webget</c> of CodeAlta).</summary>
@@ -159,6 +178,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             string host;
             int port;
             byte[]? forward = null;
+            string[] headers = [];
             if (first[0].Equals("CONNECT", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TrySplitHostPort(first[1], 443, out host, out port))
@@ -173,7 +193,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
                 port = uri.Port;
                 // The request goes on with the form an origin server reads, and its other lines as they came. It is the
                 // only one of the connection: a next request, which names its host again, is read on a new one.
-                var headers = lines.Skip(1).Where(static line => !IsHopHeader(line)).Append("Connection: close");
+                headers = [.. lines.Skip(1).Where(static line => !IsHopHeader(line)), "Connection: close"];
                 forward = Encoding.ASCII.GetBytes($"{first[0]} {uri.PathAndQuery} {first[2]}\r\n" + string.Concat(headers.Select(static line => line + "\r\n")) + "\r\n");
             }
             else
@@ -187,6 +207,15 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             {
                 Refused($"{host}:{port}");
                 await RefuseAsync(stream, $"{host}:{port}").ConfigureAwait(false);
+                return;
+            }
+
+            if (UpstreamOf(host, port, forward is null) is { } through)
+            {
+                // The upstream proxy connects to the host: a plain request goes to it in the absolute form, with its credentials.
+                var request = forward is null ? null : Encoding.ASCII.GetBytes($"{first[0]} {first[1]} {first[2]}\r\n"
+                    + string.Concat(headers.Select(static line => line + "\r\n")) + AuthorizationOf(through) + "\r\n");
+                await ChainAsync(stream, through, host, port, request).ConfigureAwait(false);
                 return;
             }
 
@@ -207,6 +236,68 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             // The connection ends with either side.
         }
     }
+
+    // The proxy that reaches a host the sandbox may reach, or null to reach it directly.
+    private Uri? UpstreamOf(string host, int port, bool tunnel)
+    {
+        if (_upstream is null) return null;
+        var target = new Uri($"{(tunnel ? "https" : "http")}://{Authority(host, port)}/");
+        var proxy = _upstream.IsBypassed(target) ? null : _upstream.GetProxy(target);
+        return proxy is null || proxy == target || proxy.Scheme is not ("http" or "https") ? null : proxy;
+    }
+
+    // Reaches the host through the upstream proxy: a tunnel it opens with CONNECT, or the plain request it is sent. What the
+    // upstream answers when it does not open the tunnel (a 407, a 403) is what the sandbox gets.
+    private async Task ChainAsync(NetworkStream client, Uri proxy, string host, int port, byte[]? request)
+    {
+        using var connection = new TcpClient();
+        await connection.ConnectAsync(proxy.IdnHost, proxy.Port, _closing.Token).ConfigureAwait(false);
+        Stream target = connection.GetStream();
+        using var tls = proxy.Scheme == "https" ? new SslStream(target, leaveInnerStreamOpen: false) : null;
+        if (tls is not null)
+        {
+            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = proxy.IdnHost }, _closing.Token).ConfigureAwait(false);
+            target = tls;
+        }
+
+        if (request is null)
+        {
+            var authority = Authority(host, port);
+            await target.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{AuthorizationOf(proxy)}\r\n"), _closing.Token).ConfigureAwait(false);
+            var answer = await ReadHeaderAsync(target, _closing.Token).ConfigureAwait(false);
+            if (answer is null) return;
+            var status = answer.Split(' ', 3);
+            if (status.Length < 2 || status[1] != "200")
+            {
+                await client.WriteAsync(Encoding.ASCII.GetBytes(answer + "\r\nX-CodeAlta-Sandbox: upstream\r\n\r\n"), _closing.Token).ConfigureAwait(false);
+                return;
+            }
+
+            await client.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), _closing.Token).ConfigureAwait(false);
+        }
+        else
+        {
+            await target.WriteAsync(request, _closing.Token).ConfigureAwait(false);
+        }
+
+        var upload = client.CopyToAsync(target, _closing.Token);
+        var download = target.CopyToAsync(client, _closing.Token);
+        await Task.WhenAny(upload, download).ConfigureAwait(false);
+        Observe(upload);
+        Observe(download);
+    }
+
+    // The Basic credentials of the upstream proxy, as a header line; nothing for a proxy without them, or for the account
+    // of the process, which a sandbox never signs in with.
+    private string AuthorizationOf(Uri proxy)
+    {
+        if (_upstream?.Credentials?.GetCredential(proxy, "Basic") is not { UserName.Length: > 0 } credential
+            || ReferenceEquals(credential, CredentialCache.DefaultNetworkCredentials)) return "";
+        var user = string.IsNullOrEmpty(credential.Domain) ? credential.UserName : credential.Domain + "\\" + credential.UserName;
+        return "Proxy-Authorization: Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(user + ":" + credential.Password)) + "\r\n";
+    }
+
+    private static string Authority(string host, int port) => (host.Contains(':', StringComparison.Ordinal) && !host.StartsWith('[') ? $"[{host}]" : host) + ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static void Observe(Task task)
         => task.ContinueWith(static ended => _ = ended.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -230,7 +321,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     }
 
     // The request line and the headers, up to the blank line; what follows stays in the stream.
-    private static async Task<string?> ReadHeaderAsync(NetworkStream stream, CancellationToken cancellationToken)
+    private static async Task<string?> ReadHeaderAsync(Stream stream, CancellationToken cancellationToken)
     {
         var buffer = new List<byte>(1024);
         var one = new byte[1];

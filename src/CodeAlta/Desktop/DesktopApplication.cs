@@ -40,6 +40,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         if (options.ExitRunning) return 0; // None is running: there is nothing to exit.
         // A start from a terminal gives the prompt back: the application runs in a process of its own.
         if (DesktopTerminalStart.TryHandOver(options, Console.Error) is { } handedOver) return handedOver;
+        // The proxy of [network.proxy] before any HTTP client sends, and in the environment of every program started.
+        if (options.Owned is not null && options.CatalogRoot is { } networkRoot) options = options with { Network = CodeAltaNetwork.Start(networkRoot) };
         // The traces of the runs go to the OpenTelemetry collector the environment names, if any: the end sends the last ones.
         using var telemetry = CodeAltaTelemetry.StartFromEnvironment("alta");
         return RunWithCapture(options, RunCore);
@@ -251,6 +253,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
             Directory.CreateDirectory(options.DataRoot);
             WarnOfSandbox(options);
+            if (options.Network is { } network)
+            {
+                var logger = LogManager.GetLogger("CodeAlta.Desktop");
+                if (network.Error is { } networkError) logger.Warn(networkError);
+                logger.Info($"Network proxy: {CodeAlta.Catalog.Network.ProxySettings.NameOf(network.Proxy.Settings.Mode)}{(network.Sandboxed ? " (sandboxed)" : "")}");
+            }
             var result = NeoApplication.Run(new NeoApplicationOptions
             {
                 ApplicationName = "CodeAlta", ShutdownMode = NeoApplicationShutdownMode.Explicit,
@@ -968,6 +976,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         await ProjectIdOfAsync(projectPath, token).ConfigureAwait(false), token).ConfigureAwait(false));
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"))
                 {
+                    Network = options.Network is { Sandboxed: false } network ? network.Proxy.ApplyTo : null,
                     // A terminal of the window has the identity of the space it shows, with the CLI profiles of the project it
                     // is listed under; one a session opens, the environment of the session's commands.
                     Identity = request => request.Agent && request.SessionId is { } owner
@@ -1063,6 +1072,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     Config = new CodeAltaConfigStore(host.CatalogOptions), Shell = shell, Windows = windows, Search = search.Host, WorkItems = workItems,
                     LoggingSaved = () => loggingSaved?.Invoke(),
+                    ProxySaved = options.Network is { Sandboxed: false } savedNetwork ? () => savedNetwork.Refresh() : null,
                 }))
                 {
                     // Settings is in the main window: a request brings it to the front.
@@ -1161,6 +1171,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     chrome.AddHandlers(builder);
                     var configStore = new CodeAltaConfigStore(catalog);
                     builder.AddStorageService(new StorageService(catalog, epoch, host.StartupScratchpadCleanup, retention.Service));
+                    // The proxy: saved, applied at once, and checked through settings not saved yet.
+                    builder.AddNetworkService(options.Network is { Sandboxed: false } ownedNetwork
+                        ? new NetworkService(catalog, ownedNetwork, epoch) { SecretChanged = () => host.AgentHub.SecretMasker?.Refresh() }
+                        : new NetworkService());
                     // The window can always answer a request: the setting changes while the host runs, and a send
                     // started with it on goes on asking after it is turned off.
                     builder.AddBootService(new BootService(epoch, commandReview: true, options.EnableOwnedUserInput, options.Developer)
@@ -1739,6 +1753,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             builder.AddGlobalConfigService(new GlobalConfigService());
             builder.AddStorageService(new StorageService());
+            builder.AddNetworkService(new NetworkService());
             builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddProviderUsageService(new ProviderUsageService());
             builder.AddManagedPolicyService(new ManagedPolicyService());

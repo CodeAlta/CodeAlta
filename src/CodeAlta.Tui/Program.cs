@@ -347,6 +347,8 @@ internal partial class Program
 
     internal static int RunAdmittedStartup(string[] args, int mainThreadId, StartupOwner owner)
     {
+        // The proxy of [network.proxy] before any HTTP client sends, and in the environment of every program started.
+        CodeAltaNetwork.Start(CodeAltaInstanceProfile.FromArguments(args).GlobalRoot);
         // The traces of the runs go to the OpenTelemetry collector the environment names, if any: the end sends the last ones.
         using var telemetry = CodeAltaTelemetry.StartFromEnvironment("altatui");
         try
