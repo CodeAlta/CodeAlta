@@ -472,7 +472,8 @@ public sealed class ModelsDevCatalogTests
             TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
         Assert.IsTrue(updated);
-        Assert.IsTrue(File.Exists(Path.Combine(temp.Path, "models_dev_db.json")));
+        // The new snapshot is published before its cache is written: under load the file comes a moment later.
+        Assert.IsTrue(await WaitUntilAsync(() => File.Exists(Path.Combine(temp.Path, "models_dev_db.json")), TimeSpan.FromSeconds(5)).ConfigureAwait(false));
         Assert.IsTrue(catalog.TryGetModel("openai", "gpt-5-test", out var refreshedModel));
         Assert.AreEqual("GPT 5 Test Refreshed", refreshedModel.Name);
     }
