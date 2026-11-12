@@ -196,6 +196,10 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private readonly List<PendingSecretUse> _pending = [];
     // What waits for the answer of the user to a pending use, by secret (upper case) and use.
     private readonly Dictionary<(string Name, string Use), List<ConfirmationWaiter>> _waiters = [];
+    // How many times a use was denied or stopped waiting, by secret (upper case) and use, and every use of a secret at once: what
+    // a verification that runs meanwhile compares, so that it never gives what the user denied.
+    private readonly Dictionary<(string Name, string Use), long> _refusals = [];
+    private readonly Dictionary<string, long> _refusedUses = new(StringComparer.Ordinal);
     private readonly LinkedList<SecretUseRecord> _uses = new();
     private readonly HashSet<string> _unlockedAtStart = new(StringComparer.Ordinal);
     // When an agent last had an unlock of a provider dismissed: it does not ask again for a while.
@@ -715,7 +719,8 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
     /// <summary>
     /// Confirms a use of a secret that asks before use: the system verifies the user, and the confirmation lasts as long as the
-    /// secret says. A use nobody asked yet can be confirmed ahead.
+    /// secret says. A use nobody asked yet can be confirmed ahead. A use denied (<see cref="Decline"/>) or stopped waiting while the
+    /// system verifies the user is not confirmed: the verification ends <see cref="UserPresenceResult.Canceled"/>.
     /// </summary>
     /// <param name="name">The secret.</param>
     /// <param name="use">What will use it; null for a use nobody names.</param>
@@ -726,6 +731,9 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         ArgumentNullException.ThrowIfNull(name);
         if (_options.Verifier is not { } verifier || !CanPrompt) return UserPresenceResult.Unavailable;
         var duration = SafeAskBeforeUse(name) ?? SecretAskDurations.FifteenMinutes;
+        var key = KeyOf(name, use);
+        (long Use, long Uses) refusals;
+        lock (_gate) refusals = RefusalsOf(key);
         var result = await verifier.VerifyAsync($"Use the secret {name}{(use is null ? string.Empty : $" for the {use}")}?", cancellationToken).ConfigureAwait(false);
         if (result == UserPresenceResult.Verified)
         {
@@ -733,6 +741,9 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             List<ConfirmationWaiter>? waiters;
             lock (_gate)
             {
+                // The use was denied, or stopped waiting, while the system verified the user: that answer stands, and this verification
+                // gives nothing. The user confirms again a use that asks again.
+                if (RefusalsOf(key) != refusals) return UserPresenceResult.Canceled;
                 var time = SecretAskDurations.TimeOf(duration);
                 _grants[KeyOf(name, use)] = time is null ? null : time == TimeSpan.Zero ? DateTimeOffset.MinValue : now + time.Value;
                 _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
@@ -802,6 +813,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                 {
                     _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
                     Record(name, use, "expired");
+                    Refuse(key);
                 }
             }
 
@@ -828,6 +840,8 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && (use is null || pending.Use == use));
             Record(name, use, "refused");
             var upper = name.ToUpperInvariant();
+            if (use is null) _refusedUses[upper] = _refusedUses.GetValueOrDefault(upper) + 1;
+            else Refuse(KeyOf(name, use));
             foreach (var key in _waiters.Keys.Where(key => key.Name == upper && (use is null || key.Use == use)).ToArray())
             {
                 declined.AddRange(_waiters[key]);
@@ -956,6 +970,14 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     // Under the gate: whether a use is confirmed now, without taking a confirmation of each use.
     private bool HasGrant((string Name, string Use) key)
         => _grants.TryGetValue(key, out var until) && (until is null || until == DateTimeOffset.MinValue || until > _options.Time.GetUtcNow());
+
+    // Under the gate: how many times a use was denied or stopped waiting, alone and with every use of its secret. A verification that
+    // started before one more is given nothing.
+    private (long Use, long Uses) RefusalsOf((string Name, string Use) key)
+        => (_refusals.GetValueOrDefault(key), _refusedUses.GetValueOrDefault(key.Name));
+
+    // Under the gate: a use was denied or stopped waiting.
+    private void Refuse((string Name, string Use) key) => _refusals[key] = _refusals.GetValueOrDefault(key) + 1;
 
     // Under the gate: one waiter stops waiting; true when nothing waits for that use any more.
     private bool Forget((string Name, string Use) key, ConfirmationWaiter waiter)

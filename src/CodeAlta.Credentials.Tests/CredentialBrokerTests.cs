@@ -295,6 +295,63 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task A_use_denied_while_the_system_verifies_the_user_is_not_confirmed_by_that_verification()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.FifteenMinutes);
+        var verifier = new HeldVerifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        broker.AuthorizeUse("LOCAL", "shell of the session s1");
+        var waiting = broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromMinutes(2));
+
+        // Confirm… in one window, Deny in another while Touch ID is shown.
+        var confirming = broker.ConfirmAsync("LOCAL", "shell of the session s1");
+        await verifier.Asked.Task.WithinAsync(TestTime.Seconds(30));
+        broker.Decline("LOCAL", "shell of the session s1");
+        Assert.AreEqual(SecretConfirmationOutcome.Declined, await waiting.WithinAsync(TestTime.Seconds(30)));
+        verifier.Answer.SetResult(UserPresenceResult.Verified);
+
+        Assert.AreEqual(UserPresenceResult.Canceled, await confirming.WithinAsync(TestTime.Seconds(30)));
+        StringAssert.Contains(broker.AuthorizeUse("LOCAL", "shell of the session s1"), "asks before use", "the denial stands");
+        Assert.IsFalse(broker.ListUses().Any(static use => use.Outcome == "confirmed"));
+
+        // Denying every use of the secret stands the same way; a verification that starts after a denial confirms.
+        verifier.Reset();
+        confirming = broker.ConfirmAsync("LOCAL", "shell of the session s1");
+        await verifier.Asked.Task.WithinAsync(TestTime.Seconds(30));
+        broker.Decline("LOCAL", null);
+        verifier.Answer.SetResult(UserPresenceResult.Verified);
+        Assert.AreEqual(UserPresenceResult.Canceled, await confirming.WithinAsync(TestTime.Seconds(30)));
+        verifier.Reset();
+        verifier.Answer.SetResult(UserPresenceResult.Verified);
+        Assert.AreEqual(UserPresenceResult.Verified, await broker.ConfirmAsync("LOCAL", "shell of the session s1").WithinAsync(TestTime.Seconds(30)));
+        Assert.IsNull(broker.AuthorizeUse("LOCAL", "shell of the session s1"));
+    }
+
+    [TestMethod]
+    public async Task A_use_that_stopped_waiting_while_the_system_verifies_the_user_is_not_confirmed_by_that_verification()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.FifteenMinutes);
+        var verifier = new HeldVerifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        broker.AuthorizeUse("LOCAL", "shell of the session s1");
+        var waiting = broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromMilliseconds(300));
+
+        var confirming = broker.ConfirmAsync("LOCAL", "shell of the session s1");
+        await verifier.Asked.Task.WithinAsync(TestTime.Seconds(30));
+        Assert.AreEqual(SecretConfirmationOutcome.TimedOut, await waiting.WithinAsync(TestTime.Seconds(30)));
+        verifier.Answer.SetResult(UserPresenceResult.Verified);
+
+        Assert.AreEqual(UserPresenceResult.Canceled, await confirming.WithinAsync(TestTime.Seconds(30)));
+        StringAssert.Contains(broker.AuthorizeUse("LOCAL", "shell of the session s1"), "asks before use", "the shell started without it, and the next start asks again");
+    }
+
+    [TestMethod]
     public async Task Nothing_waits_for_a_confirmation_where_nobody_can_answer()
     {
         using var vault = new FakeVault();
@@ -343,6 +400,29 @@ public sealed class CredentialBrokerTests
         StringAssert.Contains(File.ReadAllText(vault.ConfigPath), "# mine");
         Assert.IsTrue(settings.Remove("team"));
         Assert.IsEmpty(settings.Load(out _));
+    }
+
+    // A verification that waits for the test: the system prompt is shown until the test answers it.
+    private sealed class HeldVerifier : IUserPresenceVerifier
+    {
+        public TaskCompletionSource Asked { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<UserPresenceResult> Answer { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Reset()
+        {
+            Asked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public ValueTask<UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken) => ValueTask.FromResult(new UserPresenceAvailability(true, null));
+
+        public async ValueTask<UserPresenceResult> VerifyAsync(string message, CancellationToken cancellationToken)
+        {
+            var answer = Answer;
+            Asked.TrySetResult();
+            return await answer.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private sealed class Verifier : IUserPresenceVerifier
