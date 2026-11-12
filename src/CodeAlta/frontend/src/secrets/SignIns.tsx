@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Button, Card, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, NonIdealState, Tag, TextArea } from "@blueprintjs/core";
-import type { CredentialBrowseResult, CredentialProviderRpcView, CredentialTypeView, SignInView } from "#neoastra";
+import type { CredentialProviderRpcView, CredentialTypeView, SignInView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
 import { useShellLanguage } from "../shellLanguage";
 import { CredentialIcon } from "./CredentialIcon";
 import { signInDraftProblem, siteList, type SignInDraft } from "./credentials";
-import { VaultBrowser } from "./VaultPicker";
+import { VaultBrowser, type BrowseVault } from "./VaultPicker";
 
 type Result = Promise<{ status: string; message?: string | null }>;
 
@@ -15,7 +15,7 @@ export type SignInActions = Readonly<{
   save: (draft: SignInDraft) => Result;
   remove: (id: string) => Result;
   revoke: (id: string, origin: string) => Result;
-  browse: (provider: string, parent: string | null) => Promise<CredentialBrowseResult>;
+  browse: BrowseVault;
 }>;
 
 /**
@@ -84,7 +84,7 @@ type Slot = "username" | "password" | "totp";
 /** Adds or changes a sign-in: its name, its vault, its sites, and the items of the vault picked for each field. */
 function SignInDialog({ editing, providers, types, busy, browse, onSave, onClose }: {
   editing: SignInView | null; providers: readonly CredentialProviderRpcView[]; types: readonly CredentialTypeView[]; busy: boolean;
-  browse: (provider: string, parent: string | null) => Promise<CredentialBrowseResult>; onSave: (draft: SignInDraft) => Promise<boolean>; onClose: () => void;
+  browse: BrowseVault; onSave: (draft: SignInDraft) => Promise<boolean>; onClose: () => void;
 }) {
   const { t } = useShellLanguage();
   const [label, setLabel] = useState(editing?.label ?? "");

@@ -7,6 +7,12 @@ import { CredentialIcon } from "./CredentialIcon";
 import { isSecretName, secretNameProblem } from "./secrets";
 import { matchesQuery, pickedLabel, suggestedSecretName } from "./credentials";
 
+/**
+ * Lists the entries of a vault: the top with a null parent. The signal aborts the call when the picker closes or leaves the level, so
+ * that a call still queued for the vault never runs and a vault program still running (a sync of Bitwarden) is stopped.
+ */
+export type BrowseVault = (provider: string, parent: string | null, signal?: AbortSignal) => Promise<CredentialBrowseResult>;
+
 /** What the dialog binds. */
 export type VaultBinding = Readonly<{ name: string; provider: string; reference: string; label: string; replaceLocal: boolean }>;
 
@@ -18,7 +24,7 @@ export type VaultBinding = Readonly<{ name: string; provider: string; reference:
 export function VaultBindingDialog({ providers, types, names, localNames, initialName, nameEditable = false, initialProvider, busy, browse, onBind, onClose }: {
   providers: readonly CredentialProviderRpcView[]; types: readonly CredentialTypeView[]; names: readonly string[]; localNames: readonly string[];
   initialName?: string; nameEditable?: boolean; initialProvider?: string; busy: boolean;
-  browse: (provider: string, parent: string | null) => Promise<CredentialBrowseResult>;
+  browse: BrowseVault;
   onBind: (binding: VaultBinding) => Promise<boolean>; onClose: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -84,7 +90,7 @@ type Shown = Readonly<{ entry: CredentialEntryView; folder: Step | null }>;
  * without knowing where it is. A field is picked by a click; the one hidden field of an item is picked when the item opens.
  */
 export function VaultBrowser({ provider, hint, browse, picked, onPick, typed, onType, typedInput = true, autoPick = true, autoFocus = false }: {
-  provider: CredentialProviderRpcView; hint: string | null; browse: (provider: string, parent: string | null) => Promise<CredentialBrowseResult>;
+  provider: CredentialProviderRpcView; hint: string | null; browse: BrowseVault;
   picked: { reference: string; label: string } | null; onPick: (pick: { reference: string; label: string } | null) => void; typed: string; onType: (text: string) => void;
   typedInput?: boolean; autoPick?: boolean; autoFocus?: boolean;
 }) {
@@ -99,20 +105,26 @@ export function VaultBrowser({ provider, hint, browse, picked, onPick, typed, on
   const parent = trail.at(-1)?.id ?? null;
   useEffect(() => {
     let alive = true;
+    const abort = new AbortController();
     setLoading(true);
-    browse(provider.id, parent).then(result => { if (alive) setPage(result); })
+    browse(provider.id, parent, abort.signal).then(result => { if (alive) setPage(result); })
       .catch(() => { if (alive) setPage({ status: "failed", message: null, path: null, entries: [] }); })
       .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    // Closed, or another level opened: what this level asked is no longer wanted.
+    return () => { alive = false; abort.abort(); };
   }, [provider.id, parent, browse]);
   const searching = query.trim().length > 0;
   const folders = useMemo(() => parent === null && page?.status === "ok" ? page.entries.filter(entry => entry.kind === "folder") : [], [parent, page]);
-  // The folders asked for once, and whether the browser is still shown: a read that ends later is kept only then.
+  // The folders asked for once, and whether the browser is still shown: a read that ends later is kept only then, and a read
+  // still queued when it closes is aborted.
   const asked = useRef(new Set<string>());
   const shownNow = useRef(true);
+  const reading = useRef<AbortController | null>(null);
   useEffect(() => {
+    const abort = new AbortController();
+    reading.current = abort;
     shownNow.current = true;
-    return () => { shownNow.current = false; };
+    return () => { shownNow.current = false; abort.abort(); };
   }, []);
   // A search at the top reads the folders it has not read yet; a folder that cannot be read is left out.
   useEffect(() => {
@@ -121,7 +133,7 @@ export function VaultBrowser({ provider, hint, browse, picked, onPick, typed, on
       if (asked.current.has(folder.id)) continue;
       asked.current.add(folder.id);
       setInside(current => new Map(current).set(folder.id, null));
-      browse(provider.id, folder.id).then(result => result.status === "ok" ? result.entries : [], () => [] as CredentialEntryView[])
+      browse(provider.id, folder.id, reading.current?.signal).then(result => result.status === "ok" ? result.entries : [], () => [] as CredentialEntryView[])
         .then(entries => { if (shownNow.current) setInside(current => new Map(current).set(folder.id, entries)); });
     }
   }, [searching, folders, browse, provider.id]);

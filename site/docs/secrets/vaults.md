@@ -105,6 +105,8 @@ The kind **Bitwarden** reads Bitwarden, or a Vaultwarden server, through its com
 2. Sign in once in a terminal with `bw login`; for Vaultwarden or a server of your own, first `bw config server https://vault.example.com`.
 3. Add the provider. **Unlock** asks your master password in a field of the page, gives it to `bw unlock`, and keeps the session key it answers in memory only, until CodeAlta closes or you click **Lock**.
 
+Each time the picker opens, it syncs `bw` first, so an item you just added in the Bitwarden app or the web vault is listed; offline, it lists what `bw` already has.
+
 A reference is the id of the item and its field: `<item id>/password`, `<item id>/username`, `<item id>/totp` for its one-time code, `<item id>/notes`, `<item id>/uri`, or `<item id>/field:<name>` for a custom field.
 
 **Bitwarden Secrets Manager**, for the secrets of machines, reads through `bws` with an access token, set as a secret of this computer in **Access token**. A reference is the id of the secret. It needs no unlock.

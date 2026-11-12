@@ -19,6 +19,10 @@ const command: CredentialTypeView = {
   referenceHint: "item#field", unlockAsksPassword: false, builtIn: true,
   settings: [{ key: "read", label: "Command that prints a secret", kind: "list", description: null, placeholder: "pass-cli item view {ref}", required: true }],
 };
+const bitwarden: CredentialTypeView = {
+  type: "bitwarden", displayName: "Bitwarden", description: "Reads items of Bitwarden or Vaultwarden through the bw CLI.", icon: "bitwarden", iconSvg: null,
+  website: "https://bitwarden.com/help/cli/", referenceHint: "<item id>/password", unlockAsksPassword: true, builtIn: true, settings: [],
+};
 const provider = (id: string, type: CredentialTypeView, state: string, extra: Partial<CredentialProviderRpcView> = {}): CredentialProviderRpcView => ({
   id, type: type.type, displayName: type.displayName, state, message: null, typeName: type.displayName, icon: type.icon, account: null, programPath: null,
   signInCommand: null, installCommand: null, installPage: null, cache: "session", unlockAtStart: true, unlockAsksPassword: false, secrets: 1, held: 0, unlocked: false, settings: [], ...extra,
@@ -42,8 +46,9 @@ const listing: SecretsList = {
   providers: [
     provider("personal", onePassword, "locked", { account: "my.1password.com", message: "Unlock to let the 1Password app authorize CodeAlta." }),
     provider("team", command, "ready", { held: 1 }),
+    provider("vault", bitwarden, "ready", { unlockAsksPassword: true, unlocked: true }),
   ],
-  types: [onePassword, command],
+  types: [onePassword, command, bitwarden],
   pending: [{ name: "ANTHROPIC_API_KEY_FOR_THE_PLATFORM_TEAM_AND_ITS_AUTOMATIONS", use: "provider anthropic", at: "2026-11-12T09:05:00Z" }],
   uses: [{ name: "DEPLOY_TOKEN", use: "MCP server deploy", at: "2026-11-12T09:04:00Z", outcome: "given" }],
   verification: { available: true, reason: null },
@@ -56,16 +61,36 @@ const listing: SecretsList = {
     grants: [{ origin: "https://github.com", until: "2026-12-12T09:00:00Z" }] }],
 };
 const ok = async () => ({ status: "ok", message: null });
+// Each browse the page asked, and whether its signal aborted it; `slow` keeps a browse waiting, as a vault program that queues.
+const browses: { id: string; parent: string | null; aborted: boolean }[] = [];
+const control = { slow: false };
 const api = {
   list: async () => listing, setSecret: ok, rotateSecret: ok, deleteSecret: ok, setVariable: ok, deleteVariable: ok,
   saveProvider: async () => ({ status: "ok", message: null, provider: null }), removeProvider: async () => ({ status: "ok", message: null, provider: null }),
   unlockProvider: async () => ({ status: "ok", message: null, provider: null }), lockProvider: async () => ({ status: "ok", message: null, provider: null }),
   testProvider: async () => ({ status: "ok", message: null, provider: null }),
-  // Two vaults of 1Password: the search at the top finds an item in either, and an item lists its fields.
-  browse: async ({ parent }: { parent: string | null }) => {
+  // Two vaults of 1Password: the search at the top finds an item in either, and an item lists its fields. Bitwarden lists its items
+  // at the top, each a folder of fields, as BitwardenProvider does.
+  browse: async ({ id, parent }: { id: string; parent: string | null }, options?: { signal?: AbortSignal }) => {
+    const call = { id, parent, aborted: false };
+    browses.push(call);
+    options?.signal?.addEventListener("abort", () => { call.aborted = true; });
+    if (control.slow) {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 60_000);
+        options?.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); });
+      });
+    }
     const folder = (id: string, label: string, detail: string | null = null) => ({ id, label, kind: "folder", reference: null, detail });
     const field = (id: string, reference: string, detail: string | null) => ({ id, label: id, kind: "field", reference, detail });
     const page = (path: string | null, entries: ReturnType<typeof folder | typeof field>[]) => ({ status: "ok", message: null, path, entries });
+    if (id === "vault") {
+      switch (parent) {
+        case null: return page(null, [folder("item:b1", "GitHub", "login"), folder("item:b2", "Server notes", "note")]);
+        case "item:b1": return page("GitHub", [field("username", "b1/username", null), field("password", "b1/password", "concealed")]);
+        default: return page(null, []);
+      }
+    }
     switch (parent) {
       case null: return page(null, [folder("vault:v1:Private", "Private"), folder("vault:v2:Work", "Work")]);
       case "vault:v1:Private": return page("Private", [folder("item:v1:i1", "Anthropic", "api credential"), folder("item:v1:i2", "GitHub", "login")]);
@@ -83,7 +108,7 @@ const api = {
 // The width of the page of the Settings window: about 1250 CSS pixels in a window of 1600, about 430 in one of 900.
 function Fixture() {
   const [width, setWidth] = useState(1250);
-  Object.assign(window, { secretsFixture: { setWidth } });
+  Object.assign(window, { secretsFixture: { setWidth, browses, control } });
   return <div className="ide-shell settings-dialog-content" style={{ padding: 12, width, boxSizing: "border-box" }}>
     <SecretsSettings epoch="12345678-1234-1234-1234-123456789abc" api={api} />
   </div>;

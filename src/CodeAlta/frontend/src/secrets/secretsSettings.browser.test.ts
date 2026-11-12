@@ -67,3 +67,17 @@ test("a vault item is found by its name in any vault, its hidden field is picked
       assert.deepEqual(page.problems, []);
     }, options);
   });
+
+test("a picker closed while its vault is still listing aborts the call, so that nothing stays queued for the vault", { skip: !edge, timeout: testLimit(90_000) },
+  async () => {
+    await withCanvas(async page => {
+      await page.until(`document.querySelectorAll(".secret-row").length > 0`, "the secrets");
+      await page.evaluate(`window.secretsFixture.control.slow = true`);
+      await page.clickText(".secrets-settings button", "Add from a vault…");
+      await page.until(`window.secretsFixture.browses.some(call => call.parent === null)`, "the top of the vault asked");
+      await page.clickText(".vault-binding-dialog .bp6-dialog-footer button", "Cancel");
+      await page.until(`!document.querySelector(".vault-binding-dialog")`, "the picker closed");
+      await page.until(`window.secretsFixture.browses.filter(call => call.parent === null).every(call => call.aborted)`, "the list it asked is aborted");
+      assert.deepEqual(page.problems, []);
+    }, options);
+  });

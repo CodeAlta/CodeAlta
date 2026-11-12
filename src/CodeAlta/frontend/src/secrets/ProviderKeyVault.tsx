@@ -27,7 +27,7 @@ export function ProviderKeyVault({ epoch, provider, disabled, onUse, api = secre
     api.list({ expectedEpoch: epoch }).then(value => { if (alive && value.status === "ok") setListing(value); }).catch(() => { });
     return () => { alive = false; };
   }, [api, epoch, provider.apiKeySecret]);
-  const browse = useCallback((id: string, parent: string | null) => api.browse({ expectedEpoch: epoch, id, parent }), [api, epoch]);
+  const browse = useCallback((id: string, parent: string | null, signal?: AbortSignal) => api.browse({ expectedEpoch: epoch, id, parent }, { signal }), [api, epoch]);
   if (!listing || listing.providers.length === 0) return null;
   const secret = provider.apiKeySecret ? listing.secrets.find(item => item.name.toLowerCase() === provider.apiKeySecret!.toLowerCase()) : null;
   const state = secret ? stateLabel(secret.state) : null;
