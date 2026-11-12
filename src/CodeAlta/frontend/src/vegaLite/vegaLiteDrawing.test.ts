@@ -136,3 +136,25 @@ test("ordinary charts stay within the limits: many rows, folds, sequences of tim
     mark: "line", encoding: { x: { field: "day", type: "temporal", axis: { tickCount: { interval: "week", step: 1 } } }, y: { aggregate: "mean", field: "value" }, color: { field: "key" } } }));
   assert.match(svg, /^<svg/u);
 });
+
+test("the views of a chart of several views (facets, a repetition, a concatenation) are half as large as a chart of one view", async () => {
+  const view = { view: { continuousWidth: 440, continuousHeight: 260, discreteWidth: 440 } };
+  const sized = (spec: Record<string, unknown>) => drawChart({ spec, files: {}, config: { ...config, ...view }, width: 500 })
+    .then(svg => Number(/^<svg[^>]*\swidth="([\d.]+)"/u.exec(svg)?.[1]));
+  const values = ["a", "b", "c"].flatMap(group => ["x", "y"].map((name, index) => ({ group, name, n: index + 1, m: index + 2, k: index + 3 })));
+  const bars = { mark: "bar", encoding: { x: { field: "name", type: "nominal" }, y: { field: "n", type: "quantitative" } } };
+  const one = await sized({ data: { values }, ...bars });
+  assert.ok(one >= 440, `one view takes the width of a chart: ${one}`);
+  const several = [
+    { data: { values }, facet: { column: { field: "group" } }, spec: bars },
+    { data: { values }, mark: "bar", encoding: { ...bars.encoding, column: { field: "group" } } },
+    { data: { values }, hconcat: [bars, bars, bars] },
+    { data: { values }, repeat: { column: ["n", "m", "k"] }, spec: { mark: "bar", encoding: { x: { field: "name", type: "nominal" }, y: { field: { repeat: "column" }, type: "quantitative" } } } },
+  ];
+  for (const spec of several) {
+    const width = await sized(spec);
+    assert.ok(width > 3 * 220 && width < 3 * 330, `three views of about 220 pixels: ${width} for ${Object.keys(spec).join(",")}`);
+  }
+  // A spec that says its own sizes keeps them.
+  assert.ok(await sized({ data: { values }, facet: { column: { field: "group" } }, spec: { ...bars, width: 400 } }) > 3 * 400);
+});

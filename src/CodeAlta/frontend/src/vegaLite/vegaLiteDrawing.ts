@@ -304,6 +304,24 @@ export function secureVega() {
   guard(transforms, "datajoin", (_, rows, budget) => charge(budget, rows.length, "more marks"));
 }
 
+/** Whether a spec draws several views side by side: facets, a repetition or a concatenation. */
+export function hasSeveralViews(spec: Readonly<Record<string, unknown>>): boolean {
+  if (["facet", "repeat", "concat", "hconcat", "vconcat"].some(name => name in spec)) return true;
+  const encoding = spec.encoding;
+  return !!encoding && typeof encoding === "object" && ["facet", "row", "column"].some(name => name in encoding);
+}
+
+// The configuration of the window for a chart of several views: each view is half as large as a chart of one view, so that
+// three of them are about as wide as a block and their text keeps its size. A size the spec says is kept.
+function configOf(job: ChartJob): Readonly<Record<string, unknown>> {
+  const view = job.config.view;
+  if (!hasSeveralViews(job.spec) || !view || typeof view !== "object") return job.config;
+  const half = (value: unknown) => typeof value === "number" ? Math.round(value / 2) : value;
+  const sizes = view as Record<string, unknown>;
+  return { ...job.config, view: { ...sizes, continuousWidth: half(sizes.continuousWidth), continuousHeight: half(sizes.continuousHeight),
+    discreteWidth: half(sizes.discreteWidth), discreteHeight: half(sizes.discreteHeight) } };
+}
+
 /**
  * Draws a chart as an SVG string, headless: Vega-Lite compiles the spec, and Vega runs its expressions through an
  * interpreter (no `eval`, no `new Function`), within the budget of the chart ({@link secureVega}), with a loader that reads
@@ -315,7 +333,7 @@ export async function drawChart(job: ChartJob): Promise<string> {
   if (sized.height === "container") sized.height = Math.round(job.width * 0.6);
   const spec = inlineData(sized, job.files) as unknown as TopLevelSpec;
   const quiet = logger(0);
-  const compiled = compile(spec, { config: job.config as never, logger: quiet as never }).spec;
+  const compiled = compile(spec, { config: configOf(job) as never, logger: quiet as never }).spec;
   // What the dataflow refuses (a value that cannot be parsed, an expression that fails, a limit) is said, not drawn half.
   let failure: unknown = null;
   const capture = logger(1);
