@@ -154,8 +154,9 @@ public sealed class NodeManagementCommandTests
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         File.WriteAllText(log, "first\n");
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
-        var output = new StringWriter();
-        var command = new NodeLogCommand(TextWriter.Synchronized(output), TextWriter.Null) { Stop = stop.Token, PollInterval = TimeSpan.FromMilliseconds(20) };
+        // The command writes from its own thread while the test reads what it wrote: both go through one lock.
+        var output = new LockedWriter();
+        var command = new NodeLogCommand(output, TextWriter.Null) { Stop = stop.Token, PollInterval = TimeSpan.FromMilliseconds(20) };
         var options = new NodeLogOptions { Follow = true };
         options.Profile.DataRoot = root.DataRoot;
         var following = command.RunAsync(options).AsTask();
@@ -187,6 +188,36 @@ public sealed class NodeManagementCommandTests
         Assert.AreEqual("", NodeLogCommand.Tail(stream, 0));
         using var unterminated = new MemoryStream(Encoding.UTF8.GetBytes("a\nb\nc"));
         Assert.AreEqual("b\nc", NodeLogCommand.Tail(unterminated, 2));
+    }
+
+    // A writer whose text can be read while another thread writes to it: TextWriter.Synchronized locks the writes only, and a
+    // StringBuilder read during a write can throw.
+    private sealed class LockedWriter : TextWriter
+    {
+        private readonly Lock _gate = new();
+        private readonly StringBuilder _text = new();
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void Write(char value)
+        {
+            lock (_gate) _text.Append(value);
+        }
+
+        public override void Write(char[] buffer, int index, int count)
+        {
+            lock (_gate) _text.Append(buffer, index, count);
+        }
+
+        public override void Write(string? value)
+        {
+            lock (_gate) _text.Append(value);
+        }
+
+        public override string ToString()
+        {
+            lock (_gate) return _text.ToString();
+        }
     }
 
     private async Task WaitForAsync(Func<bool> condition)
