@@ -165,6 +165,7 @@ public static partial class ChartDataFiles
     }
 
     // A fenced block of a chart: its fence (``` or ~~~, three or more), the language, its body, and the same fence to close it.
-    [GeneratedRegex(@"^[ ]{0,3}(?<fence>`{3,}|~{3,})[ \t]*vega-?lite[ \t]*\r?\n(?<body>.*?)\r?\n[ ]{0,3}\k<fence>[`~]*[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    // The end of a line is before a line feed only: the carriage return of a text written on Windows is taken before it.
+    [GeneratedRegex(@"^[ ]{0,3}(?<fence>`{3,}|~{3,})[ \t]*vega-?lite[ \t]*\r?\n(?<body>.*?)\r?\n[ ]{0,3}\k<fence>[`~]*[ \t]*\r?$",RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ChartBlock();
 }

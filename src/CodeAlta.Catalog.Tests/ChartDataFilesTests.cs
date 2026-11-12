@@ -115,7 +115,9 @@ public sealed class ChartDataFilesTests
             { not json "data": { "url": "broken.csv" } }
             ```
             """;
-        CollectionAssert.AreEqual(new[] { "out/a.csv", "out/b.tsv", "names.json" }, ChartDataFiles.NamedIn(text).ToArray());
+        // Whatever ends its lines: a message written on Windows names the same files.
+        foreach (var ending in new[] { "\n", "\r\n" })
+            CollectionAssert.AreEqual(new[] { "out/a.csv", "out/b.tsv", "names.json" }, ChartDataFiles.NamedIn(text.ReplaceLineEndings(ending)).ToArray(), ending == "\n" ? "LF" : "CRLF");
         Assert.AreEqual(0, ChartDataFiles.NamedIn(null).Count);
         Assert.AreEqual(0, ChartDataFiles.NamedIn("out/a.csv").Count);
     }
