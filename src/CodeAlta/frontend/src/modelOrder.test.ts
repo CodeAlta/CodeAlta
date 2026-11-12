@@ -41,3 +41,10 @@ test("a provider in its own order keeps it: only the orders by name are sorted b
     assert.deepEqual(other.map(m => m.id), ["claude-opus-4-1", "gpt-5"]);
   }
 });
+
+test("Codex CLI version order puts older GPT versions under Other models", () => {
+  const models = ["gpt-5.6-terra", "gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"].map(id => ({ id }));
+  const { frontier, other } = sectionModels(models, "name_version");
+  assert.deepEqual(frontier.map(model => model.id), ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-luna"]);
+  assert.deepEqual(other.map(model => model.id), ["gpt-6-sol", "gpt-5.6-terra"]);
+});

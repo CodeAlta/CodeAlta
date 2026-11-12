@@ -53,6 +53,7 @@ public sealed class CodexCliPlugin : PluginBase
             ProviderType = CodexCliSettings.ProviderType,
             DisplayName = "Codex CLI",
             Tag = "Codex",
+            ModelOrder = ModelOrder.NameVersion,
             PermissionModes = CodexCliSession.PermissionModes,
             Settings =
             [
