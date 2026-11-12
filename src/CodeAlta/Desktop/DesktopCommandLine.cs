@@ -56,6 +56,18 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
 
     /// <summary>The spaces the folders of <see cref="Projects"/> join (<c>--space</c>): ids, starts of ids or names. Empty for none.</summary>
     internal IReadOnlyList<string> Spaces { get; init; } = [];
+
+    /// <summary>
+    /// The folder of a separate profile (<c>--profile</c>, <c>CODEALTA_HOME</c>), as a full path: its own configuration,
+    /// sessions and window data, in place of <c>~/.alta</c>. Null for the profile of the user.
+    /// </summary>
+    internal string? Profile { get; init; }
+
+    /// <summary>
+    /// The root of the entry of the desktop (the shortcut, the application of macOS), which is one for the computer: the
+    /// data root of the normal instance, also for a separate profile. Null for <see cref="DataRoot"/>.
+    /// </summary>
+    internal string? IntegrationRoot { get; init; }
 }
 internal sealed record OwnedDesktopRoots(string Project, string? Home, string? Instructions, string? Builtin);
 
@@ -76,6 +88,15 @@ internal static class DesktopCommandLine
     /// <summary>Names a space the folders given join.</summary>
     internal const string SpaceOption = "--space";
 
+    /// <summary>Names the folder of a separate profile, in place of <c>~/.alta</c>.</summary>
+    internal const string ProfileOption = "--profile";
+
+    /// <summary>The environment variable that does what <see cref="ProfileOption"/> does, as for <c>altacli</c>.</summary>
+    internal const string HomeVariable = "CODEALTA_HOME";
+
+    /// <summary>The folder of a separate profile that holds the data of the window (the web view, its logs), in place of the local application data.</summary>
+    internal const string ProfileDataFolder = "desktop";
+
     /// <summary>Says that another program started the application and exits it (see <see cref="DesktopLaunchOptions.Automated"/>).</summary>
     internal const string AutomatedOption = "--automated";
 
@@ -95,6 +116,7 @@ internal static class DesktopCommandLine
           alta <folder>...    Add the folders as projects and show the first one.
           alta . --space <s>  Add the current folder as a project and put it in a space.
           alta --dev          Start the developer instance beside the normal one.
+          alta --profile <f>  Use the profile in the folder <f> instead of ~/.alta.
           alta --wait         Start it and keep the terminal until it exits.
           alta --exit         Ask the running CodeAlta Desktop to exit.
           alta --version      Print the version.
@@ -115,6 +137,12 @@ internal static class DesktopCommandLine
 
         --dev runs a second instance on the same profile. It shares configuration, providers,
         credentials, prompts, skills and projects, and keeps its own sessions under ~/.alta/dev.
+
+        --profile <folder>, or the CODEALTA_HOME environment variable, runs CodeAlta Desktop on a
+        separate profile in that folder, created when missing: its own configuration, providers,
+        credentials, sessions and projects, and the data of its window in its desktop folder. It
+        runs beside an instance on another profile, and the sessions it starts get CODEALTA_HOME,
+        so that altacli uses the same profile. It does not combine with --dev.
 
         --exit asks first when files have unsaved edits or sessions are running. Use
         alta --dev --exit for the developer instance. Exit before updating with
@@ -166,13 +194,15 @@ internal static class DesktopCommandLine
 
         try
         {
-            if (!TryParse(args, Directory.Exists, File.Exists, out var options, out var message))
+            if (!TryParse(args, Directory.Exists, File.Exists, Environment.GetEnvironmentVariable(HomeVariable), out var options, out var message))
             {
                 error.WriteLine(message);
                 return 2;
             }
 
             if (IsAutomated(Environment.GetEnvironmentVariable(AutomatedVariable))) options = options! with { Automated = true };
+            // What the sessions start (altacli, a terminal, the plugins) uses the same profile.
+            if (options!.Profile is { } profile) Environment.SetEnvironmentVariable(HomeVariable, profile);
             // Admission grants only desktop-owned browser storage and opt-in cache writes in a trusted copy.
             return startNative(options!);
         }
@@ -196,6 +226,11 @@ internal static class DesktopCommandLine
     // Mandatory CLI seam. Tests supply existence facts without opening any storage or native services.
     internal static bool TryParse(string[] args, Func<string, bool> directoryExists, Func<string, bool> fileExists,
         out DesktopLaunchOptions? options, out string? error)
+        => TryParse(args, directoryExists, fileExists, home: null, out options, out error);
+
+    // home: the value of CODEALTA_HOME, the profile of a start that names none with --profile.
+    internal static bool TryParse(string[] args, Func<string, bool> directoryExists, Func<string, bool> fileExists, string? home,
+        out DesktopLaunchOptions? options, out string? error)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(directoryExists);
@@ -208,12 +243,12 @@ internal static class DesktopCommandLine
         var automated = args.Take(end < 0 ? args.Length : end).Count(static arg => arg == AutomatedOption);
         if (automated > 1) return false;
         if (automated == 1) args = [.. args.Where((arg, index) => arg != AutomatedOption || (end >= 0 && index > end))];
-        if (!TryParseStart(args, directoryExists, fileExists, out options, out error)) return false;
+        if (!TryParseStart(args, directoryExists, fileExists, home, out options, out error)) return false;
         if (automated == 1) options = options! with { Automated = true };
         return true;
     }
 
-    private static bool TryParseStart(string[] args, Func<string, bool> directoryExists, Func<string, bool> fileExists,
+    private static bool TryParseStart(string[] args, Func<string, bool> directoryExists, Func<string, bool> fileExists, string? profileVariable,
         out DesktopLaunchOptions? options, out string? error)
     {
         options = null;
@@ -222,7 +257,7 @@ internal static class DesktopCommandLine
         if (!TryTakeMcpEndpoint(ref args, out var mcpHost, out var mcpPort)) return false;
         if (mcpHost is not null || mcpPort is not null)
         {
-            if (!TryParseStart(args, directoryExists, fileExists, out options, out error)) return false;
+            if (!TryParseStart(args, directoryExists, fileExists, profileVariable, out options, out error)) return false;
             if (options!.ExitRunning)
             {
                 options = null;
@@ -234,7 +269,7 @@ internal static class DesktopCommandLine
             return true;
         }
 
-        if (TryParseNormalStart(args, directoryExists, out options, out error) is { } normal) return normal;
+        if (TryParseNormalStart(args, directoryExists, fileExists, profileVariable, out options, out error) is { } normal) return normal;
         error = InvalidOptions;
         string? data = null;
         string? catalog = null;
@@ -293,17 +328,20 @@ internal static class DesktopCommandLine
         return true;
     }
 
-    // A start on the ~/.alta profile: --dev, --wait or --exit, and the folders it adds as projects with the spaces they
-    // join. Null when the arguments are not those of such a start (the isolated roots, an unknown option).
-    private static bool? TryParseNormalStart(string[] args, Func<string, bool> directoryExists, out DesktopLaunchOptions? options, out string? error)
+    // A start on the ~/.alta profile, or on a separate one (--profile, CODEALTA_HOME): --dev, --wait or --exit, and the
+    // folders it adds as projects with the spaces they join. Null when the arguments are not those of such a start (the
+    // isolated roots, an unknown option).
+    private static bool? TryParseNormalStart(string[] args, Func<string, bool> directoryExists, Func<string, bool> fileExists, string? home,
+        out DesktopLaunchOptions? options, out string? error)
     {
         options = null;
         error = InvalidOptions;
         var end = Array.IndexOf(args, "--");
         if (args.Take(end < 0 ? args.Length : end).Any(static arg => arg.StartsWith('-')
-            && arg is not (CodeAltaInstanceProfile.DeveloperOption or ExitOption or WaitOption or SpaceOption)))
+            && arg is not (CodeAltaInstanceProfile.DeveloperOption or ExitOption or WaitOption or SpaceOption or ProfileOption)))
             return null;
         bool developer = false, exit = false, wait = false, folders = false;
+        string? profile = null;
         var projects = new List<string>();
         var spaces = new List<string>();
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -321,7 +359,10 @@ internal static class DesktopCommandLine
                     case SpaceOption when i + 1 < args.Length && !string.IsNullOrWhiteSpace(args[i + 1]) && !args[i + 1].StartsWith('-'):
                         spaces.Add(args[++i].Trim());
                         continue;
-                    case CodeAltaInstanceProfile.DeveloperOption or ExitOption or WaitOption or SpaceOption:
+                    case ProfileOption when profile is null && i + 1 < args.Length && !string.IsNullOrWhiteSpace(args[i + 1]) && !args[i + 1].StartsWith('-'):
+                        profile = args[++i];
+                        continue;
+                    case CodeAltaInstanceProfile.DeveloperOption or ExitOption or WaitOption or SpaceOption or ProfileOption:
                         return false;
                 }
             }
@@ -348,6 +389,34 @@ internal static class DesktopCommandLine
         }
 
         if (exit && (wait || projects.Count > 0 || spaces.Count > 0)) return false;
+        var named = profile is not null;
+        profile ??= string.IsNullOrWhiteSpace(home) ? null : home;
+        if (profile is not null)
+        {
+            if (developer)
+            {
+                error = named ? "--dev uses the developer instance of ~/.alta: it does not combine with --profile."
+                    : $"--dev uses the developer instance of ~/.alta: it does not combine with the profile of {HomeVariable}.";
+                return false;
+            }
+
+            try
+            {
+                profile = Path.TrimEndingDirectorySeparator(Path.GetFullPath(profile.Trim()));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                error = $"'{profile}' is not the path of a profile folder.";
+                return false;
+            }
+
+            if (fileExists(profile))
+            {
+                error = $"The profile '{profile}' is a file, not a folder.";
+                return false;
+            }
+        }
+
         if (spaces.Count > 0 && projects.Count == 0)
         {
             error = "--space puts the folders given in a space: name a folder too, as in alta . --space work.";
@@ -360,7 +429,8 @@ internal static class DesktopCommandLine
             return false;
         }
 
-        options = CreateDefaultOptions(developer, projects.FirstOrDefault()) with { ExitRunning = exit, Wait = wait, Projects = projects, Spaces = spaces };
+        options = (profile is null ? CreateDefaultOptions(developer, projects.FirstOrDefault()) : CreateProfileOptions(profile, projects.FirstOrDefault()))
+            with { ExitRunning = exit, Wait = wait, Projects = projects, Spaces = spaces };
         error = null;
         return true;
     }
@@ -372,17 +442,12 @@ internal static class DesktopCommandLine
     // The folder the application starts on: the first folder given, else the current one.
     private static DesktopLaunchOptions CreateDefaultOptions(bool developer, string? project)
     {
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrWhiteSpace(userProfile))
-            throw new InvalidOperationException("Unable to determine the user profile directory for CodeAlta.");
-        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localData))
-            localData = Path.Combine(userProfile, ".local", "share");
+        var userProfile = UserProfile();
         var profile = CodeAltaInstanceProfile.Create(Path.Combine(userProfile, ".alta"), developer);
         return new DesktopLaunchOptions(
             // The developer instance has its own WebView profile: its own tabs and drafts, and its own
             // remote debugging port when one is requested.
-            Path.Combine(localData, "CodeAlta", developer ? "desktop-dev" : "desktop"),
+            DefaultDataRoot(userProfile, developer),
             profile.GlobalRoot)
         {
             // Match the TUI's normal startup: current project, standard profile, and the
@@ -391,6 +456,32 @@ internal static class DesktopCommandLine
             StateRoot = developer ? profile.StateRoot : null,
             Developer = developer,
         };
+    }
+
+    // A separate profile keeps all of its data in its folder, the data of the window too: a profile is moved off the home
+    // folder of the user (where it may not be trusted) as a whole.
+    private static DesktopLaunchOptions CreateProfileOptions(string profile, string? project) =>
+        new(Path.Combine(profile, ProfileDataFolder), profile)
+        {
+            Owned = new(project ?? Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
+            Profile = profile,
+            IntegrationRoot = DefaultDataRoot(UserProfile(), developer: false),
+        };
+
+    private static string UserProfile()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userProfile))
+            throw new InvalidOperationException("Unable to determine the user profile directory for CodeAlta.");
+        return userProfile;
+    }
+
+    private static string DefaultDataRoot(string userProfile, bool developer)
+    {
+        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localData))
+            localData = Path.Combine(userProfile, ".local", "share");
+        return Path.Combine(localData, "CodeAlta", developer ? "desktop-dev" : "desktop");
     }
 
     // Takes the two MCP options out of the arguments. False when one is given twice, without a value or with

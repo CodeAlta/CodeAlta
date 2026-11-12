@@ -464,7 +464,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var entry = options.Developer || roots.Home is not null ? Task.FromResult(default(DesktopIntegration.DesktopEntryChange))
                 : Task.Run(() =>
                 {
-                    var change = DesktopIntegration.Ensure(options.DataRoot, DesktopCommandLine.Version);
+                    var change = DesktopIntegration.Ensure(options.IntegrationRoot ?? options.DataRoot, DesktopCommandLine.Version);
                     var bundle = OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null;
                     if (DesktopIntegration.AnnouncesEntry(change.Added, OperatingSystem.IsMacOS(), bundle)) shell.NotifyEntryAdded();
                     return change;
