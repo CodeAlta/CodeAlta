@@ -214,6 +214,28 @@ public sealed class ProxySettingsTests
     }
 
     [TestMethod]
+    public void TheCredentials_OfAProxy_AreGivenToThatProxyAlone()
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var proxy = new NetworkProxy(null, name => environment.GetValueOrDefault(name), (name, value) => environment[name] = value);
+        var credentials = proxy.Credentials!;
+        var first = new Uri("http://proxy-a.corp:8080/");
+        proxy.Apply(Manual with { Url = "http://proxy-a.corp:8080", Authentication = ProxyAuthentication.Password, User = "a", PasswordSecret = "S" }, "password-a");
+        Assert.AreEqual("password-a", credentials.GetCredential(first, "Basic")!.Password);
+
+        // A request that went to proxy A gets its 407 after the settings moved to proxy B: it is given nothing.
+        proxy.Apply(Manual with { Url = "http://proxy-b.corp:3128", Authentication = ProxyAuthentication.Password, User = "b", PasswordSecret = "S" }, "password-b");
+        Assert.IsNull(credentials.GetCredential(first, "Basic"));
+        Assert.IsNull(proxy.Upstream.Credentials!.GetCredential(first, "Basic"), "nor the sandbox that chained to A");
+        Assert.AreEqual("password-b", credentials.GetCredential(new Uri("http://PROXY-B.corp:3128/"), "Basic")!.Password);
+        Assert.IsNull(credentials.GetCredential(new Uri("http://proxy-b.corp:8080/"), "Basic"), "another port is another proxy");
+
+        var created = NetworkProxy.Create(Manual with { Authentication = ProxyAuthentication.Password, User = "c", PasswordSecret = "S" }, "password-c", null)!;
+        Assert.IsNull(created.Credentials!.GetCredential(first, "Basic"));
+        Assert.AreEqual("password-c", created.Credentials!.GetCredential(new Uri("http://proxy.corp:8080/"), "Basic")!.Password);
+    }
+
+    [TestMethod]
     public void TheAddressShown_NeverHoldsTheUserNameAndPasswordOfAProxy()
     {
         Assert.AreEqual("http://env-proxy:3128", NetworkProxy.DisplayAddress(new Uri("http://jdoe:p%40ss@env-proxy:3128/")));

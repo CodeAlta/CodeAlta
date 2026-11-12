@@ -254,16 +254,27 @@ public sealed partial class NetworkProxy : IWebProxy
 
     private sealed record State(ProxySettings Settings, ProxyBypassList? Bypass, NetworkCredential? Credential, string? Password);
 
-    // The credentials the clients keep: those of the settings applied when a proxy asks.
+    /// <summary>Gets whether two addresses name the same proxy: the same scheme, host and port.</summary>
+    /// <param name="left">An address.</param>
+    /// <param name="right">Another address, or null.</param>
+    /// <returns>True when both name the same proxy.</returns>
+    internal static bool SameProxy(Uri left, Uri? right)
+        => right is not null && string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(left.IdnHost, right.IdnHost, StringComparison.OrdinalIgnoreCase) && left.Port == right.Port;
+
+    // The credentials the clients keep: those of the settings applied when a proxy asks, for the proxy of those settings
+    // alone. A request that went to the proxy of before, and gets its 407 after a change, is given nothing: the password of
+    // one proxy never goes to another.
     private sealed class ProxyCredentials(NetworkProxy owner) : ICredentials
     {
         public NetworkCredential? GetCredential(Uri uri, string authType)
         {
+            ArgumentNullException.ThrowIfNull(uri);
             var state = Volatile.Read(ref owner._state);
             return state.Settings.Mode switch
             {
                 ProxyMode.System => owner._system?.Credentials?.GetCredential(uri, authType),
-                ProxyMode.Manual => state.Credential,
+                ProxyMode.Manual when SameProxy(uri, state.Settings.ProxyUri) => state.Credential,
                 _ => null,
             };
         }
@@ -287,10 +298,17 @@ public sealed partial class NetworkProxy : IWebProxy
     // A manual proxy with the bypass list of CodeAlta: names, subdomains, CIDR ranges and this computer.
     private sealed class ManualProxy(WebProxy proxy, ProxyBypassList bypass) : IWebProxy
     {
-        public ICredentials? Credentials { get => proxy.Credentials; set => proxy.Credentials = value; }
+        public ICredentials? Credentials { get => new ScopedCredentials(proxy); set => proxy.Credentials = value; }
 
         public Uri? GetProxy(Uri destination) => IsBypassed(destination) ? null : proxy.Address;
 
         public bool IsBypassed(Uri host) => bypass.Matches(host.IdnHost);
+    }
+
+    // The credentials of one proxy, given to that proxy alone.
+    private sealed class ScopedCredentials(WebProxy proxy) : ICredentials
+    {
+        public NetworkCredential? GetCredential(Uri uri, string authType)
+            => SameProxy(uri, proxy.Address) ? proxy.Credentials?.GetCredential(uri, authType) : null;
     }
 }
