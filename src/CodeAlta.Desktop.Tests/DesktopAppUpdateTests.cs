@@ -428,6 +428,14 @@ public sealed class DesktopAppUpdateTests
         var windows = CodeAlta.Desktop.DesktopUpdateInstaller.WindowsScript(4242, @"C:\dotnet.exe", arguments, @"C:\l", @"C:\r", @"C:\c",
             @"C:\Users\me\.dotnet\tools\alta.cmd", [@"--profile", @"D:\100% work"]);
         Assert.AreEqual("\"C:\\Users\\me\\.dotnet\\tools\\alta.cmd\" \"--profile\" \"D:\\100%% work\"", windows.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)[^1]);
+        // The root of a drive or of a share ends with a backslash, which would escape the closing quote for the application.
+        foreach (var (root, quoted) in new[] { (@"D:\", @"""D:\\"""), (@"\\server\share\", @"""\\server\share\\"""), (@"\\server\share", @"""\\server\share""") })
+        {
+            var line = CodeAlta.Desktop.DesktopUpdateInstaller.WindowsScript(1, @"C:\d.exe", arguments, @"C:\l", @"C:\r", @"C:\c", @"C:\alta.cmd", ["--profile", root])
+                .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)[^1];
+            Assert.AreEqual(@"""C:\alta.cmd"" ""--profile"" " + quoted, line, root);
+            Assert.AreEqual(root, CommandLineArguments(line[(line.IndexOf("\"--profile\" ", StringComparison.Ordinal) + 12)..]).Single(), "as the application reads it");
+        }
 
         // ~/.alta is started as before: no argument, the bundle opened as it was.
         Assert.AreEqual(CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", "/b.app", "/app", macOS: true),
@@ -436,6 +444,45 @@ public sealed class DesktopAppUpdateTests
         var profile = Path.Combine(Path.GetTempPath(), "alta-update-profile");
         CollectionAssert.AreEqual(new[] { "--profile", profile }, CodeAlta.Desktop.DesktopCommandLine.RelaunchArguments(Parse(profile)!).ToArray(),
             "a profile of CODEALTA_HOME is named: the helper may not inherit it");
+    }
+
+    // How a Windows application splits its command line (CommandLineToArgvW): 2n backslashes before a quote are n and the
+    // quote delimits, 2n+1 are n and a quote; others are themselves.
+    private static List<string> CommandLineArguments(string line)
+    {
+        var arguments = new List<string>();
+        var current = new System.Text.StringBuilder();
+        bool quoted = false, any = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            var backslashes = 0;
+            while (i < line.Length && line[i] == '\\') { backslashes++; i++; }
+            if (i < line.Length && line[i] == '"')
+            {
+                current.Append('\\', backslashes / 2);
+                if (backslashes % 2 == 1) current.Append('"');
+                else quoted = !quoted;
+                any = true;
+                continue;
+            }
+
+            current.Append('\\', backslashes);
+            if (i >= line.Length) break;
+            if (line[i] == ' ' && !quoted)
+            {
+                if (any || current.Length > 0) arguments.Add(current.ToString());
+                current.Clear();
+                any = false;
+            }
+            else
+            {
+                current.Append(line[i]);
+                any = true;
+            }
+        }
+
+        if (any || current.Length > 0) arguments.Add(current.ToString());
+        return arguments;
     }
 
     private static CodeAlta.Desktop.DesktopLaunchOptions? Parse(string? home, params string[] args)

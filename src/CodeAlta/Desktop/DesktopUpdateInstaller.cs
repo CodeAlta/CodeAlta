@@ -59,7 +59,7 @@ internal static class DesktopUpdateInstaller
         // nothing returns here): it runs in this console, which has no window, until the application's window
         // is shown (see DesktopTerminalStart).
         script.Append(BatchQuote(launcher));
-        foreach (var argument in relaunch) script.Append(' ').Append(BatchQuote(argument));
+        foreach (var argument in relaunch) script.Append(' ').Append(BatchArgument(argument));
         script.Append("\r\n");
         return script.ToString();
     }
@@ -280,4 +280,27 @@ internal static class DesktopUpdateInstaller
 
     // A quoted batch word; a percent sign would otherwise start a variable.
     internal static string BatchQuote(string value) => "\"" + value.Replace("%", "%%", StringComparison.Ordinal) + "\"";
+
+    // An argument the launcher passes on to the application, quoted as a batch word and as the application reads its
+    // command line: backslashes before a quote are doubled, so that D:\ or \\server\share\ does not escape the closing quote.
+    internal static string BatchArgument(string value)
+    {
+        var quoted = new StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var character in value)
+        {
+            if (character == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            // Backslashes before a quote of the value are doubled, and the quote escaped.
+            quoted.Append('\\', character == '"' ? backslashes * 2 + 1 : backslashes);
+            backslashes = 0;
+            quoted.Append(character == '%' ? "%%" : character.ToString());
+        }
+
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
+    }
 }
