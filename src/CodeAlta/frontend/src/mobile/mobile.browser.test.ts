@@ -20,7 +20,12 @@ const shots = process.env.CODEALTA_SHOTS ?? "";
 const options: Options = {
   models: [
     { provider: "codex", id: "gpt-6.1", name: "GPT-6.1", providerName: "Codex", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
+    // Claude Code's models in its own order (the recommended one, the current ones, then the older ones), as alta lists them.
+    { provider: "claude", id: "default", name: "Default (recommended)", providerName: "Claude", efforts: ["low", "high"], defaultEffort: "high" },
+    { provider: "claude", id: "opus", name: "Opus 5.5", providerName: "Claude", efforts: ["low", "high"], defaultEffort: "high" },
+    { provider: "claude", id: "sonnet", name: "Sonnet 5.5", providerName: "Claude", efforts: ["low", "high"], defaultEffort: "high" },
     { provider: "claude", id: "claude-opus-4-7", name: "Opus 4.7", providerName: "Claude", efforts: ["low", "high"], defaultEffort: "high" },
+    { provider: "claude", id: "claude-fable-5", name: "Fable 5", providerName: "Claude", efforts: ["low", "high"], defaultEffort: "high" },
   ],
   prompts: [{ id: "default", name: "Default", description: null }, { id: "plan", name: "Plan", description: null }],
   tiers: [
@@ -398,6 +403,8 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
       [["ComplexOpus 4.7", false], ["StandardGPT-6.1", false], ["QuickNo model is set for this tier.", true]]);
     await click("#tiers .tier");
     await waitFor(`document.getElementById('new-model-name').textContent === "Complex · Opus 4.7 · high"`, "the complex tier");
+    assert.deepEqual(await texts("#model-list button > span"), ["Default (recommended)", "Opus 5.5", "Sonnet 5.5", "Opus 4.7", "Fable 5"],
+      "the models of the tier's provider, in the order of the provider, as the desktop lists them");
     assert.deepEqual(await texts("#sheet-effort .reasoning-labels button"), ["low", "high"], "the efforts of the tier's model");
     await click("#model-done");
     assert.equal(await evaluate("document.getElementById('new-space').textContent"), "Work", "the space the session goes to, beside its project");

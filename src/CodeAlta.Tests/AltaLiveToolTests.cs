@@ -2332,6 +2332,56 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ModelList_KeepsTheOrderOfTheProvider_OrTheOneOfItsSettings()
+    {
+        // Claude Code's initialize answer: the recommended model, the current one of each family, then the older ones, newest first.
+        string[] claude = ["default", "opus", "claude-fable-5-2", "sonnet", "haiku", "fable", "claude-haiku-4-5-20251001", "claude-sonnet-5",
+            "claude-opus-5", "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"];
+        // Codex CLI's model/list, in its priority order.
+        string[] codexCli = ["gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+        // Codex (ChatGPT sign-in), in the order of its catalog.
+        string[] codex = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"];
+        // An OpenAI-compatible server, in the order of its /models.
+        string[] local = ["qwen4-coder-30b", "llama-5-70b", "gemma-4-27b", "deepseek-v4"];
+        var registry = new ModelProviderRegistry();
+        void Register(string key, string[] ids, ModelOrder order)
+        {
+            var id = new ModelProviderId(key);
+            registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(id, key) { ModelOrder = order },
+                () => new StatefulProviderRuntime(id) { Models = [.. ids.Select(static model => new AgentModelInfo(model))] });
+        }
+
+        Register("claude", claude, ModelOrder.Provider);
+        Register("codex-cli", codexCli, ModelOrder.Provider);
+        Register("codex", codex, ModelOrder.Provider);
+        Register("local", local, ModelOrder.Provider);
+        // An ACP agent, whose default is name_version, and a provider whose settings say name.
+        Register("cursor", ["gpt-5.6", "claude-4.5-sonnet", "composer-2", "claude-4.6-sonnet", "gpt-6.1"], ModelOrder.NameVersion);
+        Register("sorted", ["b-2", "a-1", "c-3"], ModelOrder.Name);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add<IModelProviderRegistry>(registry)
+            .Add<IModelProviderInitializationService>(new ModelProviderInitializationService(registry)));
+
+        string[] Listed(AltaCommandResult result, string provider) => [.. ReadJsonLines(result.Stdout)
+            .Where(line => line.GetProperty("type").GetString() == "alta.model.item" && line.GetProperty("providerKey").GetString() == provider)
+            .Select(static line => line.GetProperty("modelId").GetString()!)];
+        var detailed = await dispatcher.InvokeAsync(["model", "list", "--detailed"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var refs = await dispatcher.InvokeAsync(["model", "list", "--provider", "codex"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, detailed.ExitCode, detailed.Stderr);
+        CollectionAssert.AreEqual(claude, Listed(detailed, "claude"), "the order of Claude Code, which the phone shows as it is");
+        CollectionAssert.AreEqual(codexCli, Listed(detailed, "codex-cli"), "the order of Codex CLI");
+        CollectionAssert.AreEqual(codex, Listed(detailed, "codex"), "the order of Codex");
+        CollectionAssert.AreEqual(local, Listed(detailed, "local"), "the order of an OpenAI-compatible server");
+        CollectionAssert.AreEqual(new[] { "claude-4.6-sonnet", "claude-4.5-sonnet", "composer-2", "gpt-6.1", "gpt-5.6" }, Listed(detailed, "cursor"),
+            "models_order = name_version: by name, the highest version first");
+        CollectionAssert.AreEqual(new[] { "a-1", "b-2", "c-3" }, Listed(detailed, "sorted"), "models_order = name sorts them");
+        Assert.AreEqual(AltaExitCodes.Success, refs.ExitCode, refs.Stderr);
+        CollectionAssert.AreEqual(codex.Select(static model => $"codex:{model}").ToArray(), ReadJsonLines(refs.Stdout)
+            .Single(static line => line.GetProperty("type").GetString() == "alta.model.refs").GetProperty("modelRefs").EnumerateArray().Select(static item => item.GetString()).ToArray());
+    }
+
+    [TestMethod]
     public async Task ProviderModelRefresh_AsksTheProviderForItsModelsAgain()
     {
         var providerId = new ModelProviderId("refreshing");
@@ -2358,7 +2408,7 @@ public sealed partial class AltaLiveToolTests
         CollectionAssert.AreEqual(new[] { "refreshing:gpt-old" }, Refs(cached));
         var refreshed = await dispatcher.InvokeAsync(["provider", "model", "refresh", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.Success, refreshed.ExitCode, refreshed.Stderr);
-        CollectionAssert.AreEqual(new[] { "refreshing:gpt-new", "refreshing:gpt-old" }, Refs(refreshed));
+        CollectionAssert.AreEqual(new[] { "refreshing:gpt-old", "refreshing:gpt-new" }, Refs(refreshed), "in the order of the provider");
         Assert.AreEqual(version, registry.GetRegistrationVersion(providerId), "the provider is asked again, not registered again: sessions go on");
 
         var missing = await dispatcher.InvokeAsync(["provider", "model", "refresh", "--provider", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);

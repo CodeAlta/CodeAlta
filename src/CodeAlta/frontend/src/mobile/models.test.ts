@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelOption, Options } from "./contract";
-import { choiceLabel, choiceRequest, forgetMode, groupVariants, initialChoice, pickEffort, pickModel, rememberChoice, tierChoice, tierText } from "./models";
+import { sectionModels } from "../modelOrder";
+import { choiceLabel, choiceRequest, forgetMode, groupVariants, initialChoice, pickEffort, pickModel, providerEntries, rememberChoice, tierChoice, tierText } from "./models";
 
 const model = (provider: string, id: string, name = id, efforts: string[] = ["low", "medium", "high"], defaultEffort: string | null = "medium"): ModelOption =>
   ({ provider, id, name, providerName: provider.toUpperCase(), efforts, defaultEffort });
@@ -28,6 +29,36 @@ test("ids that differ only by a variant are one entry with options", () => {
   assert.deepEqual(gpt.options, ["fast"]);
   assert.equal(gpt.find(["fast"])?.id, "gpt-6.1-fast");
   assert.equal(gpt.find(["thinking"]), undefined);
+});
+
+test("every provider keeps its own order on the new-session sheet, in the parts the desktop's composer shows", () => {
+  // The lists as alta gives them: each in the order of its provider's settings (the provider's own for models_order =
+  // provider, the default; sorted by name and version for an ACP agent, whose default is name_version).
+  const lists: Record<string, { order?: string; ids: string[] }> = {
+    claude: { order: "provider", ids: ["default", "opus", "claude-fable-5-2", "sonnet", "haiku", "fable", "claude-haiku-4-5-20251001", "claude-sonnet-5",
+      "claude-opus-5", "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"] },
+    "codex-cli": { order: "provider", ids: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] },
+    codex: { order: "provider", ids: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] },
+    // An OpenAI-compatible server, in the order of its /models; a CodeAlta that does not give the order keeps it too.
+    local: { ids: ["qwen4-coder-30b", "llama-5-70b", "gemma-4-27b", "deepseek-v4"] },
+    cursor: { order: "name_version", ids: ["claude-4.6-sonnet", "claude-4.5-sonnet", "composer-2", "gpt-6.1", "gpt-5.6"] },
+  };
+  const o = options({
+    models: Object.entries(lists).flatMap(([provider, list]) => list.ids.map(id => model(provider, id))),
+    modelsOrders: Object.fromEntries(Object.entries(lists).flatMap(([provider, list]) => list.order ? [[provider, list.order]] : [])),
+    defaults: null, tiers: [], defaultTier: null,
+  });
+  const ids = (models: readonly { id: string }[]) => models.map(m => m.id);
+  for (const [provider, list] of Object.entries(lists)) {
+    const { frontier, other } = providerEntries(o, provider);
+    const desktop = sectionModels(list.ids.map(id => ({ id })), list.order);
+    assert.deepEqual({ frontier: ids(frontier), other: ids(other) }, { frontier: ids(desktop.frontier), other: ids(desktop.other) }, `${provider}: as the desktop`);
+    if (list.order !== "name_version") assert.deepEqual([ids(frontier), ids(other)], [list.ids, []], `${provider}: the order of the provider, in one part`);
+    assert.equal(pickModel(o, provider)?.id, ids(frontier)[0], `${provider}: a new session starts on the first model the sheet shows`);
+  }
+  assert.deepEqual(ids(providerEntries(o, "cursor").frontier), ["claude-4.6-sonnet", "composer-2", "gpt-6.1"], "name_version: the latest of each family first");
+  assert.deepEqual(ids(providerEntries(o, "cursor").other), ["claude-4.5-sonnet", "gpt-5.6"], "then the older ones");
+  assert.deepEqual(ids(providerEntries(o, "claude", "OPUS").frontier), ["opus", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"], "a search keeps the order");
 });
 
 test("a provider's model is the wanted one, else the configured one, else the first of its frontier", () => {

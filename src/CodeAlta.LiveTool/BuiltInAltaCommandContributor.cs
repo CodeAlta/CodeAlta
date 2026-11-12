@@ -5327,9 +5327,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 continue;
             }
 
-            foreach (var model in models
-                         .Where(model => ModelMatchesFilters(provider.Value, model, options))
-                         .OrderBy(static model => model.Id, StringComparer.OrdinalIgnoreCase))
+            // In the order the provider's settings give (models_order), as the composer of the window lists them: the
+            // phone shows this list as it is.
+            foreach (var model in models.Where(model => ModelMatchesFilters(provider.Value, model, options)))
             {
                 if (options.Detailed)
                 {

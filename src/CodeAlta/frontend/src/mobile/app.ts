@@ -15,8 +15,8 @@ import { setUpNotifications } from "./notifications";
 import { createLiveStream, type LinkState } from "./liveStream";
 import { createMarkdownView, linkedFileName, linksLine, linksMarkdown } from "./markdownView";
 import {
-  choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, lastProjectKey, modelsOf, pickEffort, pickModel, preferencesKey,
-  providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
+  choiceLabel, choiceRequest, entryName, findModel, forgetMode, initialChoice, lastProjectKey, pickEffort, pickModel, preferencesKey,
+  providerEntries, providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
 } from "./models";
 import { createPhoneFiles, newSessionFiles } from "./phoneFiles";
 import { sectionModels } from "../modelOrder";
@@ -1345,7 +1345,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const model = findModel(o, choice.provider, choice.model);
     effortField(model?.efforts ?? [], choice.effort, effort => { if (effort !== choice.effort || choice.tier) setChoice({ ...choice, effort, tier: null }); });
     // The options of the model: a checkbox per variant its entry has; a combination that does not exist is disabled.
-    const groups = groupVariants(modelsOf(o, choice.provider)), byEntry = new Map(groups.map(g => [g.entry.id, g]));
+    const { groups, frontier, other } = providerEntries(o, choice.provider, query), byEntry = new Map(groups.map(g => [g.entry.id, g]));
     const group = groups.find(g => g.members.some(x => x.model.id === choice.model));
     const flags = group ? group.members.find(x => x.model.id === choice.model)!.flags.filter(f => !group.fixed.includes(f)) : [];
     const variants = $("new-variants");
@@ -1359,8 +1359,6 @@ export function startMobile(window: Window & typeof globalThis) {
       return check;
     }));
     modelSearch.hidden = groups.length <= 8;
-    const { frontier, other } = sectionModels(groups.filter(g => !query || g.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(query))).map(g => g.entry),
-      o.modelsOrders?.[choice.provider]);
     $("model-list").replaceChildren(...modelItems(frontier, other, m => !choice.tier && byEntry.get(m.id)!.members.some(x => x.model.id === choice.model), entryName,
       m => m.id + (byEntry.get(m.id)!.options.length ? ` (${[...byEntry.get(m.id)!.options].sort().map(f => `+${f}`).join(", ")})` : ""),
       m => { if (choice.tier || !byEntry.get(m.id)!.members.some(x => x.model.id === choice.model)) setChoice({ tier: null, provider: choice.provider, model: m.id, effort: pickEffort(o, m, choice.effort) }); }));

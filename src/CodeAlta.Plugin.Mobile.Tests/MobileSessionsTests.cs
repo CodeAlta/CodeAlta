@@ -601,6 +601,34 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
+    public async Task Options_KeepTheModelsOfEveryProviderInTheOrderAltaGivesThem()
+    {
+        // Each provider in the order of its settings, as alta lists it: never sorted by id here.
+        (string Provider, string Order, string[] Ids)[] lists =
+        [
+            ("claude", "provider", ["default", "opus", "claude-fable-5-2", "sonnet", "haiku", "fable", "claude-haiku-4-5-20251001", "claude-opus-4-6"]),
+            ("codex-cli", "provider", ["gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol", "gpt-5.6-luna"]),
+            ("codex", "provider", ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-5.6-sol"]),
+            ("local", "provider", ["qwen4-coder-30b", "llama-5-70b", "gemma-4-27b"]),
+            ("cursor", "name_version", ["claude-4.6-sonnet", "claude-4.5-sonnet", "composer-2", "gpt-6.1"]),
+        ];
+        var alta = new FakeAlta()
+            .Answer("model list --detailed", [.. lists.SelectMany(static list => list.Ids.Select(id => new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = list.Provider, ["modelId"] = id }))])
+            .Answer("provider list --detailed", [.. lists.Select(static list => new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = list.Provider, ["modelsOrder"] = list.Order })]);
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+
+        var options = await api.OptionsAsync(default);
+
+        var models = ((JsonArray)options["models"]!).OfType<JsonObject>().ToArray();
+        var orders = (JsonObject)options["modelsOrders"]!;
+        foreach (var (provider, order, ids) in lists)
+        {
+            CollectionAssert.AreEqual(ids, models.Where(model => (string?)model["provider"] == provider).Select(static model => (string?)model["id"]).ToArray(), provider);
+            Assert.AreEqual(order, (string?)orders[provider], provider);
+        }
+    }
+
+    [TestMethod]
     public async Task Options_NameTheProviderOfAModel_AsTheWindowNamesIt()
     {
         var alta = new FakeAlta()

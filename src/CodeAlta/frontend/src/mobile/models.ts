@@ -56,12 +56,24 @@ export const findModel = (options: Options, provider: string | null, id: string 
 export const providerName = (options: Options, provider: string): string => options.models.find(model => model.provider === provider)?.providerName || provider;
 export const providers = (options: Options): string[] => [...new Set(options.models.map(model => model.provider))];
 
+/**
+ * The list of a provider's models on the model sheet of a new session: one entry per group of variants, in the order alta
+ * gives them (the order of the provider's settings), in the parts the desktop's composer shows (`sectionModels`): as
+ * given for `models_order = provider`, the default, or an order not known; by family and version for `name` and
+ * `name_version`. A query keeps the entries one of whose models has it in its name or id.
+ */
+export function providerEntries(options: Options, provider: string, query = ""): { groups: ModelGroup<ModelOption>[]; frontier: ModelOption[]; other: ModelOption[] } {
+  const groups = groupVariants(modelsOf(options, provider)), text = query.trim().toLowerCase();
+  const shown = groups.filter(group => !text || group.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(text)));
+  return { groups, ...sectionModels(shown.map(group => group.entry), options.modelsOrders?.[provider]) };
+}
+
 /** A model of the provider, always one it lists: the wanted one, else the configured default when it is this provider's, else the first it shows. */
 export function pickModel(options: Options, provider: string, wanted?: string | null): ModelOption | undefined {
   const models = modelsOf(options, provider), defaults = options.defaults;
   return models.find(model => model.id === wanted)
     ?? (defaults?.provider === provider ? models.find(model => model.id === defaults.model) : undefined)
-    ?? sectionModels(groupVariants(models).map(group => group.entry), options.modelsOrders?.[provider]).frontier[0] ?? models[0];
+    ?? providerEntries(options, provider).frontier[0] ?? models[0];
 }
 
 /** The effort of a model: the wanted one, else the effort of the settings when it is their model, else the model's default, else its first. */
