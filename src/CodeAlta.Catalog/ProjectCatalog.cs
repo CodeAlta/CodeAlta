@@ -646,7 +646,8 @@ public sealed partial class ProjectCatalog
     private ProjectSource ParseSource(string markdownPath, string markdown)
         => new(ParseProject(markdownPath, markdown, out var relative), markdown, relative);
 
-    private static string EnsureUniqueSlug(string baseSlug, IReadOnlyList<ProjectDescriptor> projects)
+    // Shared with the transient project of a host (CodeAltaHost), so that both make the same valid slugs.
+    internal static string EnsureUniqueSlug(string baseSlug, IReadOnlyList<ProjectDescriptor> projects)
     {
         var candidate = baseSlug;
         var suffix = 2;
@@ -738,7 +739,8 @@ public sealed partial class ProjectCatalog
                !string.Equals(Path.GetFileName(path), "readme.md", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string Slugify(string value)
+    // A valid slug of a name: at least two characters (a folder named A gives "project"), at most 64.
+    internal static string Slugify(string value)
     {
         var normalized = value.Trim().ToLowerInvariant();
         var builder = new StringBuilder(normalized.Length);

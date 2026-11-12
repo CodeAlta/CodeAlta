@@ -199,6 +199,16 @@ public sealed class DesktopStartupTests
         Assert.AreEqual(NeoDecisionAction.Cancel, Decide(uri, kind: NeoNavigationKind.Reload));
     }
 
+    // A start that fails once the window shows says why on its start-up screen, which otherwise waited for nothing (#429).
+    [TestMethod]
+    public void StartFailure_SaysTheReasonAndWhereTheLogIs()
+    {
+        var logs = Path.Combine(Path.GetTempPath(), "logs");
+        var text = DesktopApplication.StartFailure(new AggregateException(new InvalidOperationException("The folder\ncannot be read.")), logs);
+
+        Assert.AreEqual($"CodeAlta could not start: The folder cannot be read. The log is in {logs}.", text);
+    }
+
     private static NeoDecisionAction Decide(Uri uri, bool mainFrame = true, bool userInitiated = false, NeoNavigationKind kind = NeoNavigationKind.NewDocument) =>
         DesktopApplication.DecideNavigation(new NeoNavigationRequest(uri, mainFrame, userInitiated) { Kind = kind }).Action;
 }

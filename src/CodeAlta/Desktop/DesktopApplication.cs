@@ -17,6 +17,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 {
     private CodeAltaSingleInstanceGuard? _lease;
     private Task<CodeAltaHost>? _hostCreation;
+    // The line of the start-up screen: a start that fails after the window is shown says it there.
+    private DesktopStartupStatus? _startupStatus;
     // The skills used most in the last days, for the prompts and for search: one ranking per day, kept by each session.
     private DesktopSkillUsage? _skillUsage;
     // The reading of the policy of the organizations of the Copilot accounts, which the host started and disposes.
@@ -41,6 +43,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         // The traces of the runs go to the OpenTelemetry collector the environment names, if any: the end sends the last ones.
         using var telemetry = CodeAltaTelemetry.StartFromEnvironment("alta");
         return RunWithCapture(options, RunCore);
+    }
+
+    /// <summary>What the start-up screen says when the start failed: the reason, and where the log is.</summary>
+    internal static string StartFailure(Exception failure, string logs)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        var reason = (failure is AggregateException { InnerException: { } inner } ? inner : failure).Message.ReplaceLineEndings(" ").Trim();
+        return $"CodeAlta could not start: {reason} The log is in {logs}.";
     }
 
     private static string LockPath(DesktopLaunchOptions options) => Path.Combine(options.StateRoot ?? options.CatalogRoot!, "alta.lock");
@@ -490,7 +500,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // published through one, and the fleet names this computer by one in its pairing links.
             var privateNetworks = new CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry(
                 () => _hostCreation is { IsCompletedSuccessfully: true } created ? created.Result.PluginRuntime.ActivePlugins.Select(static plugin => (object?)plugin.Instance) : []);
-            var startupStatus = new DesktopStartupStatus();
+            var startupStatus = _startupStatus = new DesktopStartupStatus();
             using var scratchpadStartupStatus = startupScratchpadCleanup.Subscribe(startupStatus.SetScratchpadCleanup);
             var retentionProtection = DesktopSessionRetention.CreateProtection();
             var pluginUi = new DesktopPluginUi(retentionProtection);
@@ -1487,6 +1497,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             DesktopLogging.ReportFailure(failure, "Owned desktop initialization or application flow failed");
             // A web view that cannot start (no WebView2 Runtime, no display) is said where the user started CodeAlta.
             if (!_windowShown) DesktopStartupFailure.Report(options, failure);
+            // Shown, the window still has the start-up screen: it says why instead of waiting for nothing.
+            else if (_startupStatus is { } status) status.Text = StartFailure(failure, Path.Combine(options.DataRoot, "logs"));
             bodyFailed = true;
             closing.Begin();
             closeRequested.TrySetResult();

@@ -824,11 +824,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
         var normalizedPath = NormalizePath(projectPath);
         var projectName = ProjectPathNameFormatter.InferName(normalizedPath);
         var displayName = ProjectPathNameFormatter.InferDisplayName(normalizedPath);
-        var baseSlug = Slugify(projectName);
+        var baseSlug = ProjectCatalog.Slugify(projectName);
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Slug = EnsureUniqueSlug(baseSlug, knownProjects),
+            Slug = ProjectCatalog.EnsureUniqueSlug(baseSlug, knownProjects),
             Name = projectName,
             DisplayName = displayName,
             ProjectPath = normalizedPath,
@@ -837,21 +837,6 @@ public sealed class CodeAltaHost : IAsyncDisposable
         };
         project.Validate();
         return project;
-    }
-
-    private static string EnsureUniqueSlug(string baseSlug, IReadOnlyList<ProjectDescriptor> projects)
-    {
-        var candidate = baseSlug;
-        var suffix = 2;
-        var usedSlugs = projects
-            .Select(static project => project.Slug)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        while (usedSlugs.Contains(candidate))
-        {
-            candidate = $"{baseSlug}-{suffix++}";
-        }
-
-        return candidate;
     }
 
     private static string NormalizePath(string path)
@@ -865,26 +850,6 @@ public sealed class CodeAltaHost : IAsyncDisposable
         }
 
         return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    }
-
-    private static string Slugify(string value)
-    {
-        var normalized = value.Trim().ToLowerInvariant();
-        var builder = new System.Text.StringBuilder(normalized.Length);
-        foreach (var ch in normalized)
-        {
-            if (char.IsLetterOrDigit(ch))
-            {
-                builder.Append(ch);
-            }
-            else if (builder.Length > 0 && builder[^1] != '-')
-            {
-                builder.Append('-');
-            }
-        }
-
-        var slug = builder.ToString().Trim('-');
-        return string.IsNullOrWhiteSpace(slug) ? "project" : slug;
     }
 
     internal static PluginAdapterOperationOptions CreatePluginOperationOptions(
