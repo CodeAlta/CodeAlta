@@ -19,7 +19,8 @@ test("provider default-model picker lists, searches and selects without saving a
     await page.click('#provider-model');
     await page.key('End', 35);
     await page.type('-custom');
-    assert.equal(await page.evaluate(`document.querySelector('#provider-model').value`), 'first-reasoning-custom');
+    // The last key can still be on its way to the field when typing returns (seen on CI: 'first-reasoning-custo').
+    await page.until(`document.querySelector('#provider-model').value === 'first-reasoning-custom'`, "typed custom model");
     await page.click('#provider-model + .bp6-input-action button');
     assert.equal(await page.evaluate(`document.querySelector('#provider-model').value`), '', "reset preserves the provider default");
     await page.evaluate(`modelsFixture.hold = true`);
