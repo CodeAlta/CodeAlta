@@ -605,8 +605,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             provider.ModelOverrides,
             provider.ModelsIncludeRegex,
             contextPriceTiers: true,
-            contextSizes: claudeApi ? [StandardContextSize] : null,
-            transport: providerDescriptor.TransportKind);
+            contextSizes: claudeApi ? [StandardContextSize] : null);
         return claudeApi
             ? [.. enriched.Select(model => WithFastMode(model, ModelsDevFastMode.Find(provider.ModelCatalog, ClaudeApiModelsDevProviderId, model.Id)))]
             : enriched;

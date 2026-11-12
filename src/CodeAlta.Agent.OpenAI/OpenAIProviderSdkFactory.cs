@@ -120,8 +120,7 @@ internal static class OpenAIProviderSdkFactory
             provider.ModelsIncludeRegex,
             OpenAIKnownModelLimits.For(provider),
             // A session of the API can use a model at each of its prices; Codex gives the sizes its configuration takes.
-            contextPriceTiers: provider.CodexSubscription is null,
-            transport: providerDescriptor.TransportKind));
+            contextPriceTiers: provider.CodexSubscription is null));
     }
 
     // The fast mode of the models (AgentModelInfo.FastMode). With Codex, the models whose discovery lists priority, on

@@ -104,9 +104,12 @@ api_url = "https://api.openai.com/v1"
 enabled = false
 display_name = "OpenCode Zen"
 type = "openai-chat"
+model = "glm-5.3"
 api_key_env = "CODEALTA_OPENCODE_API_KEY"
 api_url = "https://opencode.ai/inference/openai/v1"
 models_dev_provider_id = "opencode"
+# The free models of OpenCode answer 403 outside OpenCode itself.
+models_include_regex = "^(?!big-pickle$|grok-code$)(?!.*-free$)"
 
 [providers.opencode.request.headers]
 "x-opencode-session" = "${session.id}"
@@ -115,9 +118,12 @@ models_dev_provider_id = "opencode"
 enabled = false
 display_name = "OpenCode Go"
 type = "openai-chat"
+model = "glm-5.3"
 api_key_env = "CODEALTA_OPENCODE_API_KEY"
 api_url = "https://opencode.ai/inference/go/openai/v1"
 models_dev_provider_id = "opencode-go"
+# The free models of OpenCode answer 403 outside OpenCode itself.
+models_include_regex = "^(?!big-pickle$|grok-code$)(?!.*-free$)"
 
 [providers.opencode-go.request.headers]
 "x-opencode-session" = "${session.id}"

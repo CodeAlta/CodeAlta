@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent.ModelCatalog;
@@ -29,11 +28,9 @@ internal static class AgentModelMetadataEnricher
         string? modelsIncludeRegex = null,
         IReadOnlyList<AgentModelKnownLimit>? knownLimits = null,
         bool contextPriceTiers = false,
-        IReadOnlyList<long>? contextSizes = null,
-        AgentTransportKind? transport = null)
+        IReadOnlyList<long>? contextSizes = null)
     {
-        // A gateway lists every model at each endpoint: those another API serves are left out (AgentModelApiFilter).
-        var filteredModels = AgentModelApiFilter.KeepOwnApi(AgentModelCatalogFilter.ApplyIncludeRegex(models, modelsIncludeRegex), catalog, modelsDevProviderId, transport);
+        var filteredModels = AgentModelCatalogFilter.ApplyIncludeRegex(models, modelsIncludeRegex);
         if (filteredModels.Count == 0)
         {
             return filteredModels;

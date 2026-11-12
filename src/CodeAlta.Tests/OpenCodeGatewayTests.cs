@@ -8,56 +8,11 @@ using CodeAlta.Catalog;
 
 namespace CodeAlta.Tests;
 
-// A gateway such as OpenCode (#420): it lists all of its models at each endpoint but serves each one through one API, and
-// asks for a header that stays the same for a conversation (x-opencode-session).
+// OpenCode Zen and Go (#420): built in, with the header that keeps a conversation on one backend (x-opencode-session), and
+// without the free models, which OpenCode answers with 403 outside its own app.
 [TestClass]
 public sealed class OpenCodeGatewayTests
 {
-    private static readonly string[] Listed = ["chat-model", "responses-model", "anthropic-model", "gemini-model", "mistral-model", "unknown-model"];
-
-    [TestMethod]
-    [DataRow(AgentTransportKind.OpenAIChatCompletions, new[] { "chat-model", "mistral-model", "unknown-model" })]
-    [DataRow(AgentTransportKind.OpenAIResponses, new[] { "responses-model", "unknown-model" })]
-    [DataRow(AgentTransportKind.AnthropicMessages, new[] { "anthropic-model", "unknown-model" })]
-    [DataRow(AgentTransportKind.GoogleGeminiApi, new[] { "gemini-model", "unknown-model" })]
-    public async Task AGateway_ListsOnlyTheModelsItServesThroughTheApiOfTheProvider(AgentTransportKind transport, string[] expected)
-    {
-        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
-
-        var kept = AgentModelApiFilter.KeepOwnApi([.. Listed.Select(static id => new AgentModelInfo(id))], catalog, "gateway", transport);
-
-        CollectionAssert.AreEqual(expected, kept.Select(static model => model.Id).ToArray());
-    }
-
-    [TestMethod]
-    public async Task AProviderOfOneApi_KeepsAllItsModels_WhateverTheApiItIsConfiguredWith()
-    {
-        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
-        IReadOnlyList<AgentModelInfo> models = [new("chat-a"), new("chat-b")];
-
-        Assert.AreSame(models, AgentModelApiFilter.KeepOwnApi(models, catalog, "uniform", AgentTransportKind.OpenAIResponses));
-        Assert.AreSame(models, AgentModelApiFilter.KeepOwnApi(models, catalog, "gateway", transport: null), "an API that is not known keeps every model");
-        Assert.AreSame(models, AgentModelApiFilter.KeepOwnApi(models, catalog, "missing", AgentTransportKind.OpenAIChatCompletions));
-        Assert.AreSame(models, AgentModelApiFilter.KeepOwnApi(models, null, "gateway", AgentTransportKind.OpenAIChatCompletions));
-    }
-
-    [TestMethod]
-    public async Task TheModelsOfAProvider_AreFilteredWhenTheyAreListed()
-    {
-        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
-
-        var listed = AnthropicModelProviderRuntime.EnrichModels(
-            new AnthropicProviderOptions { ProviderKey = "opencode-anthropic", ApiKey = "key", ModelCatalog = catalog, ModelsDevProviderId = "gateway" },
-            new ModelProviderRuntimeDescriptor
-            {
-                ProtocolFamily = "anthropic-messages", ProviderKey = "opencode-anthropic", DisplayName = "OpenCode",
-                TransportKind = AgentTransportKind.AnthropicMessages,
-            },
-            [.. Listed.Select(static id => new AgentModelInfo(id))]);
-
-        CollectionAssert.AreEqual(new[] { "anthropic-model", "unknown-model" }, listed.Select(static model => model.Id).ToArray());
-    }
-
     [TestMethod]
     public async Task AnAnthropicProvider_SendsTheSessionInTheHeaderThatNamesIt()
     {
@@ -103,7 +58,7 @@ public sealed class OpenCodeGatewayTests
     [TestMethod]
     [DataRow("opencode", "OpenCode Zen", "https://opencode.ai/inference/openai/v1")]
     [DataRow("opencode-go", "OpenCode Go", "https://opencode.ai/inference/go/openai/v1")]
-    public void TheDefaultConfiguration_OffersOpenCode(string key, string name, string url)
+    public void TheDefaultConfiguration_OffersOpenCode_WithoutItsFreeModels(string key, string name, string url)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-opencode-defaults-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -117,35 +72,18 @@ public sealed class OpenCodeGatewayTests
             Assert.AreEqual("openai-chat", provider.ProviderType);
             Assert.AreEqual(url, provider.ApiUrl);
             Assert.AreEqual(key, provider.ModelsDevProviderId);
+            Assert.AreEqual("glm-5.3", provider.Model);
             Assert.AreEqual("${session.id}", provider.Request!.Headers!["x-opencode-session"]);
+
+            IReadOnlyList<AgentModelInfo> listed = [new("big-pickle"), new("glm-5.3"), new("kimi-k2.5-free"), new("grok-code"), new("claude-sonnet-5-5"), new("free-model"), new("grok-code-fast")];
+            var shown = AgentModelCatalogFilter.ApplyIncludeRegex(listed, provider.ModelsIncludeRegex);
+            CollectionAssert.AreEqual(new[] { "glm-5.3", "claude-sonnet-5-5", "free-model", "grok-code-fast" }, shown.Select(static model => model.Id).ToArray());
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
     }
-
-    // A gateway as models.dev describes OpenCode: the API of a model is the package of its own AI SDK, else the provider's.
-    private static ModelsDevDatabase CreateDatabase()
-        => ModelsDevDatabaseJson.Deserialize(
-            """
-            {
-              "gateway": {
-                "id": "gateway", "name": "Gateway", "npm": "@ai-sdk/openai-compatible", "api": "https://gateway.example/openai/v1",
-                "models": {
-                  "chat-model": { "id": "chat-model" },
-                  "responses-model": { "id": "responses-model", "provider": { "npm": "@ai-sdk/openai" } },
-                  "anthropic-model": { "id": "anthropic-model", "provider": { "npm": "@ai-sdk/anthropic", "api": "https://gateway.example/anthropic/v1" } },
-                  "gemini-model": { "id": "gemini-model", "provider": { "npm": "@ai-sdk/google" } },
-                  "mistral-model": { "id": "mistral-model", "provider": { "npm": "@ai-sdk/mistral" } }
-                }
-              },
-              "uniform": {
-                "id": "uniform", "name": "Uniform", "npm": "@ai-sdk/openai-compatible",
-                "models": { "chat-a": { "id": "chat-a" }, "chat-b": { "id": "chat-b" } }
-              }
-            }
-            """);
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {

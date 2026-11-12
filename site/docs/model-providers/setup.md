@@ -394,23 +394,11 @@ The server runs the model: what one model does wrong (a tool call left in its th
 
 ## OpenCode
 
-OpenCode Zen (`opencode`, pay as you go) and OpenCode Go (`opencode-go`, the subscription) are built in, turned off: add your key from the OpenCode console, or set `CODEALTA_OPENCODE_API_KEY`. Each request names its session in `x-opencode-session`, which keeps a conversation on the same backend and its prompt cache, and which Go requires.
+OpenCode Zen (`opencode`, pay as you go) and OpenCode Go (`opencode-go`, the subscription) are built in, turned off: add your key from the OpenCode console, or set `CODEALTA_OPENCODE_API_KEY`.
 
-OpenCode serves each model through one API: Chat Completions, Responses, Anthropic Messages or Gemini. A provider lists only the models of its own API, as [models.dev](https://models.dev) gives them. The built-in providers use Chat Completions; for the other models, add a provider of the same account for their API:
-
-```toml
-[providers.opencode-go-anthropic]
-display_name = "OpenCode Go (Anthropic)"
-type = "anthropic"
-api_url = "https://opencode.ai/inference/go/anthropic"
-api_key_env = "CODEALTA_OPENCODE_API_KEY"
-models_dev_provider_id = "opencode-go"
-
-[providers.opencode-go-anthropic.request.headers]
-"x-opencode-session" = "${session.id}"
-```
-
-For Zen, drop `/go` from the URLs. Use `type = "openai-responses"` with `/openai/v1` for the GPT models; Gemini models need `type = "google-genai"`, which does not fill `${session.id}`, so Go cannot use them.
+- Each request names its session in `x-opencode-session`, which keeps a conversation on the same backend and its prompt cache. Go requires it.
+- They use Chat Completions, through which OpenCode serves every paid and Go model, translating the request for the models of another API.
+- They do not list the free models (`-free`, `big-pickle`): OpenCode answers 403 for them outside its own app. `models_include_regex` in their table says which models are shown.
 
 ## Other endpoints
 
