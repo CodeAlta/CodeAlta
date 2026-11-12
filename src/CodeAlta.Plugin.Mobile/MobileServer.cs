@@ -164,6 +164,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
         // A file an answer links, a page at a time: the server finds the link in that answer, whatever the phone names.
         api.MapGet("/sessions/{id}/file", async (string id, long? seq, string? link, int? offset, int? before, CancellationToken ct) =>
             Json(await _options.Sessions.Files.ReadAsync(id, seq, link, offset, before, ct).ConfigureAwait(false)));
+        // A data file that a chart of a message names, below the folder of the session: the server finds the chart in that message.
+        api.MapGet("/sessions/{id}/chart-data", async (string id, long? seq, string? path, CancellationToken ct) =>
+            Json(await _options.Sessions.Files.ReadChartDataAsync(id, seq, path, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/provider", async (string id, HttpRequest request, CancellationToken ct) =>
             await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Api.ProviderAsync(id, body, ct).ConfigureAwait(false)) : Invalid());

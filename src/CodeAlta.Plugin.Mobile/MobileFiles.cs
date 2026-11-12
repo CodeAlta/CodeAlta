@@ -69,6 +69,31 @@ internal sealed class MobileFiles(IPluginAltaService alta, MobileSessions sessio
         return page;
     }
 
+    /// <summary>
+    /// A data file that a chart of a message names (<see cref="ChartDataFiles"/>), for the phone to draw the chart: the server finds
+    /// the chart that names the path in the message itself, and reads the file below the folder the session works in, as the
+    /// desktop does.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="sequence">The sequence number of the message.</param>
+    /// <param name="path">The path of the file, as the phone read it in the chart.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The status and, for <c>ok</c>, the text of the file; null when the phone does not see the session or asks for nothing.</returns>
+    internal async Task<JsonObject?> ReadChartDataAsync(string sessionId, long? sequence, string? path, CancellationToken cancellationToken)
+    {
+        if (sequence is not > 0 || path is not { Length: > 0 }) return null;
+        var parsed = ChartDataFiles.Parse(path, out var parts);
+        if (parsed != "ok") return new JsonObject { ["status"] = parsed };
+        if (await sessions.FindAsync(sessionId, cancellationToken).ConfigureAwait(false) is not { } status) return null;
+        var wanted = string.Join('/', parts);
+        var message = await LinkingTextAsync(sessionId, sequence.Value, cancellationToken).ConfigureAwait(false);
+        var named = ChartDataFiles.NamedIn(message).Any(url => ChartDataFiles.Parse(url, out var written) == "ok" && string.Join('/', written) == wanted);
+        if (!named) return new JsonObject { ["status"] = "not_named" };
+        var folder = MobileAlta.Text(status, "worktreeDirectory") ?? MobileAlta.Text(status, "workingDirectory");
+        var read = await ChartDataFiles.ReadAsync(folder, null, wanted, cancellationToken).ConfigureAwait(false);
+        return new JsonObject { ["status"] = read.Status, ["text"] = read.Text };
+    }
+
     // The text of a message whose links may be read, as the phone shows it: an answer or a prompt the user sent; null for anything else.
     private async Task<string?> LinkingTextAsync(string sessionId, long sequence, CancellationToken cancellationToken)
     {

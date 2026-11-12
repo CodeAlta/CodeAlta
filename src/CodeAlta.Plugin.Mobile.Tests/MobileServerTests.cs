@@ -609,6 +609,47 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task ChartData_IsReadOnlyWhenAChartOfTheAnswerNamesIt_BelowTheFolderOfTheSession()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        using var folder = new TempFolder();
+        Directory.CreateDirectory(Path.Combine(folder.Path, "out"));
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "out", "results.csv"), "name,value\na,1\n");
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "out", "other.csv"), "secret\n1\n");
+        var status = FakeAlta.Status("a", "p1", "personal");
+        status["workingDirectory"] = folder.Path;
+        fixture.Alta
+            .Answer("session status a", status)
+            .Answer("session events a", new JsonObject
+            {
+                ["type"] = "alta.session.event", ["sequenceNumber"] = 7, ["kind"] = "assistant.message",
+                ["content"] = new JsonArray(new JsonObject
+                {
+                    ["text"] = "A chart:\n\n```vega-lite\n{ \"data\": { \"url\": \"./out/results.csv\" }, \"mark\": \"bar\" }\n```\n\nand [a link](out/other.csv).\n\n"
+                        + "```vega-lite\n{ \"data\": { \"url\": \"out/missing.csv\" } }\n```",
+                }),
+            });
+
+        JsonNode? Read(HttpResponseMessage response) => JsonNode.Parse(response.Content.ReadAsStringAsync().Result);
+        Task<HttpResponseMessage> Get(string path, long seq = 7) => fixture.Client.GetAsync($"/api/sessions/a/chart-data?seq={seq}&path={Uri.EscapeDataString(path)}");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await Get("out/results.csv")).StatusCode, "Data needs a phone that signed in.");
+        await fixture.SignInAsync();
+
+        var read = Read(await Get("out/results.csv"))!;
+        Assert.AreEqual(("ok", "name,value\na,1\n"), ((string?)read["status"], (string?)read["text"]));
+        Assert.AreEqual("not_found", (string?)Read(await Get("out/missing.csv"))!["status"]);
+        // Only what a chart of the message names: a file the message links, or no message at all, is not read.
+        Assert.AreEqual(("not_named", null), Fields(Read(await Get("out/other.csv"))!));
+        Assert.AreEqual(("not_named", null), Fields(Read(await Get("out/results.csv", 8))!));
+        Assert.AreEqual(("outside", null), Fields(Read(await Get("../out/results.csv"))!));
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/c/chart-data?seq=7&path=out/results.csv")).StatusCode, "A session the phone does not see.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/chart-data?seq=7")).StatusCode, "No path.");
+
+        static (string?, string?) Fields(JsonNode node) => ((string?)node["status"], (string?)node["text"]);
+    }
+
+    [TestMethod]
     public async Task Files_AreReadOnlyWhenTheAnswerLinksThem_APageAtATime()
     {
         await using var fixture = await Fixture.StartAsync();

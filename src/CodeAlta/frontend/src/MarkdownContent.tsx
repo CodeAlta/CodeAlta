@@ -19,6 +19,7 @@ import { TimelineImageViewer } from "./TimelineImageStrip";
 import { inlineImageSource } from "./timelineImages";
 import type { WindowSize } from "./windowGeometry";
 import { dressTaskReferences, taskReferenceAt, taskReferenceAttribute, TaskReferencesContext } from "./workItems/taskReferences";
+import { charts, vegaLiteAppearance, type ChartData, type ChartFile } from "./vegaLite/vegaLite";
 import { TaskReferenceCard, taskReferenceCardId } from "./workItems/TaskReferenceCard";
 import type { WorkItem } from "./workItems/workItems";
 
@@ -34,6 +35,12 @@ export const MarkdownLinkScopeContext = createContext<MarkdownLinkScope | null>(
  * nothing reads them (a window without a host): such a picture stays a link to its file.
  */
 export const MarkdownImagesContext = createContext<MarkdownImages | null>(null);
+/**
+ * Reads a data file that a chart of the Markdown names (`"data": {"url": "out/results.csv"}`), below the folder of the
+ * session or of the document of the text (see `markdownLinks.chartData` of the host). Null where nothing reads them: a
+ * chart that names a file is refused.
+ */
+export const MarkdownChartDataContext = createContext<((path: string, scope: MarkdownLinkScope) => Promise<ChartFile>) | null>(null);
 /**
  * Pastes the commands of a code block of a shell in a terminal of the session or the project of the text, without running them.
  * Null where the window opens no terminal: the blocks have no such button.
@@ -77,27 +84,34 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     notDrawn: translate(locale, "Not drawn as a diagram:"), copyLatex: translate(locale, "Copy LaTeX"), copyMathMl: translate(locale, "Copy MathML"),
     footnotes: translate(locale, "Footnotes"), footnote: translate(locale, "Footnote"), backToReference: translate(locale, "Back to reference"),
     source: translate(locale, "Source"), preview: translate(locale, "Preview"), showSource: translate(locale, "Show the source or the drawing"),
-    expandDiagram: translate(locale, "Expand the diagram") }), [locale]);
+    expandDiagram: translate(locale, "Expand the diagram"), notCharted: translate(locale, "Not drawn as a chart:"), expandChart: translate(locale, "Expand the chart") }), [locale]);
   // A drawn diagram opens in a window of its own, where it can be zoomed; not from a text whose links are inert (the preview of a folded row).
   const expandableDiagrams = onOpenLink !== null;
   // Diagrams are drawn on the side, in the window's font, then found by the next render; they take the colors of the theme from the stylesheet.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
+  // The charts read their data files below the folder of the session or of the document of the text, and nowhere else.
+  const readChartData = useContext(MarkdownChartDataContext);
+  const chartScope = scope && (scope.sessionId || scope.projectId) ? scope : null;
+  const chartScopeKey = chartScope ? JSON.stringify([chartScope.sessionId ?? null, chartScope.projectId ?? null, chartScope.directory ?? null]) : null;
+  const chartData = useMemo<ChartData | null>(() => readChartData && chartScope && chartScopeKey
+    ? { key: chartScopeKey, read: path => readChartData(path, chartScope) } : null, [readChartData, chartScopeKey]);
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
     const pending = markdownPending();
-    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages, terminalBlocks, expandableDiagrams }), pending };
-  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, terminalBlocks, expandableDiagrams, appearance, drawn]);
+    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages, terminalBlocks, expandableDiagrams, chartData }), pending };
+  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, terminalBlocks, expandableDiagrams, chartData, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
-    const { diagrams: undrawn, math } = rendered.pending;
-    if (!undrawn.length && !math) return;
+    const { diagrams: undrawn, charts: uncharted, math } = rendered.pending;
+    if (!undrawn.length && !uncharted.length && !math) return;
     let current = true;
     // Formulas wait only for KaTeX, which loads once for the whole window.
     if (math) void loadMath().then(() => { if (current) setDrawn(value => value + 1); }, () => { /* Not loaded: the formulas stay as written. */ });
     // Text still being written changes before this fires, so only settled text is drawn.
-    const timer = undrawn.length ? setTimeout(() => {
-      const look = diagramAppearance();
-      void Promise.all(undrawn.map(text => diagrams.draw(text, look))).then(() => { if (current) setDrawn(value => value + 1); });
+    const timer = undrawn.length || uncharted.length ? setTimeout(() => {
+      const look = diagramAppearance(), chartLook = uncharted.length ? vegaLiteAppearance() : null;
+      void Promise.all([...undrawn.map(text => diagrams.draw(text, look)), ...uncharted.map(text => charts.draw(text, chartLook!, chartData))])
+        .then(() => { if (current) setDrawn(value => value + 1); });
     }, 200) : undefined;
     return () => { current = false; clearTimeout(timer); };
   }, [rendered]);
@@ -216,8 +230,10 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   function expandDiagram(target: Element): boolean {
     const found = expandableDiagrams ? expandableDiagram(target) : null;
     if (!found) return false;
-    const { drawing, source } = found;
-    setDiagram({ diagram: { picture: diagramPicture(drawing), source, background: diagramColors(drawing).variables["--pele-bg"] ?? "" },
+    const { drawing, source, chart } = found;
+    // A chart draws the color behind it; a diagram takes it from the page.
+    const background = diagramColors(drawing).variables["--pele-bg"] ?? getComputedStyle(drawing.parentElement!).backgroundColor;
+    setDiagram({ diagram: { picture: diagramPicture(drawing), source, background, chart },
       origin: target.closest<HTMLElement>("button") ?? drawing.parentElement! });
     return true;
   }

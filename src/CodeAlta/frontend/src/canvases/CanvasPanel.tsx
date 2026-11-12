@@ -3,6 +3,8 @@ import { Button, NonIdealState } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { showToast } from "../appToaster";
 import type { FileTab } from "../fileTabs";
+import { MarkdownLinkScopeContext } from "../MarkdownContent";
+import type { MarkdownLinkScope } from "../markdownLinks";
 import { PluginHtml } from "../PluginHtml";
 import type { PluginScriptTab } from "../pluginScript/PluginScript";
 import type { ScriptLoader } from "../pluginScript/scriptModule";
@@ -209,15 +211,22 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   // The calls of the script to its plugin: carried by the host, and paused while the tab is hidden.
   const rpc = useCanvasRpc(hub, view.instanceId, visible);
   const pane = useMemo(() => ({ projectId, sessionId }), [projectId, sessionId]);
+  // The Markdown of the canvas (its relative links, the data files of its charts) starts from the folder of its session, or of its project.
+  const linkScope = useMemo(() => sessionId ? { sessionId } : projectId ? { projectId } : null, [projectId, sessionId]);
   const scriptInput = useMemo(() => { try { return view.input ? JSON.parse(view.input) as unknown : null; } catch { return null; } }, [view.input]);
   return <div className="canvas-panel" data-phase={view.phase} data-visible={visible} data-active={active} tabIndex={-1} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {view.phase === "ready"
-      ? <PluginHtml className="canvas-html" html={drawn.html} pluginKey={pluginKey} pane={pane} onAction={view.actions ? onAction : undefined}
-        script={{ path: drawn.script, problem: drawn.problem, visible, tab: scriptTab, load: loadScript, rpc, context: { canvasId, instanceId: view.instanceId, spaceId, key, input: scriptInput } }} />
+      ? <ScopedMarkdown scope={linkScope}><PluginHtml className="canvas-html" html={drawn.html} pluginKey={pluginKey} pane={pane} onAction={view.actions ? onAction : undefined}
+        script={{ path: drawn.script, problem: drawn.problem, visible, tab: scriptTab, load: loadScript, rpc, context: { canvasId, instanceId: view.instanceId, spaceId, key, input: scriptInput } }} /></ScopedMarkdown>
       : view.phase === "loading"
         ? <div className="canvas-loading"><ActivitySpinner size={18} label={t("Loading…")} /></div>
         : <CanvasPlaceholder phase={view.phase} title={view.title ?? tab.name ?? t("Canvas")} icon={tab.icon} pluginKey={tab.pluginKey} control={control} onClose={onClose} onOpenSource={onOpenSource} onRebuilt={() => setRetry(value => value + 1)} />}
   </div>;
+}
+
+// The scope of the Markdown below, where the canvas has one; else the one around it.
+function ScopedMarkdown({ scope, children }: { scope: MarkdownLinkScope | null; children: ReactNode }) {
+  return scope ? <MarkdownLinkScopeContext.Provider value={scope}>{children}</MarkdownLinkScopeContext.Provider> : <>{children}</>;
 }
 
 /** Why a canvas shows nothing, and what to do: build the plugin again, open its source, or close the tab. */

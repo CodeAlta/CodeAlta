@@ -46,7 +46,10 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-rnd": "10.5.3",
-    "uqr": "0.1.3"
+    "uqr": "0.1.3",
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.5.0"
   },
   "devDependencies": {
     "@lobehub/icons-static-svg": "1.95.1",

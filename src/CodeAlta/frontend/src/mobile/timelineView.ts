@@ -21,8 +21,11 @@ export type DrawnBlock = { element: HTMLLIElement; version: string; diagram: boo
 /** What the view needs of the page. */
 export type TimelineViewOptions = Readonly<{
   document: Document;
-  /** Renders Markdown into an element; `redraw` is called once a diagram of it is drawn. Says whether it has a diagram. */
-  fill: (element: HTMLElement, text: string, redraw: () => void) => boolean;
+  /**
+   * Renders Markdown into an element; `redraw` is called once a diagram of it is drawn. Says whether it has a diagram. `seq` is the
+   * sequence number of the message, whose charts read the data files it names.
+   */
+  fill: (element: HTMLElement, text: string, redraw: () => void, seq?: number) => boolean;
   /** The session the timeline shows. */
   session: () => string | null;
   /** The title of a session, when the page knows it. */
@@ -125,8 +128,8 @@ export function createTimelineView(options: TimelineViewOptions) {
   }
 
   function fillMessage(content: HTMLElement, block: MessageBlock, text: string): boolean {
-    const redraw = () => { options.fill(content, text, redraw); dressLinkedImages(content, block); };
-    const diagram = options.fill(content, text, redraw);
+    const redraw = () => { options.fill(content, text, redraw, block.seq); dressLinkedImages(content, block); };
+    const diagram = options.fill(content, text, redraw, block.seq);
     dressLinkedImages(content, block);
     return diagram;
   }

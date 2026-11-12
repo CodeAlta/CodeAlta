@@ -3,6 +3,7 @@ import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, 
 import { fileMarkdownHref, placeAfterPath } from "../markdownLinks";
 import { loadMath } from "../math";
 import { dressSessionLinks, sessionLinkTarget, type SessionLinkInfo } from "../sessionLinks";
+import { charts, vegaLiteAppearance } from "../vegaLite/vegaLite";
 import { el, iconSvg } from "./dom";
 
 /** What the page asks of the server for a diagram page: `POST /api/diagrams`. */
@@ -94,23 +95,29 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
   // A diagram is laid out for the width it has in a message: the screen's, less the margins of the message and of the
   // diagram. A flowchart wider than that is laid out top to bottom.
   const look = () => diagramAppearance(window.innerWidth - 64);
-  const render = createMarkdownRenderer(window, undefined, look);
+  // A chart as wide as its container is as wide as the screen, less the same margins.
+  const chartLook = () => vegaLiteAppearance(window.innerWidth - 64);
+  const render = createMarkdownRenderer(window, undefined, look, chartLook);
   const pages = createDiagramPages(options.upload);
 
   /**
-   * Renders a text into an element; `redraw` is called once a diagram of it is drawn, or once KaTeX is loaded for its
-   * formulas. Says whether it has a diagram (drawn again when the theme changes). `how` is how it is rendered, such as
-   * with the lines of its blocks.
+   * Renders a text into an element; `redraw` is called once a diagram or a chart of it is drawn, or once KaTeX is loaded for its
+   * formulas. Says whether it has a diagram or a chart (drawn again when the theme changes). `how` is how it is rendered, such as
+   * with the lines of its blocks, or where its charts read the data files they name.
    */
   function fill(container: HTMLElement, text: string, redraw: () => void, how?: MarkdownRenderOptions): boolean {
     const pending = markdownPending();
     container.innerHTML = render(text, true, pending, how);
     for (const figure of Array.from(container.querySelectorAll<HTMLElement>(".markdown-diagram"))) dressDiagram(figure);
     if (options.describeSession) dressSessionLinks(container, options.describeSession, (_target, info, text) => info ? `Session ${info.title || text}${info.scope ? `, in ${info.scope}` : ""}: ${info.state}` : text);
-    const appearance = look(), undrawn = pending.diagrams;
+    const appearance = look(), undrawn = pending.diagrams, uncharted = pending.charts;
     if (undrawn.length) void Promise.all(undrawn.map(source => diagrams.draw(source, appearance))).then(() => { if (container.isConnected) redraw(); });
+    if (uncharted.length) {
+      const chartAppearance = chartLook();
+      void Promise.all(uncharted.map(source => charts.draw(source, chartAppearance, how?.chartData ?? null))).then(() => { if (container.isConnected) redraw(); });
+    }
     if (pending.math) void loadMath().then(() => { if (container.isConnected) redraw(); }, () => { /* Not loaded: the formulas stay as written. */ });
-    return undrawn.length > 0 || !!container.querySelector(".markdown-diagram, pre[data-language='mermaid']");
+    return undrawn.length > 0 || uncharted.length > 0 || !!container.querySelector(".markdown-diagram, pre[data-language='mermaid'], pre[data-language='vega-lite'], pre[data-language='vegalite']");
   }
 
   function dressDiagram(figure: HTMLElement) {

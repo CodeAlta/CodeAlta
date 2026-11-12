@@ -228,6 +228,37 @@ public sealed class DesktopFileLinksTests
     }
 
     [TestMethod]
+    public async Task TheDataOfAChart_IsReadBelowTheFolderOfItsSession_OrOfItsProjectFromItsDocument()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Write(fixture.ProjectPath, "out/results.csv", "name,value\na,1\n");
+        fixture.Write(fixture.ProjectPath, "docs/data/points.json", "[1]");
+        var worktree = Path.Combine(fixture.Root, "worktree");
+        fixture.Write(worktree, "out/results.csv", "from the worktree");
+        fixture.Write(fixture.Root, "secret.csv", "secret");
+        fixture.SessionFolders["worktree-session"] = worktree;
+        var service = new MarkdownLinksService(Epoch, _ => true, fixture.Links);
+
+        Assert.AreEqual(("ok", "name,value\na,1\n"), Fields(await service.ChartDataAsync(new(Epoch, "out/results.csv", "session"), default)));
+        Assert.AreEqual(("ok", "from the worktree"), Fields(await service.ChartDataAsync(new(Epoch, "out/results.csv", "worktree-session"), default)));
+        // A document of a project reads from its own folder, inside the project.
+        Assert.AreEqual(("ok", "[1]"), Fields(await service.ChartDataAsync(new(Epoch, "data/points.json", null, fixture.ProjectId, "docs"), default)));
+        Assert.AreEqual(("ok", "name,value\na,1\n"), Fields(await service.ChartDataAsync(new(Epoch, "out/results.csv", null, fixture.ProjectId), default)));
+        Assert.AreEqual(("outside", null), Fields(await service.ChartDataAsync(new(Epoch, "../out/results.csv", null, fixture.ProjectId, "docs"), default)));
+        Assert.AreEqual(("outside", null), Fields(await service.ChartDataAsync(new(Epoch, "../secret.csv", "session"), default)));
+        Assert.AreEqual(("outside", null), Fields(await service.ChartDataAsync(new(Epoch, Path.Combine(fixture.Root, "secret.csv"), "session"), default)));
+        Assert.AreEqual(("not_data", null), Fields(await service.ChartDataAsync(new(Epoch, "out/notes.txt", "session"), default)));
+        Assert.AreEqual(("not_found", null), Fields(await service.ChartDataAsync(new(Epoch, "out/missing.csv", "session"), default)));
+        // Where there is no folder to read in, nothing is read.
+        Assert.AreEqual(("no_project", null), Fields(await service.ChartDataAsync(new(Epoch, "out/results.csv"), default)));
+        Assert.AreEqual(("no_project", null), Fields(await service.ChartDataAsync(new(Epoch, "out/results.csv", "unknown-session"), default)));
+        Assert.AreEqual(("no_project", null), Fields(await new MarkdownLinksService(Epoch, _ => true).ChartDataAsync(new(Epoch, "out/results.csv", "session"), default)));
+        Assert.AreEqual(("stale_epoch", null), Fields(await service.ChartDataAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "out/results.csv", "session"), default)));
+
+        static (string, string?) Fields(MarkdownChartDataResponse response) => (response.Status, response.Text);
+    }
+
+    [TestMethod]
     public async Task TheFullPathOfALink_IsGiven_WhetherOrNotTheFileIsThere()
     {
         using var fixture = await Fixture.CreateAsync();

@@ -14,6 +14,7 @@ import { installedApp, setUpInstall } from "./install";
 import { setUpNotifications } from "./notifications";
 import { createLiveStream, type LinkState } from "./liveStream";
 import { createMarkdownView, linkedFileName, linksLine, linksMarkdown } from "./markdownView";
+import type { ChartData } from "../vegaLite/vegaLite";
 import {
   choiceLabel, choiceRequest, entryName, findModel, forgetMode, initialChoice, lastProjectKey, pickEffort, pickModel, preferencesKey,
   providerEntries, providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
@@ -398,8 +399,10 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   markdown.handle(timeline, text => showToast(text), openLinkedFile);
+  // The charts of a message read the data files it names, below the folder of the session: the server finds them in the message.
+  const chartData = (id: string, seq: number): ChartData => ({ key: `${id}\n${seq}`, read: path => api.chartData(id, seq, path) });
   const blocksView = createTimelineView({
-    document, fill: (element, text, redraw) => markdown.fill(element, text, redraw), session: () => detail.id,
+    document, fill: (element, text, redraw, seq) => markdown.fill(element, text, redraw, seq === undefined || !detail.id ? undefined : { chartData: chartData(detail.id, seq) }), session: () => detail.id,
     sessionTitle: id => sessions.view(id)?.title ?? null,
     openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
     viewer: createImageViewer({ window }),

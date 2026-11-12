@@ -10,7 +10,7 @@ Named runtime exports only; no default export. `interfaceVersion` is **1**, also
 | Use | Exports |
 | --- | --- |
 | Elements and hooks | `html`, `useAlta`, `useVisible`, `useTheme`, `useRpc`, `useStream` |
-| Content and links | `Markdown`, `Code`, `Diagram`, `Equation`, `FileLink`, `SessionLink` |
+| Content and links | `Markdown`, `Code`, `Diagram`, `VegaLite`, `Equation`, `FileLink`, `SessionLink` |
 | Icons | `Icon`, `BrandIcon`, `brandIconNames`, `isBrandIcon` |
 | Charts | `Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, `WeekdayHourHeatmap` |
 | Distribution data/options | `histogram`, `histogramOption`, `boxStats`, `boxPlotOption`, `quantile` |
@@ -92,6 +92,7 @@ Required props are in **bold**. Optional callbacks are functions, not strings.
 | `Markdown` | **`source: string`** |
 | `Code` | **`code: string`**, `language?: string` (e.g. `json`, `csharp`, `diff`). It does not take `source` or children as the code. |
 | `Diagram` | **`source: string`** (Mermaid) |
+| `VegaLite` | **`spec: object \| string`** (a [Vega-Lite](https://vega.github.io/vega-lite/) spec, or its JSON), drawn as a `vega-lite` fence of `Markdown`: in the window's font and colors, again when the theme changes. Its data is in the spec (`values`) or in a CSV, TSV or JSON file of the canvas project it names (`"data": {"url": "out/results.csv"}`, below the project, 4 MB at most). It reads nothing from the web, runs no script and has no link: a chart that cannot be drawn shows its spec and why. |
 | `Equation` | **`source: string`** (LaTeX, without delimiters; `\ce{…}` for chemistry). `Markdown` draws `$…$` and `$$…$$` formulas and footnotes too. |
 | `FileLink` | **`path: string`**, `line?: number`, `children?` (label). Relative paths use the canvas project. |
 | `SessionLink` | **`sessionId: string`**, `children?` |

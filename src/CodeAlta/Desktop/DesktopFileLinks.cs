@@ -179,6 +179,30 @@ internal sealed class DesktopFileLinks
     }
 
     /// <summary>
+    /// Reads a data file that a chart of the Markdown names (<see cref="ChartDataFiles"/>): below the folder a session works in,
+    /// for a message of a session; else below the folder of a project, from the folder of the document, for a document.
+    /// </summary>
+    /// <param name="path">The path as the chart writes it.</param>
+    /// <param name="sessionId">The session whose message has the chart: its folder is the one the file is read in.</param>
+    /// <param name="projectId">Without a session, the project or the folder whose document has the chart.</param>
+    /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The text of the file, or why it was not read (<c>no_project</c> where there is no folder to read in).</returns>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    internal async Task<ChartDataRead> ReadChartDataAsync(string? path, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    {
+        if (sessionId is { Length: > 0 })
+        {
+            var folder = sessionId.Length <= 128 ? await _sessionFolder(sessionId, cancellationToken).ConfigureAwait(false) : null;
+            return await ChartDataFiles.ReadAsync(folder, null, path, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (projectId is not { Length: > 0 and <= 512 }) return new("no_project");
+        var (status, root) = await _folder(projectId, cancellationToken).ConfigureAwait(false);
+        return await ChartDataFiles.ReadAsync(status == "ok" ? root : null, directory, path, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Shows the file that a link names in the file manager of the system: <c>ok</c>, <c>not_found</c>, or
     /// <c>failed</c> when the file manager could not be started.
     /// </summary>

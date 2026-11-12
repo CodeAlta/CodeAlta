@@ -55,23 +55,31 @@ export const isDarkTheme = (element: Element): boolean => element.closest(".bp6-
  * does not parse (`color-mix`, `oklch`) is read back through the browser as a plain `#rrggbb` or `rgba()` color.
  */
 export function readChartTokens(element: HTMLElement): ChartTokens {
-  const probe = document.createElement("span");
+  return readColorVariables(element, read => chartTokens(read, isDarkTheme(element), getComputedStyle(element).fontFamily));
+}
+
+/**
+ * Gives `use` a reader of the colors of variables as the element sees them, as plain `#rrggbb` or `rgba()` colors (an
+ * empty string for a variable the page does not define), and returns what it returns.
+ */
+export function readColorVariables<T>(element: HTMLElement, use: (read: (variable: string) => string) => T): T {
+  const probe = element.ownerDocument.createElement("span");
   probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;width:0;height:0";
   element.appendChild(probe);
-  const canvas = document.createElement("canvas").getContext("2d");
+  const canvas = element.ownerDocument.createElement("canvas").getContext("2d");
+  const view = element.ownerDocument.defaultView ?? window;
   try {
-    const read = (variable: string) => {
+    return use(variable => {
       probe.style.color = "";
       probe.style.color = `var(${variable})`;
-      const computed = getComputedStyle(probe).color;
+      const computed = view.getComputedStyle(probe).color;
       // A variable that is not defined leaves the color inherited: it must read as missing, not as the text color.
-      if (getComputedStyle(element).getPropertyValue(variable).trim() === "") return "";
+      if (view.getComputedStyle(element).getPropertyValue(variable).trim() === "") return "";
       if (!canvas) return computed;
       canvas.fillStyle = "#000000";
       canvas.fillStyle = computed;
       return String(canvas.fillStyle);
-    };
-    return chartTokens(read, isDarkTheme(element), getComputedStyle(element).fontFamily);
+    });
   } finally {
     probe.remove();
   }

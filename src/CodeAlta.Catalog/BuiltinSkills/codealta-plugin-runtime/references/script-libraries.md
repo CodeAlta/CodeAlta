@@ -207,6 +207,9 @@ These are **not import-map entries**. Use the helper, not `import ... from "echa
 | `highlight.js` | 11.12.0 | `Code`, Markdown code fences | [Languages / GitHub](https://github.com/highlightjs/highlight.js) |
 | `katex` | 0.19.1 | `Equation`, formulas and `math` fences of `Markdown`, with mhchem (`\ce`, `\pu`) | [Functions](https://katex.org/docs/supported) · [GitHub](https://github.com/KaTeX/KaTeX) |
 | `pele` | 1.12.0 | `Diagram`, Mermaid fences | [Syntax](https://mermaid.js.org/intro/) · [Pele](https://pele.run) · [GitHub](https://github.com/obsidianmd/pele) |
+| `vega-lite` | 6.5.0 | `VegaLite`, `vega-lite` fences of `Markdown` (data only: no address of the web, no image, no link) | [Docs](https://vega.github.io/vega-lite/docs/) · [GitHub](https://github.com/vega/vega-lite) |
+| `vega` | 6.4.0 | Draws the charts of `vega-lite` to SVG, in a worker, with its expressions interpreted (`vega-interpreter`) | [Docs](https://vega.github.io/vega/docs/) · [GitHub](https://github.com/vega/vega) |
+| `vega-interpreter` | 2.3.2 | The expressions of a chart, without `eval` | [GitHub](https://github.com/vega/vega/tree/main/packages/vega-interpreter) |
 | `dompurify` | 3.4.14 | `alta.html(text)` with CodeAlta's fragment policy | [API / GitHub](https://github.com/cure53/DOMPurify) |
 | `@lobehub/icons-static-svg` | 1.95.1 | Curated `BrandIcon` assets, not the whole collection | [GitHub](https://github.com/lobehub/lobe-icons) |
 | `simple-icons` | 16.34.0 | Curated `BrandIcon` assets, not the whole collection | [Catalog](https://simpleicons.org) · [GitHub](https://github.com/simple-icons/simple-icons) |

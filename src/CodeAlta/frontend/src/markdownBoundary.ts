@@ -2,6 +2,7 @@ import createDOMPurify from "dompurify";
 import { isShellLanguage } from "./terminal/shellBlocks";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
+import { charts, isVegaLiteLanguage, vegaLiteAppearance, type ChartAppearance, type ChartData } from "./vegaLite/vegaLite";
 import { loadedMath } from "./math";
 import { createMarkdownParser, fileName, footnoteAttribute, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
 import { markdownHrefTarget } from "./markdownLinks";
@@ -17,17 +18,20 @@ export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the button of a code block says it does. */ copy?: string;
   /** What the button of a code block of a shell that pastes it in a terminal says it does. */ pasteInTerminal?: string;
   /** What the note under a `mermaid` block that could not be drawn says before its reason. */ notDrawn?: string;
+  /** What the note under a `vega-lite` block that could not be drawn says before its reason. */ notCharted?: string;
   /** What the buttons of a displayed equation say they do. */ copyLatex?: string; copyMathMl?: string;
   /** The name of the notes at the end of a text, and what a reference and the way back from a note say before their number. */
   footnotes?: string; footnote?: string; backToReference?: string;
   /** What the button of a drawn block (a diagram, an equation) says: its source, or its drawing again, and what it does. */
   source?: string; preview?: string; showSource?: string;
   /** What the button of a drawn diagram that opens it in a window of its own says it does. */ expandDiagram?: string;
+  /** What the button of a drawn chart that opens it in a window of its own says it does. */ expandChart?: string;
 }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy", pasteInTerminal: "Paste in terminal",
   notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML",
   footnotes: "Footnotes", footnote: "Footnote", backToReference: "Back to reference",
-  source: "Source", preview: "Preview", showSource: "Show the source or the drawing", expandDiagram: "Expand the diagram" };
+  source: "Source", preview: "Preview", showSource: "Show the source or the drawing", expandDiagram: "Expand the diagram",
+  notCharted: "Not drawn as a chart:", expandChart: "Expand the chart" };
 
 /**
  * Shows the source of a drawn block (a diagram, a displayed equation) in place of its drawing, or the drawing again,
@@ -48,15 +52,16 @@ export function toggleRenderedSource(target: Element): boolean {
 }
 
 /**
- * The drawing and the Mermaid text of the diagram whose Expand button holds the element, while it is shown; null otherwise.
+ * The drawing and the text (Mermaid, or the Vega-Lite spec of a chart) of the diagram whose Expand button holds the element,
+ * while it is shown; null otherwise.
  */
-export function expandableDiagram(target: Element): Readonly<{ drawing: SVGSVGElement; source: string }> | null {
+export function expandableDiagram(target: Element): Readonly<{ drawing: SVGSVGElement; source: string; chart: boolean }> | null {
   const button = target.closest<HTMLElement>("button.markdown-diagram-expand");
   const block = button?.parentElement?.parentElement;
   if (!button || !block?.classList.contains("markdown-rendered") || block.hasAttribute("data-source")) return null;
   const drawing = block.querySelector<SVGSVGElement>(":scope > .markdown-diagram > svg");
   const source = block.querySelector(":scope > pre > code")?.textContent?.replace(/\n$/, "");
-  return drawing && source !== undefined ? { drawing, source } : null;
+  return drawing && source !== undefined ? { drawing, source, chart: drawing.parentElement!.classList.contains("markdown-chart") } : null;
 }
 
 /**
@@ -81,13 +86,14 @@ export function followFootnote(target: Element): boolean {
 }
 
 /**
- * What a render could not draw yet: the texts of the `mermaid` blocks to draw, and whether its formulas wait for the
- * math library (`loadMath`). The owner draws or loads them, then renders again.
+ * What a render could not draw yet: the texts of the `mermaid` blocks to draw, the texts of the `vega-lite` blocks to draw
+ * (or whose files to read again), and whether its formulas wait for the math library (`loadMath`). The owner draws or
+ * loads them, then renders again.
  */
-export type MarkdownPending = { diagrams: string[]; math: boolean };
+export type MarkdownPending = { diagrams: string[]; charts: string[]; math: boolean };
 
 /** A new, empty {@link MarkdownPending}. */
-export const markdownPending = (): MarkdownPending => ({ diagrams: [], math: false });
+export const markdownPending = (): MarkdownPending => ({ diagrams: [], charts: [], math: false });
 
 /**
  * What a button of a displayed equation copies: its LaTeX between `$$` lines, or its MathML (which Word pastes as an
@@ -124,14 +130,16 @@ export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?:
   /** Whether the images of the web are links marked as pictures, as those of the disk: the text of a tracker, whose host reads its images. */
   webImages?: boolean;
   /** Whether a drawn diagram has a button that opens it in a window of its own (`expandableDiagram`): where the window can open one. */
-  expandableDiagrams?: boolean }>;
+  expandableDiagrams?: boolean;
+  /** Where the charts of the text read the data files they name; without it, a chart that names a file is refused. */
+  chartData?: ChartData | null }>;
 
 /**
  * Instance-owned browser boundary; parser output must never bypass this sanitizer. Its diagrams are those drawn
- * for `appearance`: the window's, or one no wider than a phone.
+ * for `appearance`, and its charts those drawn for `chartAppearance`: the window's, or one no wider than a phone.
  */
 export function createMarkdownRenderer(view: Window & typeof globalThis, labels: MarkdownLabels = englishLabels,
-  appearance: () => DiagramAppearance = () => diagramAppearance()) {
+  appearance: () => DiagramAppearance = () => diagramAppearance(), chartAppearance: () => ChartAppearance = () => vegaLiteAppearance()) {
   // A link to a file is one that the Markdown of the text wrote (`[name](path)`): the parsers mark theirs with
   // a value that no text knows. An `<a>` written in HTML opens a page of the web, and nothing else.
   const fileLinkMark = view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
@@ -198,45 +206,59 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       || name === "value" && tag === "li" && /^-?\d{1,6}$/.test(value)
       || name === "reversed" && tag === "ol";
   });
+  // A drawn block (a diagram, a chart) with its Expand button where the window can open one.
+  function drawnFigure(pre: HTMLElement, className: string, svg: string, expandable: boolean, expandLabel: string) {
+    const figure = view.document.createElement("div");
+    figure.className = className;
+    figure.innerHTML = svg;
+    const block = renderedBlock(figure, pre);
+    if (expandable) {
+      const expand = view.document.createElement("button");
+      expand.type = "button";
+      expand.className = "markdown-diagram-expand";
+      expand.title = expandLabel;
+      expand.setAttribute("aria-label", expand.title);
+      block.querySelector(":scope > .markdown-block-tools")!.prepend(expand);
+    }
+    pre.replaceWith(block);
+    block.append(pre);
+  }
+  // A block that could not be drawn says why under it, or it reads as a drawing that failed to show.
+  function refusalNote(pre: HTMLElement, label: string, refused: string) {
+    const note = view.document.createElement("p");
+    note.className = "markdown-diagram-refused";
+    note.textContent = `${label} ${refused}`;
+    pre.after(note);
+  }
   // Fenced blocks are dressed after sanitization, from their text alone: the sanitizer keeps accepting no
   // authored class, style or SVG. A `mermaid` block that has been drawn becomes its diagram; one that has
-  // not is reported in `undrawn` and stays a code block. A `math` block is drawn by `dressMath`. Any other known language is highlighted.
-  function dressFences(fragment: DocumentFragment, undrawn: string[] | undefined, expandable: boolean) {
+  // not is reported in `pending` and stays a code block. A `vega-lite` block becomes its chart the same way, its SVG
+  // drawn by Vega in a worker and sanitized (`vegaLite.ts`). A `math` block is drawn by `dressMath`. Any other known
+  // language is highlighted.
+  function dressFences(fragment: DocumentFragment, pending: MarkdownPending | undefined, expandable: boolean, chartData: ChartData | null) {
+    let chartLook: ChartAppearance | undefined;
     for (const code of Array.from(fragment.querySelectorAll<HTMLElement>("pre > code[class^='language-']"))) {
       const pre = code.parentElement!;
       if (pre.children.length !== 1) continue;
       const language = code.className.slice("language-".length);
       const text = code.textContent ?? "";
+      if (isVegaLiteLanguage(language)) {
+        pre.setAttribute("data-language", language.toLowerCase());
+        const found = charts.lookup(text, chartLook ??= chartAppearance(), chartData);
+        if (found.pending) pending?.charts.push(text);
+        if (found.svg !== null) drawnFigure(pre, "markdown-diagram markdown-chart", found.svg, expandable, labels.expandChart ?? englishLabels.expandChart!);
+        else if (found.refused !== null) refusalNote(pre, labels.notCharted ?? englishLabels.notCharted!, found.refused);
+        continue;
+      }
       if (language === "mermaid") {
         const look = appearance();
         const svg = diagrams.get(text, look);
-        if (typeof svg === "string") {
-          const figure = view.document.createElement("div");
-          figure.className = "markdown-diagram";
-          figure.innerHTML = svg;
-          pre.setAttribute("data-language", "mermaid");
-          const block = renderedBlock(figure, pre);
-          if (expandable) {
-            const expand = view.document.createElement("button");
-            expand.type = "button";
-            expand.className = "markdown-diagram-expand";
-            expand.title = labels.expandDiagram ?? englishLabels.expandDiagram!;
-            expand.setAttribute("aria-label", expand.title);
-            block.querySelector(":scope > .markdown-block-tools")!.prepend(expand);
-          }
-          pre.replaceWith(block);
-          block.append(pre);
-        } else {
-          if (svg === undefined) undrawn?.push(text);
-          pre.setAttribute("data-language", "mermaid");
-          // A block that could not be drawn says why under it, or it reads as a diagram that failed to show.
+        pre.setAttribute("data-language", "mermaid");
+        if (typeof svg === "string") drawnFigure(pre, "markdown-diagram", svg, expandable, labels.expandDiagram ?? englishLabels.expandDiagram!);
+        else {
+          if (svg === undefined) pending?.diagrams.push(text);
           const refused = svg === null ? diagrams.refusal(text, look) : null;
-          if (refused !== null) {
-            const note = view.document.createElement("p");
-            note.className = "markdown-diagram-refused";
-            note.textContent = `${labels.notDrawn ?? englishLabels.notDrawn!} ${refused}`;
-            pre.after(note);
-          }
+          if (refused !== null) refusalNote(pre, labels.notDrawn ?? englishLabels.notDrawn!, refused);
         }
         continue;
       }
@@ -549,7 +571,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         fragment.prepend(block);
       }
       dressFileImages(fragment);
-      dressFences(fragment, pending?.diagrams, options.expandableDiagrams === true);
+      dressFences(fragment, pending, options.expandableDiagrams === true, options.chartData ?? null);
       dressFootnotes(fragment);
       dressMath(fragment, pending);
       dressTasks(fragment);

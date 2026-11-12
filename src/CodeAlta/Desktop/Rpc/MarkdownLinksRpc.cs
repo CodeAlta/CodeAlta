@@ -87,6 +87,31 @@ internal sealed class MarkdownLinksService
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
     }
 
+    /// <summary>
+    /// Reads a data file that a chart of the Markdown names, for the window to draw the chart: a CSV, TSV or JSON file below the
+    /// folder of the session of the message, or of the project of the document, of at most <see cref="ChartDataFiles.MaximumBytes"/>
+    /// (<see cref="ChartDataFiles"/>). The address of the request is the path as the chart writes it.
+    /// </summary>
+    /// <remarks>
+    /// The answer is <c>ok</c> with the text of the file, or <c>not_found</c>, <c>outside</c>, <c>not_data</c>, <c>too_large</c>,
+    /// <c>no_project</c>, <c>failed</c>, <c>invalid_request</c> or <c>stale_epoch</c> with nothing else.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    [NeoRpcMethod("chartData", TimeoutMilliseconds = 60_000)]
+    public async Task<MarkdownChartDataResponse> ChartDataAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+    {
+        MarkdownChartDataResponse Reply(string status, string? text = null) => new(status, _epoch, text);
+        if (Validate(request) is { } refused) return Reply(refused);
+        if (_files is null) return Reply("no_project");
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var read = await _files.ReadChartDataAsync(request.Address, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false);
+            return Reply(read.Status, read.Text);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
+    }
+
     /// <summary>Shows the file that a link of the Markdown names in the file manager of the system.</summary>
     /// <remarks>The answer is <c>ok</c>, <c>not_found</c>, <c>failed</c>, <c>invalid_request</c> or <c>stale_epoch</c>.</remarks>
     /// <exception cref="OperationCanceledException">The request was canceled before anything was shown.</exception>
@@ -170,5 +195,7 @@ internal sealed record MarkdownLinkRequest(string ExpectedHostEpoch, string Addr
 internal sealed record MarkdownLinkResponse(string Status, string HostEpoch);
 /// <summary>A picture that a link names: its media type, its content in base64 and the full path of its file, only for <c>ok</c>.</summary>
 internal sealed record MarkdownImageResponse(string Status, string HostEpoch, string? MediaType, string? Base64, string? FullPath);
+/// <summary>A data file that a chart names: its text, only for <c>ok</c>.</summary>
+internal sealed record MarkdownChartDataResponse(string Status, string HostEpoch, string? Text);
 /// <summary>The full path of the file that a link names, only for <c>ok</c>.</summary>
 internal sealed record MarkdownLinkPathResponse(string Status, string HostEpoch, string? FullPath);

@@ -23,8 +23,8 @@ namespace CodeAlta.Plugins.Abstractions;
 /// </para>
 /// <para>
 /// A fragment runs no script of its own. What the application itself draws is reached through Markdown:
-/// <see cref="Markdown"/>, <see cref="Code"/> and <see cref="Diagram"/> write a block that the application
-/// renders as it renders the messages of a session, with highlighted code and Mermaid diagrams, and
+/// <see cref="Markdown"/>, <see cref="Code"/>, <see cref="Diagram"/> and <see cref="VegaLite"/> write a block that the application
+/// renders as it renders the messages of a session, with highlighted code, Mermaid diagrams and Vega-Lite charts, and
 /// <see cref="Chart"/> writes a chart.
 /// </para>
 /// </remarks>
@@ -77,8 +77,8 @@ public static partial class PluginHtml
 
     /// <summary>
     /// Marks a block whose text is Markdown. The application renders it as it renders the messages of a
-    /// session: headings, lists, tables, fenced code with the colors of its language, and <c>mermaid</c>
-    /// fences as diagrams. The indentation that every line of the block shares is not part of the Markdown.
+    /// session: headings, lists, tables, fenced code with the colors of its language, <c>mermaid</c>
+    /// fences as diagrams and <c>vega-lite</c> fences as charts. The indentation that every line of the block shares is not part of the Markdown.
     /// </summary>
     public const string MarkdownClass = "alta-markdown";
 
@@ -156,6 +156,19 @@ public static partial class PluginHtml
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mermaid);
         return Markdown(Fence(mermaid, "mermaid"));
+    }
+
+    /// <summary>
+    /// Creates a chart from its Vega-Lite spec, in JSON: drawn by the application in the font and the colors of the window. Its data
+    /// is in the spec (<c>"values"</c>) or in a CSV, TSV or JSON file of the project that it names (<c>"url": "out/results.csv"</c>).
+    /// </summary>
+    /// <param name="spec">The Vega-Lite spec, as after a <c>vega-lite</c> fence.</param>
+    /// <returns>The block markup. A spec that cannot be drawn is shown as it is, with the reason under it.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="spec"/> is null, empty or whitespace.</exception>
+    public static string VegaLite(string spec)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(spec);
+        return Markdown(Fence(spec, "vega-lite"));
     }
 
     /// <summary>Creates a displayed equation from its LaTeX (<c>\frac{a}{b}</c>, or <c>\ce{H2O}</c> for chemistry), drawn by the application.</summary>

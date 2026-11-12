@@ -203,6 +203,11 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       if (place.before !== undefined) query.set("before", String(place.before));
       return call<LinkedFilePage>("GET", `${session(id)}/file?${query}`);
     },
+    /** A data file that a chart of the message `seq` names, below the folder of the session: the server finds the chart in that message. */
+    chartData: async (id: string, seq: number, path: string): Promise<{ status: string; text?: string }> => {
+      const reply = await call<{ status?: string; text?: string | null }>("GET", `${session(id)}/chart-data?${new URLSearchParams({ seq: String(seq), path })}`);
+      return { status: reply.status ?? "failed", text: reply.text ?? undefined };
+    },
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archiveChildren: (id: string) => call<{ hasChildren?: boolean; error?: string | null }>("GET", `${session(id)}/archive-children`),
     archive: (id: string, withChildren = false) => command<ActionResult & { changed?: readonly string[] | null }>(`${session(id)}/archive${withChildren ? "?withChildren=true" : ""}`),

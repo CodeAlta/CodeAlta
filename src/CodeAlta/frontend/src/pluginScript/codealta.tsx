@@ -121,7 +121,7 @@ export function useStream<T = unknown>(name: string, input?: unknown): StreamRes
   return state;
 }
 
-/** A text of Markdown, drawn as the messages of a session are: headings, lists, tables, colored code and diagrams. */
+/** A text of Markdown, drawn as the messages of a session are: headings, lists, tables, colored code, diagrams and charts. */
 export function Markdown({ source }: { source: string }) {
   return <MarkdownContent source={source} timelineCodeBlocks />;
 }
@@ -141,6 +141,15 @@ export function Code({ code, language }: { code: string; language?: string }) {
 /** A diagram from its Mermaid text, in the colors of the window. */
 export function Diagram({ source }: { source: string }) {
   return <MarkdownContent source={fence(source, "mermaid")} timelineCodeBlocks />;
+}
+
+/**
+ * A chart from its Vega-Lite spec (an object, or its JSON), drawn as a `vega-lite` block of the messages: in the font and the colors
+ * of the window, again when the theme changes. Its data is in the spec, or in a file of the project it names; Vega loads with the
+ * first chart.
+ */
+export function VegaLite({ spec }: { spec: string | Readonly<Record<string, unknown>> }) {
+  return <MarkdownContent source={fence(typeof spec === "string" ? spec : JSON.stringify(spec, null, 2), "vega-lite")} timelineCodeBlocks />;
 }
 
 /** An equation from its LaTeX (`\frac{a}{b}`, `\ce{H2O}` for chemistry), displayed as in the messages; KaTeX loads with the first one. */

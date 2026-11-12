@@ -479,6 +479,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(MarkdownLinkRequest))]
 [JsonSerializable(typeof(MarkdownLinkResponse))]
 [JsonSerializable(typeof(MarkdownImageResponse))]
+[JsonSerializable(typeof(MarkdownChartDataResponse))]
 [JsonSerializable(typeof(MarkdownLinkPathResponse))]
 [JsonSerializable(typeof(PullRequestPromptsRequest))]
 [JsonSerializable(typeof(PullRequestPromptsResponse))]
