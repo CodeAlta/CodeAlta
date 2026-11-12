@@ -222,6 +222,7 @@ Reasoning effort is chosen per provider and model:
 
 - a model that does not reason shows the effort that applies to it;
 - when the provider lists every effort a model has (Claude Code, Copilot, the Anthropic API), a model that lists none, such as Claude Haiku 4.5 on Copilot, is sent no effort;
+- an `openai-chat` or `openai-responses` endpoint that lists the efforts of its models in `/models`, in OpenRouter's shape (`reasoning.supported_efforts`, as TensorFold does) or Kimi's, offers those efforts and sends each as it names it, `max` included; a model it says reasons only when asked is sent no effort until you choose one;
 - on the Anthropic API, a model that takes both `xhigh` and `max` offers XHigh and Max; XHigh is sent as `max` to a model that takes `max` and not `xhigh`;
 - Claude Haiku 4.5 and Claude Sonnet 4.5 on the Anthropic API think with a token budget: Low, Medium, High and XHigh give 1,024, 8,192, 16,384 and 32,768 tokens.
 

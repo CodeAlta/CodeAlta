@@ -122,6 +122,73 @@ public sealed class OpenAIListedModelsTests
         Assert.IsNull(text.SupportedReasoningEfforts, "The reasoning of the model stays the user's choice.");
     }
 
+    // OpenRouter's shape, which TensorFold follows (#430): the efforts of the model, the one it defaults to, and whether
+    // it reasons when a turn names none.
+    private const string OpenRouterModelsJson =
+        """
+        {
+          "data": [
+            { "id": "GLM-5.3-Flash", "object": "model", "owned_by": "tensorfold",
+              "reasoning": { "default_enabled": false, "default_effort": "xhigh", "supported_efforts": ["max", "high", "low"] } },
+            { "id": "always-on", "object": "model", "owned_by": "tensorfold",
+              "reasoning": { "default_enabled": true, "default_effort": "medium", "supported_efforts": ["minimal", "medium", "high"] } },
+            { "id": "other-shape", "object": "model", "owned_by": "someone", "reasoning": { "levels": ["low", "high"] } },
+            { "id": "no-selection", "object": "model", "owned_by": "openrouter", "reasoning": { "mandatory": true } },
+            { "id": "any-effort", "object": "model", "owned_by": "openrouter", "reasoning": { "supported_efforts": null, "default_enabled": true } }
+          ],
+          "object": "list"
+        }
+        """;
+
+    [TestMethod]
+    public async Task ListModels_ReadsTheEffortsOfOpenRoutersShape_AndSendsThemAsListed()
+    {
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "tensorfold",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://tensorfold.test/v1"),
+            HttpClient = new HttpClient(new StubHandler(static _ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OpenRouterModelsJson, Encoding.UTF8, "application/json") })),
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(
+            provider,
+            new ModelProviderRuntimeDescriptor { ProtocolFamily = "openai", ProviderKey = "tensorfold", DisplayName = "TensorFold", TransportKind = AgentTransportKind.OpenAIChatCompletions },
+            CancellationToken.None).ConfigureAwait(false);
+
+        // From the lowest effort; off by default, so a turn that names none is sent none; a default it does not list is no default.
+        var glm = models.Single(static model => model.Id == "GLM-5.3-Flash");
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low, AgentReasoningEffort.High, AgentReasoningEffort.Max }, glm.SupportedReasoningEfforts!.ToArray());
+        Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(glm));
+        Assert.IsNull(glm.DefaultReasoningEffort);
+
+        var alwaysOn = models.Single(static model => model.Id == "always-on");
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Minimal, AgentReasoningEffort.Medium, AgentReasoningEffort.High }, alwaysOn.SupportedReasoningEfforts!.ToArray());
+        Assert.AreEqual(AgentReasoningEffort.Medium, alwaysOn.DefaultReasoningEffort);
+
+        // A shape the endpoint does not share with another says nothing: the efforts come from elsewhere, as for a plain model.
+        var other = models.Single(static model => model.Id == "other-shape");
+        Assert.IsNull(other.SupportedReasoningEfforts);
+        Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(other));
+
+        // OpenRouter: without supported_efforts the model does not expose effort selection; null accepts any effort.
+        var noSelection = models.Single(static model => model.Id == "no-selection");
+        Assert.AreEqual(0, noSelection.SupportedReasoningEfforts!.Count);
+        Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(noSelection));
+        var anyEffort = models.Single(static model => model.Id == "any-effort");
+        Assert.IsNull(anyEffort.SupportedReasoningEfforts);
+        Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(anyEffort));
+
+        // Each effort the endpoint lists is sent as it names it.
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.Max, glm, out var level));
+        Assert.AreEqual("max", level.ToString());
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.Low, glm, out level));
+        Assert.AreEqual("low", level.ToString());
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.Minimal, alwaysOn, out level));
+        Assert.AreEqual("minimal", level.ToString());
+    }
+
     [TestMethod]
     public void TheHighestEffort_IsSentAsTheLevelTheCatalogGivesTheModel()
     {

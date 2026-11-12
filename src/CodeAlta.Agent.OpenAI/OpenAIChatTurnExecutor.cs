@@ -534,6 +534,14 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
     internal static bool TryMapReasoningEffort(AgentReasoningEffort reasoningEffort, AgentModelInfo? model, out ChatReasoningEffortLevel reasoningEffortLevel)
     {
+        // An effort the endpoint itself lists for the model (its /models) is sent as the endpoint names it: max is max.
+        if (AgentReasoningEffortCapability.IsListComplete(model) && model!.SupportedReasoningEfforts?.Contains(reasoningEffort) == true &&
+            WireName(reasoningEffort) is { } listed)
+        {
+            reasoningEffortLevel = new ChatReasoningEffortLevel(listed);
+            return true;
+        }
+
         // A model models.dev gives xhigh or max is sent the highest effort as that level, and Max as max where it has
         // both; any other model gets the levels of the API, high at most.
         if (AgentReasoningEffortCapability.GetHighestEffort(model) is { } highest)
@@ -569,6 +577,17 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 return false;
         }
     }
+
+    private static string? WireName(AgentReasoningEffort effort) => effort switch
+    {
+        AgentReasoningEffort.Minimal => "minimal",
+        AgentReasoningEffort.Low => "low",
+        AgentReasoningEffort.Medium => "medium",
+        AgentReasoningEffort.High => "high",
+        AgentReasoningEffort.XHigh => "xhigh",
+        AgentReasoningEffort.Max => "max",
+        _ => null,
+    };
 
     private static ChatMessage MapMessage(
         AgentConversationMessage message,

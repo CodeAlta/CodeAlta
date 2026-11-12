@@ -194,8 +194,8 @@ internal static class OpenAIProviderSdkFactory
     }
 
     // A model of the list of /models, with what an endpoint of another vendor says of it beyond the fields of OpenAI:
-    // Kimi for Coding gives its name, the context of the plan of the account, whether it takes images, and its
-    // efforts ({"reasoning":{"type":"only","effort":{"valid":["low","high","max"],"default":"high"}}}).
+    // Kimi for Coding gives its name, the context of the plan of the account and whether it takes images, and Kimi,
+    // OpenRouter and the endpoints that follow it give its efforts (OpenAIListedReasoning).
     internal static AgentModelInfo CreateListedModelInfo(
         OpenAIModel model,
         ModelProviderRuntimeDescriptor providerDescriptor,
@@ -226,28 +226,12 @@ internal static class OpenAIProviderSdkFactory
 
         IReadOnlyList<AgentReasoningEffort>? efforts = null;
         AgentReasoningEffort? defaultEffort = null;
-        if (listed.TryGetProperty("reasoning", out var reasoning) && reasoning.ValueKind == JsonValueKind.Object)
+        if (OpenAIListedReasoning.TryRead(listed, out var listedEfforts, out var listedDefault))
         {
-            // A model whose reasoning names no effort thinks as it does, and is sent none.
+            // The endpoint gives every effort of the model: it is sent no other, and none when it lists none.
             capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
-            efforts = [];
-            if (reasoning.TryGetProperty("effort", out var effort) && effort.ValueKind == JsonValueKind.Object)
-            {
-                if (effort.TryGetProperty("valid", out var valid) && valid.ValueKind == JsonValueKind.Array)
-                {
-                    efforts = valid.EnumerateArray()
-                        .Select(static value => value.ValueKind == JsonValueKind.String ? ParseReasoningEffort(value.GetString()) : null)
-                        .OfType<AgentReasoningEffort>()
-                        .Distinct()
-                        .ToArray();
-                }
-
-                if (effort.TryGetProperty("default", out var value) && value.ValueKind == JsonValueKind.String &&
-                    ParseReasoningEffort(value.GetString()) is { } parsed && efforts.Contains(parsed))
-                {
-                    defaultEffort = parsed;
-                }
-            }
+            efforts = listedEfforts;
+            defaultEffort = listedDefault;
         }
 
         var displayName = listed.TryGetProperty("display_name", out var name) && name.ValueKind == JsonValueKind.String &&
@@ -491,7 +475,7 @@ internal static class OpenAIProviderSdkFactory
                !string.Equals(options.ResponseTransport, "sse", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static AgentReasoningEffort? ParseReasoningEffort(string? value)
+    internal static AgentReasoningEffort? ParseReasoningEffort(string? value)
         => value?.Trim().ToLowerInvariant() switch
         {
             "minimal" => AgentReasoningEffort.Minimal,
