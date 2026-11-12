@@ -42,7 +42,8 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         string? projectRef = null;
         var command = Leaf("show", "Show the project map of a repository as CodeAlta reads it: its labels, its projects with their folders and the project each is, and its problems.");
-        command.Add("<project>?", "The repository project: id, slug or path.", value => projectRef = value);
+        // The argument is given as null when it is left out: it must not take the place of what --project named.
+        command.Add("<project>?", "The repository project: id, slug or path.", value => projectRef = value ?? projectRef);
         command.Add("project=", "The repository project: id, slug or path.", value => projectRef ??= value);
         command.Add(async (_, _) => await HandleManifestShowAsync(context, projectRef).ConfigureAwait(false));
         AddHelpText(command,

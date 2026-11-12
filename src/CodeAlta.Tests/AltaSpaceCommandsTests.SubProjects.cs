@@ -105,6 +105,9 @@ public sealed partial class AltaSpaceCommandsTests
         var outer = fixture.Single(await fixture.OkAsync("project", "manifest", "show", platform.Slug), "alta.project.manifest");
         Assert.AreEqual(2, outer.GetProperty("projects")[0].GetProperty("subProjects").GetInt32());
         var billingId = billing.GetProperty("projectId").GetString()!;
+        // Named with --project, as its help and its errors say, the map is the one of the project named.
+        var named = fixture.Single(await fixture.OkAsync("project", "manifest", "show", "--project", "platform-map-billing"), "alta.project.manifest");
+        Assert.AreEqual(billingId, named.GetProperty("projectId").GetString());
         // A session of billing reads and writes the map of billing; one of its sub-projects, the map of billing too.
         foreach (var caller in new[] { billingId, invoices.GetProperty("projectId").GetString()! })
         {
