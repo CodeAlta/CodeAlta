@@ -18,7 +18,7 @@ internal static class CommandPresets
             {
                 Status = ["vault", "token", "lookup", "-format=json"], SignIn = ["vault", "login"],
                 Environment = Variables(("VAULT_ADDR", context.GetString("address")), ("VAULT_NAMESPACE", context.GetString("namespace"))),
-                Install = Install(["winget", "install", "HashiCorp.Vault"], ["brew", "install", "hashicorp/tap/vault"], "https://developer.hashicorp.com/vault/install"),
+                Install = Install(["winget", "install", "--id", "Hashicorp.Vault", "-e"], ["brew", "install", "hashicorp/tap/vault"], "https://developer.hashicorp.com/vault/install"),
             });
         yield return Preset(runner, "openbao", "OpenBao", "openbao", "Reads the key-value secrets of OpenBao with the bao CLI, signed in with bao login.",
             "secret/myapp#api_key", new Uri("https://openbao.org/docs/install/"),
@@ -28,7 +28,7 @@ internal static class CommandPresets
             {
                 Status = ["bao", "token", "lookup", "-format=json"], SignIn = ["bao", "login"],
                 Environment = Variables(("BAO_ADDR", context.GetString("address")), ("BAO_NAMESPACE", context.GetString("namespace"))),
-                Install = Install(null, ["brew", "install", "openbao"], "https://openbao.org/docs/install/"),
+                Install = Install(["winget", "install", "--id", "OpenBao.OpenBao", "-e"], ["brew", "install", "openbao"], "https://openbao.org/docs/install/"),
             });
         yield return Preset(runner, "aws-secrets-manager", "AWS Secrets Manager", "aws", "Reads AWS Secrets Manager with the aws CLI, signed in with its profiles or aws sso login. A secret that holds JSON gives one of its keys after #.",
             "prod/myapp#api_key", new Uri("https://aws.amazon.com/cli/"),
@@ -37,7 +37,7 @@ internal static class CommandPresets
             {
                 Status = ["aws", "sts", "get-caller-identity", "--output", "json"], SignIn = ["aws", "sso", "login"], JsonFromField = true,
                 Environment = Variables(("AWS_PROFILE", context.GetString("profile")), ("AWS_REGION", context.GetString("region"))),
-                Install = Install(["winget", "install", "Amazon.AWSCLI"], ["brew", "install", "awscli"], "https://aws.amazon.com/cli/"),
+                Install = Install(["winget", "install", "--id", "Amazon.AWSCLI", "-e"], ["brew", "install", "awscli"], "https://aws.amazon.com/cli/"),
             });
         yield return Preset(runner, "azure-key-vault", "Azure Key Vault", "azure", "Reads the secrets of an Azure Key Vault with the az CLI, signed in with az login.",
             "openai-api-key", new Uri("https://learn.microsoft.com/cli/azure/install-azure-cli"),
@@ -45,7 +45,7 @@ internal static class CommandPresets
             context => new CommandShape("Azure", ["az", "keyvault", "secret", "show", "--vault-name", context.GetString("vault") ?? string.Empty, "--name", "{item}", "--query", "value", "-o", "tsv"])
             {
                 Status = ["az", "account", "show", "-o", "none"], SignIn = ["az", "login"],
-                Install = Install(["winget", "install", "Microsoft.AzureCLI"], ["brew", "install", "azure-cli"], "https://learn.microsoft.com/cli/azure/install-azure-cli"),
+                Install = Install(["winget", "install", "--id", "Microsoft.AzureCLI", "-e"], ["brew", "install", "azure-cli"], "https://learn.microsoft.com/cli/azure/install-azure-cli"),
             });
         yield return Preset(runner, "google-secret-manager", "Google Secret Manager", "googlecloud", "Reads the latest version of the secrets of Google Secret Manager with the gcloud CLI, signed in with gcloud auth login.",
             "openai-api-key", new Uri("https://cloud.google.com/sdk/docs/install"),
@@ -54,7 +54,7 @@ internal static class CommandPresets
             {
                 Status = ["gcloud", "auth", "list", "--filter=status:ACTIVE", "--format=value(account)"], SignIn = ["gcloud", "auth", "login"],
                 Environment = Variables(("CLOUDSDK_CORE_PROJECT", context.GetString("project"))),
-                Install = Install(["winget", "install", "Google.CloudSDK"], ["brew", "install", "--cask", "google-cloud-sdk"], "https://cloud.google.com/sdk/docs/install"),
+                Install = Install(["winget", "install", "--id", "Google.CloudSDK", "-e"], ["brew", "install", "--cask", "google-cloud-sdk"], "https://cloud.google.com/sdk/docs/install"),
             });
         yield return Preset(runner, "doppler", "Doppler", "key-round", "Reads the secrets of a Doppler project with the doppler CLI, signed in with doppler login.",
             "OPENAI_API_KEY", new Uri("https://docs.doppler.com/docs/install-cli"),
@@ -63,7 +63,7 @@ internal static class CommandPresets
             {
                 Status = ["doppler", "me", "--json"], SignIn = ["doppler", "login"],
                 Environment = Variables(("DOPPLER_PROJECT", context.GetString("project")), ("DOPPLER_CONFIG", context.GetString("config"))),
-                Install = Install(["winget", "install", "doppler.doppler"], ["brew", "install", "dopplerhq/cli/doppler"], "https://docs.doppler.com/docs/install-cli"),
+                Install = Install(["winget", "install", "--id", "Doppler.doppler", "-e"], ["brew", "install", "dopplerhq/cli/doppler"], "https://docs.doppler.com/docs/install-cli"),
             });
         yield return Preset(runner, "infisical", "Infisical", "key-round", "Reads the secrets of an Infisical project with the infisical CLI, signed in with infisical login.",
             "OPENAI_API_KEY", new Uri("https://infisical.com/docs/cli/overview"),
@@ -72,7 +72,7 @@ internal static class CommandPresets
             {
                 SignIn = ["infisical", "login"],
                 ExtraArguments = Options(("--projectId", context.GetString("project_id")), ("--env", context.GetString("environment"))),
-                Install = Install(null, ["brew", "install", "infisical/get-cli/infisical"], "https://infisical.com/docs/cli/overview"),
+                Install = Install(["winget", "install", "--id", "infisical.infisical", "-e"], ["brew", "install", "infisical/get-cli/infisical"], "https://infisical.com/docs/cli/overview"),
             });
     }
 

@@ -133,7 +133,8 @@ int KeePassXc(string[] arguments)
     var password = flags.Contains("--no-password") ? null : Console.In.ReadLine();
     var credentialsOk = kp["noPassword"]?.GetValue<bool>() == true ? flags.Contains("--no-password") : password == kp["password"]?.GetValue<string>();
     if (kp["keyFile"]?.GetValue<string>() is { } expected && (keyFile is null || Path.GetFileName(keyFile) != expected)) credentialsOk = false;
-    if (!credentialsOk) return Fail($"Error while reading the database {positional[0]}: Invalid credentials were provided, please try again.", 1);
+    // keepassxc-cli 2.8 run with -q writes nothing when the database refuses the password or the key file.
+    if (!credentialsOk) return flags.Contains("-q") ? 1 : Fail($"Error while reading the database {positional[0]}: Invalid credentials were provided, please try again.", 1);
 
     var entries = kp["entries"]?.AsArray() ?? [];
     switch (arguments[0])

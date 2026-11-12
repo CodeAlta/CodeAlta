@@ -92,7 +92,7 @@ internal sealed class KeePassXcProvider : ICredentialProvider
         {
             Lock();
             return CredentialProviderStatus.Locked(result.TimedOut ? "keepassxc-cli did not answer in time."
-                : result.Error.Contains("Invalid credentials", StringComparison.OrdinalIgnoreCase) || result.Error.Contains("wrong key", StringComparison.OrdinalIgnoreCase)
+                : Refused(result)
                     ? "KeePassXC refused the password of the database."
                     : $"KeePassXC did not open the database: {result.Summary()}.").WithDetail(result) with { Account = status.Account, ProgramPath = status.ProgramPath };
         }
@@ -207,11 +207,17 @@ internal sealed class KeePassXcProvider : ICredentialProvider
         return (program, password);
     }
 
+    // The database refused the password or the key file. keepassxc-cli 2.8 run with -q writes nothing then and ends with code 1,
+    // while it still writes why it found no entry or no attribute.
+    private static bool Refused(VaultCommandResult result)
+        => result.Error.Contains("Invalid credentials", StringComparison.OrdinalIgnoreCase) || result.Error.Contains("wrong key", StringComparison.OrdinalIgnoreCase)
+            || result.ExitCode != 0 && !result.TimedOut && string.IsNullOrWhiteSpace(result.Error);
+
     private CredentialProviderException Failure(VaultCommandResult result, string? reference)
     {
         var error = result.Error;
         if (result.TimedOut) return new CredentialProviderException(CredentialFailure.Failed, "keepassxc-cli did not answer in time.");
-        if (error.Contains("Invalid credentials", StringComparison.OrdinalIgnoreCase) || error.Contains("wrong key", StringComparison.OrdinalIgnoreCase))
+        if (Refused(result))
         {
             // The database changed its password: the one held is of no use.
             Lock();
