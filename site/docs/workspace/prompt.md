@@ -209,6 +209,11 @@ CodeAlta Desktop draws a chart of data from a `vega-lite` code block (or `vegali
 ```
 ````
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-chart-message.webp" alt="An answer in the timeline of CodeAlta Desktop with a bar chart of the tests passed per project, stacked by suite with a legend, drawn in the colors of the window from a CSV file of the project, and a sentence of what it shows" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An answer with a chart of a CSV file of the project.</figcaption>
+</figure>
+
 - **Data**: in the spec (`"values"`), or a CSV, TSV or JSON file of the project named by `"url"`. In a message, its path starts from the folder the session works in; in a Markdown file, from the folder of the file. The file must be inside that folder or project, 4 MB at most; a path with `..`, a full path and an address of the web are refused. A chart reads its file again when it is shown again a few seconds later, and is drawn again if the file changed.
 - **Look**: the font and colors of the window, drawn again when the theme changes; a `"config"` in the spec overrides them.
 - **Source and copy**: as a diagram, a chart has **Source** under the pointer and an expand button that opens it in a window, where it is copied as a picture (PNG), as SVG or as its spec.
