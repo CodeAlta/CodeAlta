@@ -177,7 +177,6 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             int port;
             byte[]? forward = null;
             string[] headers = [];
-            var pathAndQuery = "/";
             if (first[0].Equals("CONNECT", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TrySplitHostPort(first[1], 443, out host, out port))
@@ -190,10 +189,10 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             {
                 host = uri.Host;
                 port = uri.Port;
-                pathAndQuery = uri.PathAndQuery;
                 // The request goes on with the form an origin server reads, and its other lines as they came. It is the
                 // only one of the connection: a next request, which names its host again, is read on a new one.
                 headers = [.. lines.Skip(1).Where(static line => !IsHopHeader(line)), "Connection: close"];
+                if (!headers.Any(static line => line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))) headers = [$"Host: {uri.Authority}", .. headers];
                 forward = Encoding.ASCII.GetBytes($"{first[0]} {uri.PathAndQuery} {first[2]}\r\n" + string.Concat(headers.Select(static line => line + "\r\n")) + "\r\n");
             }
             else
@@ -212,21 +211,11 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
 
             if (UpstreamOf(host, port, forward is null) is { } through)
             {
-                // The upstream proxy connects to the address checked here, never to one it resolves itself: a name that
+                // The upstream proxy opens a tunnel to the address checked here, never to one it resolves itself: a name that
                 // resolves elsewhere for it (split DNS, a rebinding) does not lead the sandbox to the network of this computer.
-                // A tunnel keeps the name of the host in its TLS; a plain request keeps it in its Host line.
-                if (forward is null)
-                {
-                    await TunnelAsync(stream, through, address, port).ConfigureAwait(false);
-                }
-                else
-                {
-                    if (!headers.Any(static line => line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))) headers = [$"Host: {Authority(host, port)}", .. headers];
-                    var absolute = $"{first[0]} http://{Authority(address.ToString(), port)}{pathAndQuery} {first[2]}\r\n";
-                    await ForwardAsync(stream, through, auth => Encoding.ASCII.GetBytes(absolute + string.Concat(headers.Select(static line => line + "\r\n")) + auth + "\r\n"),
-                        HasBody(headers)).ConfigureAwait(false);
-                }
-
+                // The name of the host stays in the TLS of a tunnel, and in the Host line of a plain request, which goes in the
+                // tunnel in the form an origin server reads: a proxy would replace that line with the address otherwise.
+                await TunnelAsync(stream, through, address, port, forward).ConfigureAwait(false);
                 return;
             }
 
@@ -257,9 +246,10 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
         return proxy is null || proxy == target || proxy.Scheme is not ("http" or "https") ? null : proxy;
     }
 
-    // Opens a tunnel to the address through the upstream proxy, signed in when it asks. What the upstream answers when it does
-    // not open the tunnel (a 407 it was not given what it asks, a 403) is what the sandbox gets.
-    private async Task TunnelAsync(NetworkStream client, Uri proxy, IPAddress address, int port)
+    // Opens a tunnel to the address through the upstream proxy, signed in when it asks, on one connection (NTLM signs in a
+    // connection), then sends the plain request in it, if any. What the upstream answers when it does not open the tunnel
+    // (a 407 it was not given what it asks, a 403) is what the sandbox gets.
+    private async Task TunnelAsync(NetworkStream client, Uri proxy, IPAddress address, int port, byte[]? request)
     {
         var authority = Authority(address.ToString(), port);
         await using var exchange = await UpstreamProxyClient.SendAsync(proxy, _upstream!.Credentials,
@@ -270,27 +260,8 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             return;
         }
 
-        await client.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), _closing.Token).ConfigureAwait(false);
-        await PipeAsync(client, exchange.Stream).ConfigureAwait(false);
-    }
-
-    // Sends a plain request to the upstream proxy and gives its answer to the sandbox. A request without a body is sent again
-    // with what the proxy asks; one with a body, whose body is not kept, is sent once without credentials.
-    private async Task ForwardAsync(NetworkStream client, Uri proxy, Func<string, byte[]> headOf, bool body)
-    {
-        UpstreamProxyClient.UpstreamExchange exchange;
-        if (body)
-        {
-            exchange = await UpstreamProxyClient.OpenAsync(proxy, _closing.Token).ConfigureAwait(false);
-            await using var _ = exchange;
-            await exchange.Stream.WriteAsync(headOf(""), _closing.Token).ConfigureAwait(false);
-            await PipeAsync(client, exchange.Stream).ConfigureAwait(false);
-            return;
-        }
-
-        exchange = await UpstreamProxyClient.SendAsync(proxy, _upstream!.Credentials, headOf, _closing.Token).ConfigureAwait(false);
-        await using var answered = exchange;
-        await client.WriteAsync(Encoding.ASCII.GetBytes(exchange.Answer + "\r\n\r\n"), _closing.Token).ConfigureAwait(false);
+        if (request is null) await client.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), _closing.Token).ConfigureAwait(false);
+        else await exchange.Stream.WriteAsync(request, _closing.Token).ConfigureAwait(false);
         await PipeAsync(client, exchange.Stream).ConfigureAwait(false);
     }
 
@@ -304,9 +275,6 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
         Observe(download);
     }
 
-    private static bool HasBody(IEnumerable<string> headers)
-        => headers.Any(static line => line.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase)
-                                      || line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase) && line[15..].Trim() != "0");
 
     private static string Authority(string host, int port) => (host.Contains(':', StringComparison.Ordinal) && !host.StartsWith('[') ? $"[{host}]" : host) + ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
 

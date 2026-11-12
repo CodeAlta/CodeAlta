@@ -105,13 +105,18 @@ public sealed class SandboxNetworkProxyTests
         Assert.DoesNotContain("Proxy-Authorization", first, "nothing is sent before the proxy asks");
         Assert.Contains($"Proxy-Authorization: {basic}\r\n", second, "the challenge is answered");
 
-        // A plain request goes to the upstream in the absolute form, at the address checked, with the name of the host it asked for.
+        // A plain request goes in a tunnel to the address checked, in the form an origin server reads, with the Host line it was
+        // given: a proxy that forwarded it would replace that line with the address, and a name-based virtual host would be lost.
+        var before = corporate.Requests.Count;
         var plain = await SendAsync(proxy, "GET http://localhost:4444/x HTTP/1.1\r\nHost: localhost:4444\r\nAccept: */*\r\n\r\n", null);
-        Assert.StartsWith("HTTP/1.1 200", plain);
-        Assert.Contains("GET http://127.0.0.1:4444/x HTTP/1.1\r\n", plain);
-        Assert.Contains("Host: localhost:4444\r\n", plain);
-        Assert.Contains($"Proxy-Authorization: {basic}\r\n", plain);
+        Assert.StartsWith("GET /x HTTP/1.1\r\nHost: localhost:4444\r\n", plain, "the echo shows what the origin received");
         Assert.Contains("Connection: close\r\n", plain);
+        Assert.DoesNotContain("Proxy-Authorization", plain, "the credentials of the proxy stay with the proxy");
+        var (challenged, answered) = (corporate.Requests[before], corporate.Requests[before + 1]);
+        Assert.StartsWith("CONNECT 127.0.0.1:4444 HTTP/1.1\r\n", challenged);
+        Assert.Contains($"Proxy-Authorization: {basic}\r\n", answered);
+        // NTLM signs in a connection: the challenge and its answer go on the same one.
+        Assert.AreEqual(corporate.Connections[before], corporate.Connections[before + 1]);
 
         // The rules of the sandbox come first: a refused host never reaches the upstream.
         var count = corporate.Requests.Count;
