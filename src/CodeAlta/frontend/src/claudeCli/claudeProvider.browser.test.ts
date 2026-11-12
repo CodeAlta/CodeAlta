@@ -9,6 +9,7 @@ const panel = `document.querySelector('.provider-claude-cli')`;
 test("the Claude Code form offers the pinned CLI, shows its download and gives the login command of the account", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${panel}?.textContent.includes('Your version 2.1.300')`, "the CLI of the user, newer than the pin");
+    assert.equal(await page.evaluate(`document.querySelector('#provider-models-order').selectedOptions[0].textContent`), "Default (By name, newest first)");
     assert.match(await page.evaluate(`${panel}.textContent`) as string, /tested with Claude Code 2\.1\.292.*\.local\\bin\\claude\.exe is used/);
     assert.equal(await page.evaluate(`${panel}.querySelector('code').textContent`), `& "$HOME\\.local\\bin\\claude.exe"`);
 

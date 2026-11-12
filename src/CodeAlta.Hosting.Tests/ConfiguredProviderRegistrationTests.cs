@@ -111,6 +111,27 @@ public sealed class ConfiguredProviderRegistrationTests
     }
 
     [TestMethod]
+    [DataRow(null, null, ModelOrder.NameVersion)]
+    [DataRow("provider", null, ModelOrder.Provider)]
+    [DataRow(null, false, ModelOrder.Provider)]
+    [DataRow("name", null, ModelOrder.Name)]
+    public void ClaudeCode_DefaultsToVersionOrder_AndHonorsAnExplicitOrder(string? order, bool? sort, ModelOrder expected)
+    {
+        var definition = new CodeAltaProviderDocument
+        {
+            ProviderKey = "claude-code",
+            ProviderType = "claude-code",
+            ModelsOrder = order,
+            SortModels = sort,
+        };
+
+        Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            definition, NewStateRoot(), null, out var descriptor, out _));
+
+        Assert.AreEqual(expected, descriptor.ModelOrder);
+    }
+
+    [TestMethod]
     [DataRow("openai-chat")]
     [DataRow("openai-responses")]
     [DataRow("azure-openai")]

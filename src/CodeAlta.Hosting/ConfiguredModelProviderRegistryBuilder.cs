@@ -907,7 +907,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DefaultContextSize = definition.ContextSize is > 0 ? definition.ContextSize : null,
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
-            ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
+            ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.NameVersion),
             ModelVisibility = ModelVisibilityOf(definition),
             // The models of Claude Code are those of Anthropic: models.dev lists them under that provider.
             ModelCatalog = modelCatalog,

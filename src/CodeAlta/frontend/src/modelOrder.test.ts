@@ -41,3 +41,10 @@ test("a provider in its own order keeps it: only the orders by name are sorted b
     assert.deepEqual(other.map(m => m.id), ["claude-opus-4-1", "gpt-5"]);
   }
 });
+
+test("Claude Code version order groups older families and ignores release dates", () => {
+  const models = ["claude-fable-5", "claude-fable-5-1", "claude-haiku-4-5-20251001", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"].map(id => ({ id }));
+  const { frontier, other } = sectionModels(models, "name_version");
+  assert.deepEqual(frontier.map(model => model.id), ["claude-fable-5-1", "claude-opus-4-8", "claude-haiku-4-5-20251001"]);
+  assert.deepEqual(other.map(model => model.id), ["claude-fable-5", "claude-opus-4-7", "claude-opus-4-6"]);
+});

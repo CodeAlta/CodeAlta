@@ -442,7 +442,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             {/* Blank is the order of the type: the agents of a plugin may sort their models by default. */}
             <FormGroup label={t("Model order")} labelFor="provider-models-order">
               <HTMLSelect id="provider-models-order" fill value={form.modelsOrder} disabled={busy} onChange={event => edit({ modelsOrder: event.target.value })}>
-                <option value="">{t("Default ({value})", { value: modelsOrderLabel(formPlugin?.modelsOrder ?? "provider", t) })}</option>
+                <option value="">{t("Default ({value})", { value: modelsOrderLabel(formPlugin?.modelsOrder ?? (form.type === "claude-code" ? "name_version" : "provider"), t) })}</option>
                 {[...new Set([...modelsOrders, ...(form.modelsOrder ? [form.modelsOrder] : [])])].map(order => <option key={order} value={order}>{modelsOrderLabel(order, t)}</option>)}
               </HTMLSelect></FormGroup>
             {runsOwnCli(form.type) && <FormGroup label={t("Account folder")} labelFor="provider-config-dir"

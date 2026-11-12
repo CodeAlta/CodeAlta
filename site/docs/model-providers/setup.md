@@ -28,7 +28,7 @@ The `claude-code` provider runs your sessions through the [Claude Code](https://
 1. In CodeAlta Desktop, open **Settings > Providers** and select **Claude Code**. The **Claude Code CLI** box says which CLI the provider runs. **Download** gets the version CodeAlta is tested with (about 130 MB, once for all your Claude providers). The same download is proposed above the prompt when you choose a Claude Code provider without a CLI, and under the error of a turn that could not start.
 2. Sign in: copy the command the box gives, run it in a terminal, then type `/login`. An API key or a cloud provider configured for the CLI works too.
 3. Enable the provider and **Test** it. The test asks the CLI for its models without calling one. A provider whose account is not signed in is tagged **Signed out**, and its form says how to sign in.
-4. Start a session. The models are the ones the CLI offers for your account; the first is the one Claude Code recommends.
+4. Start a session. The models are the ones the CLI offers for your account. By default, the prompt's model list on desktop and phone shows the latest version of each family first and older versions under **Other models**. Choose **Model order: Provider order** to keep Claude Code's own list instead.
 
 CodeAlta never sees your Claude credentials. Usage counts against the account the CLI is signed in to, with the limits of its plan. A claude.ai sign-in ends after some weeks: CodeAlta shows it [below the prompt](../workspace/prompt.md#below-the-editor) in its last week, so that you can sign in again before your turns fail.
 
