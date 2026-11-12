@@ -217,7 +217,7 @@ CodeAlta Desktop draws a chart of data from a `vega-lite` code block (or `vegali
 - **Data**: in the spec (`"values"`), or a CSV, TSV or JSON file of the project named by `"url"`. In a message, its path starts from the folder the session works in; in a Markdown file, from the folder of the file. The file must be inside that folder or project, 4 MB at most; a path with `..`, a full path and an address of the web are refused. A chart reads its file again when it is shown again a few seconds later, and is drawn again if the file changed.
 - **Look**: the font and colors of the window, drawn again when the theme changes; a `"config"` in the spec overrides them.
 - **Source and copy**: as a diagram, a chart has **Source** under the pointer and an expand button that opens it in a window, where it is copied as a picture (PNG), as SVG or as its spec.
-- **Safety**: a chart is data only. It reads nothing from the web, loads no image, follows no link and runs no code; a spec that takes too long to draw is stopped. A block that cannot be drawn stays code, with the reason under it.
+- **Safety**: a chart is data only. It reads nothing from the web, loads no image, follows no link and runs no code; a spec that takes too long to draw is stopped, and one that would make more than a chart shows (millions of rows, ticks or values) is refused. A block that cannot be drawn stays code, with the reason under it.
 
 CodeAlta TUI shows the spec as code.
 

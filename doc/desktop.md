@@ -321,7 +321,8 @@ The page is trusted; what it shows often is not. Each boundary has one owner:
   attributes. After sanitization the renderer may add only what it computes from text (highlighted code, the SVG
   of pele for a `mermaid` block, with links and images off and sanitized again, the SVG of a `vega-lite` chart, front matter tables, task boxes, alerts, the copy button); no authored or unsanitized markup
   is concatenated afterwards. A chart is data a model wrote: Vega draws it to an SVG string in a worker of its own
-  (`vegaLite/`), stopped after ten seconds, with its expressions interpreted (no `eval`, under the same policy) and a
+  (`vegaLite/`), stopped after ten seconds and refused before it makes more than its bounds (a worker out of memory takes
+  the renderer down), with its expressions interpreted (no `eval`, under the same policy) and a
   loader that reads nothing; its data files are read by the host (`markdownLinks.chartData`, `ChartDataFiles`) only below
   the folder of the session or of the document's project, and the SVG is sanitized again with no link, image or style. Renderer-owned attributes that must survive (`data-source-lines`, file links) carry a
   random mark of the render, so authored HTML cannot claim them. Rendering never navigates: a web link opens in the
