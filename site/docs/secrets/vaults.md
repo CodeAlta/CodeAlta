@@ -157,12 +157,18 @@ The kind **A command** reads any vault that has a command line tool: Proton Pass
 - **Command that says it is unlocked**, optional: exits with 0 when the vault can be read without asking anybody.
 - **Command to sign in**, optional: what **Sign in** runs in a terminal.
 
+For example, Proton Pass through its CLI, `pass-cli` (`winget install --id Proton.ProtonPass.CLI -e`, `brew install protonpass/tap/pass-cli`). Sign in once with `pass-cli login`: CodeAlta then reads with that session.
+
 ```toml
-[credentials.team]
+[credentials.proton]
 type = "command"
-read = ["vault", "kv", "get", "-mount=secret", "-field={field}", "{item}"]
-sign_in = ["vault", "login", "-method=oidc"]
+display_name = "Proton Pass"
+read = ["pass-cli", "item", "view", "{ref}"]
+status = ["pass-cli", "info"]
+sign_in = ["pass-cli", "login"]
 ```
+
+A reference of Proton Pass is `pass://<vault>/<item>/<field>`, such as `pass://Personal/GitHub/password`, or `pass://Personal/My note/note` for the text of a note.
 
 The program is found on the `PATH` and run without a shell, in a folder of its own, never the folder of a project. Only you add a vault of this kind: agents cannot propose one.
 
