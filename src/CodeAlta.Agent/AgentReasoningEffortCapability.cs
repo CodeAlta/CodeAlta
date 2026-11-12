@@ -18,6 +18,34 @@ public static class AgentReasoningEffortCapability
     /// </summary>
     public const string HighestEffortKey = "highestReasoningEffort";
 
+    /// <summary>
+    /// The key of <see cref="AgentModelInfo.Capabilities"/> that holds <c>true</c> for a model whose endpoint says it reasons
+    /// only when asked (OpenRouter's <c>default_enabled: false</c>): a session that names no effort starts with
+    /// <see cref="AgentReasoningEffort.None"/>.
+    /// </summary>
+    public const string OffByDefaultKey = "reasoningOffByDefault";
+
+    /// <summary>
+    /// The key of <see cref="AgentModelInfo.Capabilities"/> that holds <c>true</c> for a model whose endpoint lists the
+    /// effort <c>none</c>: <see cref="AgentReasoningEffort.None"/> is then sent as <c>none</c>, which turns its reasoning off,
+    /// instead of no effort at all.
+    /// </summary>
+    public const string NoneListedKey = "reasoningNoneListed";
+
+    /// <summary>Returns whether the endpoint of <paramref name="model"/> says it reasons only when asked.</summary>
+    /// <param name="model">The model, or null when unknown.</param>
+    /// <returns>True only when the endpoint says so.</returns>
+    public static bool IsOffByDefault(AgentModelInfo? model) => IsTrue(model, OffByDefaultKey);
+
+    /// <summary>Returns whether the endpoint of <paramref name="model"/> lists the effort <c>none</c>.</summary>
+    /// <param name="model">The model, or null when unknown.</param>
+    /// <returns>True only when the endpoint lists it.</returns>
+    public static bool IsNoneListed(AgentModelInfo? model) => IsTrue(model, NoneListedKey);
+
+    private static bool IsTrue(AgentModelInfo? model, string key)
+        => model?.Capabilities is { } capabilities && capabilities.TryGetValue(key, out var value)
+           && value is true or JsonElement { ValueKind: JsonValueKind.True };
+
     /// <summary>Returns whether the provider says that the efforts <paramref name="model"/> lists are all it has.</summary>
     /// <param name="model">The model, or null when unknown.</param>
     /// <returns>True only when the provider says so; false when it does not, or for an unknown model.</returns>

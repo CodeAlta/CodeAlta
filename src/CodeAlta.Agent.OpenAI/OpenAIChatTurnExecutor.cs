@@ -460,7 +460,12 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
         ApplyMaxOutputTokens(request, options);
 
+        var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
+        var extraBody = OpenAIModelRequestOverrides.MergeExtraBody(provider.ExtraBody, modelRequest);
+        // A reasoning the configuration sets in the body (OpenRouter's reasoning.max_tokens) is the one sent: an effort beside
+        // it would make the request one the endpoint refuses.
         if ((request.Provider.Profile?.SupportsReasoningEffort ?? true) &&
+            extraBody?.ContainsKey("reasoning") != true && extraBody?.ContainsKey("reasoning_effort") != true &&
             request.ReasoningEffort is { } reasoningEffort &&
             SupportsRequestedReasoningEffort(request, reasoningEffort) &&
             TryMapReasoningEffort(reasoningEffort, request.ModelInfo, out var reasoningEffortLevel))
@@ -468,10 +473,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             options.ReasoningEffortLevel = reasoningEffortLevel;
         }
 
-        var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
-        OpenAIExtraBodyPatchHelper.Apply(
-            ref options.Patch,
-            OpenAIModelRequestOverrides.MergeExtraBody(provider.ExtraBody, modelRequest));
+        OpenAIExtraBodyPatchHelper.Apply(ref options.Patch, extraBody);
 
         var allowStrictTools = request.Provider.Profile?.SupportsStrictTools ?? provider.Profile?.SupportsStrictTools ?? false;
         var supportsTypeUnions = request.Provider.Profile?.SupportsToolSchemaTypeUnions ?? provider.Profile?.SupportsToolSchemaTypeUnions ?? true;
@@ -523,9 +525,10 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
     private static bool SupportsRequestedReasoningEffort(AgentTurnRequest request, AgentReasoningEffort reasoningEffort)
     {
+        // None sends no effort, unless the endpoint lists none, which turns the reasoning off.
         if (reasoningEffort == AgentReasoningEffort.None)
         {
-            return false;
+            return AgentReasoningEffortCapability.IsNoneListed(request.ModelInfo) && AgentReasoningEffortCapability.IsListComplete(request.ModelInfo);
         }
 
         return request.ModelInfo?.SupportedReasoningEfforts is not { } supportedReasoningEfforts ||
@@ -580,6 +583,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
     private static string? WireName(AgentReasoningEffort effort) => effort switch
     {
+        AgentReasoningEffort.None => "none",
         AgentReasoningEffort.Minimal => "minimal",
         AgentReasoningEffort.Low => "low",
         AgentReasoningEffort.Medium => "medium",

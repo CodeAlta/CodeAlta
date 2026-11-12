@@ -14,33 +14,40 @@ namespace CodeAlta.Agent.OpenAI;
 /// </summary>
 internal static class OpenAIListedReasoning
 {
+    /// <summary>What an endpoint says of the reasoning of a model.</summary>
+    /// <param name="Efforts">
+    /// The efforts, from the lowest; empty for a model that takes none. <see cref="AgentReasoningEffort.None"/> is one of them
+    /// when the endpoint lists <c>none</c>, or when the model reasons only when asked.
+    /// </param>
+    /// <param name="DefaultEffort">
+    /// The effort a session starts with when its provider names none: <see cref="AgentReasoningEffort.None"/> for a model
+    /// that reasons only when asked; null when the endpoint names no default, or one the model does not list.
+    /// </param>
+    /// <param name="OffByDefault">Whether the model reasons only when asked (OpenRouter's <c>default_enabled: false</c>).</param>
+    /// <param name="NoneListed">Whether the endpoint lists <c>none</c>, which turns the reasoning of the model off.</param>
+    public sealed record Listed(IReadOnlyList<AgentReasoningEffort> Efforts, AgentReasoningEffort? DefaultEffort, bool OffByDefault, bool NoneListed);
+
     /// <summary>
     /// Reads the efforts of a model of the list. A <c>reasoning</c> of another shape says nothing: the efforts of the model
     /// then come from elsewhere (models.dev), as for a model the endpoint describes no further.
     /// </summary>
     /// <param name="listed">The entry of the model in the data of <c>/models</c>.</param>
-    /// <param name="efforts">The efforts, from the lowest; empty for a model that takes none.</param>
-    /// <param name="defaultEffort">
-    /// The effort a turn that names none is sent; null for none, also when the endpoint says reasoning is off by default
-    /// (<c>default_enabled: false</c>) or names a default the model does not list.
-    /// </param>
-    /// <returns>True when the endpoint gives the complete list of the efforts of the model.</returns>
-    public static bool TryRead(JsonElement listed, out IReadOnlyList<AgentReasoningEffort> efforts, out AgentReasoningEffort? defaultEffort)
+    /// <returns>What the endpoint says, a complete list of the efforts of the model; null when it says nothing.</returns>
+    public static Listed? Read(JsonElement listed)
     {
-        efforts = [];
-        defaultEffort = null;
         if (listed.ValueKind != JsonValueKind.Object || !listed.TryGetProperty("reasoning", out var reasoning) || reasoning.ValueKind != JsonValueKind.Object)
         {
-            return false;
+            return null;
         }
 
+        AgentReasoningEffort[] efforts;
         string? defaultName;
+        var offByDefault = false;
         if (reasoning.TryGetProperty("supported_efforts", out var supported) && supported.ValueKind == JsonValueKind.Array)
         {
             efforts = ReadEfforts(supported);
-            defaultName = reasoning.TryGetProperty("default_enabled", out var enabled) && enabled.ValueKind == JsonValueKind.False
-                ? null
-                : ReadString(reasoning, "default_effort");
+            offByDefault = reasoning.TryGetProperty("default_enabled", out var enabled) && enabled.ValueKind == JsonValueKind.False;
+            defaultName = ReadString(reasoning, "default_effort");
         }
         else if (reasoning.TryGetProperty("effort", out var effort) && effort.ValueKind == JsonValueKind.Object &&
                  effort.TryGetProperty("valid", out var valid) && valid.ValueKind == JsonValueKind.Array)
@@ -54,24 +61,32 @@ internal static class OpenAIListedReasoning
         {
             // Kimi's type alone, or OpenRouter's reasoning without supported_efforts: a model that does not expose
             // effort selection, and is sent no effort. A supported_efforts of null accepts any effort and says nothing.
-            return true;
+            return new([], null, false, false);
         }
         else
         {
-            return false;
+            return null;
         }
 
-        if (OpenAIProviderSdkFactory.ParseReasoningEffort(defaultName) is { } parsed && efforts.Contains(parsed))
+        var noneListed = efforts.Contains(AgentReasoningEffort.None);
+        if (offByDefault)
         {
-            defaultEffort = parsed;
+            // A model that reasons only when asked starts with None, which sends no effort unless the endpoint lists none.
+            if (!noneListed) efforts = [AgentReasoningEffort.None, .. efforts];
+            return new(efforts, AgentReasoningEffort.None, true, noneListed);
         }
 
-        return true;
+        var defaultEffort = ParseEffort(defaultName) is { } parsed && efforts.Contains(parsed) ? parsed : (AgentReasoningEffort?)null;
+        return new(efforts, defaultEffort, false, noneListed);
     }
+
+    // An effort of the list: the levels of CodeAlta, and none.
+    private static AgentReasoningEffort? ParseEffort(string? value)
+        => string.Equals(value?.Trim(), "none", StringComparison.OrdinalIgnoreCase) ? AgentReasoningEffort.None : OpenAIProviderSdkFactory.ParseReasoningEffort(value);
 
     private static AgentReasoningEffort[] ReadEfforts(JsonElement values)
         => values.EnumerateArray()
-            .Select(static value => value.ValueKind == JsonValueKind.String ? OpenAIProviderSdkFactory.ParseReasoningEffort(value.GetString()) : null)
+            .Select(static value => value.ValueKind == JsonValueKind.String ? ParseEffort(value.GetString()) : null)
             .OfType<AgentReasoningEffort>()
             .Distinct()
             .OrderBy(Rank)

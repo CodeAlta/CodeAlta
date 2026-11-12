@@ -226,12 +226,14 @@ internal static class OpenAIProviderSdkFactory
 
         IReadOnlyList<AgentReasoningEffort>? efforts = null;
         AgentReasoningEffort? defaultEffort = null;
-        if (OpenAIListedReasoning.TryRead(listed, out var listedEfforts, out var listedDefault))
+        if (OpenAIListedReasoning.Read(listed) is { } reasoning)
         {
             // The endpoint gives every effort of the model: it is sent no other, and none when it lists none.
             capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
-            efforts = listedEfforts;
-            defaultEffort = listedDefault;
+            if (reasoning.OffByDefault) capabilities[AgentReasoningEffortCapability.OffByDefaultKey] = true;
+            if (reasoning.NoneListed) capabilities[AgentReasoningEffortCapability.NoneListedKey] = true;
+            efforts = reasoning.Efforts;
+            defaultEffort = reasoning.DefaultEffort;
         }
 
         var displayName = listed.TryGetProperty("display_name", out var name) && name.ValueKind == JsonValueKind.String &&

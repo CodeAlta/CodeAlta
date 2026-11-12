@@ -132,6 +132,8 @@ public sealed class OpenAIListedModelsTests
               "reasoning": { "default_enabled": false, "default_effort": "xhigh", "supported_efforts": ["max", "high", "low"] } },
             { "id": "always-on", "object": "model", "owned_by": "tensorfold",
               "reasoning": { "default_enabled": true, "default_effort": "medium", "supported_efforts": ["minimal", "medium", "high"] } },
+            { "id": "switchable", "object": "model", "owned_by": "openrouter",
+              "reasoning": { "default_enabled": true, "default_effort": "high", "supported_efforts": ["high", "low", "none"] } },
             { "id": "other-shape", "object": "model", "owned_by": "someone", "reasoning": { "levels": ["low", "high"] } },
             { "id": "no-selection", "object": "model", "owned_by": "openrouter", "reasoning": { "mandatory": true } },
             { "id": "any-effort", "object": "model", "owned_by": "openrouter", "reasoning": { "supported_efforts": null, "default_enabled": true } }
@@ -157,11 +159,26 @@ public sealed class OpenAIListedModelsTests
             new ModelProviderRuntimeDescriptor { ProtocolFamily = "openai", ProviderKey = "tensorfold", DisplayName = "TensorFold", TransportKind = AgentTransportKind.OpenAIChatCompletions },
             CancellationToken.None).ConfigureAwait(false);
 
-        // From the lowest effort; off by default, so a turn that names none is sent none; a default it does not list is no default.
+        // From the lowest effort. Off by default: it starts with None, which sends no effort, since it does not list none.
         var glm = models.Single(static model => model.Id == "GLM-5.3-Flash");
-        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low, AgentReasoningEffort.High, AgentReasoningEffort.Max }, glm.SupportedReasoningEfforts!.ToArray());
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.None, AgentReasoningEffort.Low, AgentReasoningEffort.High, AgentReasoningEffort.Max }, glm.SupportedReasoningEfforts!.ToArray());
         Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(glm));
-        Assert.IsNull(glm.DefaultReasoningEffort);
+        Assert.IsTrue(AgentReasoningEffortCapability.IsOffByDefault(glm));
+        Assert.IsFalse(AgentReasoningEffortCapability.IsNoneListed(glm));
+        Assert.AreEqual(AgentReasoningEffort.None, glm.DefaultReasoningEffort);
+        Assert.AreEqual(AgentReasoningEffort.None, AgentModelDefaults.ResolveReasoningEffort(glm, null), "a session that names no effort starts off");
+        Assert.AreEqual(AgentReasoningEffort.Max, AgentModelDefaults.ResolveReasoningEffort(glm, AgentReasoningEffort.Max));
+
+        // A model that lists none can be turned off: None is sent as none.
+        var switchable = models.Single(static model => model.Id == "switchable");
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.None, AgentReasoningEffort.Low, AgentReasoningEffort.High }, switchable.SupportedReasoningEfforts!.ToArray());
+        Assert.IsTrue(AgentReasoningEffortCapability.IsNoneListed(switchable));
+        Assert.AreEqual(AgentReasoningEffort.High, switchable.DefaultReasoningEffort);
+        Assert.AreEqual(AgentReasoningEffort.High, AgentModelDefaults.ResolveReasoningEffort(switchable, null));
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.None, switchable, out var off));
+        Assert.AreEqual("none", off.ToString());
+        Assert.AreEqual("none", OpenAIResponsesTurnExecutor.MapReasoningEffortLevel(AgentReasoningEffort.None, switchable)!.Value.ToString());
+        Assert.IsNull(OpenAIResponsesTurnExecutor.MapReasoningEffortLevel(AgentReasoningEffort.None, glm), "None sends no effort to a model that does not list none");
 
         var alwaysOn = models.Single(static model => model.Id == "always-on");
         CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Minimal, AgentReasoningEffort.Medium, AgentReasoningEffort.High }, alwaysOn.SupportedReasoningEfforts!.ToArray());

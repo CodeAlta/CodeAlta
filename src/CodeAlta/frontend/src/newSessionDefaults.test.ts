@@ -19,4 +19,8 @@ test("the starting reasoning effort prefers the configured one, then High, the m
   assert.equal(defaultReasoningEffort(model("a", ["minimal", "low"], "none")), "minimal");
   assert.equal(defaultReasoningEffort(model("a", [], "medium")), null);
   assert.equal(defaultReasoningEffort(undefined, "high"), null);
+  // A model that reasons only when asked (its endpoint says reasoning is off by default) starts with None, unless the
+  // provider names an effort it has.
+  assert.equal(defaultReasoningEffort(model("a", ["None", "Low", "High", "Max"], "None")), "None");
+  assert.equal(defaultReasoningEffort(model("a", ["None", "Low", "High", "Max"], "None"), "max"), "Max");
 });

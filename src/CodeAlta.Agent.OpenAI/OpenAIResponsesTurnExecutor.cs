@@ -1548,28 +1548,31 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     // The highest effort of a session is sent as max to a model models.dev gives max and no xhigh.
     internal static ResponseReasoningEffortLevel? MapReasoningEffortLevel(AgentReasoningEffort effort, AgentModelInfo? model)
-        => effort == AgentReasoningEffort.XHigh && AgentReasoningEffortCapability.GetHighestEffort(model) == "max"
+        => effort == AgentReasoningEffort.None
+            ? AgentReasoningEffortCapability.IsNoneListed(model) ? new ResponseReasoningEffortLevel("none") : (ResponseReasoningEffortLevel?)null
+            : effort == AgentReasoningEffort.XHigh && AgentReasoningEffortCapability.GetHighestEffort(model) == "max"
             ? MaxReasoningEffortLevel
             : MapReasoningEffortLevel(effort);
 
     internal static ResponseReasoningEffortLevel? MapReasoningEffortLevel(AgentReasoningEffort effort)
         => effort switch
         {
-            AgentReasoningEffort.None => null,
+            AgentReasoningEffort.None => (ResponseReasoningEffortLevel?)null,
             AgentReasoningEffort.Minimal => ResponseReasoningEffortLevel.Minimal,
             AgentReasoningEffort.Low => ResponseReasoningEffortLevel.Low,
             AgentReasoningEffort.Medium => ResponseReasoningEffortLevel.Medium,
             AgentReasoningEffort.High => ResponseReasoningEffortLevel.High,
             AgentReasoningEffort.XHigh => XHighReasoningEffortLevel,
             AgentReasoningEffort.Max => MaxReasoningEffortLevel,
-            _ => null,
+            _ => (ResponseReasoningEffortLevel?)null,
         };
 
     private static bool SupportsRequestedReasoningEffort(AgentTurnRequest request, AgentReasoningEffort reasoningEffort)
     {
+        // None sends no effort, unless the endpoint lists none, which turns the reasoning off.
         if (reasoningEffort == AgentReasoningEffort.None)
         {
-            return false;
+            return AgentReasoningEffortCapability.IsNoneListed(request.ModelInfo) && AgentReasoningEffortCapability.IsListComplete(request.ModelInfo);
         }
 
         return request.ModelInfo?.SupportedReasoningEfforts is not { } supportedReasoningEfforts ||

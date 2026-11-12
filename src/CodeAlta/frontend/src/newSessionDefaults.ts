@@ -11,11 +11,13 @@ export function defaultModelId(models: readonly Model[], configured: string | nu
 
 /**
  * The reasoning effort a model starts with, as the terminal picks it: the configured effort when the model
- * supports it, then High, then the model's own default, then its first effort. Null leaves it to the model.
+ * supports it, then None for a model whose own default it is (it reasons only when asked), then High, then the
+ * model's own default, then its first effort. Null leaves it to the model.
  */
 export function defaultReasoningEffort(model: Model | undefined, configured?: string | null): string | null {
   if (!model) return null;
   const supported = (effort: string | null | undefined) => effort ? model.efforts.find(value => value.toLowerCase() === effort.toLowerCase()) : undefined;
   if (model.efforts.length === 0) return null;
-  return supported(configured) ?? supported("high") ?? supported(model.defaultEffort) ?? model.efforts[0];
+  const off = model.defaultEffort?.toLowerCase() === "none" ? supported("none") : undefined;
+  return supported(configured) ?? off ?? supported("high") ?? supported(model.defaultEffort) ?? model.efforts[0];
 }

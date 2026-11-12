@@ -33,7 +33,8 @@ public static class AgentModelDefaults
 
     /// <summary>
     /// Resolves the reasoning effort a model starts with: the preferred effort when the model supports it or does
-    /// not report what it supports, then <see cref="AgentReasoningEffort.High"/>, then the model's own default,
+    /// not report what it supports, then <see cref="AgentReasoningEffort.None"/> for a model whose own default it is (a
+    /// model that reasons only when asked), then <see cref="AgentReasoningEffort.High"/>, then the model's own default,
     /// then the first effort the model supports.
     /// </summary>
     /// <param name="model">The selected model, or <see langword="null"/> when it is not known.</param>
@@ -54,6 +55,11 @@ public static class AgentModelDefaults
 
         if (supportedReasoningEfforts is { Length: > 0 })
         {
+            if (model?.DefaultReasoningEffort == AgentReasoningEffort.None && supportedReasoningEfforts.Contains(AgentReasoningEffort.None))
+            {
+                return AgentReasoningEffort.None;
+            }
+
             if (supportedReasoningEfforts.Contains(AgentReasoningEffort.High))
             {
                 return AgentReasoningEffort.High;

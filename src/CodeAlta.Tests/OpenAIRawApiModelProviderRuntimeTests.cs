@@ -368,6 +368,50 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(1234, maxTokens);
     }
 
+    // A reasoning the configuration sets in the body (OpenRouter's reasoning.max_tokens) is the one sent: an effort the
+    // endpoint lists for the model is not added beside it, which OpenRouter would refuse (#430).
+    [TestMethod]
+    [DataRow(false, "high")]
+    [DataRow(true, null)]
+    public async Task OpenAIChatTurnExecutor_LeavesTheReasoningToTheBodyTheConfigurationSets(bool configured, string? expected)
+    {
+        var chatClient = new RecordingOpenAIChatClient(
+        [
+            OpenAIChatModelFactory.StreamingChatCompletionUpdate(completionId: "chatcmpl-reasoning", contentUpdate: [ChatMessageContentPart.CreateTextPart("OK")], model: "opus"),
+        ]);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "openrouter",
+            ChatClientFactory = _ => chatClient,
+            ExtraBody = configured ? new Dictionary<string, object?> { ["reasoning"] = new Dictionary<string, object?> { ["max_tokens"] = 8192 } } : null,
+        };
+        var model = new AgentModelInfo("anthropic/claude-opus-4.6", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High],
+            Capabilities: new Dictionary<string, object?> { [AgentReasoningEffortCapability.CompleteListKey] = true });
+
+        _ = await new OpenAIChatTurnExecutor(provider).ExecuteTurnAsync(
+                new AgentTurnRequest
+                {
+                    Provider = new ModelProviderRuntimeDescriptor
+                    {
+                        ProtocolFamily = "openai", ProviderKey = "openrouter", DisplayName = "OpenRouter", TransportKind = AgentTransportKind.OpenAIChatCompletions,
+                    },
+                    ProviderId = new ModelProviderId("openrouter"),
+                    SessionId = "session-1",
+                    RunId = new AgentRunId("run-1"),
+                    ModelId = model.Id,
+                    ModelInfo = model,
+                    ReasoningEffort = AgentReasoningEffort.High,
+                    Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Hello")])],
+                    Tools = [],
+                    State = new AgentSessionState { SessionId = "session-1", ProtocolFamily = "openai", ProviderKey = "openrouter", UpdatedAt = DateTimeOffset.UtcNow },
+                },
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+
+        var options = chatClient.Requests.Single().Options!;
+        Assert.AreEqual(expected, options.ReasoningEffortLevel?.ToString());
+    }
+
     [TestMethod]
     public async Task OpenAIChatTurnExecutor_EnablesParallelToolCallsByDefaultWhenToolsAreAvailable()
     {
