@@ -56,6 +56,12 @@ export const spaceIdentityMessages = {
   "{variable} is given another value by the profile {other}.": ["El perfil {other} da otro valor a {variable}.", "Le profil {other} donne une autre valeur à {variable}.", "Das Profil {other} gibt {variable} einen anderen Wert.", "プロファイル {other} が {variable} に別の値を設定しています。", "配置 {other} 为 {variable} 设置了另一个值。"],
   "The check command is one line of at most 2048 characters.": ["El comando de comprobación es una línea de 2048 caracteres como máximo.", "La commande de vérification tient sur une ligne de 2048 caractères au plus.", "Der Prüfbefehl ist eine Zeile mit höchstens 2048 Zeichen.", "確認コマンドは 2048 文字以内の 1 行です。", "检查命令为一行，最多 2048 个字符。"],
   "The login command is one line of at most 2048 characters.": ["El comando de inicio de sesión es una línea de 2048 caracteres como máximo.", "La commande de connexion tient sur une ligne de 2048 caractères au plus.", "Der Anmeldebefehl ist eine Zeile mit höchstens 2048 Zeichen.", "サインインコマンドは 2048 文字以内の 1 行です。", "登录命令为一行，最多 2048 个字符。"],
+  "A secret of a profile is given to the agent of every session that uses it.": [
+    "Un secreto de un perfil se da al agente de cada sesión que lo usa.",
+    "Un secret d’un profil est donné à l’agent de chaque session qui l’utilise.",
+    "Ein Geheimnis eines Profils wird dem Agenten jeder Sitzung gegeben, die es verwendet.",
+    "プロファイルのシークレットは、それを使う各セッションのエージェントに渡されます。",
+    "配置中的机密会提供给使用它的每个会话的代理。"],
   "The profiles are saved once each of them can be.": ["Los perfiles se guardan cuando todos pueden guardarse.", "Les profils sont enregistrés dès que chacun peut l’être.", "Die Profile werden gespeichert, sobald jedes gespeichert werden kann.", "すべてのプロファイルが保存できる状態になると保存されます。", "所有配置都可保存时才会保存。"],
   // The information window of a session.
   "CLI {name}": ["CLI {name}", "CLI {name}", "CLI {name}", "CLI {name}", "CLI {name}"],

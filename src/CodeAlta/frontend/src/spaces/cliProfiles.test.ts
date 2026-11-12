@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cliLoginCommand, cliPresets, isSecretName, newProfile, profileItems, profileProblem, profilesValid, readProfiles, sameProfiles, type CliProfileCard } from "./cliProfiles";
+import { cliLoginCommand, cliPresets, givesSecret, isSecretName, newProfile, profileItems, profileProblem, profilesValid, readProfiles, sameProfiles, type CliProfileCard } from "./cliProfiles";
 import { cliRows } from "./SessionIdentityInfo";
 
 const card = (name: string, env: [string, string][], check = "", login = ""): CliProfileCard =>
@@ -44,6 +44,15 @@ test("a profile that cannot be saved says why, as the host would", () => {
   assert.equal(profileProblem([card("azure", [["AZURE_FEDERATED_TOKEN_FILE", "~/.azure/token"]])], 0), null, "A name of a place holds where a secret is.");
   assert.equal(profilesValid([ok, helm]), true);
   assert.equal(profilesValid([ok, card("", [])]), false);
+});
+
+test("a profile that names a secret of this computer says so, since the agent of its sessions gets it", () => {
+  const card = (value: string): CliProfileCard => ({ key: "k", name: "vault", env: [{ name: "KUBECONFIG", value: "/srv/kube" }, { name: "VAULT_TOKEN", value }], check: "", login: "" });
+  assert.equal(givesSecret(card("${secret:CONTOSO_VAULT_TOKEN}")), true);
+  assert.equal(givesSecret(card("Bearer ${SECRET:TOKEN}")), true);
+  assert.equal(givesSecret(card("${env:VAULT_TOKEN}")), false);
+  assert.equal(givesSecret(card("${var:VAULT_ADDRESS}")), false);
+  assert.equal(givesSecret(card("${secret:}")), false);
 });
 
 test("a name says it holds a secret by its words, not by a part of a word", () => {

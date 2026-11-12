@@ -8,7 +8,7 @@ import { useShellLanguage } from "../shellLanguage";
 import type { SpaceSectionProps } from "./spaceSection";
 import type { SpaceIdentityApi } from "./SpaceIdentity";
 import {
-  cliLoginCommand, cliPresets, newProfile, profileItem, profileItems, profileProblem, profilesValid, readProfiles, sameProfiles,
+  cliLoginCommand, cliPresets, givesSecret, newProfile, profileItem, profileItems, profileProblem, profilesValid, readProfiles, sameProfiles,
   type CliProblem, type CliProfileCard, type CliVariable,
 } from "./cliProfiles";
 
@@ -149,6 +149,7 @@ export function SpaceCliProfiles({ id, spaceId, epoch, api, run, disabled, initi
             {!disabled && <Button className="space-identity-add-variable" size="small" variant="minimal" icon={<AppIcon name="plus" size={13} />} text={t("Add a variable")}
               onClick={() => setDraft(cards => cards.map(other => other.key === card.key ? { ...other, env: [...other.env, { name: "", value: "" }] } : other))} />}
           </div>
+          {givesSecret(card) && <p className="space-identity-hint">{t("A secret of a profile is given to the agent of every session that uses it.")}</p>}
           {field(card, "check", "Check command", card.check, check => ({ ...card, check }), t("Optional"))}
           {field(card, "login", "Login command", card.login, login => ({ ...card, login }), t("Optional"))}
           {login && <div className="space-identity-login">

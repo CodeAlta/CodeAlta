@@ -245,6 +245,7 @@ body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !i
 .space-identity-add-variable.bp6-button { align-self: flex-start; justify-self: start; }
 .space-identity-add.bp6-html-select { justify-self: start; min-width: 200px; }
 .space-identity-waiting { margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.space-identity-hint { margin: 0; color: var(--muted); font-size: 12px; }
 .space-identity-add.bp6-html-select select { height: 26px; font-size: 12.5px; }
 
 @media (max-width: 900px) {

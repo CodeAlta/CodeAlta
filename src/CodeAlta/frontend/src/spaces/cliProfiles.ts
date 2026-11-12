@@ -102,6 +102,9 @@ export function profileProblem(cards: readonly CliProfileCard[], index: number):
 }
 
 /** Whether every profile can be saved. */
+/** Whether a profile gives a secret of this computer to the sessions that use it: one of its variables names `${secret:NAME}`. */
+export const givesSecret = (card: CliProfileCard) => card.env.some(variable => /\$\{secret:[^}]+\}/i.test(variable.value));
+
 export const profilesValid = (cards: readonly CliProfileCard[]) => cards.every((_, index) => profileProblem(cards, index) === null);
 
 /** A preset: what the page fills a new profile with for a well-known tool; `{space}` is the identifier of the space. */
