@@ -284,6 +284,8 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tab-popup .bp6-menu-item.bp6-disabled { color: var(--muted); }
 .session-tab-popup .bp6-menu-item:not(.bp6-disabled):hover, .session-tab-popup .bp6-menu-item:focus { background: var(--accent-soft); }
 .session-tab-popup .bp6-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A menu that leaves the focus in the text it edits marks the entry its keys choose. */
+.session-tab-popup .bp6-menu-item.session-tab-active:not(.bp6-disabled) { background: var(--accent-soft); }
 .reference-palette { width: min(620px, calc(100vw - 32px)); max-height: min(620px, calc(100dvh - 32px)); overflow: auto; }
 .reference-palette header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .reference-palette h2 { margin: 0; font-size: 16px; }

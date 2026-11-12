@@ -7,6 +7,8 @@ import { CodeEditor, type CodeEditorHandle } from "./monaco/CodeEditor";
 import { canSaveRecovery, recoveryStatus } from "./configRecovery";
 import { maximumConfigLength } from "./configEditor";
 import { ShellAppearance } from "./ShellAppearance";
+import { EditMenu } from "./EditMenu";
+import { monacoEditTarget } from "./monaco/monacoEditMenu";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { dismissStartupScreen } from "./startupScreen";
 import { availableUpdate, RecoveryUpdateNotice, type AvailableUpdate } from "./UpdateNotice";
@@ -25,7 +27,7 @@ export function ConfigRecoveryScreen({ developer = false, api = startupConfig, u
   const { appearance } = useWindowPreferences();
   const titleBar = useWindowTitleBar();
   // The same theme as the workspace: this screen stands where it would.
-  return <ShellLanguageContext.Provider value={language}><ShellAppearance appearance={appearance} /><div className="config-recovery-shell">
+  return <ShellLanguageContext.Provider value={language}><ShellAppearance appearance={appearance} /><EditMenu editors={monacoEditTarget} /><div className="config-recovery-shell">
     <header className="config-recovery-titlebar" data-neoastra-drag-region><WindowBrand developer={developer} /><WindowControls snapshot={titleBar} /></header>
     <ConfigRecovery api={api} updates={updates} />
   </div></ShellLanguageContext.Provider>;

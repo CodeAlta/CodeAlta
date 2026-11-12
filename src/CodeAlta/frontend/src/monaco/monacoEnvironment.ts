@@ -4,7 +4,6 @@ import "monaco-editor/features/clipboard/register.js";
 import "monaco-editor/features/wordOperations/register.js";
 import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/find/register.js";
-import "monaco-editor/features/contextmenu/register.js";
 import "monaco-editor/features/tokenization/register.js";
 // What a code editor needs beyond typing: going to a line, folding, matching brackets, several carets, comments,
 // indentation, the other places a word is used, links, and suggestions when asked for. Every editor of the page
@@ -34,10 +33,9 @@ import { installEditorFocus } from "./editorFocus";
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 // One editor of the page has the text focus, also when the browser announced no change of focus.
 installEditorFocus(monaco);
-// The menu of a right-click is drawn in a shadow root, which takes the colors of the theme only from the elements around
-// it, and the theme gives them to `.monaco-editor` and `.monaco-component`. An editor with its widgets fixed to the window
-// (the prompt, a file) puts that menu in the element it was created in, beside `.monaco-editor`: it had no surface and black
-// entries. That element is a Monaco component too.
+// An editor with its widgets fixed to the window (the prompt, a file) puts them in the element it was created in, beside
+// `.monaco-editor`, and the theme gives its colors to `.monaco-editor` and `.monaco-component`: that element is a Monaco
+// component too. The editors have no menu of their own: a right-click opens the menu of every text of the page (EditMenu).
 monaco.editor.onDidCreateEditor(editor => editor.getContainerDomNode().classList.add("monaco-component"));
 
 /**

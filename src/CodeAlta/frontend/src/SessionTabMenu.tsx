@@ -9,11 +9,18 @@ export type SessionMenuEntry = { key: string; label: string; disabled?: boolean;
   | { key: string; divider: true; label?: string };
 
 // The portal stays inside the themed shell, not FlexLayout's unthemed popup container.
-export function SessionTabMenu({ anchor, at, items, title, container, current, onClose }: {
+export function SessionTabMenu({ anchor, at, items, title, container, current, onClose, keepFocus, className }: {
   anchor: HTMLElement; items: SessionMenuEntry[]; title: string; container: HTMLElement;
   /** A point of the window the menu opens at (a context menu), instead of under its anchor. */
   at?: Readonly<{ x: number; y: number }>;
   current: () => boolean; onClose: () => void;
+  /**
+   * The menu leaves the focus where it is, in the text it edits (a field that saves or closes when it loses the focus):
+   * the caller reads the keys and says which entry they chose (`active`); the pointer chooses with `onActive`.
+   */
+  keepFocus?: Readonly<{ active: string | null; onActive: (key: string) => void }>;
+  /** A class of the menu, beside `session-tab-popup`. */
+  className?: string;
 }) {
   // Blueprint's childRef declaration predates React 19's nullable RefObject type.
   // DOM access below still checks the actual mount lifetime.
@@ -36,9 +43,11 @@ export function SessionTabMenu({ anchor, at, items, title, container, current, o
   }
   return <Overlay2 isOpen hasBackdrop={false} enforceFocus={false} autoFocus={false} shouldReturnFocusOnClose={false}
     transitionDuration={0} portalContainer={container} childRef={popup}
-    onOpening={() => popup.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus()}
+    onOpening={() => { if (!keepFocus) popup.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus(); }}
     onClose={event => close("key" in event && event.key === "Escape")}>
-    <div ref={popup} className="session-tab-popup" style={position} onKeyDown={event => {
+    <div ref={popup} className={className ? `session-tab-popup ${className}` : "session-tab-popup"} style={position}
+      // A press in a menu that keeps the focus leaves it, and the selection, where they are.
+      onMouseDown={keepFocus ? event => event.preventDefault() : undefined} onKeyDown={event => {
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) return;
       if (event.key === "Tab") { close(true); return; }
       const entries = Array.from(popup.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
@@ -50,6 +59,8 @@ export function SessionTabMenu({ anchor, at, items, title, container, current, o
       <Menu role="menu" aria-label={title}>
         {items.map(item => "divider" in item ? <MenuDivider key={item.key} title={item.label} /> : <MenuItem key={item.key} role="menuitem" text={item.label} disabled={item.disabled} tabIndex={-1}
           icon={item.iconNode ?? (item.icon ? <AppIcon name={item.icon} size={15} /> : undefined)} labelElement={item.endNode} intent={item.danger ? "danger" : undefined}
+          className={keepFocus?.active === item.key ? "session-tab-active" : undefined}
+          onMouseEnter={keepFocus && !item.disabled ? () => keepFocus.onActive(item.key) : undefined}
           onClick={() => { if (!item.disabled && current()) { close(true); item.onSelect(); } }} />)}
       </Menu>
     </div>
