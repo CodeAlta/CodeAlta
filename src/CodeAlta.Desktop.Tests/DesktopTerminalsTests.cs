@@ -45,12 +45,12 @@ public sealed class DesktopTerminalsTests
         }
     }
 
-    private static async Task Until(Func<bool> condition, string what)
+    private static async Task Until(Func<bool> condition, string what, Func<string>? seen = null)
     {
         var limit = DateTime.UtcNow + Patience;
         while (!condition())
         {
-            if (DateTime.UtcNow > limit) Assert.Fail(what + " did not happen.");
+            if (DateTime.UtcNow > limit) Assert.Fail(what + " did not happen." + (seen is null ? "" : " Seen:\n" + seen()));
             await Task.Delay(10);
         }
     }
@@ -630,7 +630,10 @@ public sealed class DesktopTerminalsTests
             Assert.AreEqual("ok", status);
             Assert.IsTrue(terminal!.Describe().ProcessId > 0);
             terminal.Write(OperatingSystem.IsWindows() ? "echo terminal=%CODEALTA_TERMINAL% in %TERM_PROGRAM%\r" : "echo terminal=$CODEALTA_TERMINAL in $TERM_PROGRAM\r");
-            await Until(() => terminal.ReadLines(50).Any(line => line == $"terminal={terminal.Id} in CodeAlta"), "The line of the shell");
+            // A shell that starts after the line was typed echoes it first, then prints its prompt before the output: the
+            // output can follow the prompt on its line ("$ terminal=…").
+            await Until(() => terminal.ReadLines(50).Any(line => line.TrimEnd().EndsWith($"terminal={terminal.Id} in CodeAlta", StringComparison.Ordinal)), "The line of the shell",
+                () => string.Join("\n", terminal.ReadLines(50)));
             terminal.Write("exit 4\r");
             await terminal.Ended.WithinAsync(Patience);
             Assert.AreEqual(4, terminal.Describe().ExitCode);
