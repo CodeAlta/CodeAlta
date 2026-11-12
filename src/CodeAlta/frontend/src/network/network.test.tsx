@@ -14,7 +14,7 @@ const render = (element: ReactElement) =>
   renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } }, element));
 const silent = () => new Promise<never>(() => { });
 const listing = (change: Partial<NetworkProxyResponse> = {}): NetworkProxyResponse => ({ status: "ok", message: null, mode: "system", url: "", bypass: [],
-  authentication: "none", user: "", passwordSet: false, appliedMode: "system", applyError: null, systemProxy: null, pending: false, ...change });
+  authentication: "none", user: "", passwordSet: false, appliedMode: "system", applyError: null, systemProxy: null, pending: false, restartAdvised: false, ...change });
 const manual = (change: Partial<ProxyForm> = {}): ProxyForm => ({ mode: "manual", url: "http://proxy.corp:8080", bypass: "", authentication: "none", user: "", password: "", ...change });
 const view = (value: NetworkProxyResponse) => render(createElement(NetworkView, { listing: value, busy: false, onSave: never, onCheck: never }));
 const check = (change: Partial<NetworkCheckResponse>): NetworkCheckResponse => ({ status: "ok", message: null, reached: true, httpStatus: 200, via: null,
@@ -54,6 +54,10 @@ test("what the host could not apply, and settings of the file that do not run ye
   assert.match(html, /The proxy settings could not be applied as saved\./);
   assert.match(html, /The secret NETWORK_PROXY_PASSWORD that keeps the proxy password is not set\./);
   assert.match(html, /save them here, or restart CodeAlta\./);
+  assert.equal(html.includes("Restart CodeAlta so that"), false);
+  // The settings left the system mode while CodeAlta ran: the clients that used the system settings keep them.
+  assert.match(view(listing({ mode: "manual", url: "http://proxy.corp:8080", appliedMode: "manual", restartAdvised: true })),
+    /Restart CodeAlta so that the connections it opened with the system settings use this proxy too\./);
 });
 
 test("a manual proxy needs an address the host takes, and a password needs a user name and a password once", () => {

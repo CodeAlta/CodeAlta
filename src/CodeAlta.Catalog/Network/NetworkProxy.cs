@@ -5,15 +5,17 @@ namespace CodeAlta.Catalog.Network;
 
 /// <summary>
 /// The proxy of the application, as <see cref="ProxySettings"/> says, in the two places it reaches: the HTTP clients of the
-/// process that use the default proxy (this instance is <see cref="HttpClient.DefaultProxy"/>, see <see cref="Install"/>), and
-/// the environment of the process, which the programs it starts inherit (<c>HTTP_PROXY</c>, <c>HTTPS_PROXY</c>,
-/// <c>NO_PROXY</c>, in both cases).
+/// process that use the default proxy (<see cref="HttpClient.DefaultProxy"/>), and the environment of the process, which the
+/// programs it starts inherit (<c>HTTP_PROXY</c>, <c>HTTPS_PROXY</c>, <c>NO_PROXY</c>, in both cases).
 /// </summary>
 /// <remarks>
 /// <para>
-/// A change applies at once to the next request of every client that uses the default proxy, even one created before: the
-/// clients ask this instance for each request. A connection already open stays as it is until it closes, and a program
-/// already started keeps the environment it started with.
+/// In the system mode the default proxy is the one of .NET, untouched: the proxy of Windows keeps its PAC script and its
+/// failover from one proxy to the next, which no other proxy can give. In the other modes this instance is the default
+/// proxy, and the clients ask it for each request: a change applies at once to the next request of every client that uses
+/// it, even one created before. A client that sent its first request while the system mode applied keeps the proxy of .NET
+/// until CodeAlta restarts (<see cref="RestartAdvised"/>). A connection already open stays as it is until it closes, and a
+/// program already started keeps the environment it started with.
 /// </para>
 /// <para>
 /// A client made with <c>UseProxy = false</c> (the loopback, the network of a sandbox) never asks: it stays as it is. The
@@ -27,22 +29,40 @@ public sealed partial class NetworkProxy : IWebProxy
 
     private readonly IWebProxy? _system;
     private readonly Action<string, string?> _setVariable;
+    private readonly Action<IWebProxy>? _setDefault;
     private readonly KeyValuePair<string, string?>[] _original;
     private readonly Lock _gate = new();
     private readonly ProxyCredentials _credentials;
     private State _state;
+    private bool _installed;
+    private bool _systemExposed;
 
-    /// <summary>Initializes a proxy that does as the system says until <see cref="Apply"/> is called.</summary>
+    /// <summary>Initializes a proxy that does as the system says until <see cref="Apply"/> is called, and is the default proxy of no client.</summary>
     /// <param name="system">The proxy of the system, read before the environment is changed; null for none.</param>
     /// <param name="getVariable">Reads a variable of the environment of the process.</param>
     /// <param name="setVariable">Sets a variable of the environment of the process; a null value removes it.</param>
     /// <exception cref="ArgumentNullException"><paramref name="getVariable"/> or <paramref name="setVariable"/> is null.</exception>
     public NetworkProxy(IWebProxy? system, Func<string, string?> getVariable, Action<string, string?> setVariable)
+        : this(system, getVariable, setVariable, setDefault: null)
+    {
+    }
+
+    /// <summary>Initializes a proxy that does as the system says until <see cref="Apply"/> is called.</summary>
+    /// <param name="system">The proxy of the system, read before the environment is changed; null for none.</param>
+    /// <param name="getVariable">Reads a variable of the environment of the process.</param>
+    /// <param name="setVariable">Sets a variable of the environment of the process; a null value removes it.</param>
+    /// <param name="setDefault">
+    /// Makes a proxy the default one of the clients: this instance in the none and manual modes, <paramref name="system"/> in the
+    /// system mode; null to change no default.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="getVariable"/> or <paramref name="setVariable"/> is null.</exception>
+    public NetworkProxy(IWebProxy? system, Func<string, string?> getVariable, Action<string, string?> setVariable, Action<IWebProxy>? setDefault)
     {
         ArgumentNullException.ThrowIfNull(getVariable);
         ArgumentNullException.ThrowIfNull(setVariable);
         _system = system;
         _setVariable = setVariable;
+        _setDefault = setDefault;
         // What the system mode gives back: the variables as the process started with them.
         _original = [.. Variables.Select(name => new KeyValuePair<string, string?>(name, getVariable(name)))];
         _state = new State(ProxySettings.Default, null, null, null);
@@ -63,7 +83,22 @@ public sealed partial class NetworkProxy : IWebProxy
     /// </summary>
     public IWebProxy Upstream { get; }
 
-    /// <summary>Gets the <see cref="Upstream"/> of the proxy of the process (<see cref="Install"/>), or null when none is installed.</summary>
+    /// <summary>
+    /// Gets whether clients of the process may still use the proxy of the system after the settings left the system mode: those
+    /// that sent their first request while it applied, which keep it until CodeAlta restarts.
+    /// </summary>
+    public bool RestartAdvised
+    {
+        get
+        {
+            lock (_gate) return _systemExposed && Volatile.Read(ref _state).Settings.Mode != ProxyMode.System;
+        }
+    }
+
+    /// <summary>
+    /// Gets the <see cref="Upstream"/> of the proxy of the process while it is the default proxy (the none and manual modes),
+    /// or null when the default proxy is the one of the system.
+    /// </summary>
     public static IWebProxy? ProcessUpstream => HttpClient.DefaultProxy is NetworkProxy proxy ? proxy.Upstream : null;
 
     /// <summary>
@@ -84,18 +119,17 @@ public sealed partial class NetworkProxy : IWebProxy
     }
 
     /// <summary>
-    /// Makes this instance the default proxy of the HTTP clients of the process (<see cref="HttpClient.DefaultProxy"/>), over
-    /// the proxy of the system read first, or gives the instance already installed. Call it at the start, before the first
-    /// request.
+    /// Creates the proxy of the process over the proxy of the system read first, or gives the one already installed. It becomes
+    /// the default proxy of the HTTP clients (<see cref="HttpClient.DefaultProxy"/>) when settings other than the system ones are
+    /// applied. Call it at the start, then <see cref="Apply"/>, before the first request.
     /// </summary>
     /// <returns>The proxy of the process.</returns>
     public static NetworkProxy Install()
     {
         if (HttpClient.DefaultProxy is NetworkProxy installed) return installed;
         // The system proxy reads the variables of the environment as they are now, before a manual mode changes them.
-        var proxy = new NetworkProxy(HttpClient.DefaultProxy, Environment.GetEnvironmentVariable, Environment.SetEnvironmentVariable);
-        HttpClient.DefaultProxy = proxy;
-        return proxy;
+        return new NetworkProxy(HttpClient.DefaultProxy, Environment.GetEnvironmentVariable, Environment.SetEnvironmentVariable,
+            static proxy => HttpClient.DefaultProxy = proxy);
     }
 
     /// <summary>Applies settings: to the next requests of the clients, and to the environment of the programs started from now on.</summary>
@@ -109,10 +143,25 @@ public sealed partial class NetworkProxy : IWebProxy
         if (settings.GetError() is { } error) throw new ArgumentException(error, nameof(settings));
         var state = new State(settings, settings.Mode == ProxyMode.Manual ? new ProxyBypassList(settings.Bypass.IsDefault ? [] : settings.Bypass) : null,
             CredentialOf(settings, password), password);
+        var variables = settings.Mode == ProxyMode.System ? _original : EnvironmentOf(settings, password);
         lock (_gate)
         {
             Volatile.Write(ref _state, state);
-            var variables = settings.Mode == ProxyMode.System ? _original : EnvironmentOf(settings, password);
+            if (settings.Mode == ProxyMode.System)
+            {
+                // The proxy of .NET, untouched: the clients created from now on use it directly. Those that already use this
+                // instance get the proxy of the system through it.
+                if (_installed && _system is not null) _setDefault?.Invoke(_system);
+                _installed = false;
+                // Every client that sends its first request from now on keeps the proxy of the system.
+                _systemExposed = true;
+            }
+            else if (!_installed && _setDefault is not null)
+            {
+                _setDefault(this);
+                _installed = true;
+            }
+
             foreach (var (name, value) in variables) _setVariable(name, value);
         }
     }

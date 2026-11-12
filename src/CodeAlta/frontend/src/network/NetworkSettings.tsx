@@ -55,6 +55,8 @@ export function NetworkView({ listing, busy, onSave, onCheck }: {
   return <>
     {listing.applyError && <Callout intent="warning" compact role="alert">{t("The proxy settings could not be applied as saved.")}
       <div className="config-editor-diagnostic">{listing.applyError}</div></Callout>}
+    {listing.restartAdvised && <Callout intent="warning" compact role="status">
+      {t("Restart CodeAlta so that the connections it opened with the system settings use this proxy too.")}</Callout>}
     {listing.pending && <Callout intent="warning" compact role="status">
       {t("The configuration file has proxy settings that do not run yet: save them here, or restart CodeAlta.")}</Callout>}
     <section className="network-block" aria-label={t("Proxy")}>

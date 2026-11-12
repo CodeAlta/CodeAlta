@@ -1173,7 +1173,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddStorageService(new StorageService(catalog, epoch, host.StartupScratchpadCleanup, retention.Service));
                     // The proxy: saved, applied at once, and checked through settings not saved yet.
                     builder.AddNetworkService(options.Network is { Sandboxed: false } ownedNetwork
-                        ? new NetworkService(catalog, ownedNetwork, epoch) { SecretChanged = () => host.AgentHub.SecretMasker?.Refresh() }
+                        ? new NetworkService(catalog, ownedNetwork, epoch)
+                        {
+                            SecretChanged = () => host.AgentHub.SecretMasker?.Refresh(), RestartAdvised = () => ownedNetwork.Proxy.RestartAdvised,
+                        }
                         : new NetworkService());
                     // The window can always answer a request: the setting changes while the host runs, and a send
                     // started with it on goes on asking after it is turned off.

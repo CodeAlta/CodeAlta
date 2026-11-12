@@ -229,6 +229,35 @@ public sealed class ProxySettingsTests
     }
 
     [TestMethod]
+    public void TheSystemMode_LeavesTheProxyOfDotNetAsTheDefault_AndTheOthersInstallTheirs()
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var system = new FixedProxy(new Uri("http://env-proxy:3128"));
+        IWebProxy? current = system;
+        var proxy = new NetworkProxy(system, name => environment.GetValueOrDefault(name), (name, value) => environment[name] = value, value => current = value);
+
+        // A start in the system mode: the proxy of .NET stays, with what only it does (the PAC failover of Windows).
+        proxy.Apply(ProxySettings.Default, null);
+        Assert.AreSame(system, current);
+        Assert.IsFalse(proxy.RestartAdvised);
+
+        // Leaving it while CodeAlta runs: the clients created since keep the proxy of .NET until a restart.
+        proxy.Apply(Manual, null);
+        Assert.AreSame(proxy, current);
+        Assert.IsTrue(proxy.RestartAdvised);
+        proxy.Apply(ProxySettings.Default, null);
+        Assert.AreSame(system, current, "back to the system mode, the proxy of .NET again");
+        Assert.IsFalse(proxy.RestartAdvised);
+
+        // A start in the manual mode: no client ever had the proxy of .NET.
+        IWebProxy? other = system;
+        var manual = new NetworkProxy(system, name => environment.GetValueOrDefault(name), (name, value) => environment[name] = value, value => other = value);
+        manual.Apply(Manual with { Mode = ProxyMode.None }, null);
+        Assert.AreSame(manual, other);
+        Assert.IsFalse(manual.RestartAdvised);
+    }
+
+    [TestMethod]
     public void TheCredentials_OfAProxy_AreGivenToThatProxyAlone()
     {
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal);

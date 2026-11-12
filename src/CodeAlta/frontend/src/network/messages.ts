@@ -14,6 +14,11 @@ export const networkMessages = {
     "Die Konfigurationsdatei enthält Proxy-Einstellungen, die noch nicht gelten: hier speichern oder CodeAlta neu starten.",
     "構成ファイルにまだ適用されていないプロキシ設定があります。ここで保存するか、CodeAlta を再起動してください。", "配置文件中有尚未生效的代理设置：请在此保存，或重启 CodeAlta。"],
   "Proxy": ["Proxy", "Proxy", "Proxy", "プロキシ", "代理"],
+  "Restart CodeAlta so that the connections it opened with the system settings use this proxy too.": [
+    "Reinicia CodeAlta para que las conexiones que abrió con los ajustes del sistema usen también este proxy.",
+    "Redémarrez CodeAlta pour que les connexions ouvertes avec les paramètres du système utilisent aussi ce proxy.",
+    "Starten Sie CodeAlta neu, damit auch die mit den Systemeinstellungen geöffneten Verbindungen diesen Proxy nutzen.",
+    "システムの設定で開いた接続にもこのプロキシを使うには、CodeAlta を再起動してください。", "请重启 CodeAlta，使其以系统设置打开的连接也使用此代理。"],
   "Use the system settings": ["Usar los ajustes del sistema", "Utiliser les paramètres du système", "Systemeinstellungen verwenden", "システムの設定を使う", "使用系统设置"],
   "The variables HTTP_PROXY, HTTPS_PROXY and NO_PROXY of the environment, else the proxy of the operating system.": [
     "Las variables HTTP_PROXY, HTTPS_PROXY y NO_PROXY del entorno; si no, el proxy del sistema operativo.",

@@ -65,6 +65,12 @@ internal sealed class NetworkService
         (_config, _secrets, _apply, _applied, _system, _epoch, _handler) = (config, secrets, apply, applied, system, epoch, handler);
     }
 
+    /// <summary>
+    /// Gets whether clients of CodeAlta may still use the proxy of the system after the settings left the system mode, until a
+    /// restart (<see cref="NetworkProxy.RestartAdvised"/>); null for never.
+    /// </summary>
+    internal Func<bool>? RestartAdvised { get; init; }
+
     /// <summary>Gets what is told once the password secret changed: the masking of the host.</summary>
     internal Action? SecretChanged { get; init; }
 
@@ -213,7 +219,10 @@ internal sealed class NetworkService
         return new NetworkProxyResponse(status, message, ProxySettings.NameOf(settings.Mode), settings.Url ?? "", [.. settings.Bypass], ProxySettings.NameOf(settings.Authentication),
             settings.User ?? "", settings.PasswordSecret is { } secret && HasSecret(secret), ProxySettings.NameOf(applied.Mode), NetworkProxy.RedactCredentials(applyError), system,
             // The settings of the file are not those that run: another program changed the file since the start or the last save.
-            !SameSettings(applied, settings));
+            !SameSettings(applied, settings))
+        {
+            RestartAdvised = RestartAdvised?.Invoke() ?? false,
+        };
     }
 
     private static bool SameSettings(ProxySettings left, ProxySettings right)
@@ -292,6 +301,12 @@ internal sealed record NetworkCheckRequest(string? ExpectedEpoch, string? Target
 internal sealed record NetworkProxyResponse(string Status, string? Message, string Mode, string Url, string[] Bypass, string Authentication, string User, bool PasswordSet,
     string AppliedMode, string? ApplyError, string? SystemProxy, bool Pending)
 {
+    /// <summary>
+    /// Gets whether connections CodeAlta made with the system settings keep them until it restarts: the settings left the
+    /// system mode while it ran.
+    /// </summary>
+    public bool RestartAdvised { get; init; }
+
     internal static NetworkProxyResponse Refused(string status)
         => new(status, null, ProxySettings.SystemName, "", [], ProxySettings.NoneName, "", false, ProxySettings.SystemName, null, null, false);
 }
