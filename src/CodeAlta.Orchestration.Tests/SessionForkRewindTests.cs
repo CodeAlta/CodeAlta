@@ -520,6 +520,57 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task StoppingASession_WhoseShellWaitsForASecret_EndsTheWaitAtOnce_AndItsShellStartsWithoutIt()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider);
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Deploy", null, null, null, "business", CancellationToken.None);
+        var use = $"shell of the session {session.SessionId}";
+        await GiveTheSecretAsync(host, session.SessionId);
+
+        // A send prepares the attachment before it returns: it runs beside the test.
+        var sending = Task.Run(() => host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("one") }, CancellationToken.None));
+        await AwaitedAsync(host, use);
+        var aborting = host.RuntimeService.AbortAsync(session.SessionId);
+
+        // The wait lasts 2 minutes: stopping the session ends it at once.
+        await AttachedAsync(host, session.SessionId).WithinAsync(TestTime.Seconds(30));
+        await Task.WhenAll(Quietly(sending), Quietly(aborting)).WithinAsync(TestTime.Seconds(30));
+        var identity = await host.RuntimeService.GetSessionIdentityAsync(session.SessionId);
+        Assert.IsNull(identity.Environment.Get("DEPLOY_TOKEN"), "nothing is given without a confirmation");
+        StringAssert.Contains(identity.SecretProblems.Single(), "the session was stopped before its use was confirmed");
+        Assert.IsNull(host.Credentials!.ListPending().Single(pending => pending.Use == use).AwaitedUntil, "nothing waits for the answer any more");
+        Assert.IsFalse(provider.Requests.Any(request => request.Environment?.Get("DEPLOY_TOKEN") is not null));
+    }
+
+    [TestMethod]
+    public async Task StoppingASendWhosePreparationWaitsForASecret_EndsTheWaitAtOnce()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider);
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Deploy", null, null, null, "business", CancellationToken.None);
+        var use = $"shell of the session {session.SessionId}";
+        await GiveTheSecretAsync(host, session.SessionId);
+
+        var admitting = Task.Run(() => host.Commands.AdmitSend(new OwnedTextSendRequest("send-1", session.SessionId, "one")));
+        await AwaitedAsync(host, use);
+        var send = await admitting.WithinAsync(TestTime.Seconds(30));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, send.Kind);
+        var abort = host.Commands.AdmitAbort(new OwnedAbortRequest("abort-1", send.Receipt!.OperationId));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, abort.Kind);
+
+        // The abort waits for the preparation, which no longer waits for the user.
+        await abort.Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
+        await send.Receipt.Completion.WithinAsync(TestTime.Seconds(30));
+        Assert.IsNull(host.Credentials!.ListPending().Single(pending => pending.Use == use).AwaitedUntil);
+        Assert.IsFalse(provider.Requests.Any(request => request.Environment?.Get("DEPLOY_TOKEN") is not null), "nothing is given without a confirmation");
+    }
+
+    [TestMethod]
     public async Task ASession_WorksUnderTheCliProfilesOfItsSpace_WithTheOnesOfItsProjectOverThem()
     {
         using var temp = TempDirectory.Create();
@@ -684,6 +735,70 @@ public sealed class SessionForkRewindTests
         OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
     };
 
+    // A host of CodeAlta Desktop whose space gives its sessions the secret DEPLOY, which asks before use.
+    private static async Task<CodeAltaHost> CreateHostWithAskingSecretAsync(TempDirectory temp, RecordingProvider provider)
+    {
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(temp.GlobalRoot);
+        store.SetSecret("DEPLOY", "local-deploy-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("DEPLOY", CodeAlta.Catalog.Secrets.SecretAskDurations.FifteenMinutes);
+        var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = temp.GlobalRoot,
+                CurrentProjectPath = temp.ProjectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                AppliesSpaceIdentities = true,
+                CredentialPrompts = true,
+                UserPresenceVerifier = new AvailableVerifier(),
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+            },
+            CancellationToken.None);
+        Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+        return host;
+    }
+
+    // The space gives its sessions DEPLOY from now on: the session attaches again, for its next send, with it.
+    private static async Task GiveTheSecretAsync(CodeAltaHost host, string sessionId)
+    {
+        Assert.IsTrue((await host.SpaceCatalog.UpdateSettingsAsync("business", settings => settings with
+        {
+            Identity = new SpaceIdentity(Cli: [new("deploy", [new("DEPLOY_TOKEN", "${secret:DEPLOY}")])]),
+        })).Succeeded);
+        await host.RuntimeService.DetachRuntimeSessionAsync(sessionId);
+    }
+
+    // The use once the shell of a session that attaches waits for its answer.
+    private static async Task AwaitedAsync(CodeAltaHost host, string use)
+    {
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(30);
+        while (host.Credentials!.ListPending().All(pending => pending.Use != use || pending.AwaitedUntil is null))
+        {
+            Assert.IsTrue(DateTimeOffset.UtcNow < deadline, $"Nothing waited for the use '{use}': "
+                + string.Join(" | ", host.Credentials!.ListPending().Select(static pending => $"{pending.Name} {pending.Use} {pending.AwaitedUntil}"))
+                + $" now {DateTimeOffset.UtcNow:HH:mm:ss.fff} uses: " + string.Join(" | ", host.Credentials!.ListUses().Select(static used => $"{used.Name} {used.Outcome} {used.At:HH:mm:ss.fff}")));
+            await Task.Delay(10);
+        }
+    }
+
+    private static async Task AttachedAsync(CodeAltaHost host, string sessionId)
+    {
+        while ((await host.RuntimeService.GetSessionIdentityAsync(sessionId)).SecretProblems.Count == 0) await Task.Delay(10);
+    }
+
+    // A send that the abort ended, or an abort that found the run already over: what matters is that both end.
+    private static async Task Quietly(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException)
+        {
+        }
+    }
+
     private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider, bool identities = false)
         => CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
@@ -697,6 +812,15 @@ public sealed class SessionForkRewindTests
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             },
             CancellationToken.None);
+
+    private sealed class AvailableVerifier : CodeAlta.Credentials.IUserPresenceVerifier
+    {
+        public ValueTask<CodeAlta.Credentials.UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken)
+            => ValueTask.FromResult(new CodeAlta.Credentials.UserPresenceAvailability(true, null));
+
+        public ValueTask<CodeAlta.Credentials.UserPresenceResult> VerifyAsync(string message, CancellationToken cancellationToken)
+            => ValueTask.FromResult(CodeAlta.Credentials.UserPresenceResult.Canceled);
+    }
 
     // Answers every prompt and keeps the requests it was sent.
     private sealed class RecordingProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor

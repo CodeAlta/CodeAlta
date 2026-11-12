@@ -47,7 +47,7 @@ public interface ISessionSecretConfirmations
 {
     /// <summary>Waits, for a bounded time, for the answers to the uses that the environment built for a session waits for.</summary>
     /// <param name="scope">The work of the session, whose run is the session.</param>
-    /// <param name="cancellationToken">A token to stop waiting.</param>
+    /// <param name="cancellationToken">A token to stop waiting: the uses not confirmed then are given as not confirmed.</param>
     /// <returns>The secrets it waited for, with their outcome; empty when none waits.</returns>
     Task<IReadOnlyList<SessionSecretConfirmation>> WaitAsync(SecretScope scope, CancellationToken cancellationToken);
 }
@@ -180,14 +180,35 @@ public sealed class SessionIdentityResolver
     /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
     /// <exception cref="OperationCanceledException">The read or the wait was canceled.</exception>
-    public async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+    public Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
         CancellationToken cancellationToken)
+        => ResolveForAttachmentAsync(recordedSpaceId, projectId, sessionId, parentSessionId, CancellationToken.None, cancellationToken);
+
+    /// <summary>
+    /// Gives the identity a session attaches with (<see cref="ResolveForAttachmentAsync(string?, string?, string, string?, CancellationToken)"/>),
+    /// whose wait for the confirmations ends early when <paramref name="stopWaiting"/> is canceled: the user stopped the session. The
+    /// secrets that were not confirmed then are left out, and named in <see cref="SessionIdentity.SecretProblems"/>.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="sessionId">The session, the run its uses of values are recorded for.</param>
+    /// <param name="parentSessionId">The session that started it; null for none.</param>
+    /// <param name="stopWaiting">Ends the wait for the confirmations, not the resolution.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+        CancellationToken stopWaiting, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         if (await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false) is not { } read) return SessionIdentity.Usual;
         var identity = Of(read.Space, read.Profiles, read.Scope);
         if (identity.Identity is null || Confirmations is not { } confirmations) return identity;
-        var waited = await confirmations.WaitAsync(read.Scope, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<SessionSecretConfirmation> waited;
+        using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopWaiting))
+            waited = await confirmations.WaitAsync(read.Scope, waiting.Token).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (waited.Count == 0) return identity;
         // Built again for the secrets the user confirmed: nothing was given for them before.
         if (waited.Any(static confirmation => confirmation.Confirmed)) identity = Of(read.Space, read.Profiles, read.Scope);

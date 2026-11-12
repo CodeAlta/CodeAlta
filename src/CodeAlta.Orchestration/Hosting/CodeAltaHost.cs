@@ -1235,7 +1235,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var use = ShellUseOf(scope);
             var names = broker.ListPending().Where(pending => pending.Use == use).Select(static pending => pending.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (names.Length == 0) return [];
-            var outcomes = await Task.WhenAll(names.Select(name => broker.WaitForConfirmationAsync(name, use, timeout, cancellationToken))).ConfigureAwait(false);
+            var outcomes = await Task.WhenAll(names.Select(name => WaitAsync(name, use, cancellationToken))).ConfigureAwait(false);
             // The next build asks again for what the user confirmed, and keeps what the first build read.
             if (_resolutions.TryGetValue(scope, out var read))
                 read.Forget([.. names.Where((_, index) => outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed)]);
@@ -1243,8 +1243,22 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ProblemOf(name, outcomes[index], timeout)))];
         }
 
-        private static string? ProblemOf(string name, CodeAlta.Credentials.SecretConfirmationOutcome outcome, TimeSpan timeout) => outcome switch
+        // A wait the user ended by stopping the session gives no outcome: the shell starts without the secret.
+        private async Task<CodeAlta.Credentials.SecretConfirmationOutcome?> WaitAsync(string name, string use, CancellationToken cancellationToken)
         {
+            try
+            {
+                return await broker.WaitForConfirmationAsync(name, use, timeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
+        private static string? ProblemOf(string name, CodeAlta.Credentials.SecretConfirmationOutcome? outcome, TimeSpan timeout) => outcome switch
+        {
+            null => $"The shell of this session started without the secret {name}: the session was stopped before its use was confirmed.",
             CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed => null,
             CodeAlta.Credentials.SecretConfirmationOutcome.Declined => $"The shell of this session started without the secret {name}: its use was denied.",
             CodeAlta.Credentials.SecretConfirmationOutcome.TimedOut =>

@@ -1162,6 +1162,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private async Task RunControlAsync(SendOperation operation)
     {
         await operation.ControlLaunch.Task.ConfigureAwait(false);
+        // A preparation that waits for the confirmation of a secret goes on at once without it: the abort below waits for it.
+        _runtime.StopSecretWaits(operation.SessionId);
         var failed = operation.CancellationFailed;
         var attached = false;
 

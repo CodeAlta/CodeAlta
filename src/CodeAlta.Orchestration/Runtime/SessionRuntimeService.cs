@@ -247,6 +247,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// </summary>
     public SessionIdentityResolver Identities { get; init; } = SessionIdentityResolver.None;
 
+    // The waits of the sessions that attach for the confirmations of their secrets, which stopping a session ends.
+    private readonly SessionSecretWaits _secretWaits = new();
+
     /// <summary>
     /// Gets or initializes whether the permission mode of a session decides what the host does with its requests
     /// (<see cref="GetPermissionPolicy"/>). False, the default, leaves every session the one policy of the host.
@@ -2279,9 +2282,19 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // whatever the window shows and whatever is changed in the space meanwhile.
         // A secret that asks before use waits for the user's answer, for a bounded time: the shell starts with it once confirmed, and
         // without it, as the session is told, once denied or not answered in time.
-        var identity = string.IsNullOrWhiteSpace(session.SessionId)
-            ? await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId, cancellationToken).ConfigureAwait(false)
-            : await Identities.ResolveForAttachmentAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId, cancellationToken).ConfigureAwait(false);
+        // Stopping the session, or closing the runtime, ends that wait at once.
+        SessionIdentity identity;
+        if (string.IsNullOrWhiteSpace(session.SessionId))
+        {
+            identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            using var secretWait = _secretWaits.Begin(session.SessionId);
+            identity = await Identities.ResolveForAttachmentAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId,
+                secretWait.Token, cancellationToken).ConfigureAwait(false);
+        }
+
         if (identity.SecretProblems.Count > 0 && !_disposed && !string.IsNullOrWhiteSpace(session.SessionId))
             _events.TryPublish(new SessionHostEvent(session.SessionId, DateTimeOffset.UtcNow, AgentSessionUpdateKind.Warning, string.Join(" ", identity.SecretProblems)));
         // What the programs of the session start with: the identity of its space, and the variables that name the session.
@@ -3760,6 +3773,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public async Task AbortAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        // An attachment that waits for the confirmation of a secret goes on at once without it, and its run is then aborted.
+        StopSecretWaits(sessionId);
         Task admitted;
         try { admitted = AdmitAsync(() => AbortOwnedBodyAsync(sessionId, cancellationToken), cancellationToken); }
         // A runtime that closed has nothing left to abort: its disposal ends the work of its sessions. It can close
@@ -4648,9 +4663,19 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Ends at once the wait of a session that attaches for the user's answer to the secrets that ask before use: the user stopped the
+    /// session. Its shell starts without the secrets not confirmed, and the session says so.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    internal void StopSecretWaits(string? sessionId) => _secretWaits.Stop(sessionId);
+
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
+        // An attachment that waits for a confirmation does not hold the closure for its time; ended outside the gate, since what
+        // waited goes on at once.
+        _secretWaits.Close();
         lock (_identityGate)
         {
         _disposed = true;
