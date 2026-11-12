@@ -198,6 +198,16 @@ internal sealed class DesktopFileLinks
         }
 
         if (projectId is not { Length: > 0 and <= 512 }) return new("no_project");
+        // A folder given for one file (a file of a folder of settings, opened alone) reaches that file alone, as the code editor
+        // does (`ProjectFilesService.Reaches`): its other files are not the document's to read.
+        if (DiskFolders.IsFile(projectId))
+        {
+            var named = ChartDataFiles.Parse(string.IsNullOrEmpty(directory) ? path : $"{directory}/{path}", out var parts);
+            if (named != "ok") return new(named);
+            if (_folders.OnlyFile(projectId) is not { } only || parts.Length != 1
+                || !string.Equals(parts[0], only, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) return new("outside");
+        }
+
         var (status, root) = await _folder(projectId, cancellationToken).ConfigureAwait(false);
         return await ChartDataFiles.ReadAsync(status == "ok" ? root : null, directory, path, cancellationToken).ConfigureAwait(false);
     }

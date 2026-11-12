@@ -259,6 +259,30 @@ public sealed class DesktopFileLinksTests
     }
 
     [TestMethod]
+    public async Task TheDataOfAChart_OfAFolderGivenForOneFile_IsThatFileAlone()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        // A file of a folder of settings, opened alone: its folder holds other files (credentials) that it gives no access to.
+        var settings = Path.Combine(fixture.Root, "settings");
+        var opened = fixture.Write(settings, "report.json", "[1]");
+        fixture.Write(settings, "auth.json", "{\"token\":\"secret\"}");
+        fixture.Write(settings, "auth/keys.json", "{\"key\":\"secret\"}");
+        var single = fixture.Folders.GiveFile(opened);
+        var service = new MarkdownLinksService(Epoch, _ => true, fixture.Links);
+
+        Assert.AreEqual(("outside", null), Fields(await service.ChartDataAsync(new(Epoch, "auth.json", null, single.Id), default)));
+        Assert.AreEqual(("outside", null), Fields(await service.ChartDataAsync(new(Epoch, "keys.json", null, single.Id, "auth"), default)));
+        Assert.AreEqual(("outside", null), Fields(await service.ChartDataAsync(new(Epoch, "auth/keys.json", null, single.Id), default)));
+        // The one file it was given for is the one it reaches.
+        Assert.AreEqual(("ok", "[1]"), Fields(await service.ChartDataAsync(new(Epoch, "report.json", null, single.Id), default)));
+        // The folder given whole reaches its files.
+        var whole = fixture.Folders.Give(settings);
+        Assert.AreEqual(("ok", "{\"token\":\"secret\"}"), Fields(await service.ChartDataAsync(new(Epoch, "auth.json", null, whole.Id), default)));
+
+        static (string, string?) Fields(MarkdownChartDataResponse response) => (response.Status, response.Text);
+    }
+
+    [TestMethod]
     public async Task TheFullPathOfALink_IsGiven_WhetherOrNotTheFileIsThere()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -356,7 +380,7 @@ public sealed class DesktopFileLinksTests
             Root = root;
             Projects = projects;
             Project = project;
-            var folders = new DiskFolders();
+            var folders = Folders = new DiskFolders();
             var view = new DesktopEditorView();
             Watching = view.Watch(Shown.Add);
             Files = new ProjectFilesService(projects, Epoch, view: view, folders: folders);
@@ -380,6 +404,7 @@ public sealed class DesktopFileLinksTests
         public string ProjectId => Project.Id;
         public string ProjectPath => Project.ProjectPath;
         public ProjectFilesService Files { get; }
+        public DiskFolders Folders { get; }
         public DesktopFileLinks Links { get; }
         public IDisposable Watching { get; }
         public Dictionary<string, string> SessionFolders { get; } = new(StringComparer.Ordinal);
