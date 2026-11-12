@@ -221,6 +221,14 @@ public sealed class DesktopTerminalsTests
             new Dictionary<string, string> { ["UserProfile"] = @"C:\elsewhere", ["TEMP"] = @"C:\Users\me\AppData\Local\Temp" });
         Assert.AreEqual(("me", @"C:\Users\me", @"C:\Users\me\AppData\Roaming", @"C:\Windows\system32\cmd.exe", @"C:\Users\me\AppData\Local\Temp"),
             (current["USERNAME"], current["USERPROFILE"], current["APPDATA"], current["ComSpec"], current["TEMP"]));
+        // The profile alta --profile selected stays over the one of the account: altacli in the terminal uses the same.
+        current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["CODEALTA_HOME"] = @"C:\profiles\b" };
+        TerminalEnvironment.Refresh(current, new Dictionary<string, string>(), new Dictionary<string, string> { ["codealta_home"] = @"C:\profiles\a" });
+        Assert.AreEqual(@"C:\profiles\b", current["CODEALTA_HOME"]);
+        // An application on ~/.alta selected none: what the account sets reaches the terminal, as before.
+        current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        TerminalEnvironment.Refresh(current, new Dictionary<string, string>(), new Dictionary<string, string> { ["CODEALTA_HOME"] = @"C:\profiles\a" });
+        Assert.AreEqual(@"C:\profiles\a", current["CODEALTA_HOME"]);
     }
 
     [TestMethod]

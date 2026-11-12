@@ -36,9 +36,18 @@ internal static class TerminalEnvironment
     /// <summary>
     /// Lays the variables of the machine and of the user over those a process started with, but for the ones
     /// a sign-in gives: who the user is and where their folders are (the registry of a machine names its own
-    /// account there, <c>USERNAME=SYSTEM</c>).
+    /// account there, <c>USERNAME=SYSTEM</c>), and for the profile this application runs on: the
+    /// <c>CODEALTA_HOME</c> it selected (<c>alta --profile</c>) stays, whatever the account sets, so that
+    /// <c>altacli</c> in the terminal uses the same profile.
     /// </summary>
     internal static void Refresh(Dictionary<string, string> variables, IReadOnlyDictionary<string, string> machine, IReadOnlyDictionary<string, string> user)
+    {
+        var profile = variables.TryGetValue(DesktopCommandLine.HomeVariable, out var selected) && !string.IsNullOrWhiteSpace(selected) ? selected : null;
+        Overlay(variables, machine, user);
+        if (profile is not null) variables[DesktopCommandLine.HomeVariable] = profile;
+    }
+
+    private static void Overlay(Dictionary<string, string> variables, IReadOnlyDictionary<string, string> machine, IReadOnlyDictionary<string, string> user)
     {
         foreach (var (name, value) in machine)
         {
