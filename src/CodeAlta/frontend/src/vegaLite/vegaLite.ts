@@ -55,13 +55,16 @@ export function vegaLiteConfig(tokens: ChartTokens, background: string): Record<
   const { text, muted, axis, grid } = tokens;
   return {
     background, font: tokens.fontFamily, padding: 8,
-    view: { stroke: grid, continuousWidth: 440, continuousHeight: 260 },
+    // A chart of categories along x is as wide as one of quantities: with the step of Vega-Lite (20 pixels a category) a
+    // chart of a few bars is a narrow column whose labels overlap. Along y it keeps the step: a row for each category.
+    view: { stroke: grid, continuousWidth: 440, continuousHeight: 260, discreteWidth: 440 },
     title: { color: text, subtitleColor: muted, fontSize: 14, fontWeight: 600, anchor: "start" },
     axis: { domainColor: axis, tickColor: axis, gridColor: grid, labelColor: muted, titleColor: text, labelFontSize: 11, titleFontSize: 12, titleFontWeight: 600 },
     legend: { labelColor: text, titleColor: text, labelFontSize: 11, titleFontSize: 12, titleFontWeight: 600 },
     header: { labelColor: text, titleColor: text },
     mark: { color: tokens.series[0] },
-    rule: { color: axis },
+    // A rule is drawn to be read (a mean, a threshold): in the color of the labels, not the faint one of the axes.
+    rule: { color: muted },
     text: { color: text },
     range: { category: [...tokens.series], ordinal: [...tokens.ramp], ramp: [...tokens.ramp], heatmap: [...tokens.ramp], diverging: [...tokens.diverging] },
   };

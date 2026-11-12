@@ -66,7 +66,7 @@ export function readColorVariables<T>(element: HTMLElement, use: (read: (variabl
   const probe = element.ownerDocument.createElement("span");
   probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;width:0;height:0";
   element.appendChild(probe);
-  const canvas = element.ownerDocument.createElement("canvas").getContext("2d");
+  const canvas = element.ownerDocument.createElement("canvas").getContext("2d", { willReadFrequently: true });
   const view = element.ownerDocument.defaultView ?? window;
   try {
     return use(variable => {
@@ -78,7 +78,14 @@ export function readColorVariables<T>(element: HTMLElement, use: (read: (variabl
       if (!canvas) return computed;
       canvas.fillStyle = "#000000";
       canvas.fillStyle = computed;
-      return String(canvas.fillStyle);
+      const plain = String(canvas.fillStyle);
+      if (/^#[0-9a-f]{6}$|^rgba?\(/iu.test(plain)) return plain;
+      // The browser keeps the color of a `color-mix` as `color(srgb …)`, which no chart library reads: the pixel it paints says it.
+      canvas.clearRect(0, 0, 1, 1);
+      canvas.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = canvas.getImageData(0, 0, 1, 1).data;
+      return alpha === 255 ? `#${[red, green, blue].map(value => value.toString(16).padStart(2, "0")).join("")}`
+        : `rgba(${red}, ${green}, ${blue}, ${Math.round(alpha / 255 * 1000) / 1000})`;
     });
   } finally {
     probe.remove();

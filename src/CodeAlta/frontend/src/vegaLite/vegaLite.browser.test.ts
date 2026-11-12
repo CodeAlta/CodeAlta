@@ -179,6 +179,18 @@ test("vega-lite blocks are drawn as charts under the production policy, from the
     assert.equal(await wait(chart), true);
     assert.equal(await evaluate(`${chart}.querySelectorAll('image, [href], [*|href]').length`), 0);
 
+    // A color scale of quantities takes the ramp of the window, whose steps the stylesheet writes with `color-mix`: each
+    // one reaches the chart as a color it can read, so the cells differ and none is black.
+    await evaluate("chartFixture.clear()");
+    await evaluate(`chartFixture.render(${JSON.stringify(fence({ data: { values: [{ a: "x", n: 1 }, { a: "y", n: 5 }, { a: "z", n: 9 }] }, mark: "rect",
+      encoding: { x: { field: "a", type: "nominal" }, color: { field: "n", type: "quantitative", legend: null } } }))}, "message")`);
+    assert.equal(await wait(chart), true);
+    const cells = await evaluate<string[]>(`[...${chart}.querySelectorAll('.mark-rect path')].map(e => e.getAttribute('fill'))`);
+    assert.equal(new Set(cells).size, 3, JSON.stringify(cells));
+    assert.ok(cells.every(fill => !/^rgb\(0, 0, 0\)$|^#000(000)?$/u.test(fill)), JSON.stringify(cells));
+    // A chart of categories is as wide as a chart of quantities, however few its categories are.
+    assert.equal(await evaluate(`Number(${chart}.getAttribute('width')) >= 440`), true, "three categories fill the width of a chart");
+
     // A narrow window shows a chart whole: it is no wider than its block.
     await evaluate("chartFixture.clear(); document.getElementById('root').style.width = '320px'");
     await evaluate(`chartFixture.render(${JSON.stringify(fence({ ...inline, width: 600 }))}, "message")`);
