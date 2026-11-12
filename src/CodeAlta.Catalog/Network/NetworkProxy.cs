@@ -150,8 +150,8 @@ public sealed partial class NetworkProxy : IWebProxy
         if (settings.Mode == ProxyMode.System) return [];
         if (settings.Mode == ProxyMode.None || settings.ProxyUri is not { } uri) return [.. Variables.Select(static name => new KeyValuePair<string, string?>(name, null))];
         var address = AddressOf(uri, settings.Authentication == ProxyAuthentication.Password ? settings.User : null, password);
-        var bypass = string.Join(',', (settings.Bypass.IsDefault ? [] : settings.Bypass).Concat(ProxyBypassList.LoopbackEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase));
+        var bypass = string.Join(',', (settings.Bypass.IsDefault ? [] : settings.Bypass).Select(ProxyBypassList.ToEnvironmentEntry).OfType<string>()
+            .Concat(ProxyBypassList.LoopbackEntries).Distinct(StringComparer.OrdinalIgnoreCase));
         return
         [
             new("HTTP_PROXY", address), new("http_proxy", address), new("HTTPS_PROXY", address), new("https_proxy", address),

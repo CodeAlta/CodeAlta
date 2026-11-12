@@ -80,6 +80,32 @@ public sealed class ProxyBypassList
         return IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address);
     }
 
+    /// <summary>
+    /// Gets an entry as the programs CodeAlta starts read it in <c>NO_PROXY</c> (curl and git, Python, Node.js, Go): <c>*.example.com</c>
+    /// is written <c>.example.com</c>, which they all read as its subdomains (curl also as the domain itself), the port and the brackets
+    /// of an address are dropped (they match by host), and a CIDR range is written with its base address. An entry that is not valid
+    /// gives nothing.
+    /// </summary>
+    /// <param name="entry">The entry, as the configuration writes it.</param>
+    /// <returns>The entry for <c>NO_PROXY</c>, or null.</returns>
+    public static string? ToEnvironmentEntry(string? entry)
+    {
+        switch (Parse(entry))
+        {
+            case null: return null;
+            case { Everything: true }: return "*";
+            case { Network: { } network }:
+                var single = network.PrefixLength == (network.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128);
+                return single ? network.BaseAddress.ToString() : network.ToString();
+        }
+
+        var text = entry!.Trim();
+        var colon = text.LastIndexOf(':');
+        if (colon > 0 && text.IndexOf(':') == colon) text = text[..colon];
+        text = text.TrimEnd('.');
+        return text.StartsWith("*.", StringComparison.Ordinal) ? text[1..] : text;
+    }
+
     /// <summary>Gets why an entry is not one a bypass list takes, or null when it is.</summary>
     /// <param name="entry">The entry.</param>
     /// <returns>The error, or <see langword="null"/>.</returns>

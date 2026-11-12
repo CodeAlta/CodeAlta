@@ -132,6 +132,21 @@ public sealed class ProxySettingsTests
     }
 
     [TestMethod]
+    [DataRow("*.corp.example", ".corp.example")]
+    [DataRow(".corp.example", ".corp.example")]
+    [DataRow("corp.example", "corp.example")]
+    [DataRow("corp.example.", "corp.example")]
+    [DataRow("intranet:8443", "intranet")]
+    [DataRow("10.1.2.3:8080", "10.1.2.3")]
+    [DataRow("[fd00::1]:8443", "fd00::1")]
+    [DataRow("192.168.1.10/24", "192.168.1.0/24")]
+    [DataRow("10.0.0.0/8", "10.0.0.0/8")]
+    [DataRow("*", "*")]
+    [DataRow("not a host", null)]
+    public void TheBypassList_IsWrittenAsCurlGitPythonAndNodeReadNoProxy(string entry, string? expected)
+        => Assert.AreEqual(expected, ProxyBypassList.ToEnvironmentEntry(entry));
+
+    [TestMethod]
     public void ParseBypass_ReadsWhatAUserTypes()
         => CollectionAssert.AreEqual(new[] { "a.example", "10.0.0.0/8", "b.example" },
             ProxySettings.ParseBypass(" a.example, 10.0.0.0/8;\nb.example  A.EXAMPLE ").ToArray());
@@ -157,7 +172,7 @@ public sealed class ProxySettingsTests
         // The programs read their proxy from both cases; the password is in the address, escaped.
         Assert.AreEqual("http://j%20doe:p%40ss%3Aword@proxy.corp:8080", environment["HTTPS_PROXY"]);
         Assert.AreEqual(environment["HTTPS_PROXY"], environment["http_proxy"]);
-        Assert.AreEqual("*.corp.example,10.0.0.0/8,intranet:8443,localhost,127.0.0.1,::1", environment["NO_PROXY"]);
+        Assert.AreEqual(".corp.example,10.0.0.0/8,intranet,localhost,127.0.0.1,::1", environment["NO_PROXY"]);
         Assert.AreEqual(environment["NO_PROXY"], environment["no_proxy"]);
         Assert.IsNull(environment["ALL_PROXY"], "the manual proxy is the whole configuration");
 
