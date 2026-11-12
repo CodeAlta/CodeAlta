@@ -20,6 +20,7 @@ A fragment is plain HTML that CodeAlta Desktop inserts in its window. CodeAlta s
 | `PluginHtml.Markdown(text)` | Markdown rendered as in the timeline |
 | `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language |
 | `PluginHtml.Diagram(text)` | A [Mermaid](https://mermaid.js.org/) diagram |
+| `PluginHtml.VegaLite(specJson)` | A [chart](../workspace/prompt.md#charts) from a [Vega-Lite](https://vega.github.io/vega-lite/) spec, its data inline or in a file of the project |
 | `PluginHtml.Equation(latex)` | An equation, drawn from its LaTeX (chemistry with `\ce{…}`) |
 
 Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed (a plugin that wants JavaScript gives it beside the fragment, see [Scripts](#scripts)). A link only opens an `http` or `https` page in the browser. A fragment asks the window to act with attributes, and the plugin answers in C#:
@@ -107,9 +108,9 @@ export default function Board() {
 
 or `export async function mount(root, alta)`, which fills the element holding the HTML and may return a cleanup function.
 
-**Libraries.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react` and `@xyflow/react` (React Flow, for graphs of nodes and links) and gets the very ones the window runs: menus and popovers open above the tabs, and the theme, color scheme and zoom apply. When CodeAlta moves one to a new major version, a script that used what changed needs an update; `alta.versions` gives the versions. Use `PopoverNext` for popovers. The HTML above and the `codealta` module stay stable across releases.
+**Libraries.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react`, `@xyflow/react` (React Flow, for graphs of nodes and links) and `@observablehq/plot` ([Observable Plot](https://observablehq.com/plot/), for charts of a script's own data) and gets the very ones the window runs: menus and popovers open above the tabs, and the theme, color scheme and zoom apply. When CodeAlta moves one to a new major version, a script that used what changed needs an update; `alta.versions` gives the versions. Use `PopoverNext` for popovers. The HTML above and the `codealta` module stay stable across releases.
 
-**The `codealta` module** gives `html` (JSX as a template), `Markdown`, `Code`, `Diagram`, `Equation`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink`, the window's charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms, box plots), and the hooks `useAlta`, `useVisible` and `useTheme`.
+**The `codealta` module** gives `html` (JSX as a template), `Markdown`, `Code`, `Diagram`, `VegaLite`, `Equation`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink`, the window's charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms, box plots), and the hooks `useAlta`, `useVisible` and `useTheme`. A Plot chart takes the font and the colors of the window from `useTheme()` (`fontFamily`, `text`, `series`, `axis`) and is drawn again when the theme changes; the skill `codealta-plugin-runtime` has an example.
 
 **The `alta` object:**
 

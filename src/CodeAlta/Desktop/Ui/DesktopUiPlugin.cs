@@ -233,7 +233,7 @@ internal sealed class DesktopUiPlugin : PluginBase
     /// <summary>What the instructions of a session say of the Markdown the window renders in answers, in one line.</summary>
     internal const string MarkdownGuidance = "Markdown: CodeAlta Desktop renders LaTeX, so write every formula, even a short one, in it (`$O(n \\log n)$` inline, `$$…$$` on lines of their own, " +
         "`\\ce{…}` for chemistry), never in Unicode or code; cite sources with footnotes (`[^1]`); draw flows and exchanges as `mermaid` diagrams, not ASCII art; " +
-        "use alerts (`> [!WARNING]`) for what can go wrong, task lists and tables where they help.";
+        "chart data as a Vega-Lite spec in a `vega-lite` block, its data inline or a CSV/JSON file of the project (`\"data\": {\"url\": \"out/results.csv\"}`); use alerts (`> [!WARNING]`) for what can go wrong, task lists and tables where they help.";
 
     /// <summary>What the instructions of a session say about the windows of CodeAlta Desktop.</summary>
     internal const string WindowsGuidance = "Windows: `alta window list --tabs` shows the windows of CodeAlta Desktop (the main one and the ones that hold tabs moved out of it), their tabs and the monitors; " +
