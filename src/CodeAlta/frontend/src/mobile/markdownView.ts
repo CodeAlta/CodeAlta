@@ -2,6 +2,7 @@ import { diagramAppearance, diagramColors, diagrams, type DiagramColors } from "
 import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, toggleRenderedSource, type MarkdownRenderOptions } from "../markdownBoundary";
 import { fileMarkdownHref, placeAfterPath } from "../markdownLinks";
 import { loadMath } from "../math";
+import { dressSessionLinks, sessionLinkTarget, type SessionLinkInfo } from "../sessionLinks";
 import { el, iconSvg } from "./dom";
 
 /** What the page asks of the server for a diagram page: `POST /api/diagrams`. */
@@ -53,9 +54,10 @@ export function createDiagramPages(upload: DiagramUpload, capacity = 48) {
   };
 }
 
-/** What a tap on a link of a message does: a page of the web opens in a tab of its own, a file of the computer is read here, and anything else does nothing. */
-export function linkTarget(href: string | null): "web" | "file" | "none" {
+/** What a tap on a link of a message does: a page of the web opens in a tab of its own, a session opens here, a file of the computer is read here, and anything else does nothing. */
+export function linkTarget(href: string | null): "web" | "session" | "file" | "none" {
   if (href === null) return "none";
+  if (sessionLinkTarget(href)) return "session";
   if (/^(https?:|mailto:)/iu.test(href.trim())) return "web";
   return fileMarkdownHref(href) ? "file" : "none";
 }
@@ -83,9 +85,11 @@ export function linkedFileName(href: string): string {
  * The messages of the timeline, rendered as the desktop renders them (`createMarkdownRenderer`: markdown-it,
  * DOMPurify, highlighted code, diagrams drawn on the side), with what a phone adds: a tap on a diagram shows
  * it full screen, "Open" shows it in a tab of its own (not in the installed app, where full screen is the way), and
- * the copy button of a code block copies it.
+ * the copy button of a code block copies it. A link to a session (`session:<id>`) is a chip that says what the page knows of
+ * the session (`describeSession`) and opens it (`openSession`).
  */
-export function createMarkdownView(options: Readonly<{ window: Window & typeof globalThis; upload: DiagramUpload; installed: () => boolean; note: (text: string) => void }>) {
+export function createMarkdownView(options: Readonly<{ window: Window & typeof globalThis; upload: DiagramUpload; installed: () => boolean; note: (text: string) => void;
+  describeSession?: (id: string) => SessionLinkInfo | null; openSession?: (id: string) => void }>) {
   const { window } = options, document = window.document;
   // A diagram is laid out for the width it has in a message: the screen's, less the margins of the message and of the
   // diagram. A flowchart wider than that is laid out top to bottom.
@@ -102,6 +106,7 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
     const pending = markdownPending();
     container.innerHTML = render(text, true, pending, how);
     for (const figure of Array.from(container.querySelectorAll<HTMLElement>(".markdown-diagram"))) dressDiagram(figure);
+    if (options.describeSession) dressSessionLinks(container, options.describeSession, (_target, info, text) => info ? `Session ${info.title || text}${info.scope ? `, in ${info.scope}` : ""}: ${info.state}` : text);
     const appearance = look(), undrawn = pending.diagrams;
     if (undrawn.length) void Promise.all(undrawn.map(source => diagrams.draw(source, appearance))).then(() => { if (container.isConnected) redraw(); });
     if (pending.math) void loadMath().then(() => { if (container.isConnected) redraw(); }, () => { /* Not loaded: the formulas stay as written. */ });
@@ -214,6 +219,7 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
         event.preventDefault();
         const href = link.getAttribute("href"), kind = linkTarget(href);
         if (kind === "web") window.open(link.href, "_blank", "noopener");
+        else if (kind === "session") options.openSession?.(sessionLinkTarget(href)!.sessionId);
         else if (kind === "file") {
           const seq = Number(link.closest<HTMLElement>("li.msg[data-seq]")?.dataset.seq);
           if (seq && openFile) openFile(href!, seq);

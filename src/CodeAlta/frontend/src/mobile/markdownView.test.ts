@@ -38,6 +38,9 @@ test("a page that could not be made is asked for again at the next open", async 
 test("a link of a message opens a page of the web or reads a file of the computer", () => {
   assert.equal(linkTarget("https://example.com/a"), "web");
   assert.equal(linkTarget("mailto:me@example.com"), "web");
+  assert.equal(linkTarget("session:0199eeee-aaaa"), "session");
+  assert.equal(linkTarget("session:0199eeee#4096"), "session", "the message a link names does not change where it goes");
+  assert.equal(linkTarget("session:"), "none");
   assert.equal(linkTarget("src/Program.cs#L3"), "file");
   assert.equal(linkTarget("C:/code/a.md"), "file");
   assert.equal(linkTarget("C:%5Ccode%5Ca%20b.md"), "file");

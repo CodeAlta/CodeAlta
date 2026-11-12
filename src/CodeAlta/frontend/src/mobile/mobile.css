@@ -252,6 +252,14 @@ button.tool-row:focus-visible { outline: 2px solid var(--accent); outline-offset
 .markdown-content :is(h1, h2, h3, h4, h5, h6) { margin: .625rem 0 .25rem; line-height: 1.3; }
 .markdown-content h1 { font-size: 1.25rem; } .markdown-content h2 { font-size: 1.125rem; } .markdown-content :is(h3, h4, h5, h6) { font-size: 1rem; }
 .markdown-content a { color: var(--accent); }
+/* A link to a session (sessionLinks.ts): a chip with a dot of its state, its title and the name of its project, which opens it. */
+.markdown-content a[data-session-link] { display: inline; padding: .125rem .5rem; border: 1px solid var(--line); border-radius: 999px; color: var(--text); background: var(--panel-2);
+  text-decoration: none; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.markdown-content a[data-session-link]::before { content: ""; display: inline-block; width: .4375rem; height: .4375rem; margin-inline-end: .3125rem; border-radius: 50%; vertical-align: .08em; background: var(--muted); }
+.markdown-content a[data-session-link][data-session-scope]::after { content: attr(data-session-scope); margin-inline-start: .375rem; color: var(--muted); font-size: .88em; }
+.markdown-content a[data-session-state="running"]::before { background: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 25%, transparent); }
+.markdown-content a[data-session-state="archived"] { color: var(--muted); border-style: dashed; background: transparent; }
+.markdown-content a[data-session-link]:active, .markdown-content a[data-session-link]:focus-visible { outline: none; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
 .markdown-content hr { border: 0; border-top: 1px solid var(--line); margin: .75rem 0; }
 .markdown-content blockquote { padding: .125rem .75rem; border-left: 3px solid var(--line); color: var(--muted); }
 .markdown-content table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .875rem; }
