@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { MarkdownChartDataContext, MarkdownContent, MarkdownLinkScopeContext } from "../MarkdownContent";
 import { MarkdownPreviewBox } from "../editor/MarkdownPreviewBox";
 import type { MarkdownLinkScope } from "../markdownLinks";
-import type { ChartFile } from "./vegaLite";
+import { createChartSanitizer, type ChartFile } from "./vegaLite";
 
 // A clipboard that keeps what is written to it: the text, and the size of a picture.
 const clipboard = { text: [] as string[], images: [] as { type: string; width: number; height: number }[] };
@@ -44,4 +44,4 @@ const fixture = {
   clear() { flushSync(() => root.render(null)); },
   setFile(path: string, text: string | null) { if (text === null) files.delete(path); else files.set(path, { status: "ok", text }); },
 };
-Object.assign(window, { chartFixture: fixture, chartClipboard: clipboard, chartReads: reads });
+Object.assign(window, { chartFixture: fixture, chartClipboard: clipboard, chartReads: reads, chartSanitize: createChartSanitizer() });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { chartTokens } from "../charts/tokens";
-import { chartFileRefusal, createChartCache, createChartWorkerClient, vegaLiteConfig, type ChartAppearance, type ChartData, type ChartFile } from "./vegaLite";
+import { chartFileRefusal, cssValue, createChartCache, createChartWorkerClient, vegaLiteConfig, type ChartAppearance, type ChartData, type ChartFile } from "./vegaLite";
 
 const dark: ChartAppearance = { key: "dark", config: { background: "#2f343c" }, width: 640 };
 const light: ChartAppearance = { key: "light", config: { background: "#ffffff" }, width: 640 };
@@ -153,4 +153,12 @@ test("a chart takes the font, the text and guide colors and the series of the wi
   const light = vegaLiteConfig(chartTokens(() => "", false, "Segoe UI"), "#ffffff") as { range: { category: string[] }; title: { color: string } };
   assert.notDeepEqual(light.range.category, config.range.category);
   assert.notEqual(light.title.color, (config as unknown as { title: { color: string } }).title.color);
+});
+test("a value of CSS is read as the browser reads it: escapes decoded, comments removed", () => {
+  assert.equal(cssValue("\\75 rl(x)"), "url(x)");
+  assert.equal(cssValue("\\000055RL(x)"), "URL(x)");
+  assert.equal(cssValue("\\u\\r\\l(x)"), "url(x)");
+  assert.equal(cssValue("u/* a */rl(x)"), "url(x)");
+  assert.equal(cssValue("\\0 \\110000 x"), "\ufffd\ufffdx");
+  assert.equal(cssValue("rgb(1, 2, 3)"), "rgb(1, 2, 3)");
 });

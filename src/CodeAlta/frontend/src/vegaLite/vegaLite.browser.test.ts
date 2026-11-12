@@ -191,6 +191,38 @@ test("vega-lite blocks are drawn as charts under the production policy, from the
     // A chart of categories is as wide as a chart of quantities, however few its categories are.
     assert.equal(await evaluate(`Number(${chart}.getAttribute('width')) >= 440`), true, "three categories fill the width of a chart");
 
+    // An attribute that names a resource keeps only a reference to the chart itself, rewritten to its own id, whatever the case of
+    // the function and its escapes; a style keeps none.
+    const sanitized = await evaluate<{ fills: (string | null)[]; styles: (string | null)[]; clip: string | null; ids: string[] }>(`(() => {
+      const fills = ["URL(https://remote.invalid/a.svg#p)", "url(https://remote.invalid/a.svg#p)", "\\\\75 rl(https://remote.invalid/a)", "\\\\000055RL(//remote.invalid/a)",
+        "u/**/rl(https://remote.invalid/a)", "image-set('https://remote.invalid/a.png' 1x)", "url(#g)", "URL( '#g' )", "url(#g) red", "rgb(1, 2, 3)"];
+      const styles = ["fill: URL(https://remote.invalid/a)", "background-image: image-set('https://remote.invalid/a.png' 1x)", "fill: url(#g)", "mix-blend-mode: multiply"];
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g"/><clipPath id="c"/></defs>'
+        + fills.map(fill => '<rect fill="' + fill.replaceAll('"', '&quot;') + '"/>').join('')
+        + styles.map(style => '<rect style="' + style + '"/>').join('') + '<g clip-path="url(#c)"/></svg>';
+      const box = document.createElement('div'); box.innerHTML = chartSanitize(svg);
+      const rects = [...box.querySelectorAll('rect')];
+      return { fills: rects.slice(0, fills.length).map(r => r.getAttribute('fill')), styles: rects.slice(fills.length).map(r => r.getAttribute('style')),
+        clip: box.querySelector('g').getAttribute('clip-path'), ids: [...box.querySelectorAll('[id]')].map(e => e.id) }; })()`);
+    const prefix = /^codealta-chart-\d+-/u.exec(sanitized.ids[0])?.[0];
+    assert.ok(prefix, JSON.stringify(sanitized));
+    assert.deepEqual(sanitized, { fills: [null, null, null, null, null, null, `url(#${prefix}g)`, `url(#${prefix}g)`, null, "rgb(1, 2, 3)"],
+      styles: [null, null, null, "mix-blend-mode: multiply"], clip: `url(#${prefix}c)`, ids: [`${prefix}g`, `${prefix}c`] });
+    // A spec that names a resource in a color draws without it, and the window asks for nothing; a gradient of the chart is kept.
+    await evaluate("chartFixture.clear()");
+    await evaluate(`chartFixture.render(${JSON.stringify(fence({ data: { values: [{ a: "x", b: 1 }, { a: "y", b: 2 }] }, layer: [
+      { mark: { type: "bar", color: "URL(https://remote.invalid/paint.svg#p)", stroke: "\\75 rl(https://remote.invalid/stroke.svg#s)" }, encoding: { x: { field: "a" }, y: { field: "b", type: "quantitative" } } },
+      { mark: { type: "area", color: { gradient: "linear", stops: [{ offset: 0, color: "#3fa6da" }, { offset: 1, color: "#43bf4d" }] } }, encoding: { x: { field: "a" }, y: { field: "b", type: "quantitative" } } }] }))}, "message")`);
+    assert.equal(await wait(chart), true);
+    const painted = await evaluate<{ remote: number; gradient: string | null; stops: number; referenced: boolean }>(`(() => {
+      const svg = ${chart}, area = svg.querySelector('.mark-area path');
+      const fill = area?.getAttribute('fill') ?? null, id = /^url\\(#(.+)\\)$/.exec(fill ?? '')?.[1];
+      return { remote: [...svg.querySelectorAll('*')].filter(e => [...e.attributes].some(a => /remote\\.invalid/i.test(a.value))).length,
+        gradient: fill, stops: id ? svg.querySelectorAll('#' + CSS.escape(id) + ' stop').length : 0, referenced: !!id && !!svg.querySelector('linearGradient#' + CSS.escape(id)) }; })()`);
+    assert.equal(painted.remote, 0, "no attribute names the remote resource");
+    assert.match(painted.gradient ?? "", /^url\(#codealta-chart-\d+-/u);
+    assert.deepEqual([painted.referenced, painted.stops], [true, 2], "the gradient is the chart's own, with its stops");
+
     // A narrow window shows a chart whole: it is no wider than its block.
     await evaluate("chartFixture.clear(); document.getElementById('root').style.width = '320px'");
     await evaluate(`chartFixture.render(${JSON.stringify(fence({ ...inline, width: 600 }))}, "message")`);

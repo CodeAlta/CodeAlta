@@ -239,27 +239,42 @@ export function createChartWorkerClient(start: () => Worker, timeLimit = chartTi
   };
 }
 
+/** A value of CSS as the browser reads it: its escapes decoded (`\\75 rl(` is `url(`) and its comments removed. */
+export function cssValue(value: string): string {
+  return value.replace(/\/\*[\s\S]*?(?:\*\/|$)/gu, "")
+    .replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([^\n\r\f0-9a-f]))/giu, (_match, hex: string | undefined, character: string | undefined) => {
+      if (hex === undefined) return character ?? "";
+      const point = parseInt(hex, 16);
+      return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : "\ufffd";
+    });
+}
+
+// The functions of CSS that name a resource, whatever their case: what an attribute of a chart may not hold, but for a reference
+// to the chart itself.
+const resourceFunction = /(?:url|image-set|image|cross-fade|element|src|paint)\s*\(/iu;
+// A reference to an element of the chart, and nothing else: `url(#id)`, in any case, quoted or not.
+const ownReference = /^\s*url\(\s*(['"]?)#([\w\-.:]{1,256})\1\s*\)\s*$/iu;
+
 /**
  * The SVG of a chart as the window shows it: SVG only (no script, no handler, no style element), without a link, an image
  * or a reference to anything outside it, and with the ids of its clips and gradients made its own, so that two charts of
- * a page never use each other's.
+ * a page never use each other's. An attribute that names a resource (`url(`, `URL(`, `\\75 rl(`, `image-set(`…) is kept only
+ * when it is a reference to an element of the chart, rewritten to its own id; a `style` keeps none.
  */
 export function createChartSanitizer(view: () => Window & typeof globalThis = () => window) {
   let purifier: DOMPurify | undefined;
   let prefix = "";
   let sequence = 0;
-  const own = (id: string) => `${prefix}${id}`;
   return (svg: string): string => {
     if (!purifier) {
       purifier = createDOMPurify(view());
       purifier.addHook("uponSanitizeAttribute", (_node, data) => {
-        if (!prefix) return;
-        if (data.attrName === "id") data.attrValue = own(data.attrValue);
-        else if (data.attrValue.includes("url(")) {
-          // Only a reference inside the chart is kept: `url(#id)`, to its own id.
-          const local = data.attrValue.replace(/url\(\s*(['"]?)#([^'")\s]+)\1\s*\)/gu, (_match, _quote, id: string) => `url(#${own(id)})`);
-          if (/url\((?!#)/u.test(local)) data.keepAttr = false; else data.attrValue = local;
-        }
+        if (data.attrName === "id") { data.attrValue = `${prefix}${data.attrValue}`; return; }
+        const value = cssValue(data.attrValue);
+        if (!resourceFunction.test(value)) return;
+        const reference = data.attrName === "style" ? null : ownReference.exec(value);
+        if (reference) data.attrValue = `url(#${prefix}${reference[2]})`;
+        else data.keepAttr = false;
       });
     }
     prefix = `codealta-chart-${++sequence}-`;
