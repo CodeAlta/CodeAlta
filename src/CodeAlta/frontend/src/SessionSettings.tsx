@@ -193,5 +193,7 @@ export function AttributionText({ id, value, defaultValue, maxLength, disabled, 
     : undefined;
   return <InputGroup id={id} value={text.draft} placeholder={defaultValue} maxLength={maxLength} disabled={disabled} fill rightElement={restore}
     onValueChange={text.setDraft} onBlur={text.save}
-    onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); text.save(); } }} />;
+    // Enter saves on its release: pressed, it would open the confirmation, whose focused button the release then clicks.
+    onKeyDown={event => { if (event.key === "Enter") event.preventDefault(); }}
+    onKeyUp={event => { if (event.key === "Enter") text.save(); }} />;
 }

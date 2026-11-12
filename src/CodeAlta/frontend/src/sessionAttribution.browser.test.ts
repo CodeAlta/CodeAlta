@@ -42,7 +42,11 @@ const enter = async (page: Page, text: string) => {
   await selectAll(page);
   await page.type(text);
   await until(page, `${trailer}.value === ${JSON.stringify(text)} && document.activeElement === ${trailer}`, "the text typed in the field");
-  await page.key("Enter", 13);
+  // A person releases Enter a moment after pressing it: the release must not answer the confirmation the key opens, whose
+  // button has the focus by then and clicks on the release of Enter.
+  await page.command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))))`);
+  await page.command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
 };
 
 test("the texts of attribution show the ones of CodeAlta until the user writes another, and each choice is saved alone", { skip: !edge, timeout: testLimit(90_000) }, async () => {
