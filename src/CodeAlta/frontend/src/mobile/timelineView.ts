@@ -535,12 +535,13 @@ export function createTimelineView(options: TimelineViewOptions) {
     // What the script presented shows whole, open or not: it is what the run says to the user.
     if (run.presented.length) {
       const parts = make("div", "wf-presented");
-      for (const part of run.presented) {
-        const content = make("div", "markdown-content");
-        const redraw = () => { options.fill(content, part, redraw); };
-        options.fill(content, part, redraw);
+      run.presented.forEach((part, index) => {
+        const content = make("div", "markdown-content"), seq = run.presentedSeqs[index];
+        // Its charts read the files it names, by the record of the part.
+        const redraw = () => { options.fill(content, part, redraw, seq); };
+        options.fill(content, part, redraw, seq);
         parts.append(content);
-      }
+      });
       card.append(parts);
     }
     if (isOpen) card.append(workflowBody(run));

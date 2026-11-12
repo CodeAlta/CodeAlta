@@ -646,6 +646,15 @@ public sealed class MobileServerTests
         Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/c/chart-data?seq=7&path=out/results.csv")).StatusCode, "A session the phone does not see.");
         Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/chart-data?seq=7")).StatusCode, "No path.");
 
+        // What a script of Code Mode presented is the agent's, as its answers are: its charts read the files they name.
+        fixture.Alta.Answer("session events a", new JsonObject
+        {
+            ["type"] = "alta.session.event", ["sequenceNumber"] = 12, ["kind"] = "workflow.presented",
+            ["content"] = new JsonArray(new JsonObject { ["text"] = "## Report\n\n```vega-lite\n{ \"data\": { \"url\": \"out/results.csv\" }, \"mark\": \"bar\" }\n```" }),
+        });
+        Assert.AreEqual(("ok", "name,value\na,1\n"), Fields(Read(await Get("out/results.csv", 12))!));
+        Assert.AreEqual(("not_named", null), Fields(Read(await Get("out/other.csv", 12))!));
+
         static (string?, string?) Fields(JsonNode node) => ((string?)node["status"], (string?)node["text"]);
     }
 

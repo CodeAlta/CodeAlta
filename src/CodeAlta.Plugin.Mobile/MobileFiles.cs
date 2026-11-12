@@ -86,7 +86,8 @@ internal sealed class MobileFiles(IPluginAltaService alta, MobileSessions sessio
         if (parsed != "ok") return new JsonObject { ["status"] = parsed };
         if (await sessions.FindAsync(sessionId, cancellationToken).ConfigureAwait(false) is not { } status) return null;
         var wanted = string.Join('/', parts);
-        var message = await LinkingTextAsync(sessionId, sequence.Value, cancellationToken).ConfigureAwait(false);
+        // What a script of Code Mode presented is written by the agent of the session, as its answers are: its charts read the same files.
+        var message = await LinkingTextAsync(sessionId, sequence.Value, cancellationToken, presented: true).ConfigureAwait(false);
         var named = ChartDataFiles.NamedIn(message).Any(url => ChartDataFiles.Parse(url, out var written) == "ok" && string.Join('/', written) == wanted);
         if (!named) return new JsonObject { ["status"] = "not_named" };
         var folder = MobileAlta.Text(status, "worktreeDirectory") ?? MobileAlta.Text(status, "workingDirectory");
@@ -94,16 +95,18 @@ internal sealed class MobileFiles(IPluginAltaService alta, MobileSessions sessio
         return new JsonObject { ["status"] = read.Status, ["text"] = read.Text };
     }
 
-    // The text of a message whose links may be read, as the phone shows it: an answer or a prompt the user sent; null for anything else.
-    private async Task<string?> LinkingTextAsync(string sessionId, long sequence, CancellationToken cancellationToken)
+    // The text of a message whose links may be read, as the phone shows it: an answer or a prompt the user sent, and with `presented` what a
+    // script of Code Mode presented (`workflow.presented`); null for anything else.
+    private async Task<string?> LinkingTextAsync(string sessionId, long sequence, CancellationToken cancellationToken, bool presented = false)
     {
         var read = await MobileAlta.RunAsync(alta, ["session", "events", sessionId, "--since", (sequence - 1).ToString(CultureInfo.InvariantCulture), "--limit", "1",
-            "--kind", "assistant.message,user.message", "--fields", "sequenceNumber,kind,content,metadata"], null, cancellationToken).ConfigureAwait(false);
+            "--kind", presented ? "assistant.message,user.message,workflow.presented" : "assistant.message,user.message", "--fields", "sequenceNumber,kind,content,metadata"],
+            null, cancellationToken).ConfigureAwait(false);
         var message = read.OfType("alta.session.event").FirstOrDefault(record => record["sequenceNumber"] is { } number && (long)number == sequence);
         if (message is null) return null;
         var text = string.Concat((message["content"] as JsonArray ?? []).Select(static part => (string?)part?["text"] ?? ""));
         var kind = MobileAlta.Text(message, "kind");
-        if (kind == "assistant.message") return text;
+        if (kind == "assistant.message" || presented && kind == "workflow.presented") return text;
         var metadata = message["metadata"] as JsonObject;
         if (kind != "user.message" || MobileAlta.Text(metadata, "provenance") is not null || MobileAlta.Text(metadata, "sourceSessionId") is not null) return null;
         return metadata?["attachments"] is JsonArray { Count: > 0 } listed ? MobileSessions.WithoutPaths(text, listed).Text : text;

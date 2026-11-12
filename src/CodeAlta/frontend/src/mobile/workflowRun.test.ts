@@ -75,6 +75,8 @@ test("what a run presented, in its order, and whether the host started it for th
     record("presented", 2, {}, "  "), record("presented", 3, { stepId: "report" }, "## Findings\n- one")];
   const [run] = foldWorkflows(records);
   assert.deepEqual(run.presented, ["## Reading", "## Findings\n- one"], "an empty part shows nothing");
+  // Each part keeps its record, by which the phone reads the data files its charts name.
+  assert.deepEqual(run.presentedSeqs, [records[1].seq, records[3].seq]);
   assert.equal(run.forUser, true);
   const [ofAgent] = foldWorkflows([record("runStarted", 0, { title: "Read" })]);
   assert.deepEqual([ofAgent.presented, ofAgent.forUser], [[], false], "a run of an agent presented nothing yet");

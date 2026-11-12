@@ -46,6 +46,7 @@ export function chartFileRefusal(path: string, status: string): string {
     case "not_data": return `${shown} is not a CSV, TSV or JSON file`;
     case "too_large": return `${shown} is larger than 4 MB`;
     case "no_project": return `No project to read ${shown} from`;
+    case "not_named": return `${shown} is read on the phone only for a chart of an answer or of what a script presented`;
     default: return `${shown} could not be read`;
   }
 }
