@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
 
@@ -19,7 +18,6 @@ namespace CodeAlta.Sandbox.Network;
 /// </remarks>
 public sealed class SandboxNetworkProxy : IAsyncDisposable
 {
-    private const int MaximumHeader = 64 * 1024;
     private const int MaximumRefusals = 16;
 
     private readonly TcpListener _listener;
@@ -179,6 +177,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             int port;
             byte[]? forward = null;
             string[] headers = [];
+            var pathAndQuery = "/";
             if (first[0].Equals("CONNECT", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TrySplitHostPort(first[1], 443, out host, out port))
@@ -191,6 +190,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             {
                 host = uri.Host;
                 port = uri.Port;
+                pathAndQuery = uri.PathAndQuery;
                 // The request goes on with the form an origin server reads, and its other lines as they came. It is the
                 // only one of the connection: a next request, which names its host again, is read on a new one.
                 headers = [.. lines.Skip(1).Where(static line => !IsHopHeader(line)), "Connection: close"];
@@ -212,10 +212,21 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
 
             if (UpstreamOf(host, port, forward is null) is { } through)
             {
-                // The upstream proxy connects to the host: a plain request goes to it in the absolute form, with its credentials.
-                var request = forward is null ? null : Encoding.ASCII.GetBytes($"{first[0]} {first[1]} {first[2]}\r\n"
-                    + string.Concat(headers.Select(static line => line + "\r\n")) + AuthorizationOf(through) + "\r\n");
-                await ChainAsync(stream, through, host, port, request).ConfigureAwait(false);
+                // The upstream proxy connects to the address checked here, never to one it resolves itself: a name that
+                // resolves elsewhere for it (split DNS, a rebinding) does not lead the sandbox to the network of this computer.
+                // A tunnel keeps the name of the host in its TLS; a plain request keeps it in its Host line.
+                if (forward is null)
+                {
+                    await TunnelAsync(stream, through, address, port).ConfigureAwait(false);
+                }
+                else
+                {
+                    if (!headers.Any(static line => line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))) headers = [$"Host: {Authority(host, port)}", .. headers];
+                    var absolute = $"{first[0]} http://{Authority(address.ToString(), port)}{pathAndQuery} {first[2]}\r\n";
+                    await ForwardAsync(stream, through, auth => Encoding.ASCII.GetBytes(absolute + string.Concat(headers.Select(static line => line + "\r\n")) + auth + "\r\n"),
+                        HasBody(headers)).ConfigureAwait(false);
+                }
+
                 return;
             }
 
@@ -246,40 +257,46 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
         return proxy is null || proxy == target || proxy.Scheme is not ("http" or "https") ? null : proxy;
     }
 
-    // Reaches the host through the upstream proxy: a tunnel it opens with CONNECT, or the plain request it is sent. What the
-    // upstream answers when it does not open the tunnel (a 407, a 403) is what the sandbox gets.
-    private async Task ChainAsync(NetworkStream client, Uri proxy, string host, int port, byte[]? request)
+    // Opens a tunnel to the address through the upstream proxy, signed in when it asks. What the upstream answers when it does
+    // not open the tunnel (a 407 it was not given what it asks, a 403) is what the sandbox gets.
+    private async Task TunnelAsync(NetworkStream client, Uri proxy, IPAddress address, int port)
     {
-        using var connection = new TcpClient();
-        await connection.ConnectAsync(proxy.IdnHost, proxy.Port, _closing.Token).ConfigureAwait(false);
-        Stream target = connection.GetStream();
-        using var tls = proxy.Scheme == "https" ? new SslStream(target, leaveInnerStreamOpen: false) : null;
-        if (tls is not null)
+        var authority = Authority(address.ToString(), port);
+        await using var exchange = await UpstreamProxyClient.SendAsync(proxy, _upstream!.Credentials,
+            auth => Encoding.ASCII.GetBytes($"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth}\r\n"), _closing.Token).ConfigureAwait(false);
+        if (exchange.Status != 200)
         {
-            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = proxy.IdnHost }, _closing.Token).ConfigureAwait(false);
-            target = tls;
+            await client.WriteAsync(UpstreamProxyClient.RefusalOf(exchange.Answer), _closing.Token).ConfigureAwait(false);
+            return;
         }
 
-        if (request is null)
-        {
-            var authority = Authority(host, port);
-            await target.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{AuthorizationOf(proxy)}\r\n"), _closing.Token).ConfigureAwait(false);
-            var answer = await ReadHeaderAsync(target, _closing.Token).ConfigureAwait(false);
-            if (answer is null) return;
-            var status = answer.Split(' ', 3);
-            if (status.Length < 2 || status[1] != "200")
-            {
-                await client.WriteAsync(Encoding.ASCII.GetBytes(answer + "\r\nX-CodeAlta-Sandbox: upstream\r\n\r\n"), _closing.Token).ConfigureAwait(false);
-                return;
-            }
+        await client.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), _closing.Token).ConfigureAwait(false);
+        await PipeAsync(client, exchange.Stream).ConfigureAwait(false);
+    }
 
-            await client.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), _closing.Token).ConfigureAwait(false);
-        }
-        else
+    // Sends a plain request to the upstream proxy and gives its answer to the sandbox. A request without a body is sent again
+    // with what the proxy asks; one with a body, whose body is not kept, is sent once without credentials.
+    private async Task ForwardAsync(NetworkStream client, Uri proxy, Func<string, byte[]> headOf, bool body)
+    {
+        UpstreamProxyClient.UpstreamExchange exchange;
+        if (body)
         {
-            await target.WriteAsync(request, _closing.Token).ConfigureAwait(false);
+            exchange = await UpstreamProxyClient.OpenAsync(proxy, _closing.Token).ConfigureAwait(false);
+            await using var _ = exchange;
+            await exchange.Stream.WriteAsync(headOf(""), _closing.Token).ConfigureAwait(false);
+            await PipeAsync(client, exchange.Stream).ConfigureAwait(false);
+            return;
         }
 
+        exchange = await UpstreamProxyClient.SendAsync(proxy, _upstream!.Credentials, headOf, _closing.Token).ConfigureAwait(false);
+        await using var answered = exchange;
+        await client.WriteAsync(Encoding.ASCII.GetBytes(exchange.Answer + "\r\n\r\n"), _closing.Token).ConfigureAwait(false);
+        await PipeAsync(client, exchange.Stream).ConfigureAwait(false);
+    }
+
+    // The connection ends with either direction; the other one then fails, and its failure is expected.
+    private async Task PipeAsync(NetworkStream client, Stream target)
+    {
         var upload = client.CopyToAsync(target, _closing.Token);
         var download = target.CopyToAsync(client, _closing.Token);
         await Task.WhenAny(upload, download).ConfigureAwait(false);
@@ -287,15 +304,9 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
         Observe(download);
     }
 
-    // The Basic credentials of the upstream proxy, as a header line; nothing for a proxy without them, or for the account
-    // of the process, which a sandbox never signs in with.
-    private string AuthorizationOf(Uri proxy)
-    {
-        if (_upstream?.Credentials?.GetCredential(proxy, "Basic") is not { UserName.Length: > 0 } credential
-            || ReferenceEquals(credential, CredentialCache.DefaultNetworkCredentials)) return "";
-        var user = string.IsNullOrEmpty(credential.Domain) ? credential.UserName : credential.Domain + "\\" + credential.UserName;
-        return "Proxy-Authorization: Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(user + ":" + credential.Password)) + "\r\n";
-    }
+    private static bool HasBody(IEnumerable<string> headers)
+        => headers.Any(static line => line.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase)
+                                      || line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase) && line[15..].Trim() != "0");
 
     private static string Authority(string host, int port) => (host.Contains(':', StringComparison.Ordinal) && !host.StartsWith('[') ? $"[{host}]" : host) + ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
@@ -321,20 +332,8 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     }
 
     // The request line and the headers, up to the blank line; what follows stays in the stream.
-    private static async Task<string?> ReadHeaderAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        var buffer = new List<byte>(1024);
-        var one = new byte[1];
-        while (buffer.Count < MaximumHeader)
-        {
-            if (await stream.ReadAsync(one, cancellationToken).ConfigureAwait(false) == 0) return null;
-            buffer.Add(one[0]);
-            if (buffer.Count >= 4 && buffer[^4] == '\r' && buffer[^3] == '\n' && buffer[^2] == '\r' && buffer[^1] == '\n')
-                return Encoding.ASCII.GetString([.. buffer]).TrimEnd('\r', '\n');
-        }
-
-        return null;
-    }
+    private static Task<string?> ReadHeaderAsync(Stream stream, CancellationToken cancellationToken)
+        => UpstreamProxyClient.ReadHeadAsync(stream, cancellationToken);
 
     private static bool TrySplitHostPort(string value, int defaultPort, out string host, out int port)
     {

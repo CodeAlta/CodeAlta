@@ -88,39 +88,52 @@ public sealed class SandboxNetworkProxyTests
     }
 
     [TestMethod]
-    public async Task AHostItLetsThrough_IsReachedOverTheUpstreamProxy_WithItsCredentials()
+    public async Task AHostItLetsThrough_IsReachedOverTheUpstreamProxy_AtTheAddressItChecked_SignedInWhenAsked()
     {
-        using var corporate = new UpstreamProxy(answer: "HTTP/1.1 200 Connection established");
+        var basic = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(@"CORP\jdoe:p:w"));
+        using var corporate = new UpstreamProxy(basic);
         var upstream = new FixedProxy(new Uri($"http://127.0.0.1:{corporate.Port}"), ["git.corp.example"]) { Credentials = new NetworkCredential("jdoe", "p:w", "CORP") };
-        // An address of the internet, written as an address: nothing is resolved, and the upstream is the only server.
-        await using var proxy = SandboxNetworkProxy.Start(null, [], [], upstream);
+        // localhost is the one name a test resolves without a network: its address is the loopback, which a profile with the port reaches.
+        await using var proxy = SandboxNetworkProxy.Start(null, [4444], [], upstream);
 
-        var tunneled = await SendAsync(proxy, "CONNECT 93.184.215.14:443 HTTP/1.1\r\nHost: 93.184.215.14\r\n\r\n", "ping");
+        var tunneled = await SendAsync(proxy, "CONNECT localhost:4444 HTTP/1.1\r\nHost: localhost\r\n\r\n", "ping");
         Assert.StartsWith("HTTP/1.1 200", tunneled);
         Assert.EndsWith("ping", tunneled, "the tunnel of the upstream carries the bytes");
-        var connect = corporate.Requests.Single();
-        Assert.StartsWith("CONNECT 93.184.215.14:443 HTTP/1.1\r\nHost: 93.184.215.14:443\r\n", connect);
-        Assert.Contains("Proxy-Authorization: Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(@"CORP\jdoe:p:w")) + "\r\n", connect);
+        var (first, second) = (corporate.Requests[0], corporate.Requests[1]);
+        // The upstream connects to the address the sandbox checked, never to one it would resolve itself.
+        Assert.StartsWith("CONNECT 127.0.0.1:4444 HTTP/1.1\r\nHost: 127.0.0.1:4444\r\n", first);
+        Assert.DoesNotContain("Proxy-Authorization", first, "nothing is sent before the proxy asks");
+        Assert.Contains($"Proxy-Authorization: {basic}\r\n", second, "the challenge is answered");
 
-        // A plain request goes to the upstream in the absolute form, which it needs to reach the host.
-        var plain = await SendAsync(proxy, "GET http://93.184.215.14/x HTTP/1.1\r\nHost: 93.184.215.14\r\nAccept: */*\r\n\r\n", null);
-        Assert.StartsWith("GET http://93.184.215.14/x HTTP/1.1\r\n", plain);
-        Assert.Contains("Proxy-Authorization: Basic ", plain);
+        // A plain request goes to the upstream in the absolute form, at the address checked, with the name of the host it asked for.
+        var plain = await SendAsync(proxy, "GET http://localhost:4444/x HTTP/1.1\r\nHost: localhost:4444\r\nAccept: */*\r\n\r\n", null);
+        Assert.StartsWith("HTTP/1.1 200", plain);
+        Assert.Contains("GET http://127.0.0.1:4444/x HTTP/1.1\r\n", plain);
+        Assert.Contains("Host: localhost:4444\r\n", plain);
+        Assert.Contains($"Proxy-Authorization: {basic}\r\n", plain);
         Assert.Contains("Connection: close\r\n", plain);
 
         // The rules of the sandbox come first: a refused host never reaches the upstream.
+        var count = corporate.Requests.Count;
         Assert.StartsWith("HTTP/1.1 403", await SendAsync(proxy, "CONNECT 10.0.0.5:443 HTTP/1.1\r\n\r\n", null));
-        Assert.AreEqual(2, corporate.Requests.Count);
+        Assert.AreEqual(count, corporate.Requests.Count);
     }
 
     [TestMethod]
-    public async Task WhatTheUpstreamRefuses_IsWhatTheSandboxGets()
+    public async Task WhatTheUpstreamAsks_AndIsNotGiven_IsWhatTheSandboxGets()
     {
-        using var corporate = new UpstreamProxy(answer: "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"corp\"");
-        await using var proxy = SandboxNetworkProxy.Start(null, [], [], new FixedProxy(new Uri($"http://127.0.0.1:{corporate.Port}"), []));
-        var refused = await SendAsync(proxy, "CONNECT 93.184.215.14:443 HTTP/1.1\r\n\r\n", null);
-        Assert.StartsWith("HTTP/1.1 407", refused);
-        Assert.DoesNotContain("Proxy-Authorization", corporate.Requests.Single(), "no credentials, none sent");
+        using var corporate = new UpstreamProxy("Basic expected");
+        // No credentials, then the account of the process, which is never sent over Basic.
+        foreach (var credentials in new ICredentials?[] { null, CredentialCache.DefaultNetworkCredentials })
+        {
+            await using var proxy = SandboxNetworkProxy.Start(null, [4444], [], new FixedProxy(new Uri($"http://127.0.0.1:{corporate.Port}"), []) { Credentials = credentials });
+            var refused = await SendAsync(proxy, "CONNECT localhost:4444 HTTP/1.1\r\n\r\n", null);
+            Assert.StartsWith("HTTP/1.1 407", refused);
+            Assert.Contains("Proxy-Authenticate: Basic realm=\"corp\"", refused, "the sandbox sees what the proxy asks");
+            Assert.Contains("X-CodeAlta-Sandbox: upstream", refused);
+        }
+
+        Assert.IsTrue(corporate.Requests.All(static request => !request.Contains("Proxy-Authorization", StringComparison.Ordinal)), "nothing sent but what was asked");
     }
 
     private sealed class FixedProxy(Uri address, string[] bypassed) : IWebProxy
@@ -132,14 +145,14 @@ public sealed class SandboxNetworkProxyTests
         public bool IsBypassed(Uri host) => bypassed.Contains(host.Host, StringComparer.OrdinalIgnoreCase);
     }
 
-    // A loopback proxy that records the head of each request; it answers a CONNECT with its answer and then echoes, and a
-    // plain request with the request itself.
+    // A loopback proxy that records the head of each request, and asks Basic credentials when it has some to expect: it
+    // answers a CONNECT with 200 and then echoes, and a plain request with its head as the body of a 200.
     private sealed class UpstreamProxy : IDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly System.Collections.Concurrent.ConcurrentQueue<string> _requests = new();
 
-        public UpstreamProxy(string answer)
+        public UpstreamProxy(string? authorization)
         {
             _listener.Start();
             _ = Task.Run(async () =>
@@ -162,21 +175,39 @@ public sealed class SandboxNetworkProxyTests
                         var stream = client.GetStream();
                         try
                         {
-                            var head = new StringBuilder();
-                            var one = new byte[1];
-                            while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal) && await stream.ReadAsync(one) > 0) head.Append((char)one[0]);
-                            _requests.Enqueue(head.ToString());
-                            if (!head.ToString().StartsWith("CONNECT", StringComparison.Ordinal))
+                            while (true)
                             {
-                                await stream.WriteAsync(Encoding.ASCII.GetBytes(head.ToString()));
+                                var head = new StringBuilder();
+                                var one = new byte[1];
+                                while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+                                {
+                                    if (await stream.ReadAsync(one) == 0) return;
+                                    head.Append((char)one[0]);
+                                }
+
+                                var text = head.ToString();
+                                _requests.Enqueue(text);
+                                if (authorization is not null && !text.Contains($"Proxy-Authorization: {authorization}\r\n", StringComparison.Ordinal))
+                                {
+                                    // The connection stays for the answer to the challenge.
+                                    await stream.WriteAsync("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"corp\"\r\nContent-Length: 0\r\n\r\n"u8.ToArray());
+                                    continue;
+                                }
+
+                                if (!text.StartsWith("CONNECT", StringComparison.Ordinal))
+                                {
+                                    var body = Encoding.ASCII.GetBytes(text);
+                                    await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n"));
+                                    await stream.WriteAsync(body);
+                                    return;
+                                }
+
+                                await stream.WriteAsync("HTTP/1.1 200 Connection established\r\n\r\n"u8.ToArray());
+                                var buffer = new byte[4096];
+                                int read;
+                                while ((read = await stream.ReadAsync(buffer)) > 0) await stream.WriteAsync(buffer.AsMemory(0, read));
                                 return;
                             }
-
-                            await stream.WriteAsync(Encoding.ASCII.GetBytes(answer + "\r\n\r\n"));
-                            if (!answer.Contains(" 200 ", StringComparison.Ordinal)) return;
-                            var buffer = new byte[4096];
-                            int read;
-                            while ((read = await stream.ReadAsync(buffer)) > 0) await stream.WriteAsync(buffer.AsMemory(0, read));
                         }
                         catch (IOException)
                         {
