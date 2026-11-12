@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Security.Cryptography;
+using System.Text;
 using MxcFilesystem = Microsoft.Mxc.Sdk.V1.Policy.Filesystem;
 
 namespace CodeAlta.Sandbox;
@@ -17,6 +19,33 @@ public static class SandboxHostDiscovery
         if (OperatingSystem.IsMacOS()) return Path.Combine(home, "Library", "Caches", "CodeAlta", "sandbox");
         var cache = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
         return Path.Combine(string.IsNullOrWhiteSpace(cache) ? Path.Combine(home, ".cache") : cache, "codealta", "sandbox");
+    }
+
+    /// <summary>The folder under <see cref="DefaultDataRoot"/> that holds the sandboxes of the separate profiles of CodeAlta.</summary>
+    public const string SeparateProfilesFolder = "codealta-profiles";
+
+    /// <summary>
+    /// Gets the folder where the sandboxes of a CodeAlta profile keep their data: <see cref="DefaultDataRoot"/> for
+    /// <c>~/.alta</c> (its normal and developer instances), and a folder of its own under it for a separate profile
+    /// (<c>--profile</c>, <c>CODEALTA_HOME</c>), so that two profiles never share the home or the caches of a sandbox profile.
+    /// </summary>
+    /// <param name="codeAltaRoot">The global root of the profile.</param>
+    /// <returns>The folder.</returns>
+    /// <exception cref="ArgumentException"><paramref name="codeAltaRoot"/> is blank.</exception>
+    public static string DataRootFor(string codeAltaRoot)
+        => DataRootFor(codeAltaRoot, DefaultDataRoot(), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta"));
+
+    // The folder of the sandboxes of a profile, given the default folder and the default profile.
+    internal static string DataRootFor(string codeAltaRoot, string defaultDataRoot, string defaultProfile)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(codeAltaRoot);
+        var comparer = SandboxPolicyBuilder.PathComparer;
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(codeAltaRoot));
+        if (comparer.Equals(root, Path.TrimEndingDirectorySeparator(Path.GetFullPath(defaultProfile)))) return defaultDataRoot;
+        // A name of the path that the system compares as it does: the same folder written in another case is one profile.
+        var key = comparer == StringComparer.OrdinalIgnoreCase ? root.ToUpperInvariant() : root;
+        var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16].ToLowerInvariant();
+        return Path.Combine(defaultDataRoot, SeparateProfilesFolder, name);
     }
 
     /// <summary>Reads the host from the running application.</summary>

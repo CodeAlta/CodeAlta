@@ -4,6 +4,34 @@ namespace CodeAlta.Sandbox.Tests;
 public sealed class SandboxPolicyBuilderTests
 {
     [TestMethod]
+    public void TwoProfilesOfCodeAlta_NeverShareTheHomeOrTheCachesOfASandboxProfile()
+    {
+        using var temp = new TempTree();
+        var data = temp.Folder("data");
+        var normal = temp.Folder(Path.Combine("home", ".alta"));
+        var work = temp.Folder("work-profile");
+        var other = temp.Folder("other-profile");
+
+        // ~/.alta keeps the folder it always had: nothing moves for its sandboxes.
+        Assert.AreEqual(data, SandboxHostDiscovery.DataRootFor(normal, data, normal));
+        Assert.AreEqual(data, SandboxHostDiscovery.DataRootFor(normal + Path.DirectorySeparatorChar, data, normal));
+        var ofWork = SandboxHostDiscovery.DataRootFor(work, data, normal);
+        var ofOther = SandboxHostDiscovery.DataRootFor(other, data, normal);
+        Assert.AreEqual(Path.Combine(data, SandboxHostDiscovery.SeparateProfilesFolder), Path.GetDirectoryName(ofWork));
+        Assert.AreNotEqual(ofWork, ofOther);
+        Assert.AreEqual(ofWork, SandboxHostDiscovery.DataRootFor(work + Path.DirectorySeparatorChar, data, normal), "one folder, one profile");
+
+        var profile = SandboxProfiles.Resolve("workspace", []);
+        var project = temp.Folder("project");
+        SandboxPolicy PolicyOf(string dataRoot) => SandboxPolicyBuilder.Build(profile, new SandboxSessionFolders { WorkingDirectory = project },
+            new SandboxHost { DataRoot = dataRoot, HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s");
+        var (first, second) = (PolicyOf(ofWork), PolicyOf(ofOther));
+        Assert.AreNotEqual(first.Home, second.Home);
+        Assert.IsTrue(first.Home.StartsWith(ofWork + Path.DirectorySeparatorChar, StringComparison.Ordinal), first.Home);
+        Assert.IsFalse(first.ReadWrite.Any(path => path.StartsWith(ofOther, StringComparison.Ordinal)), "nothing of the other profile");
+    }
+
+    [TestMethod]
     public void AProjectSession_WritesItsFolderAndPrivateFolders_AndProtectsWhatOtherProgramsRun()
     {
         using var temp = new TempTree();

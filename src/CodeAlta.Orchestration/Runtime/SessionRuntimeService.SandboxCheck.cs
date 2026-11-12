@@ -51,7 +51,7 @@ public sealed partial class SessionRuntimeService
 
         // Not in the temporary folder of the user: a parent with that many entries is left out of reach of the sandbox,
         // and the shell would not start in a folder below it.
-        var folder = Directory.CreateDirectory(Path.Combine(SandboxDataRoot ?? SandboxHostDiscovery.DefaultDataRoot(), "check", Guid.NewGuid().ToString("N")[..12])).FullName;
+        var folder = Directory.CreateDirectory(Path.Combine(EffectiveSandboxDataRoot, "check", Guid.NewGuid().ToString("N")[..12])).FullName;
         var sessionId = "sandbox-check-" + Guid.NewGuid().ToString("N");
         try
         {

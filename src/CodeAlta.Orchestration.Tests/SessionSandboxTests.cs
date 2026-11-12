@@ -231,6 +231,20 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task TheSandboxesOfASeparateProfile_KeepTheirDataApart_AndThoseOfTheUserProfileWhereTheyWere()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await using var runtime = f.CreateRuntime();
+
+        Assert.AreEqual(SandboxHostDiscovery.DataRootFor(f.Options.GlobalRoot), runtime.EffectiveSandboxDataRoot);
+        StringAssert.StartsWith(runtime.EffectiveSandboxDataRoot,
+            Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), SandboxHostDiscovery.SeparateProfilesFolder) + Path.DirectorySeparatorChar);
+        Assert.AreEqual(SandboxHostDiscovery.DefaultDataRoot(),
+            SandboxHostDiscovery.DataRootFor(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta")));
+        Assert.AreNotEqual(runtime.EffectiveSandboxDataRoot, f.Runtime.EffectiveSandboxDataRoot, "a folder given to the runtime wins");
+    }
+
+    [TestMethod]
     public async Task ASandboxThatCannotRun_RefusesTheRunAndTheTools_AndSaysWhy()
     {
         var backend = new InProcessBackend { Available = false };

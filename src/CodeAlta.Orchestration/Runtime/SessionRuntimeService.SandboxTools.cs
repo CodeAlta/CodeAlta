@@ -46,8 +46,15 @@ public sealed partial class SessionRuntimeService
         return new HashSet<int>([.. ReservedSandboxPorts, .. more.Where(static port => port > 0)]);
     }
 
-    /// <summary>Gets or initializes the folder where the sandboxes keep their data; null for <see cref="SandboxHostDiscovery.DefaultDataRoot"/>.</summary>
+    /// <summary>
+    /// Gets or initializes the folder where the sandboxes keep their data; null for the one of the profile of the catalog
+    /// (<see cref="SandboxHostDiscovery.DataRootFor(string)"/>): <see cref="SandboxHostDiscovery.DefaultDataRoot"/> for
+    /// <c>~/.alta</c>, a folder of its own for a separate profile.
+    /// </summary>
     public string? SandboxDataRoot { get; init; }
+
+    // The folder where the sandboxes of this runtime keep their data.
+    internal string EffectiveSandboxDataRoot => SandboxDataRoot ?? SandboxHostDiscovery.DataRootFor(_catalogOptions.GlobalRoot);
 
     /// <summary>
     /// Gets or initializes the values that never enter a sandbox, whatever the variable that carries them: the secrets kept in
@@ -63,7 +70,7 @@ public sealed partial class SessionRuntimeService
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 return _sandboxWorkers ??= new SessionSandboxWorkers(SandboxBackend ?? new MxcSandboxBackend(), WorkerCommandLine,
-                    () => SandboxHostDiscovery.Current(SandboxDataRoot ?? SandboxHostDiscovery.DefaultDataRoot(), [_catalogOptions.GlobalRoot, _catalogOptions.StateRoot])
+                    () => SandboxHostDiscovery.Current(EffectiveSandboxDataRoot, [_catalogOptions.GlobalRoot, _catalogOptions.StateRoot])
                         with { WithheldValues = SandboxWithheldValues ?? [] },
                     CurrentReservedPorts);
             }
