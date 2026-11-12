@@ -190,29 +190,67 @@ public sealed class NodeManagementCommandTests
         Assert.AreEqual("b\nc", NodeLogCommand.Tail(unterminated, 2));
     }
 
+    [TestMethod]
+    public async Task Logs_Follow_PrintsALineTheNodeWritesWhileTheLastLinesArePrinted()
+    {
+        using var root = new NodeTestRoot();
+        var log = NodeLogging.GetLogFilePath(root.DataRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        File.WriteAllText(log, "first\n");
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        // The node writes its next line while the command prints the last ones.
+        var output = new LockedWriter
+        {
+            FirstWrite = () =>
+            {
+                using var writer = new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+                writer.Write("second\n"u8);
+            },
+        };
+        var command = new NodeLogCommand(output, TextWriter.Null) { Stop = stop.Token, PollInterval = TimeSpan.FromMilliseconds(20) };
+        var options = new NodeLogOptions { Follow = true };
+        options.Profile.DataRoot = root.DataRoot;
+        var following = command.RunAsync(options).AsTask();
+
+        await WaitForAsync(() => output.ToString().Contains("second", StringComparison.Ordinal));
+        await stop.CancelAsync();
+
+        Assert.AreEqual(NodeExitCodes.Success, await following.WithinAsync(TestTime.Seconds(10), TestContext.CancellationToken));
+        Assert.AreEqual("first\nsecond\n", output.ToString().ReplaceLineEndings("\n"));
+    }
+
     // A writer whose text can be read while another thread writes to it: TextWriter.Synchronized locks the writes only, and a
     // StringBuilder read during a write can throw.
     private sealed class LockedWriter : TextWriter
     {
         private readonly Lock _gate = new();
         private readonly StringBuilder _text = new();
+        private Action? _firstWrite;
 
         public override Encoding Encoding => Encoding.UTF8;
+
+        /// <summary>Runs once, after the first text is written.</summary>
+        public Action? FirstWrite { init => _firstWrite = value; }
 
         public override void Write(char value)
         {
             lock (_gate) _text.Append(value);
+            Written();
         }
 
         public override void Write(char[] buffer, int index, int count)
         {
             lock (_gate) _text.Append(buffer, index, count);
+            Written();
         }
 
         public override void Write(string? value)
         {
             lock (_gate) _text.Append(value);
+            Written();
         }
+
+        private void Written() => Interlocked.Exchange(ref _firstWrite, null)?.Invoke();
 
         public override string ToString()
         {

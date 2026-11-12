@@ -59,8 +59,11 @@ internal sealed class NodeLogCommand(TextWriter output, TextWriter error)
             using var stream = Open(path);
             if (stream is not null)
             {
-                await output.WriteAsync(Tail(stream, lines)).ConfigureAwait(false);
-                position = stream.Length;
+                var tail = Tail(stream, lines);
+                // Following goes on from where the last lines were read: a line the node writes once they are read, even
+                // while they are printed, is the first one followed, never skipped.
+                position = stream.Position;
+                await output.WriteAsync(tail).ConfigureAwait(false);
             }
         }
 
@@ -82,12 +85,16 @@ internal sealed class NodeLogCommand(TextWriter output, TextWriter error)
     /// <summary>Reads the last lines of a log, from its end, without reading the whole file.</summary>
     /// <param name="stream">The log, seekable.</param>
     /// <param name="lines">How many lines.</param>
-    /// <returns>The lines, each with its end of line.</returns>
+    /// <returns>The lines, each with its end of line; the stream is left after the last byte read.</returns>
     internal static string Tail(Stream stream, int lines)
     {
         ArgumentNullException.ThrowIfNull(stream);
         var length = stream.Length;
-        if (lines <= 0 || length == 0) return "";
+        if (lines <= 0 || length == 0)
+        {
+            stream.Position = length;
+            return "";
+        }
         var start = length;
         var found = 0;
         var buffer = new byte[ChunkSize];
