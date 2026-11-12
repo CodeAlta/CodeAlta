@@ -66,7 +66,8 @@ internal sealed class SubProjectsService
             if (map is null) return new("not_found", 0, 0, false, null, []);
             var declared = map.Entries.Count(static entry => entry.Folder == ProjectManifestFolderState.Ok);
             var optional = map.Entries.Count(static entry => entry.Entry.Optional && entry.Project is null);
-            if (map.Exists || map.ClaimedBy is not null) return new("ok", declared, optional, false, map.ClaimedBy, []);
+            // A sub-project without a map of its own is told as one: no proposal to set it up as a monorepo when it is added.
+            if (map.Exists || map.Repository.IsSubProject) return new("ok", declared, optional, false, map.ClaimedBy ?? map.Repository.ParentId, []);
             // Without a map: a quick look at the root and two levels below, for what says it is a monorepo.
             var scan = await Task.Run(() => ProjectManifestScanner.Scan(map.Repository.ProjectPath, map.Manifest, [], [], 2, cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
@@ -87,7 +88,8 @@ internal sealed class SubProjectsService
         try
         {
             var projects = await _catalog!.LoadAsync(cancellationToken).ConfigureAwait(false);
-            if (projects.FirstOrDefault(project => project.Id == request.ProjectId) is not { IsSubProject: false } repository) return new("not_found", [], false, null);
+            // A sub-project too: its own map is a nested map.
+            if (projects.FirstOrDefault(project => project.Id == request.ProjectId) is not { } repository) return new("not_found", [], false, null);
             var map = await _catalog.ReadManifestAsync(repository.ProjectPath, cancellationToken).ConfigureAwait(false);
             var globs = request.Glob is { Length: > 0 and <= 256 } glob ? new[] { glob } : [];
             var scan = await Task.Run(() => ProjectManifestScanner.Scan(repository.ProjectPath, map, globs, [], 3, cancellationToken), cancellationToken).ConfigureAwait(false);
@@ -177,7 +179,8 @@ internal sealed class SubProjectsService
         try
         {
             var projects = await _catalog!.LoadAsync(cancellationToken).ConfigureAwait(false);
-            if (projects.FirstOrDefault(project => project.Id == projectId) is not { IsSubProject: false } repository) return new("not_found", null, null);
+            // A sub-project too: its own map is a nested map.
+            if (projects.FirstOrDefault(project => project.Id == projectId) is not { } repository) return new("not_found", null, null);
             var result = await Task.Run(() => change(repository.ProjectPath), CancellationToken.None).ConfigureAwait(false);
             if (result.Status == ProjectManifestChangeStatus.Updated) _view!.NotifyChanged();
             return result.Status switch
@@ -202,13 +205,14 @@ internal sealed class SubProjectsService
     {
         var slug = map.Repository.Slug;
         return new(map.Repository.Id, map.Repository.DisplayName, map.Repository.ProjectPath, map.ManifestPath, map.Exists, map.ClaimedBy,
+            map.Repository.ParentId, map.Repository.RepositoryName,
             [.. map.Manifest.Labels.Select(label => new SubProjectLabelView(label.Key, ProjectCatalog.DeclaredLabelId(slug, label.Key), label.Name, label.Parent,
                 label.Icon, label.Color, label.Description))],
             [.. map.Entries.Select(static entry => new SubProjectEntryView(entry.Entry.Key, entry.Entry.Path, entry.Entry.Name, entry.Entry.Description, [.. entry.Entry.Labels],
                 entry.Entry.Optional, entry.Entry.Write == ProjectWriteScope.Folder ? "folder" : "repository",
                 entry.Folder switch { ProjectManifestFolderState.Ok => "ok", ProjectManifestFolderState.Outside => "outside", _ => "missing" },
                 entry.Folder == ProjectManifestFolderState.Ok && File.Exists(Path.Combine(entry.FullPath, ".git")),
-                entry.Project?.Id, entry.Project?.DisplayName, entry.Project?.Archived == true, entry.ClaimedBy))],
+                entry.Project?.Id, entry.Project?.DisplayName, entry.Project?.Archived == true, entry.ClaimedBy, entry.SubProjects))],
             [.. map.Problems.Take(200).Select(static problem => new SubProjectProblemView(problem.Key, problem.Code, problem.Message))]);
     }
 
@@ -231,11 +235,13 @@ internal sealed record SubProjectsMapResponse(string Status, SubProjectsMapView?
 /// <param name="Path">Its folder.</param>
 /// <param name="ManifestPath">The file of its map.</param>
 /// <param name="Exists">Whether the file exists.</param>
-/// <param name="ClaimedBy">The repository whose map declares this project's folder, which makes its own map ignored; null otherwise.</param>
+/// <param name="ClaimedBy">The repository whose map declares this project's folder, when its own map is not read (the problems say why); null otherwise.</param>
+/// <param name="ParentId">The repository of this project when it is a sub-project: its map is a nested map; null otherwise.</param>
+/// <param name="ParentName">The name of that repository.</param>
 /// <param name="Labels">The labels of the map, in the order of their tree.</param>
 /// <param name="Entries">The projects of the map, in the order of the file.</param>
 /// <param name="Problems">What was left out, and why.</param>
-internal sealed record SubProjectsMapView(string ProjectId, string Name, string Path, string ManifestPath, bool Exists, string? ClaimedBy,
+internal sealed record SubProjectsMapView(string ProjectId, string Name, string Path, string ManifestPath, bool Exists, string? ClaimedBy, string? ParentId, string? ParentName,
     IReadOnlyList<SubProjectLabelView> Labels, IReadOnlyList<SubProjectEntryView> Entries, IReadOnlyList<SubProjectProblemView> Problems);
 
 /// <summary>A label of a map: its key, the identifier the labels of the window give it, and its look.</summary>
@@ -243,10 +249,11 @@ internal sealed record SubProjectLabelView(string Key, string Id, string Name, s
 
 /// <summary>
 /// An entry of a map. Folder is <c>ok</c>, <c>missing</c> or <c>outside</c>; ProjectId names the project once it is listed,
-/// Hidden says the user hid it; Submodule says its folder is a git submodule.
+/// Hidden says the user hid it; Submodule says its folder is a git submodule; SubProjects counts the sub-projects of its
+/// own map (a nested map).
 /// </summary>
 internal sealed record SubProjectEntryView(string Key, string Path, string? Name, string? Description, IReadOnlyList<string> Labels, bool Optional, string Write,
-    string Folder, bool Submodule, string? ProjectId, string? ProjectName, bool Hidden, string? ClaimedBy);
+    string Folder, bool Submodule, string? ProjectId, string? ProjectName, bool Hidden, string? ClaimedBy, int SubProjects);
 
 /// <summary>A problem of a map: the key at fault (null for the file), its code and its message.</summary>
 internal sealed record SubProjectProblemView(string? Key, string Code, string Message);

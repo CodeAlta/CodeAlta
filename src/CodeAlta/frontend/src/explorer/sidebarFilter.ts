@@ -2,6 +2,7 @@ import type { WorkspaceClaudeCodeConversation, WorkspaceClaudeCodeSession, Works
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 import { fieldsScore } from "../search/searchResults";
 import { plainTitle } from "../sessionTitle";
+import { repositoriesAbove } from "./projectRail";
 
 /** Whether a session of CodeAlta has every word typed in the filter of the sidebar in its title. */
 export const sessionMatches = (session: Readonly<Pick<WorkspaceSession, "title" | "fullTitle">>, words: readonly string[]): boolean =>
@@ -37,6 +38,11 @@ export type SidebarFilterView = Readonly<{
   scopes: ReadonlySet<string | null>;
   projects: ReadonlySet<string>;
   claudeCode: ReadonlyMap<string, readonly WorkspaceClaudeCodeSession[]>;
+  /**
+   * The repositories above a sub-project shown (its repository, and those above it for a nested map), shown with it so
+   * that it stays in its place in their groups; the filter does not open them.
+   */
+  frames?: ReadonlySet<string>;
 }>;
 
 /** What the words typed in the filter of the sidebar find in the projects, their sessions and the Claude Code sessions started elsewhere. */
@@ -57,7 +63,13 @@ export function sidebarFilterView(snapshot: WorkspaceSnapshot, words: readonly s
   const projects = new Set<string>();
   for (const project of snapshot.projects)
     if (scopes.has(project.id) || claudeCode.has(project.id) || fieldsScore(words, [[project.name, 0]]) !== null) projects.add(project.id);
-  return { scopes, projects, claudeCode };
+  const byId = new Map(snapshot.projects.map(project => [project.id, project]));
+  const frames = new Set<string>();
+  for (const id of projects) {
+    const project = byId.get(id);
+    if (project) for (const above of repositoriesAbove(project, byId)) if (!projects.has(above.id)) frames.add(above.id);
+  }
+  return { scopes, projects, claudeCode, frames };
 }
 
 /** Whether the filter opens a scope of the tree (the chats as `null`): what it found is in it. */

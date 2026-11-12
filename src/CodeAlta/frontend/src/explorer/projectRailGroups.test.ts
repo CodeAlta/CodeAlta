@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject } from "#neoastra";
 import type { Label } from "../labels/labels";
-import { projectRailGroups, projectRailProjection, projectTitle, type RailGroup } from "./projectRail";
+import { projectRailGroups, projectRailProjection, projectTitle, repositoryProjectIds, subProjectWindows, type RailGroup } from "./projectRail";
+import { sidebarFilterView } from "./sidebarFilter";
 
 const project = (id: string): WorkspaceProject => ({ id, name: id, path: `/${id}`, archived: false });
 const label = (id: string, projectIds: string[], look: Partial<Label> = {}): Label =>
@@ -83,6 +84,63 @@ test("the sub-projects of an archived repository leave the Explorer with it, als
   const snapshot = { configured: true, projects: [{ ...project("contoso"), archived: true }, sub("billing", "contoso"), project("beta")],
     sessions: [], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
   assert.deepEqual(projectRailProjection(snapshot, "name").projects.map(value => value.id), ["beta", "contoso"]);
+});
+
+// platform-map › billing › Apps › invoices-api: billing is a sub-project of platform-map with a map of its own (#433).
+const nestedProjects = () => [project("platform"), sub("billing", "platform"), sub("checkout", "platform"), sub("invoices", "billing"), sub("ledger", "billing"),
+  project("solo")];
+const nestedLabels = () => [label("platform.repos", ["billing", "checkout"], { repository: "platform" }),
+  label("billing.apps", ["invoices"], { repository: "billing" }), label("billing.libs", ["ledger"], { repository: "billing" })];
+
+test("a sub-project with a map of its own is a group nested in its repository, under its label of the map, with its own labels", () => {
+  const groups = projectRailGroups(nestedProjects(), 0, nestedLabels());
+  assert.deepEqual(shape(groups), ["repository:platform@0:platform", "platform.repos@1:checkout", "repository:billing@2:billing",
+    "billing.apps@3:invoices", "billing.libs@3:ledger", "other:solo"]);
+  const [platform, , billing, apps] = groups;
+  assert.ok(platform.kind === "label" && billing.kind === "label" && apps.kind === "label");
+  assert.deepEqual(platform.label.projectIds, ["platform", "billing", "checkout", "invoices", "ledger"], "The group of the repository counts the nested ones.");
+  assert.deepEqual(billing.ancestors, ["repository:platform", "platform.repos"], "Folding the repository or the label hides it.");
+  assert.equal(billing.repository?.id, "billing");
+  assert.deepEqual(apps.ancestors, ["repository:platform", "platform.repos", "repository:billing"]);
+});
+
+test("a nested repository without a label of the map comes right after the projects of its repository", () => {
+  const groups = projectRailGroups(nestedProjects(), 0, [label("billing.apps", ["invoices"], { repository: "billing" })]);
+  assert.deepEqual(shape(groups), ["repository:platform@0:platform,checkout", "repository:billing@1:billing,ledger", "billing.apps@2:invoices", "other:solo"]);
+});
+
+test("a nested repository whose repository is not listed is a group of its own", () => {
+  const projects = nestedProjects().filter(value => value.id !== "platform");
+  assert.deepEqual(shape(projectRailGroups(projects, 0, nestedLabels())), ["repository:billing@0:billing", "billing.apps@1:invoices", "billing.libs@1:ledger",
+    "other:checkout,solo"]);
+});
+
+test("the sub-projects of a nested map follow their repositories in the one list, and leave with any repository hidden above them", () => {
+  const snapshot = (projects: WorkspaceProject[]) => ({ configured: true, projects, sessions: [], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false });
+  assert.deepEqual(projectRailProjection(snapshot(nestedProjects()), "name").projects.map(value => value.id),
+    ["platform", "billing", "invoices", "ledger", "checkout", "solo"]);
+  const hidden = nestedProjects().map(value => value.id === "platform" ? { ...value, archived: true } : value);
+  assert.deepEqual(projectRailProjection(snapshot(hidden), "name").projects.map(value => value.id), ["platform", "solo"]);
+  assert.deepEqual([...repositoryProjectIds("platform", nestedProjects())], ["platform", "billing", "checkout", "invoices", "ledger"]);
+});
+
+test("the menu of a nested repository opens its own sub-projects and those of its repository", () => {
+  const projects = nestedProjects();
+  const byId = (id: string) => projects.find(value => value.id === id)!;
+  assert.deepEqual(subProjectWindows(byId("platform"), projects), ["own"]);
+  assert.deepEqual(subProjectWindows(byId("billing"), projects), ["own", "repository"]);
+  assert.deepEqual(subProjectWindows(byId("checkout"), projects), ["repository"]);
+  assert.deepEqual(subProjectWindows(byId("solo"), projects), ["own"]);
+});
+
+test("while the list is filtered, a sub-project found keeps the repositories above it as a frame, unopened", () => {
+  const snapshot = { configured: true, projects: nestedProjects(), sessions: [], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
+  const view = sidebarFilterView(snapshot, ["invoices"]);
+  assert.deepEqual([...view.projects], ["invoices"]);
+  assert.deepEqual([...view.frames ?? []].sort(), ["billing", "platform"]);
+  const listed = nestedProjects().filter(value => view.projects.has(value.id) || view.frames?.has(value.id));
+  assert.deepEqual(shape(projectRailGroups(listed, 0, nestedLabels(), false)), ["repository:platform@0:platform", "platform.repos@1:",
+    "repository:billing@2:billing", "billing.apps@3:invoices"]);
 });
 
 test("while the list is filtered, a repository whose projects do not match is left out", () => {

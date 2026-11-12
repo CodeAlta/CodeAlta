@@ -4,7 +4,7 @@ import type { SubProjectEntryView, SubProjectLabelView, SubProjectsMapView } fro
 import { addableCandidates, entryChanges, entryDraft, entryName, entryState, filterEntries, keyFrom, mapLabelPath, normalizeFolder, parentChoices, validKey } from "./subProjects";
 
 const entry = (key: string, look: Partial<SubProjectEntryView> = {}): SubProjectEntryView => ({ key, path: `services/${key}`, name: null, description: null, labels: [],
-  optional: false, write: "repository", folder: "ok", submodule: false, projectId: `id-${key}`, projectName: null, hidden: false, claimedBy: null, ...look });
+  optional: false, write: "repository", folder: "ok", submodule: false, projectId: `id-${key}`, projectName: null, hidden: false, claimedBy: null, subProjects: 0, ...look });
 const label = (key: string, parent: string | null = null): SubProjectLabelView => ({ key, id: `contoso.${key}`, name: key.toUpperCase(), parent, icon: null, color: null, description: null });
 
 test("an entry is shown, hidden, optional or unavailable, and named after its project, the map or its folder", () => {

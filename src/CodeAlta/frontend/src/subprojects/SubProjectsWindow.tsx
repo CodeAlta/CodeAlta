@@ -114,8 +114,8 @@ export function SubProjectsWindow({ epoch, project, api, onClose, onOpenMap, onS
   const body = status === "loading" ? <NonIdealState className="subprojects-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
     : !map ? <NonIdealState className="subprojects-empty" icon={<AppIcon name="folder" size={36} />} title={t("The project map cannot be read")}
       action={<Button icon={<AppIcon name="refresh" size={15} />} text={t("Refresh")} onClick={() => void read()} />} />
-    : map.claimedBy ? <NonIdealState className="subprojects-empty" icon={<AppIcon name="folder" size={36} />} title={t("This project is a sub-project")}
-      description={t("It is declared by the map of another repository: its own map is not read. Its sub-projects are declared in the map of that repository.")}
+    : map.claimedBy ? <NonIdealState className="subprojects-empty" icon={<AppIcon name="folder" size={36} />} title={t("Its project map is not read")}
+      description={t("The problem above says why. Declare its sub-projects in the map of the repository above it.")}
       action={<Button text={t("Open that repository")} onClick={() => onOpenProject(map.claimedBy!)} />} />
     : tab === "projects" ? <ProjectsPane map={map} entries={shown} total={entries.length} filter={filter} onFilter={setFilter} selected={selectedEntry}
       onSelect={entry => choose({ kind: "entry", key: entry.key })} onToggle={toggle} busy={busy} onAdd={() => { setTab("add"); setSelection(null); }} onSetUp={onSetUp}>
@@ -150,7 +150,8 @@ export function SubProjectsWindow({ epoch, project, api, onClose, onOpenMap, onS
       }} />;
 
   return <AppWindow storageKey="codealta.desktop.window.subProjects.v1" className="subprojects-dialog" titleId={titleId}
-    title={<>{t("Sub-projects")}<span className="subprojects-repository">{project.name}</span></>}
+    title={<>{t("Sub-projects")}<span className="subprojects-repository">
+      {map?.parentName && <span className="subprojects-parent">{map.parentName} › </span>}{project.name}</span></>}
     preferredSize={viewport => ({ width: Math.min(1080, viewport.width - 40), height: Math.min(720, viewport.height - 40) })} minimumSize={{ width: 520, height: 380 }}
     onClose={() => { if (!busy) onClose(); }} closeLabel={t("Close")} keepOnOutsidePress={dirty || busy}>
     <div className="subprojects" data-tab={tab}>
@@ -210,6 +211,8 @@ function ProjectsPane({ map, entries, total, filter, onFilter, selected, onSelec
               </span>
               <span className="subprojects-row-tags">
                 {entry.labels.map(key => <MapLabelBadge key={key} labelKey={key} labels={map.labels} />)}
+                {entry.subProjects > 0 && <span className="subprojects-chip" data-nested="true" title={t("It has a project map of its own: its sub-projects are grouped under it.")}>
+                  {t(entry.subProjects === 1 ? "{count} sub-project" : "{count} sub-projects", { count: entry.subProjects })}</span>}
                 {entry.submodule && <span className="subprojects-chip" title={t("Its folder is a git submodule: a repository of its own.")}>{t("Submodule")}</span>}
                 {entry.write === "folder" && <span className="subprojects-chip" title={t("Its sessions write only its folder.")}>{t("Its folder only")}</span>}
                 {state !== "shown" && <span className="subprojects-chip" data-state={state}>{t(stateText[state])}</span>}

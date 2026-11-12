@@ -1345,8 +1345,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const filtering = sidebarWords.length > 0;
   useEffect(() => { if (!filtering) setFilterFolded(new Set()); }, [filtering]);
   const fullListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
-  const projectListing = fullListing && filterView ? { ...fullListing, projects: fullListing.projects.filter(project => filterView.projects.has(project.id)),
-    favorites: fullListing.projects.slice(0, fullListing.favorites).filter(project => filterView.projects.has(project.id)).length } : fullListing;
+  // A sub-project found keeps the repositories above it, unopened, so that it stays in its place in their groups.
+  const filterShows = (id: string) => !!filterView && (filterView.projects.has(id) || !!filterView.frames?.has(id));
+  const projectListing = fullListing && filterView ? { ...fullListing, projects: fullListing.projects.filter(project => filterShows(project.id)),
+    favorites: fullListing.projects.slice(0, fullListing.favorites).filter(project => filterShows(project.id)).length } : fullListing;
   // The labels of the shown space, and the parts of the Explorer when it lists the projects under them: while the list
   // is filtered, only the labels with a project that matches, unfolded.
   const spaceLabels = useMemo(() => labelsOfSpace(labelsState.labels, spaceId), [labelsState.labels, spaceId]);
@@ -2531,12 +2533,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     openEditor(project, { path: null, line: null, column: null, explorer: true });
   }
   // The window of the git worktrees of a project: `/worktree`, and the menu of a project.
-  // The window of the sub-projects of a repository: the one named, or the repository of a sub-project.
-  function openSubProjects(id: string) {
+  // The window of the sub-projects of a repository: the one named (own, as a sub-project with a map of its own), or the
+  // repository of a sub-project.
+  function openSubProjects(id: string, own = false) {
     if (!owned || dialog || searchOpen || currentView.current !== "workspace" || modalDialogOpen()) return;
     const projects = catalog.current?.projects ?? currentSnapshot.current?.projects ?? [];
     const named = projects.find(project => project.id === id);
-    const repository = named?.parentId ? projects.find(project => project.id === named.parentId) ?? named : named;
+    const repository = !own && named?.parentId ? projects.find(project => project.id === named.parentId) ?? named : named;
     if (!repository) return;
     setSubProjectsProject({ id: repository.id, name: repository.name, path: repository.path });
     setDialog("subProjects");
@@ -2563,7 +2566,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (reply.status !== "ok" || !creationAlive.current) return;
       if (reply.declared > 0) showToast({ intent: "primary", icon: "info-sign", timeout: 20_000,
         message: t(reply.declared === 1 ? "{name} declares {count} sub-project." : "{name} declares {count} sub-projects.", { name, count: reply.declared }),
-        action: { text: t("Choose…"), onClick: () => openSubProjects(id) } }, `subprojects:${id}`);
+        action: { text: t("Choose…"), onClick: () => openSubProjects(id, true) } }, `subprojects:${id}`);
       else if (reply.monorepo) showToast({ intent: "primary", icon: "info-sign", timeout: 20_000,
         message: t("{name} looks like a monorepo: its folders can be projects of their own.", { name }),
         action: { text: t("Set up as a monorepo…"), onClick: () => setUpMonorepo(id) } }, `subprojects:${id}`);
@@ -6130,7 +6133,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 // The title of a repository: its sub-projects come from its map, and it is moved with its project.
                 ? <RepositoryRailRow key={group.label.id} group={group} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
                   onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))}
-                  actions={owned ? { subProjects: openSubProjects, setUp: setUpMonorepo } : undefined}
+                  actions={owned ? { subProjects: id => openSubProjects(id, true), setUp: setUpMonorepo } : undefined}
                   activity={labelActivity(repositoryProjectIds(group.repository.id, projectListing?.projects ?? []))} />
                 : <LabelRailRow group={group} labels={spaceLabels} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
                 onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))}
@@ -6196,7 +6199,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 || !!projectRenameTarget || projectArchive.locked || projectDeletion.locked || !!projectDeleteTarget || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive, delete: beginProjectDelete,
               worktrees: owned ? project => openWorktrees(project) : undefined,
-              subProjects: owned ? project => openSubProjects(project.id) : undefined,
+              subProjects: owned ? (project, own) => openSubProjects(project.id, own) : undefined,
               sandbox: owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: sandboxSettings } : undefined,
               labels: owned && labelsState.available ? (project, close) => <ProjectLabelsPopover projectId={project.id} projectName={project.name} labels={ownLabels(spaceLabels)}
                 assign={labelsHub.assign} create={(name, projectIds) => labelsHub.create(name, { space: labelSpace }, projectIds)} onClose={close} /> : undefined,

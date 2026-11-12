@@ -8,11 +8,13 @@ import { SubProjectsWindow, type SubProjectsApi } from "./SubProjectsWindow";
 const calls: string[] = [];
 (window as unknown as { calls: string[] }).calls = calls;
 const entry = (key: string, path: string, look: Partial<SubProjectEntryView> = {}): SubProjectEntryView => ({ key, path, name: null, description: null, labels: [],
-  optional: false, write: "repository", folder: "ok", submodule: false, projectId: `id-${key}`, projectName: null, hidden: false, claimedBy: null, ...look });
+  optional: false, write: "repository", folder: "ok", submodule: false, projectId: `id-${key}`, projectName: null, hidden: false, claimedBy: null, subProjects: 0, ...look });
 const map: SubProjectsMapView = {
   projectId: "repo", name: "contoso", path: "/contoso", manifestPath: "/contoso/.alta/projects.toml", exists: true, claimedBy: null,
+  // contoso is itself a sub-project of platform: its map is a nested map, and billing has a map of its own.
+  parentId: "platform", parentName: "platform",
   labels: [{ key: "backend", id: "contoso.backend", name: "Backend", parent: null, icon: null, color: "#2d72d2", description: null }],
-  entries: [entry("billing", "services/billing", { name: "Billing", labels: ["backend"] }), entry("web", "apps/web", { hidden: true }),
+  entries: [entry("billing", "services/billing", { name: "Billing", labels: ["backend"], subProjects: 2 }), entry("web", "apps/web", { hidden: true }),
     entry("reports", "tools/reports", { optional: true, projectId: null }), entry("sdk", "vendor/sdk", { submodule: true }),
     entry("legacy", "services/legacy", { folder: "missing", projectId: null })],
   problems: [{ key: "legacy", code: "folder.missing", message: "The folder `services/legacy` of `legacy` is not there." }],

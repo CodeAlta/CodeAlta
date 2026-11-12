@@ -4,6 +4,7 @@ import { canvasRef } from "../canvases/canvasPages";
 import { AppIcon } from "../AppIcon";
 import { ProjectDetailsDialog } from "../ProjectDetailsEntry";
 import { projectRowAccess, projectRowCurrent, type ProjectRowContext } from "./projectRowActionAccess";
+import { subProjectWindows } from "./projectRail";
 import { isSessionContextKey } from "../sessionRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
 import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
@@ -34,8 +35,11 @@ export type ProjectRowAuthority = {
   sessions?: ScopeSessionActions;
   /** Opens the window of the git worktrees of a project. Absent where they cannot be managed. */
   worktrees?: (project: WorkspaceProject) => void;
-  /** Opens the window of the sub-projects of a repository: of the project, or of the repository of a sub-project. Absent where they cannot be managed. */
-  subProjects?: (project: WorkspaceProject) => void;
+  /**
+   * Opens the window of the sub-projects of a repository: of the project itself (`own`), or of the repository of a
+   * sub-project. Absent where they cannot be managed.
+   */
+  subProjects?: (project: WorkspaceProject, own: boolean) => void;
   /**
    * The canvases of plugins that are about a project: the first few are lines of the menu, and `more` says the page has others.
    * Absent where no canvas can be opened.
@@ -151,12 +155,12 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
     owner.search.set(value.project, excluded);
   }
 
-  function subProjectsAction(original: Review) {
+  function subProjectsAction(original: Review, own: boolean) {
     const value = review.current;
     const owner = latest.current;
     if (!value || value !== original || value.details || !owner?.subProjects || !current(value) || modalDialogOpen()) return;
     dismiss();
-    owner.subProjects(value.project);
+    owner.subProjects(value.project, own);
   }
 
   function worktreesAction(original: Review) {
@@ -253,8 +257,9 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         ...(authority?.labels ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => labelsAction(visible) }] : []),
         ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
-        ...(authority?.subProjects && !project.archived ? [{ key: "subprojects", label: t(project.parentId ? "Sub-projects of the repository…" : "Sub-projects…"),
-          icon: "files" as const, onSelect: () => subProjectsAction(visible) }] : []),
+        ...(authority?.subProjects && !project.archived ? subProjectWindows(project, visible.context.snapshot?.projects ?? []).map(window => ({
+          key: window === "own" ? "subprojects" : "subprojects-repository", label: t(window === "own" ? "Sub-projects…" : "Sub-projects of the repository…"),
+          icon: "files" as const, onSelect: () => subProjectsAction(visible, window === "own") })) : []),
         ...(authority?.sandbox && !project.archived ? [{ key: "sandbox", label: `${t("Sandbox")}…`, icon: "sandbox" as const, onSelect: () => sandboxAction(visible) }] : []),
         // The folder of the project outside CodeAlta: in the editor the user chose, and in the file manager of the system.
         ...(external.opener && !project.archived && external.editor ? [{ key: "external-editor", label: t("Open in {editor}", { editor: external.editor.name }),

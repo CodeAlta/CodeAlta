@@ -8,6 +8,7 @@
 
 /* The window of the sub-projects of a repository: its tabs, the list on the left and what is selected on the right. */
 .subprojects-repository { margin-left: 10px; color: var(--muted); font-weight: 400; }
+.subprojects-parent { opacity: .75; }
 dialog.subprojects-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 dialog.subprojects-dialog:has(> .app-window) > .app-window > .app-window-body > .subprojects { flex: 1 1 auto; }
 .subprojects { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }

@@ -57,6 +57,9 @@ test("the window of the sub-projects shows each entry, hides one, edits one, add
     assert.equal(await evaluate(`document.querySelector('.subprojects-row[data-state="missing"] input').disabled`), true);
     assert.match(await evaluate(`document.querySelector(".subprojects-problems").textContent`) as string, /1 problem/);
     assert.match(await evaluate(`document.querySelector(".subprojects-summary").textContent`) as string, /2 shown, 1 hidden, 1 optional, 1 unavailable/);
+    // A nested map: the window names the repository above, and an entry with a map of its own says how many sub-projects it has.
+    assert.equal(await evaluate(`document.querySelector(".subprojects-repository").textContent`), "platform › contoso");
+    assert.equal(await evaluate(`[...document.querySelectorAll(".subprojects-chip[data-nested]")].map(chip => chip.textContent.trim()).join("|")`), "2 sub-projects");
 
     // The switch of a hidden entry shows it again, for the user only.
     assert.equal(await click('.subprojects-row[data-state="hidden"] input'), true);
