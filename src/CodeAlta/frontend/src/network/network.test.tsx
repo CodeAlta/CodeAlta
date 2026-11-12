@@ -57,7 +57,9 @@ test("what the host could not apply, and settings of the file that do not run ye
   assert.equal(html.includes("Restart CodeAlta so that"), false);
   // The settings left the system mode while CodeAlta ran: the clients that used the system settings keep them.
   assert.match(view(listing({ mode: "manual", url: "http://proxy.corp:8080", appliedMode: "manual", restartAdvised: true })),
-    /Restart CodeAlta so that the connections it opened with the system settings use this proxy too\./);
+    /Restart CodeAlta so that the connections it opened before this change use these settings too\./);
+  // Back to the system settings: the clients of the manual proxy keep it, without the PAC failover of Windows.
+  assert.match(view(listing({ restartAdvised: true })), /Restart CodeAlta so that the connections it opened before this change use these settings too\./);
 });
 
 test("a manual proxy needs an address the host takes, and a password needs a user name and a password once", () => {

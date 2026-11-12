@@ -14,7 +14,8 @@ namespace CodeAlta.Catalog.Network;
 /// failover from one proxy to the next, which no other proxy can give. In the other modes this instance is the default
 /// proxy, and the clients ask it for each request: a change applies at once to the next request of every client that uses
 /// it, even one created before. A client that sent its first request while the system mode applied keeps the proxy of .NET
-/// until CodeAlta restarts (<see cref="RestartAdvised"/>). A connection already open stays as it is until it closes, and a
+/// until CodeAlta restarts, and one that did in another mode keeps this instance (<see cref="RestartAdvised"/>). A
+/// connection already open stays as it is until it closes, and a
 /// program already started keeps the environment it started with.
 /// </para>
 /// <para>
@@ -36,6 +37,7 @@ public sealed partial class NetworkProxy : IWebProxy
     private State _state;
     private bool _installed;
     private bool _systemExposed;
+    private bool _wrapperExposed;
 
     /// <summary>Initializes a proxy that does as the system says until <see cref="Apply"/> is called, and is the default proxy of no client.</summary>
     /// <param name="system">The proxy of the system, read before the environment is changed; null for none.</param>
@@ -84,14 +86,16 @@ public sealed partial class NetworkProxy : IWebProxy
     public IWebProxy Upstream { get; }
 
     /// <summary>
-    /// Gets whether clients of the process may still use the proxy of the system after the settings left the system mode: those
-    /// that sent their first request while it applied, which keep it until CodeAlta restarts.
+    /// Gets whether clients of the process may still use another proxy than the one of the settings applied, until CodeAlta
+    /// restarts: the proxy of the system for those that sent their first request while the system mode applied, once the
+    /// settings left it; this instance for those that did while another mode applied, once the settings came back to the
+    /// system mode (it gives them the proxy of the system, without the PAC failover of Windows).
     /// </summary>
     public bool RestartAdvised
     {
         get
         {
-            lock (_gate) return _systemExposed && Volatile.Read(ref _state).Settings.Mode != ProxyMode.System;
+            lock (_gate) return Volatile.Read(ref _state).Settings.Mode == ProxyMode.System ? _wrapperExposed : _systemExposed;
         }
     }
 
@@ -164,6 +168,8 @@ public sealed partial class NetworkProxy : IWebProxy
             {
                 _setDefault(this);
                 _installed = true;
+                // Every client that sends its first request from now on keeps this instance.
+                _wrapperExposed = true;
             }
 
             foreach (var (name, value) in variables) _setVariable(name, value);

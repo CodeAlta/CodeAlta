@@ -142,6 +142,16 @@ public sealed class NetworkRpcTests
     }
 
     [TestMethod]
+    public async Task TheListing_SaysWhenConnectionsOpenedBeforeAChangeKeepTheirProxy()
+    {
+        using var fixture = new Fixture();
+        Assert.IsFalse((await fixture.Service.ReadAsync(new(Epoch), CancellationToken.None)).RestartAdvised);
+        fixture.Restart = true;
+        Assert.IsTrue((await fixture.Service.SaveAsync(new(Epoch, "system", null, null, null, null, null), CancellationToken.None)).RestartAdvised,
+            "the answer of a save says it at once");
+    }
+
+    [TestMethod]
     public async Task Read_SaysWhenTheFileHoldsSettingsThatDoNotRun()
     {
         using var fixture = new Fixture();
@@ -177,6 +187,8 @@ public sealed class NetworkRpcTests
 
         public HttpStatusCode Answer { get; set; } = HttpStatusCode.OK;
 
+        public bool Restart { get; set; }
+
         public Exception? Failure { get; set; }
 
         public IWebProxy? Proxy { get; private set; }
@@ -192,7 +204,7 @@ public sealed class NetworkRpcTests
         {
             Proxy = proxy;
             return new Answering(this);
-        }) { SecretChanged = () => SecretChanges++ };
+        }) { SecretChanged = () => SecretChanges++, RestartAdvised = () => Restart };
 
         public void Dispose() => Directory.Delete(Root, recursive: true);
 

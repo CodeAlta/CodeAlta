@@ -247,7 +247,7 @@ public sealed class ProxySettingsTests
         Assert.IsTrue(proxy.RestartAdvised);
         proxy.Apply(ProxySettings.Default, null);
         Assert.AreSame(system, current, "back to the system mode, the proxy of .NET again");
-        Assert.IsFalse(proxy.RestartAdvised);
+        Assert.IsTrue(proxy.RestartAdvised, "the clients created in the manual mode keep this instance, without the PAC failover");
 
         // A start in the manual mode: no client ever had the proxy of .NET.
         IWebProxy? other = system;
@@ -255,6 +255,12 @@ public sealed class ProxySettingsTests
         manual.Apply(Manual with { Mode = ProxyMode.None }, null);
         Assert.AreSame(manual, other);
         Assert.IsFalse(manual.RestartAdvised);
+        manual.Apply(Manual, null);
+        Assert.IsFalse(manual.RestartAdvised, "from one mode of this instance to another, every client follows");
+        // To the system mode: the clients created in the none and manual modes keep this instance until a restart.
+        manual.Apply(ProxySettings.Default, null);
+        Assert.AreSame(system, other);
+        Assert.IsTrue(manual.RestartAdvised);
     }
 
     [TestMethod]
