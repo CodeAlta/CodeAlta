@@ -206,6 +206,31 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task NoSandbox_ReachesThePortTheMcpServerOfTheWindowListensOn_WhicheverItIs()
+    {
+        var backend = new InProcessBackend();
+        // An instance on another profile listens on a free port when 2582 is taken, and on another one after a restart.
+        var listening = 51234;
+        await using var f = await Fixture.CreateAsync(backend, reservedPorts: () => [Volatile.Read(ref listening)]);
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var tools = f.RoutedTools("s");
+
+        var reach = await f.Runtime.GetSandboxReachAsync("s");
+        Assert.IsNotNull(reach);
+        CollectionAssert.IsSubsetOf(new[] { 2582, 2583, 51234 }, reach.ReservedPorts.ToArray());
+        Assert.IsTrue((await tools.CallAsync("write_file", new { path = "boxed.txt", content = "in the box" })).Success);
+        CollectionAssert.IsSubsetOf(new[] { 2582, 2583, 51234 }, f.Runtime.SandboxWorkers.ReservedPorts.ToArray());
+
+        Volatile.Write(ref listening, 51235);
+        var moved = await f.Runtime.GetSandboxReachAsync("s");
+        Assert.IsTrue(moved!.ReservedPorts.Contains(51235));
+        Assert.AreNotEqual(reach.Fingerprint, moved.Fingerprint, "the browser of the session starts again with the new port");
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "boxed.txt" })).Success);
+        Assert.AreEqual(2, backend.Starts.Count, "the worker starts again with the port of the moment");
+    }
+
+    [TestMethod]
     public async Task ASandboxThatCannotRun_RefusesTheRunAndTheTools_AndSaysWhy()
     {
         var backend = new InProcessBackend { Available = false };
@@ -802,7 +827,8 @@ public sealed class SessionSandboxTests
 
         public CatalogOptions Options { get; }
 
-        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null, string? defaultSandbox = null)
+        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null, string? defaultSandbox = null,
+            Func<IReadOnlyCollection<int>>? reservedPorts = null)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
             var registry = new ModelProviderRegistry();
@@ -816,6 +842,7 @@ public sealed class SessionSandboxTests
                 sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: options), options)
             {
                 SandboxBackend = backend,
+                ReservedLocalPorts = reservedPorts,
                 DefaultSandbox = defaultSandbox,
                 SandboxDataRoot = Path.Combine(temp, "sandbox"),
                 ScratchpadRoot = Path.Combine(temp, "scratchpad"),

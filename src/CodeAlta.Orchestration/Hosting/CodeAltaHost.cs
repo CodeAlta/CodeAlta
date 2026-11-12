@@ -711,6 +711,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,
+                ReservedLocalPorts = options.ReservedLocalPorts,
                 SandboxWithheldValues = shellSecrets.Given,
                 DefaultSandbox = options.DefaultSandbox,
                 ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,

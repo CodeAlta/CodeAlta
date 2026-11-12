@@ -556,6 +556,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ModelServerTransports = modelServerTransports.Resolve,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
+                // No sandbox reaches the MCP server of the window, on whatever port it listens.
+                ReservedLocalPorts = () => mcp?.ListeningPort is { } listening ? [listening] : [],
                 // The normal instance asks a locked vault to unlock; the developer instance never does, beside the one the user works in.
                 CredentialPrompts = !options.Developer,
                 // The developer instance asks a vault to unlock on a click, once the user lets it in Settings › Secrets.
@@ -1117,7 +1119,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 browserHost.SignIn = (sessionId, origin, signInId, token) =>
                     DesktopSignIns.FillAsync(host.Credentials, host.RuntimeService.Permissions.RequestForSessionAsync, sessionId, origin, signInId, token);
                 var mcpPort = Mcp.DesktopMcpEndpoint.For(options).Port;
-                browserHost.ReservedPorts = () => DesktopBrowser.ReservedPorts(mcpPort);
+                // The port it listens on is read at each check: it is another one when the one asked for was taken, and
+                // after a restart of the server.
+                browserHost.ReservedPorts = () => DesktopBrowser.ReservedPorts(mcpPort, mcp?.ListeningPort);
                 // The UI tools and the browser tools have the same names: a session has one set or the other.
                 browserHost.Activated = sessionId => uiSessions.Set(sessionId, active: false);
                 uiSessions.Activated = browserHost.ReleaseTools;

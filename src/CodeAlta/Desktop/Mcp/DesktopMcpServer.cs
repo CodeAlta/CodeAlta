@@ -79,6 +79,8 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
     private WebApplication? _application;
     private DesktopMcpStatus _status;
     private bool _disposed;
+    // The port it listens on, 0 while it does not: read by the browser and the sandboxes of the sessions, never under the gate.
+    private int _listeningPort;
 
     /// <summary>Creates the server. It does not listen until <see cref="StartAsync"/>.</summary>
     /// <param name="endpoint">Where it listens.</param>
@@ -120,6 +122,12 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
 
     /// <summary>Raised when <see cref="Status"/> changed.</summary>
     internal event Action? Changed;
+
+    /// <summary>
+    /// Gets the port the server listens on now, null while it does not: the one it asked for, or the free one it took when
+    /// that one was taken (another instance on another profile), and another one after a restart.
+    /// </summary>
+    internal int? ListeningPort => Volatile.Read(ref _listeningPort) is var port and > 0 ? port : null;
 
     /// <summary>Starts listening when the server is turned on. A failure is kept in <see cref="Status"/>.</summary>
     internal async Task StartAsync()
@@ -228,7 +236,9 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
             }
 
             _application = application;
-            var url = endpoint.On(BoundPort(application)).Url;
+            var bound = BoundPort(application);
+            Volatile.Write(ref _listeningPort, bound);
+            var url = endpoint.On(bound).Url;
             WriteUrl(url);
             Info($"The MCP server listens at {url}");
             Set(new DesktopMcpStatus(DesktopMcpStatus.Running, true, url, token, null, tailnet));
@@ -246,6 +256,7 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         var application = _application;
         _application = null;
         if (application is null) return;
+        Volatile.Write(ref _listeningPort, 0);
         RemoveUrl();
         try
         {

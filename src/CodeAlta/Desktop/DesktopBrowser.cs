@@ -22,7 +22,17 @@ internal static class DesktopBrowser
                 Fingerprint = reach.Fingerprint,
             };
 
-    /// <summary>The ports of CodeAlta on this computer: the MCP servers of the window and of the developer instance.</summary>
-    /// <param name="mcpPort">The port of the MCP server of this window; 0 for one the system picks.</param>
-    internal static IReadOnlyList<int> ReservedPorts(int mcpPort) => mcpPort > 0 ? [2582, 2583, mcpPort] : [2582, 2583];
+    /// <summary>
+    /// The ports of CodeAlta on this computer: the MCP servers of the normal and the developer instances, the one this
+    /// window asked for and the one it listens on, which differs when that one was taken (an instance on another profile).
+    /// </summary>
+    /// <param name="mcpPort">The port the MCP server of this window asked for; 0 for one the system picks.</param>
+    /// <param name="listeningPort">The port the MCP server of this window listens on now, null while it does not.</param>
+    internal static IReadOnlyList<int> ReservedPorts(int mcpPort, int? listeningPort)
+    {
+        List<int> ports = [Mcp.DesktopMcpEndpoint.DefaultPort, Mcp.DesktopMcpEndpoint.DeveloperPort];
+        if (mcpPort > 0 && !ports.Contains(mcpPort)) ports.Add(mcpPort);
+        if (listeningPort is { } listening && listening > 0 && !ports.Contains(listening)) ports.Add(listening);
+        return ports;
+    }
 }

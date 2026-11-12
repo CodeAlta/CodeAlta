@@ -27,13 +27,20 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
     private readonly ISandboxBackend _backend;
     private readonly Func<string> _commandLine;
     private readonly Func<SandboxHost> _host;
-    private readonly IReadOnlySet<int> _reservedPorts;
+    private readonly Func<IReadOnlySet<int>> _reservedPorts;
     private readonly ConcurrentDictionary<string, Slot> _slots = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _closing = new();
     private readonly Task _sweeping;
     private SandboxHost? _discovered;
 
     public SessionSandboxWorkers(ISandboxBackend backend, Func<string> commandLine, Func<SandboxHost> host, IReadOnlySet<int> reservedPorts)
+        : this(backend, commandLine, host, () => reservedPorts)
+    {
+    }
+
+    // reservedPorts: the ports of CodeAlta no sandbox reaches now, read at each start: a worker started with others is
+    // started again, as for another policy.
+    public SessionSandboxWorkers(ISandboxBackend backend, Func<string> commandLine, Func<SandboxHost> host, Func<IReadOnlySet<int>> reservedPorts)
     {
         _backend = backend;
         _commandLine = commandLine;
@@ -44,7 +51,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
 
     public ISandboxBackend Backend => _backend;
 
-    public IReadOnlySet<int> ReservedPorts => _reservedPorts;
+    public IReadOnlySet<int> ReservedPorts => _reservedPorts();
 
     /// <summary>Gets the policy a session would run with, without starting anything.</summary>
     public SandboxPolicy PolicyOf(SessionSandboxStart start)
@@ -58,7 +65,8 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
     public async Task<Lease> AcquireAsync(SessionSandboxStart start, CancellationToken cancellationToken)
     {
         var policy = PolicyOf(start);
-        var key = KeyOf(policy);
+        var reserved = _reservedPorts();
+        var key = KeyOf(policy) + "\u001D" + string.Join(',', reserved.Order());
         var slot = _slots.GetOrAdd(start.SessionId, static _ => new Slot());
         await slot.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -74,7 +82,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
                 SandboxNetworkProxy? proxy = null;
                 try
                 {
-                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts);
+                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, reserved);
                     var client = await SandboxWorkerClient.StartAsync(_backend, policy, _commandLine(), proxy?.Endpoint,
                         new SandboxWorkerInit(start.SessionId, start.ProviderId, policy.WorkingDirectory, [policy.WorkingDirectory, .. start.Folders.Writable],
                             start.Folders.Scratchpad, Host().HomeDirectory, start.CommandGuard), cancellationToken).ConfigureAwait(false);
@@ -129,7 +137,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         SandboxNetworkProxy? proxy = null;
         try
         {
-            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts);
+            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts());
             var process = await _backend.StartAsync(policy, SandboxCommandLine.Create(launch.FileName, launch.Arguments), proxy?.Endpoint, cancellationToken).ConfigureAwait(false);
             return new AgentProcess(process, proxy);
         }

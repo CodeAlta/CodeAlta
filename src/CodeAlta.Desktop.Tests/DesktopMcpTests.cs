@@ -263,6 +263,33 @@ public sealed class DesktopMcpTests
     }
 
     [TestMethod]
+    public async Task TheBrowserOfASession_NeverReachesThePortTheServerListensOn_AlsoAFreeOneItTook()
+    {
+        using var temp = new TempFolder();
+        using var other = new TcpListener(IPAddress.Loopback, 0);
+        other.Start();
+        // The port of the normal instance, taken: an instance on another profile listens on a free one.
+        var taken = ((IPEndPoint)other.LocalEndpoint).Port;
+
+        await using var server = new DesktopMcpServer(new DesktopMcpEndpoint("127.0.0.1", taken, Chosen: false), () => [], temp.Path, "1");
+        Assert.IsNull(server.ListeningPort);
+        await server.StartAsync();
+        Assert.AreEqual(DesktopMcpStatus.Running, server.Status.State, server.Status.Error);
+        var listening = server.ListeningPort;
+        Assert.IsNotNull(listening);
+        Assert.AreNotEqual(taken, listening);
+        Assert.AreEqual($"http://127.0.0.1:{listening}/mcp", server.Status.Url);
+
+        var reserved = DesktopBrowser.ReservedPorts(taken, server.ListeningPort);
+        CollectionAssert.IsSubsetOf(new[] { 2582, 2583, taken, listening.Value }, reserved.ToArray());
+
+        await server.SetEnabledAsync(false);
+        Assert.IsNull(server.ListeningPort, "a stopped server listens on no port");
+        CollectionAssert.AreEqual(new[] { 2582, 2583, taken }, DesktopBrowser.ReservedPorts(taken, server.ListeningPort).ToArray());
+        CollectionAssert.AreEqual(new[] { 2582, 2583 }, DesktopBrowser.ReservedPorts(2582, 2582).ToArray(), "the normal instance, as before");
+    }
+
+    [TestMethod]
     public async Task Server_TakesAFreePort_WhenItsOwnIsTaken_ButNotWhenTheUserNamedIt()
     {
         using var temp = new TempFolder();

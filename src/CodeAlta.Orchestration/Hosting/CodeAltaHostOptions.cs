@@ -256,6 +256,12 @@ public sealed class CodeAltaHostOptions
     public ISandboxBackend? SandboxBackend { get; init; }
 
     /// <summary>
+    /// Gets the ports of this computer of the host itself that no sandbox reaches, beside those of the MCP servers of
+    /// CodeAlta Desktop (<see cref="Runtime.SessionRuntimeService.ReservedLocalPorts"/>); null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<int>>? ReservedLocalPorts { get; init; }
+
+    /// <summary>
     /// Gets the profile the sessions of the host run in when no scope sandboxes them, where the sandbox can run
     /// (<see cref="Runtime.SessionRuntimeService.DefaultSandbox"/>); null, the default, for none.
     /// </summary>

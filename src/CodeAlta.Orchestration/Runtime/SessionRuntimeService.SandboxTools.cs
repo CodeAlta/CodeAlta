@@ -31,6 +31,21 @@ public sealed partial class SessionRuntimeService
     /// </summary>
     public string? SandboxWorkerCommandLine { get; init; }
 
+    /// <summary>
+    /// Gets or initializes the ports of this computer of the host itself that no sandbox reaches, beside 2582 and 2583, the
+    /// ports of the MCP servers of CodeAlta Desktop: the port the MCP server of the window listens on, which is another one
+    /// when that one was taken. It is read at each start of a worker and of a proxy, so a port that changes is followed.
+    /// Null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<int>>? ReservedLocalPorts { get; init; }
+
+    // The ports no sandbox reaches now: CodeAlta's own.
+    internal IReadOnlySet<int> CurrentReservedPorts()
+    {
+        if (ReservedLocalPorts?.Invoke() is not { Count: > 0 } more || more.All(ReservedSandboxPorts.Contains)) return ReservedSandboxPorts;
+        return new HashSet<int>([.. ReservedSandboxPorts, .. more.Where(static port => port > 0)]);
+    }
+
     /// <summary>Gets or initializes the folder where the sandboxes keep their data; null for <see cref="SandboxHostDiscovery.DefaultDataRoot"/>.</summary>
     public string? SandboxDataRoot { get; init; }
 
@@ -50,7 +65,7 @@ public sealed partial class SessionRuntimeService
                 return _sandboxWorkers ??= new SessionSandboxWorkers(SandboxBackend ?? new MxcSandboxBackend(), WorkerCommandLine,
                     () => SandboxHostDiscovery.Current(SandboxDataRoot ?? SandboxHostDiscovery.DefaultDataRoot(), [_catalogOptions.GlobalRoot, _catalogOptions.StateRoot])
                         with { WithheldValues = SandboxWithheldValues ?? [] },
-                    ReservedSandboxPorts);
+                    CurrentReservedPorts);
             }
         }
     }
@@ -167,14 +182,14 @@ public sealed partial class SessionRuntimeService
         var name = sandbox.Profile?.Name ?? sandbox.Choice.Profile ?? "?";
         if (sandbox.Profile is not { } profile || !_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
         {
-            return new SessionSandboxReach(name, [], [], SandboxNetwork.Off, [], [], ReservedSandboxPorts);
+            return new SessionSandboxReach(name, [], [], SandboxNetwork.Off, [], [], CurrentReservedPorts());
         }
 
         var start = await SandboxStartOfAsync(sessionId, entry.ProviderKey, profile, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.ProjectRoots, environment: null,
             commandGuard: false, cancellationToken).ConfigureAwait(false);
         var policy = SandboxWorkers.PolicyOf(start);
         return new SessionSandboxReach(policy.ProfileName, [.. policy.ReadWrite, .. profile.Read], policy.ReadWrite, policy.Network,
-            policy.Network == SandboxNetwork.On ? null : policy.Hosts, policy.LocalPorts, ReservedSandboxPorts)
+            policy.Network == SandboxNetwork.On ? null : policy.Hosts, policy.LocalPorts, CurrentReservedPorts())
         {
             Denied = policy.Denied,
             Protected = policy.Protected,
