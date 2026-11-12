@@ -357,6 +357,13 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public bool CredentialsDeveloperInstance { get; init; }
 
+    /// <summary>
+    /// Gets whether a provider whose key is kept in a vault that cannot give it yet is registered waiting rather than left out:
+    /// a run of it then asks the vault to unlock and waits. Only for a host that registers such a provider again once the vault
+    /// opens (CodeAlta Desktop does, on the changes of its credential broker).
+    /// </summary>
+    public bool WaitForVaultProviders { get; init; }
+
     /// <summary>Gets what verifies the user before a secret that asks before use is given; null where nobody can be asked.</summary>
     public CodeAlta.Credentials.IUserPresenceVerifier? UserPresenceVerifier { get; init; }
 

@@ -51,3 +51,23 @@ public interface IBoundSecretSource
     /// <returns>Null when it may; else why not, naming the secret.</returns>
     string? AuthorizeUse(string name, string? use);
 }
+
+/// <summary>
+/// What a host that keeps secrets in vaults does for a provider whose key it cannot give yet: says what the provider waits for,
+/// and asks for it (the vault to unlock, the use to be confirmed) when a run needs the provider.
+/// </summary>
+public interface IProviderSecretWaiter
+{
+    /// <summary>Gets what a provider that names these secrets waits for: a sentence when one of them is kept in a vault that cannot give it now; null when none is.</summary>
+    /// <param name="names">The secrets the provider names.</param>
+    /// <param name="use">What uses them, such as <c>provider anthropic</c>.</param>
+    /// <returns>The sentence, or null.</returns>
+    string? WaitsFor(IReadOnlyCollection<string> names, string use);
+
+    /// <summary>Asks for the secrets (a vault to unlock, a use to confirm) and waits until each one can be given.</summary>
+    /// <param name="names">The secrets the provider names.</param>
+    /// <param name="use">What uses them.</param>
+    /// <param name="cancellationToken">A token to stop.</param>
+    /// <returns>True once each one can be given; false when this host cannot get one now (nobody to ask, a prompt dismissed).</returns>
+    Task<bool> WaitAsync(IReadOnlyCollection<string> names, string use, CancellationToken cancellationToken);
+}

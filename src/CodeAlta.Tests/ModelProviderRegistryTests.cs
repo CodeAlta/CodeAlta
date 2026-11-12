@@ -96,6 +96,67 @@ public sealed class ModelProviderRegistryTests
         CollectionAssert.AreEqual(new[] { disabled, enabled }, registry.ListProviders(includeDisabled: true).ToArray());
     }
 
+    [TestMethod]
+    public async Task Registry_WaitingProviderIsListedButHasNoRuntime()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("anthropic"), "Anthropic", "anthropic") { WaitsFor = "The provider anthropic waits: its vault is locked." };
+        registry.RegisterWaiting(descriptor, static _ => Task.FromResult(false));
+
+        Assert.IsTrue(registry.TryGetProvider(new ModelProviderId("anthropic"), out var found));
+        Assert.AreSame(descriptor, found);
+        var failure = await Assert.ThrowsExactlyAsync<ModelProviderWaitingException>(() => registry.CreateRuntimeAsync(new ModelProviderId("anthropic")).AsTask());
+        Assert.AreEqual(descriptor.WaitsFor, failure.Message);
+        await Assert.ThrowsExactlyAsync<ModelProviderWaitingException>(() => registry.GetOrCreateRuntimeAsync(new ModelProviderId("anthropic")).AsTask());
+        Assert.ThrowsExactly<ArgumentException>(() => registry.RegisterWaiting(descriptor with { WaitsFor = null }, static _ => Task.FromResult(true)));
+    }
+
+    [TestMethod]
+    public async Task Registry_RunOfAWaitingProviderEndsOnceItIsRegisteredAgain()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("anthropic"), "Anthropic", "anthropic");
+        var asked = 0;
+        var unlock = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        registry.RegisterWaiting(descriptor with { WaitsFor = "locked" }, _ => { Interlocked.Increment(ref asked); return unlock.Task; });
+        await registry.WaitForProviderAsync(new ModelProviderId("other"), CancellationToken.None).WithinAsync(TestTime.Seconds(5));
+
+        var first = registry.WaitForProviderAsync(new ModelProviderId("anthropic"), CancellationToken.None);
+        var second = registry.WaitForProviderAsync(new ModelProviderId("ANTHROPIC"), CancellationToken.None);
+        unlock.SetResult(true);
+        Assert.IsFalse(first.IsCompleted, "A run waits for the provider to be registered again, not only for the vault.");
+        registry.RegisterOrReplace(descriptor, () => new TestModelProviderRuntime(descriptor));
+        await Task.WhenAll(first, second).WithinAsync(TestTime.Seconds(5));
+
+        Assert.AreEqual(2, asked);
+        Assert.IsNotNull(await registry.CreateRuntimeAsync(new ModelProviderId("anthropic")));
+        await registry.WaitForProviderAsync(new ModelProviderId("anthropic"), CancellationToken.None).WithinAsync(TestTime.Seconds(5));
+        Assert.AreEqual(2, asked, "A provider that runs asks for nothing.");
+    }
+
+    [TestMethod]
+    public async Task Registry_RunOfAWaitingProviderFailsWithWhatItWaitsFor()
+    {
+        await using var registry = new ModelProviderRegistry { RegistrationWaitTime = TestTime.Milliseconds(100) };
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("anthropic"), "Anthropic", "anthropic") { WaitsFor = "The vault is locked." };
+        var given = false;
+        registry.RegisterWaiting(descriptor, _ => Task.FromResult(given));
+
+        var refused = await Assert.ThrowsExactlyAsync<ModelProviderWaitingException>(
+            () => registry.WaitForProviderAsync(new ModelProviderId("anthropic"), CancellationToken.None).WithinAsync(TestTime.Seconds(5)));
+        Assert.AreEqual("The vault is locked.", refused.Message);
+        Assert.AreEqual("anthropic", refused.ProviderKey);
+
+        given = true;
+        await Assert.ThrowsExactlyAsync<ModelProviderWaitingException>(
+            () => registry.WaitForProviderAsync(new ModelProviderId("anthropic"), CancellationToken.None).WithinAsync(TestTime.Seconds(5)),
+            "A provider the host does not register again ends the wait.");
+
+        var removed = registry.WaitForProviderAsync(new ModelProviderId("anthropic"), CancellationToken.None);
+        registry.Unregister(new ModelProviderId("anthropic"));
+        await removed.WithinAsync(TestTime.Seconds(5));
+    }
+
     private sealed class TestModelProviderRuntime(ModelProviderDescriptor descriptor) : IModelProviderRuntime
     {
         public ModelProviderDescriptor Descriptor { get; } = descriptor;

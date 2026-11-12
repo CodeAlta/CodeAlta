@@ -20,7 +20,9 @@ internal sealed partial class GlobalConfigService
         {
             try
             {
-                var running = _registry.ListProviders(includeDisabled: true).Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                // A provider registered waiting for its secrets is registered again: only a provider that runs is left as it is.
+                var running = _registry.ListProviders(includeDisabled: true).Where(static descriptor => descriptor.WaitsFor is null)
+                    .Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var definitions = _store.LoadGlobalProviderDefinitions(includeDisabled: false)
                     .Where(definition => definition.Enabled != false && !running.Contains(definition.ProviderKey) && Names(definition, names))
                     .ToList();

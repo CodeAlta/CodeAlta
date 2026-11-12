@@ -273,6 +273,10 @@ public sealed class PluginModelProviderTypes
                 registered.Add(descriptor);
                 owners[descriptor.ProviderId.Value] = Find(settings.ProviderType)!;
             }
+            else if (RegisterWaiting(registry, settings) is { } waiting)
+            {
+                owners[waiting.ProviderId.Value] = Find(settings.ProviderType)!;
+            }
         }
 
         lock (_gate) _registered = owners;
@@ -302,7 +306,9 @@ public sealed class PluginModelProviderTypes
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
         ArgumentNullException.ThrowIfNull(include);
         if (Types.Count == 0) return [];
-        var running = registry.ListProviders(includeDisabled: true).Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A provider registered waiting for its secrets is registered again: only a provider that runs is left as it is.
+        var running = registry.ListProviders(includeDisabled: true).Where(static descriptor => descriptor.WaitsFor is null)
+            .Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var defaultProvider = store.GetEffectiveDefaultProvider();
         var registered = new List<ModelProviderDescriptor>();
         foreach (var provider in store.LoadGlobalExternalProviders())
@@ -322,6 +328,49 @@ public sealed class PluginModelProviderTypes
 
     // The settings a runtime is given: the texts of the tables of the section (the environment of an agent) with the values of their
     // references, each secret told to the masking first; the settings themselves when nothing refers; null with what is not set.
+    // A provider left out because a secret of its settings is kept in a vault that cannot give it now (locked, waiting for a
+    // confirmation) is registered waiting, with the descriptor it would have: a run of it asks for the secret, and the host
+    // registers the provider again once the secret can be given. Without a waiter, or for any other reason, it stays left out.
+    private ModelProviderDescriptor? RegisterWaiting(ModelProviderRegistry registry, PluginProviderSettings settings)
+    {
+        if (registry.SecretWaiter is not { } waiter || Find(settings.ProviderType) is not { } contribution) return null;
+        var names = SecretNamesOf(settings);
+        if (names.Count == 0) return null;
+        var use = $"provider {settings.ProviderKey}";
+        if (waiter.WaitsFor(names, use) is not { } waitsFor) return null;
+        try
+        {
+            if (contribution.Validate?.Invoke(settings) is { Count: > 0 }) return null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return null;
+        }
+
+        var descriptor = CreateDescriptor(contribution, settings) with { WaitsFor = $"The provider {settings.ProviderKey} waits: {waitsFor}" };
+        registry.RegisterWaiting(descriptor, cancellationToken => waiter.WaitAsync(names, use, cancellationToken));
+        Logger.Info($"Registered model provider key={settings.ProviderKey} type={settings.ProviderType} waiting for its secrets");
+        return descriptor;
+    }
+
+    // The secrets the tables of the settings of a provider name (${secret:NAME}), such as the variables of its program.
+    internal static IReadOnlyList<string> SecretNamesOf(PluginProviderSettings settings)
+    {
+        var names = new List<string>();
+        foreach (var value in settings.Values.Values)
+        {
+            if (value is not IReadOnlyDictionary<string, object?> table) continue;
+            foreach (var item in table.Values)
+            {
+                if (item is not string text) continue;
+                foreach (var reference in CodeAlta.Catalog.Secrets.SecretReferences.Find(text))
+                    if (reference.Kind == CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret && !names.Contains(reference.Name, StringComparer.OrdinalIgnoreCase)) names.Add(reference.Name);
+            }
+        }
+
+        return names;
+    }
+
     private static PluginProviderSettings? ResolveReferences(PluginProviderSettings settings, string stateRootPath, Action<string>? secretIssued,
         CodeAlta.Agent.Runtime.IBoundSecretSource? boundSecrets, out string? problem)
     {

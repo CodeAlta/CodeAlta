@@ -613,6 +613,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         IReadOnlyList<AgentModelInfo> models;
         try
         {
+            // A provider whose key is in a vault that is locked asks it to unlock, and is registered again once it opens.
+            await _host.ModelProviderRegistry.WaitForProviderAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
+            if (FindProvider(providerKey) is { IsEnabled: true } registered) provider = registered;
             models = await _host.ModelProviderInitializationService.GetModelsAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or NotSupportedException)

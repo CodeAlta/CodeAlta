@@ -547,6 +547,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 CredentialPrompts = !options.Developer,
                 // The developer instance asks a vault to unlock on a click, once the user lets it in Settings › Secrets.
                 CredentialsDeveloperInstance = options.Developer,
+                // A provider whose key waits for a vault stays listed, and a session that uses it asks the vault to unlock.
+                WaitForVaultProviders = true,
                 // Windows Hello opens over the window of CodeAlta; Touch ID needs no window.
                 UserPresenceVerifier = CodeAlta.Credentials.SystemUserPresence.ForThisSystem(() => window is { IsClosed: false } shown && OperatingSystem.IsWindows()
                     ? shown.GetNativeHandle(NeoNativeHandleKind.Win32Hwnd).Value : 0),

@@ -384,6 +384,52 @@ public sealed class ConfiguredProviderRegistrationTests
         }
     }
 
+    [TestMethod]
+    public async Task AProviderWhoseSecretIsInALockedVault_IsRegisteredWaiting_OnlyWhereTheHostCanAskForIt()
+    {
+        var stateRoot = NewStateRoot();
+        var definition = CreateDefinition("anthropic");
+        definition.ApiKey = null;
+        definition.ApiKeySecret = "VAULT_KEY";
+        definition.Env = new() { ["OTHER"] = "${secret:OTHER_KEY} and ${env:PATH}" };
+
+        await using var plain = new ModelProviderRegistry();
+        Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(plain, [definition], stateRoot).Count);
+        Assert.IsFalse(plain.TryGetProvider(new ModelProviderId("fixture"), out _), "without a waiter the provider is left out");
+
+        var waiter = new Waiter { Answer = "its secret VAULT_KEY is kept in 1Password, which is locked." };
+        await using var registry = new ModelProviderRegistry { SecretWaiter = waiter };
+        Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry, [definition], stateRoot).Count, "a waiting provider does not run");
+        Assert.IsTrue(registry.TryGetProvider(new ModelProviderId("fixture"), out var waiting));
+        Assert.AreEqual(("anthropic", "The provider fixture waits: its secret VAULT_KEY is kept in 1Password, which is locked."), (waiting.ProviderType, waiting.WaitsFor));
+        CollectionAssert.AreEqual(new[] { "VAULT_KEY", "OTHER_KEY" }, waiter.Names.ToArray());
+        Assert.AreEqual("provider fixture", waiter.Use);
+        await Assert.ThrowsExactlyAsync<ModelProviderWaitingException>(() => registry.CreateRuntimeAsync(new ModelProviderId("fixture")).AsTask());
+
+        // A secret that is not set at all waits for nothing: the provider is left out as before.
+        waiter.Answer = null;
+        definition.ProviderKey = "unset";
+        ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry, [definition], stateRoot);
+        Assert.IsFalse(registry.TryGetProvider(new ModelProviderId("unset"), out _));
+    }
+
+    private sealed class Waiter : CodeAlta.Agent.Runtime.IProviderSecretWaiter
+    {
+        public string? Answer { get; set; }
+
+        public IReadOnlyCollection<string> Names { get; private set; } = [];
+
+        public string? Use { get; private set; }
+
+        public string? WaitsFor(IReadOnlyCollection<string> names, string use)
+        {
+            (Names, Use) = (names, use);
+            return Answer;
+        }
+
+        public Task<bool> WaitAsync(IReadOnlyCollection<string> names, string use, CancellationToken cancellationToken) => Task.FromResult(true);
+    }
+
     private static string NewStateRoot()
         => Path.Combine(Path.GetTempPath(), "CodeAlta.Hosting.Tests", Guid.NewGuid().ToString("N"));
 

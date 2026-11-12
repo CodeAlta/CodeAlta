@@ -13,6 +13,9 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     // The gate of a provider outlives its registrations: the requests of the sessions that still run on a former runtime
     // count with those of the new one, and a new limit applies to all of them.
     private readonly Dictionary<string, ProviderRequestGate> _requestGates = new(StringComparer.OrdinalIgnoreCase);
+    // The providers that wait (a key kept in a locked vault): what asks for it, and what completes when the provider is
+    // registered again or removed.
+    private readonly Dictionary<string, Waiting> _waiting = new(StringComparer.OrdinalIgnoreCase);
     private long _lastVersion;
     private bool _closed;
 
@@ -49,6 +52,19 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     /// providers registered here are given for their own use (<c>provider &lt;key&gt;</c>); null for a host without them.
     /// </summary>
     public Runtime.IBoundSecretSource? BoundSecrets { get; set; }
+
+    /// <summary>
+    /// Gets or sets what asks for the secrets of a provider that cannot have them yet, such as a key kept in a locked vault: with
+    /// it, such a provider is registered waiting (<see cref="RegisterWaiting"/>) instead of being left out, and a run of it asks
+    /// for them. Null leaves such a provider out.
+    /// </summary>
+    public Runtime.IProviderSecretWaiter? SecretWaiter { get; set; }
+
+    /// <summary>
+    /// Gets or initializes how long a run waits, once what a waiting provider needed was given, for the host to register the
+    /// provider again (<see cref="WaitForProviderAsync"/>); 30 seconds by default.
+    /// </summary>
+    public TimeSpan RegistrationWaitTime { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets what gives the transport of a provider that names a model server (<c>server = "&lt;machine&gt;/&lt;server&gt;"</c>):
@@ -88,12 +104,81 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(runtimeFactory);
+        Register(descriptor, runtimeFactory, null);
+    }
 
+    /// <summary>
+    /// Registers or replaces a provider that waits before it can run (its key kept in a locked vault): it is listed with what it
+    /// waits for, anything that would create its runtime sees it as not registered (<see cref="ModelProviderWaitingException"/>),
+    /// and a run asks for what it waits for (<see cref="WaitForProviderAsync"/>) until the provider is registered again.
+    /// </summary>
+    /// <param name="descriptor">The descriptor it would have; its <see cref="ModelProviderDescriptor.WaitsFor"/> says what it waits for.</param>
+    /// <param name="waitAsync">Asks for what it waits for, and answers whether it was given.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The descriptor says nothing of what it waits for.</exception>
+    /// <exception cref="InvalidOperationException">The provider's original model preparation still owns its cached runtime.</exception>
+    /// <exception cref="ObjectDisposedException">Registry shutdown has begun.</exception>
+    public void RegisterWaiting(ModelProviderDescriptor descriptor, Func<CancellationToken, Task<bool>> waitAsync)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(waitAsync);
+        if (string.IsNullOrWhiteSpace(descriptor.WaitsFor)) throw new ArgumentException("A waiting provider says what it waits for.", nameof(descriptor));
         var key = ModelProviderId.NormalizeValue(descriptor.ProviderId.Value);
+        var message = descriptor.WaitsFor;
+        Register(descriptor, () => throw new ModelProviderWaitingException(key, message), waitAsync);
+    }
+
+    /// <summary>
+    /// Waits, when a provider is registered waiting, until it can run: asks for what it waits for (a vault to unlock), then waits
+    /// for the provider to be registered again. A provider that runs, or that is not registered, returns at once.
+    /// </summary>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="cancellationToken">A token to stop.</param>
+    /// <returns>A task that ends once the provider can run.</returns>
+    /// <exception cref="ModelProviderWaitingException">What it waits for could not be had, or the provider was not registered again in time.</exception>
+    /// <exception cref="OperationCanceledException">The wait was canceled.</exception>
+    public async Task WaitForProviderAsync(ModelProviderId providerId, CancellationToken cancellationToken)
+    {
+        var key = ModelProviderId.NormalizeValue(providerId.Value);
+        Waiting waiting;
+        string message;
+        lock (_lock)
+        {
+            if (!_waiting.TryGetValue(key, out waiting)) return;
+            message = _registrations.TryGetValue(key, out var registration) ? registration.Descriptor.WaitsFor ?? string.Empty : string.Empty;
+        }
+
+        if (!await waiting.WaitAsync(cancellationToken).ConfigureAwait(false)) throw new ModelProviderWaitingException(key, message);
+        try
+        {
+            // The host registers the provider again once what it waited for is there: a few seconds at most.
+            await waiting.Registered.Task.WaitAsync(RegistrationWaitTime, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            throw new ModelProviderWaitingException(key, message);
+        }
+    }
+
+    private void Register(ModelProviderDescriptor descriptor, Func<IModelProviderRuntime> runtimeFactory, Func<CancellationToken, Task<bool>>? waitAsync)
+    {
+        var key = ModelProviderId.NormalizeValue(descriptor.ProviderId.Value);
+        TaskCompletionSource? registered = null;
         lock (_lock)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
             ThrowIfPreparing(key);
+            if (waitAsync is not null)
+            {
+                // A provider that waits again keeps the runs that already wait for it.
+                _waiting[key] = _waiting.TryGetValue(key, out var waiting) ? waiting with { WaitAsync = waitAsync }
+                    : new Waiting(waitAsync, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            }
+            else if (_waiting.Remove(key, out var waiting))
+            {
+                registered = waiting.Registered;
+            }
+
             if (_registrations.Remove(key, out var previous))
             {
                 DisposeRuntime(previous.Runtime);
@@ -109,6 +194,8 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
                 _requestGates[key] = new ProviderRequestGate(descriptor.ProviderId.Value, descriptor.MaxConcurrentRequests) { WaitScope = WaitScope };
             }
         }
+
+        registered?.TrySetResult();
     }
 
     /// <summary>
@@ -181,6 +268,8 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
             {
                 removed = registration;
             }
+
+            if (_waiting.Remove(key, out var waiting)) waiting.Registered.TrySetResult();
         }
 
         if (removed is null)
@@ -321,6 +410,8 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
                 .Cast<IModelProviderRuntime>()
                 .ToArray();
             _registrations.Clear();
+            foreach (var waiting in _waiting.Values) waiting.Registered.TrySetCanceled();
+            _waiting.Clear();
         }
 
         foreach (var runtime in runtimes)
@@ -393,5 +484,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
         Func<IModelProviderRuntime> Factory,
         IModelProviderRuntime? Runtime,
         long Version);
+
+    private readonly record struct Waiting(Func<CancellationToken, Task<bool>> WaitAsync, TaskCompletionSource Registered);
 
 }

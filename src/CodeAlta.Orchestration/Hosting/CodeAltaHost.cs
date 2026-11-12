@@ -630,6 +630,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
             }
 
             modelProviderRegistry.BoundSecrets = credentials;
+            // A provider whose key is in a vault that cannot give it yet is listed waiting, and a run of it asks the vault: only
+            // where the host registers it again once the vault opens (CodeAlta Desktop); elsewhere it is left out until then.
+            if (options.WaitForVaultProviders) modelProviderRegistry.SecretWaiter = new CodeAlta.Credentials.VaultSecretWaiter(credentials);
             pluginRuntime.Secrets.AttachBound(credentials);
             // The values of vaults given to the shells of the sessions, which never enter a sandbox under any name.
             var shellSecrets = new ShellBoundSecrets(credentials);

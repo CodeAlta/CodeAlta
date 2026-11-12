@@ -51,6 +51,13 @@ public sealed record ModelProviderDescriptor
     public Uri? BaseUri { get; init; }
 
     /// <summary>
+    /// Gets what the provider waits for before it can run, in words for the user, such as its key kept in a vault that is
+    /// locked; null for a provider that runs. A run of a waiting provider asks for it and waits
+    /// (<see cref="ModelProviderRegistry.WaitForProviderAsync"/>); anything else sees the provider as not registered.
+    /// </summary>
+    public string? WaitsFor { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether this provider is the default option within its source definition.
     /// </summary>
     public bool IsDefault { get; init; }

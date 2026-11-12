@@ -56,6 +56,8 @@ public sealed partial class AgentHub
         string? resumeId, CancellationToken cancellationToken)
     {
         var providerId = ResolveProviderId(options);
+        // A provider that waits for its key (a vault to unlock) is asked for it first: the session starts once it runs.
+        await _modelProviderRegistry.WaitForProviderAsync(providerId, cancellationToken).ConfigureAwait(false);
         lock (_disposalGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);

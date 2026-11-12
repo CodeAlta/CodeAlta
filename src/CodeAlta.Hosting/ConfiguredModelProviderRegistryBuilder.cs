@@ -180,6 +180,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports,
                     modelProviderRegistry.CliSignInHint))
             {
+                RegisterWaiting(modelProviderRegistry, definition);
                 continue;
             }
 
@@ -1211,6 +1212,51 @@ public static class ConfiguredModelProviderRegistryBuilder
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
             DefaultContextSize = definition.ContextSize is > 0 ? definition.ContextSize : null,
         };
+    }
+
+    // A provider left out because a secret it names is kept in a vault that cannot give it now (locked, waiting for a confirmation)
+    // is registered waiting, with the descriptor it would have: a run of it asks for the secret, and the host registers the provider
+    // again once the secret can be given. Without a waiter, or for any other reason, it stays left out.
+    private static void RegisterWaiting(ModelProviderRegistry registry, CodeAltaProviderDocument definition)
+    {
+        if (registry.SecretWaiter is not { } waiter) return;
+        var names = SecretNamesOf(definition);
+        if (names.Count == 0) return;
+        var use = $"provider {definition.ProviderKey}";
+        if (waiter.WaitsFor(names, use) is not { } waitsFor) return;
+        Uri? baseUri;
+        try
+        {
+            baseUri = ParseUri(definition.ApiUrl);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        var descriptor = CreateProviderDescriptor(definition, ResolveProviderDisplayName(definition), baseUri) with { WaitsFor = $"The provider {definition.ProviderKey} waits: {waitsFor}" };
+        registry.RegisterWaiting(descriptor, cancellationToken => waiter.WaitAsync(names, use, cancellationToken));
+        LogInfo($"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} waiting for its secrets");
+    }
+
+    // The secrets a provider names: its key (api_key_secret, or ${secret:NAME} as its key) and the variables of its program.
+    internal static IReadOnlyList<string> SecretNamesOf(CodeAltaProviderDocument definition)
+    {
+        var names = new List<string>();
+        void Add(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            foreach (var reference in SecretReferences.Find(text))
+                if (reference.Kind == SecretReferenceKind.Secret && !names.Contains(reference.Name, StringComparer.OrdinalIgnoreCase)) names.Add(reference.Name);
+        }
+
+        if (NormalizeText(definition.ApiKeySecret) is { } secret) names.Add(secret);
+        Add(definition.ApiKey);
+        if (definition.Env is { } environment)
+        {
+            foreach (var value in environment.Values) Add(value);
+        }
+        return names;
     }
 
     // The store refuses a rule that does not read; one written by hand that does not is left out rather than stopping the provider.

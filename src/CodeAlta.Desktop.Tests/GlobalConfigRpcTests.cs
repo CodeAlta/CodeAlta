@@ -153,6 +153,60 @@ type = "fake-agent"
         Assert.AreEqual("provider agent-work", vault.Uses[^1]);
     }
 
+    [TestMethod]
+    public async Task AProviderWaitingForALockedVault_IsReplacedOnceItsSecretCanBeGiven_AndItsRunsGoOn()
+    {
+        const string content = """
+[providers.work]
+type = "openai-responses"
+api_url = "https://provider.invalid/v1"
+api_key_secret = "VAULT_KEY"
+""";
+        await using var fixture = new Fixture(content);
+        var root = Path.GetDirectoryName(fixture.ConfigPath)!;
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(root).Bind("VAULT_KEY", "personal", "op://Private/Work/credential", "Private › Work › credential", "tests");
+        var vault = new OneSecretVault();
+        fixture.Registry.BoundSecrets = vault;
+        fixture.Registry.SecretWaiter = new UnlockingWaiter(vault);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, root, Epoch);
+
+        // The provider left out for its secret is written to the log, as the host has one.
+        var config = new XenoAtom.Logging.LogManagerConfig();
+        XenoAtom.Logging.LogManager.Initialize(config);
+        try
+        {
+            CodeAlta.Hosting.ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(fixture.Registry, fixture.Store.LoadGlobalProviderDefinitions(includeDisabled: false), root, null);
+            Assert.IsTrue(fixture.Registry.TryGetProvider(new ModelProviderId("work"), out var waiting), "the provider is listed while its vault is locked");
+            StringAssert.Contains(waiting.WaitsFor, "locked");
+
+            var run = fixture.Registry.WaitForProviderAsync(new ModelProviderId("work"), CancellationToken.None);
+            await service.ApplySecretsChangedAsync(["VAULT_KEY"]);
+            await run.WithinAsync(TestTime.Seconds(10));
+        }
+        finally
+        {
+            config.RootLogger.MinimumLevel = XenoAtom.Logging.LogLevel.None;
+            config.ApplyChanges();
+            XenoAtom.Logging.LogManager.Shutdown();
+        }
+
+        Assert.IsTrue(fixture.Registry.TryGetProvider(new ModelProviderId("work"), out var running));
+        Assert.IsNull(running.WaitsFor, "the provider runs with the key the vault gave");
+        Assert.IsNotNull(await fixture.Registry.CreateRuntimeAsync(new ModelProviderId("work")));
+    }
+
+    // Unlocks the vault when a run asks for it, as a prompt the user answers.
+    private sealed class UnlockingWaiter(OneSecretVault vault) : CodeAlta.Agent.Runtime.IProviderSecretWaiter
+    {
+        public string? WaitsFor(IReadOnlyCollection<string> names, string use) => vault.Unlocked ? null : "its secret is kept in 1Password, which is locked.";
+
+        public Task<bool> WaitAsync(IReadOnlyCollection<string> names, string use, CancellationToken cancellationToken)
+        {
+            vault.Unlocked = true;
+            return Task.FromResult(true);
+        }
+    }
+
     private sealed class OneSecretVault : CodeAlta.Agent.Runtime.IBoundSecretSource
     {
         public bool Unlocked { get; set; }

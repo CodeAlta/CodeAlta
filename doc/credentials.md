@@ -65,8 +65,17 @@ flowchart LR
   start, since agents start developer instances. A vault such as 1Password authorizes each process on its own, so values
   never pass from one instance to the other.
 - **Changes**: `Changed` names the secrets that became readable or not. CodeAlta Desktop then registers the model
-  providers that were left out for one of them (and only those, so that no runtime in use is replaced); an MCP server
-  that did not start for a missing secret is not remembered as failed, and starts at its next use.
+  providers that were left out or waiting for one of them (and only those, so that no runtime in use is replaced); an MCP
+  server that did not start for a missing secret is not remembered as failed, and starts at its next use.
+- **Waiting providers**: in CodeAlta Desktop (`WaitForVaultProviders`), a model provider whose secret a vault cannot give
+  now is registered *waiting* rather than left out: its descriptor says what it waits for (`WaitsFor`) and its factory
+  throws `ModelProviderWaitingException`. A run (`AgentHub.PrepareSessionAsync`, the headless driver of Code Mode
+  agents) calls `ModelProviderRegistry.WaitForProviderAsync`: `VaultSecretWaiter` asks the vault to unlock, one task per
+  vault shared by every run, or the user to confirm a secret that asks before use, and the run waits for the host to
+  register the provider again on `Changed`. It never asks where the host cannot prompt, for a vault whose password is
+  typed in the page, or again within two minutes of a dismissed prompt: the run then fails with `WaitsFor`. Hosts
+  without the waiter (`altacli`, `altanode`, the TUI) still leave such a provider out, since nothing registers it
+  again.
 
 ## Providers
 
