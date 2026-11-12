@@ -143,6 +143,12 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// </summary>
     public Func<IReadOnlyList<ChatResponseUpdate>, bool?>? ReadFastMode { get; init; }
 
+    /// <summary>
+    /// Gets or initializes what a turn gives the requests it sends while it runs, such as the headers whose values name the
+    /// session (<see cref="AgentRequestHeaderPlaceholders"/>): the scope it returns is disposed when the turn ends. Null for none.
+    /// </summary>
+    public Func<AgentTurnRequest, IDisposable?>? BeginTurn { get; init; }
+
     /// <summary>Gets or sets how long a response that stopped in the middle waits before it is asked again.</summary>
     internal TimeSpan MidStreamRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
 
@@ -164,6 +170,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         ArgumentNullException.ThrowIfNull(onUpdate);
         ArgumentNullException.ThrowIfNull(onSessionUpdate);
 
+        using var turnScope = BeginTurn?.Invoke(request);
         try
         {
             var chatClient = await _chatClientFactory(request.Provider, cancellationToken).ConfigureAwait(false);

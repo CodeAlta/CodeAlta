@@ -143,6 +143,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             IsRefusedReplayedReasoning = IsRefusedThinkingSignature,
             RefusedReasoning = provider.RefusedReasoning ?? new AgentRefusedReasoning(),
             ReadFastMode = ReadFastMode,
+            // A header whose value names the session (x-opencode-session = "${session.id}") is filled for each turn.
+            BeginTurn = request => AgentRequestHeaderPlaceholders.AnyIn(provider.ExtraHeaders)
+                ? provider.RequestHeaderContext.Push(AgentRequestHeaderPlaceholders.ForTurn(provider.ExtraHeaders, request))
+                : null,
         };
     }
 
@@ -601,7 +605,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             provider.ModelOverrides,
             provider.ModelsIncludeRegex,
             contextPriceTiers: true,
-            contextSizes: claudeApi ? [StandardContextSize] : null);
+            contextSizes: claudeApi ? [StandardContextSize] : null,
+            transport: providerDescriptor.TransportKind);
         return claudeApi
             ? [.. enriched.Select(model => WithFastMode(model, ModelsDevFastMode.Find(provider.ModelCatalog, ClaudeApiModelsDevProviderId, model.Id)))]
             : enriched;
@@ -665,10 +670,13 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         AnthropicProviderOptions provider,
         ModelProviderRuntimeDescriptor providerDescriptor)
     {
+        // The headers whose values name a placeholder are filled for each turn (AnthropicTurnHeadersHandler), and left out of
+        // a request outside a turn, such as the list of the models.
+        var turnHeaders = AgentRequestHeaderPlaceholders.AnyIn(provider.ExtraHeaders);
         var options = new ClientOptions
         {
             ApiKey = provider.ApiKey,
-            ExtraHeaders = provider.ExtraHeaders,
+            ExtraHeaders = turnHeaders ? AgentRequestHeaderPlaceholders.OutsideTurn(provider.ExtraHeaders) : provider.ExtraHeaders,
         };
         if (!string.IsNullOrEmpty(provider.AuthToken))
         {
@@ -687,6 +695,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         options.Handlers = provider.HttpHandlerFactory is null
             ? [new AnthropicToolDeferral.ToolReferenceHandler(), new AnthropicCompatibleEndpointHandler(provider.ApiKey)]
             : [new AnthropicToolDeferral.ToolReferenceHandler(), new AnthropicCompatibleEndpointHandler(provider.ApiKey), provider.HttpHandlerFactory()];
+        if (turnHeaders) options.Handlers = [new AnthropicTurnHeadersHandler(provider.RequestHeaderContext), .. options.Handlers];
 
         if (provider.BaseUri is not null)
         {

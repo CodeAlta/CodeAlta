@@ -100,6 +100,28 @@ reasoning_effort = "high"
 api_key_env = "CODEALTA_OPENAI_API_KEY"
 api_url = "https://api.openai.com/v1"
 
+[providers.opencode]
+enabled = false
+display_name = "OpenCode Zen"
+type = "openai-chat"
+api_key_env = "CODEALTA_OPENCODE_API_KEY"
+api_url = "https://opencode.ai/inference/openai/v1"
+models_dev_provider_id = "opencode"
+
+[providers.opencode.request.headers]
+"x-opencode-session" = "${session.id}"
+
+[providers.opencode-go]
+enabled = false
+display_name = "OpenCode Go"
+type = "openai-chat"
+api_key_env = "CODEALTA_OPENCODE_API_KEY"
+api_url = "https://opencode.ai/inference/go/openai/v1"
+models_dev_provider_id = "opencode-go"
+
+[providers.opencode-go.request.headers]
+"x-opencode-session" = "${session.id}"
+
 [providers.openrouter]
 enabled = false
 display_name = "OpenRouter"

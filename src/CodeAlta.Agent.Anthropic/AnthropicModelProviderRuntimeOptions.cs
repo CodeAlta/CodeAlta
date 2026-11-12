@@ -36,6 +36,9 @@ public sealed class AnthropicModelProviderRuntimeOptions
 /// </summary>
 public sealed class AnthropicProviderOptions
 {
+    /// <summary>The headers of the turns this provider runs, whose values name the session (<see cref="ExtraHeaders"/>).</summary>
+    internal AgentRequestHeaderContext RequestHeaderContext { get; } = new();
+
     /// <summary>
     /// Gets or sets the stable provider key used for local storage and configuration.
     /// </summary>

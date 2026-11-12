@@ -205,7 +205,7 @@ A provider on `openrouter.ai`, or one keyed `openrouter`, also sends OpenRouter'
 
 ## Session values in headers
 
-For `openai-chat` and `openai-responses`, a header value in `request.headers` or `model_request.<model-id>.headers` can name values filled for each request:
+For `openai-chat`, `openai-responses` and `anthropic`, a header value in `request.headers` (and, for the two OpenAI types, `model_request.<model-id>.headers`) can name values filled for each request:
 
 | Placeholder | Value |
 | --- | --- |
@@ -219,7 +219,7 @@ OpenCode Go and Zen ask for an `x-opencode-session` header that stays the same f
 ```toml
 [providers.opencode-go]
 type = "openai-chat"
-api_url = "https://opencode.ai/inference/go/v1"
+api_url = "https://opencode.ai/inference/go/openai/v1"
 api_key_env = "CODEALTA_OPENCODE_GO_API_KEY"
 models_dev_provider_id = "opencode-go"
 

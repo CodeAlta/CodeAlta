@@ -392,12 +392,32 @@ api_url = "http://localhost:9931/v1"  # optional: the address of llama-server 0.
 
 The server runs the model: what one model does wrong (a tool call left in its thinking, a template that ignores the effort) is fixed in llama.cpp or with its options, not in CodeAlta.
 
+## OpenCode
+
+OpenCode Zen (`opencode`, pay as you go) and OpenCode Go (`opencode-go`, the subscription) are built in, turned off: add your key from the OpenCode console, or set `CODEALTA_OPENCODE_API_KEY`. Each request names its session in `x-opencode-session`, which keeps a conversation on the same backend and its prompt cache, and which Go requires.
+
+OpenCode serves each model through one API: Chat Completions, Responses, Anthropic Messages or Gemini. A provider lists only the models of its own API, as [models.dev](https://models.dev) gives them. The built-in providers use Chat Completions; for the other models, add a provider of the same account for their API:
+
+```toml
+[providers.opencode-go-anthropic]
+display_name = "OpenCode Go (Anthropic)"
+type = "anthropic"
+api_url = "https://opencode.ai/inference/go/anthropic"
+api_key_env = "CODEALTA_OPENCODE_API_KEY"
+models_dev_provider_id = "opencode-go"
+
+[providers.opencode-go-anthropic.request.headers]
+"x-opencode-session" = "${session.id}"
+```
+
+For Zen, drop `/go` from the URLs. Use `type = "openai-responses"` with `/openai/v1` for the GPT models; Gemini models need `type = "google-genai"`, which does not fill `${session.id}`, so Go cannot use them.
+
 ## Other endpoints
 
 Any endpoint that speaks a supported API works as a provider of your own: **Custom provider…** in **Add provider**, or a table in the file with its `type`, `api_url` and key.
 
 - **DeepSeek, MiniMax, Kimi and Z.ai** are built in, with what their APIs expect already set; see the [built-in providers](readme.md#built-in-providers).
 - **OpenRouter** and similar services use `openai-responses` or `openai-chat`; see [Request customizations](configuration.md#request-customizations) for their headers.
-- **OpenCode Go and Zen** need a header with the session id: see [Session values in headers](configuration.md#session-values-in-headers).
+- **OpenCode Go and Zen** are built in: see [OpenCode](#opencode).
 - **Local servers** such as Ollama use `openai-chat` with their local `api_url`; llama.cpp has [its own type](#llamacpp).
 - An endpoint that serves one model, or lists none, takes `single_model_id` (see [Single-model endpoints](configuration.md#single-model-endpoints)); one that behaves differently from the API it imitates takes a [compatibility profile](configuration.md#compatibility-profile).

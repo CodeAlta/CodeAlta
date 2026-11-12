@@ -241,7 +241,8 @@ public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
-            provider.ModelsIncludeRegex);
+            provider.ModelsIncludeRegex,
+            transport: providerDescriptor.TransportKind);
     }
 
     private static Client CreateSdkClient(GoogleGenAIProviderOptions provider)

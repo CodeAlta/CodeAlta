@@ -90,8 +90,12 @@ On first run, CodeAlta writes a `~/.alta/config.toml` with these providers, all 
 | `kimi-for-coding` | Kimi for Coding | `anthropic` compatible | `kimi-for-coding`, high reasoning | `CODEALTA_KIMI_API_KEY` |
 | `minimax` | MiniMax | `anthropic` compatible | `MiniMax-M2.7`, low reasoning | `CODEALTA_MINIMAX_API_KEY` |
 | `openai` | OpenAI | `openai-responses` | `gpt-5.5`, high reasoning | `CODEALTA_OPENAI_API_KEY` |
+| `opencode` | OpenCode Zen | `openai-chat` | listed by the provider | `CODEALTA_OPENCODE_API_KEY` |
+| `opencode-go` | OpenCode Go | `openai-chat` | listed by the provider | `CODEALTA_OPENCODE_API_KEY` |
 | `xai` | xAI Grok | `xai` | `grok-4.3`, high reasoning | xAI sign-in |
 | `zai` | Z.ai | `openai-chat` | `glm-5.1` | `CODEALTA_ZAI_API_KEY` |
+
+OpenCode Zen (pay as you go) and OpenCode Go (the subscription) send the session in `x-opencode-session`, which Go requires. They list the models OpenCode serves through Chat Completions; see [OpenCode](setup.md#opencode) for the others.
 
 Kimi for Coding uses its international endpoint, `https://api.kimi.ai/coding/`. For an account in China, set **API URL** to `https://api.kimi.com/coding/`.
 
