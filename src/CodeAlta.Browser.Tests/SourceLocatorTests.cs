@@ -236,7 +236,7 @@ public sealed class SourceLocatorTests
     public async Task OnlyTheLoopbackIsFetched()
     {
         using var client = new HttpClient(new RefusingHandler());
-        var fetch = SourceLocator.LoopbackFetch(client, NoReservedPorts);
+        var fetch = LoopbackFetch(client, NoReservedPorts);
         Assert.IsNull(await fetch(new Uri("https://example.com/app.js"), CancellationToken.None));
         Assert.IsNull(await fetch(new Uri("http://127.0.0.1:9/app.js"), CancellationToken.None));
     }
@@ -271,7 +271,7 @@ public sealed class SourceLocatorTests
 
         var counting = new CountingHandler(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false });
         using var client = new HttpClient(counting, disposeHandler: true);
-        var fetch = SourceLocator.LoopbackFetch(client, NoReservedPorts);
+        var fetch = LoopbackFetch(client, NoReservedPorts);
         Assert.AreEqual("const ok = 'é';", await fetch(new Uri(server.Origin + "/small.js"), CancellationToken.None));
         Assert.IsNull(await fetch(new Uri(server.Origin + "/big.js"), CancellationToken.None));
         var read = Interlocked.Read(ref counting.Read);
@@ -361,12 +361,12 @@ public sealed class SourceLocatorTests
         await using var site = await LocalServer.StartAsync(app => app.MapGet("/app.js", () => Results.Content(AppScript(codeAlta.Origin + "/app.js.map"), "text/javascript")));
         using var client = SourceLocator.CreateClient();
 
-        var refused = await new SourceLocator(SourceLocator.LoopbackFetch(client, () => [codeAlta.Port]), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
+        var refused = await new SourceLocator(LoopbackFetch(client, () => [codeAlta.Port]), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
         Assert.AreEqual(0, Volatile.Read(ref maps), "A port of CodeAlta was reached.");
         Assert.IsFalse(refused.Any(static candidate => candidate.Kind == SourceKind.Created), string.Join("; ", refused));
 
         // The same port, when it is not CodeAlta's, is read: the map leads to the line that created the element.
-        var allowed = await new SourceLocator(SourceLocator.LoopbackFetch(client, NoReservedPorts), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
+        var allowed = await new SourceLocator(LoopbackFetch(client, NoReservedPorts), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
         Assert.AreEqual(1, Volatile.Read(ref maps));
         Assert.AreEqual(("src/App.tsx", 6), allowed.Where(static candidate => candidate.Kind == SourceKind.Created).Select(static candidate => (candidate.Path, candidate.Line)).Single());
     }
@@ -389,12 +389,12 @@ public sealed class SourceLocatorTests
         });
         using var client = SourceLocator.CreateClient();
 
-        var refused = await new SourceLocator(SourceLocator.LoopbackFetch(client, () => [codeAlta.Port]), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
+        var refused = await new SourceLocator(LoopbackFetch(client, () => [codeAlta.Port]), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
         Assert.AreEqual(0, Volatile.Read(ref maps), "A redirection led to a port of CodeAlta.");
         Assert.IsFalse(refused.Any(static candidate => candidate.Kind == SourceKind.Created), string.Join("; ", refused));
 
         // A redirection to a port that is not CodeAlta's is followed.
-        var allowed = await new SourceLocator(SourceLocator.LoopbackFetch(client, NoReservedPorts), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
+        var allowed = await new SourceLocator(LoopbackFetch(client, NoReservedPorts), Folders()).LocateAsync(CreatedBy(site.Origin + "/app.js"), CancellationToken.None);
         Assert.AreEqual(1, Volatile.Read(ref maps));
         Assert.AreEqual(("src/App.tsx", 6), allowed.Where(static candidate => candidate.Kind == SourceKind.Created).Select(static candidate => (candidate.Path, candidate.Line)).Single());
     }
@@ -534,6 +534,10 @@ public sealed class SourceLocatorTests
     private static readonly Func<Uri, CancellationToken, Task<string?>> NoFetch = static (_, _) => Task.FromResult<string?>(null);
 
     private static readonly Func<IReadOnlyList<int>> NoReservedPorts = static () => [];
+
+    // A loaded runner can take seconds to answer the first request of a server: the time of a fetch is a limit of the tests.
+    private static Func<Uri, CancellationToken, Task<string?>> LoopbackFetch(HttpClient client, Func<IReadOnlyList<int>> reservedPorts)
+        => SourceLocator.LoopbackFetch(client, reservedPorts, TestTime.Seconds(5));
 
     // The folders a session reads: the project, else the ones given.
     private Func<CancellationToken, ValueTask<BrowserFiles>> Folders(params string[] roots)

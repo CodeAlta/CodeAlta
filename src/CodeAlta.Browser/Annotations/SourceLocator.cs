@@ -71,6 +71,7 @@ internal sealed partial class SourceLocator
     private const int MaximumRedirections = 5;
     private const int MaximumFiles = 20000;
     private static readonly TimeSpan SearchBudget = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan FetchLimit = TimeSpan.FromSeconds(5);
 
     private static readonly FrozenSet<string> SkippedFolders = new[]
     {
@@ -104,7 +105,7 @@ internal sealed partial class SourceLocator
         _files = files;
     }
 
-    /// <summary>Creates the client <see cref="LoopbackFetch"/> takes: it follows no redirection itself and goes through no proxy.</summary>
+    /// <summary>Creates the client <see cref="LoopbackFetch(HttpClient, Func{IReadOnlyList{int}})"/> takes: it follows no redirection itself and goes through no proxy.</summary>
     public static HttpClient CreateClient() => new(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false }, disposeHandler: true);
 
     /// <summary>
@@ -115,6 +116,14 @@ internal sealed partial class SourceLocator
     /// <param name="reservedPorts">The ports of the loopback that are never reached: those of CodeAlta itself.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public static Func<Uri, CancellationToken, Task<string?>> LoopbackFetch(HttpClient client, Func<IReadOnlyList<int>> reservedPorts)
+        => LoopbackFetch(client, reservedPorts, FetchLimit);
+
+    /// <summary>As <see cref="LoopbackFetch(HttpClient, Func{IReadOnlyList{int}})"/>, with the time an address is given to answer.</summary>
+    /// <param name="client">A client that follows no redirection itself.</param>
+    /// <param name="reservedPorts">The ports of the loopback that are never reached.</param>
+    /// <param name="limit">How long an address, with its redirections, is given to answer.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    internal static Func<Uri, CancellationToken, Task<string?>> LoopbackFetch(HttpClient client, Func<IReadOnlyList<int>> reservedPorts, TimeSpan limit)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(reservedPorts);
@@ -123,7 +132,7 @@ internal sealed partial class SourceLocator
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                timeout.CancelAfter(limit);
                 // Each address is checked before it is asked, the ones redirections lead to too: the page's server could
                 // otherwise send the locator to a port of CodeAlta that the browser itself never reaches.
                 var current = uri;
