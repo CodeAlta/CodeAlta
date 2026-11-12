@@ -15,6 +15,7 @@ public sealed class ShellSecretConfirmationsTests
 {
     private const string Value = "local-deploy-value-1";
     private const string RegistryValue = "local-registry-value-1";
+    private const string SigningValue = "local-signing-value-1";
 
     [TestMethod]
     public async Task TheShell_WaitsForTheConfirmation_ThenGetsTheValue_InEachVariableThatNamesIt()
@@ -173,6 +174,13 @@ public sealed class ShellSecretConfirmationsTests
         Assert.HasCount(1, fixture.Verifier.Messages, "the user was verified once, for the first session");
         Assert.IsEmpty(fixture.Broker.ListPending());
 
+        // A secret the session that started it was never asked for is not asked for either: that session answers for it.
+        var other = await fixture.AttachAsync("other-child", new SessionSecretAttachment(Unattended: false, new Dictionary<string, bool>())).WithinAsync(TestTime.Seconds(30));
+        Assert.IsNull(other.Environment.Get("DEPLOY_TOKEN"));
+        Assert.HasCount(2, other.SecretProblems, "both secrets are named to the session");
+        StringAssert.Contains(other.SecretProblems[0], "its use was not confirmed for the session that started this one");
+        Assert.IsEmpty(fixture.Broker.ListPending(), "nothing waits for the user");
+
         // What the child starts takes the same answers in turn.
         var grandchild = await fixture.AttachAsync("grandchild", new SessionSecretAttachment(Unattended: false, child.SecretAnswers)).WithinAsync(TestTime.Seconds(30));
         Assert.AreEqual(Value, grandchild.Environment.Get("DEPLOY_TOKEN"));
@@ -230,6 +238,38 @@ public sealed class ShellSecretConfirmationsTests
     }
 
     [TestMethod]
+    public async Task ASecretThatAValueNamesAfterAnother_IsAskedForOnceTheFirstIsConfirmed()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.FifteenMinutes, compound: true);
+        const string use = "shell of the session session-14";
+
+        // SIGNED_ARTIFACT names DEPLOY, then SIGNING: the second is only read once the first is given.
+        var attaching = fixture.AttachAsync("session-14");
+        await fixture.AwaitedAsync(use, "DEPLOY");
+        await fixture.Broker.ConfirmAsync("DEPLOY", use);
+        await fixture.AwaitedAsync(use, "SIGNING");
+        Assert.IsFalse(attaching.IsCompleted, "the shell waits for the secret the second build asked for");
+        await fixture.Broker.ConfirmAsync("SIGNING", use);
+        var identity = await attaching.WithinAsync(TestTime.Seconds(30));
+
+        Assert.AreEqual($"{Value}/{SigningValue}", identity.Environment.Get("SIGNED_ARTIFACT"));
+        Assert.AreEqual(Value, identity.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsEmpty(identity.SecretProblems);
+        Assert.IsTrue(identity.SecretAnswers["SIGNING"]);
+        Assert.IsEmpty(fixture.Broker.ListPending());
+
+        // Denied, the second is named to the session, and its value is left out whole.
+        var denied = fixture.AttachAsync("session-15");
+        await fixture.AwaitedAsync("shell of the session session-15", "DEPLOY");
+        await fixture.Broker.ConfirmAsync("DEPLOY", "shell of the session session-15");
+        await fixture.AwaitedAsync("shell of the session session-15", "SIGNING");
+        fixture.Broker.Decline("SIGNING", "shell of the session session-15");
+        var without = await denied.WithinAsync(TestTime.Seconds(30));
+        Assert.IsNull(without.Environment.Get("SIGNED_ARTIFACT"));
+        StringAssert.Contains(without.SecretProblems.Single(), "SIGNING: its use was denied");
+    }
+
+    [TestMethod]
     public async Task ASecretConfirmed_ThatTheLastBuildIsNotGiven_IsNamedToTheSession_AndNoLongerWaits()
     {
         using var fixture = await Fixture.CreateAsync(SecretAskDurations.EachUse);
@@ -281,7 +321,7 @@ public sealed class ShellSecretConfirmationsTests
 
         public Verifier Verifier { get; }
 
-        public static async Task<Fixture> CreateAsync(string askBeforeUse, TimeSpan? timeout = null, bool canPrompt = true, bool second = false)
+        public static async Task<Fixture> CreateAsync(string askBeforeUse, TimeSpan? timeout = null, bool canPrompt = true, bool second = false, bool compound = false)
         {
             var temp = new TempDirectory();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "global") };
@@ -296,13 +336,22 @@ public sealed class ShellSecretConfirmationsTests
                 store.Bindings.SetAskBeforeUse("REGISTRY", SecretAskDurations.EachUse);
             }
 
+            // A third secret, which only a value that names DEPLOY before it names.
+            if (compound)
+            {
+                store.SetSecret("SIGNING", SigningValue, "alice");
+                store.Bindings.SetAskBeforeUse("SIGNING", askBeforeUse);
+            }
+
             var verifier = new Verifier();
             var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = options.GlobalRoot, Verifier = verifier, CanPrompt = canPrompt });
             var spaces = new SpaceCatalog(new ProjectCatalog(options));
             var space = (await spaces.CreateAsync("Deploy")).Space!;
-            Assert.IsTrue((await spaces.UpdateSettingsAsync(space.Id, _ => new SpaceSettings(Identity: new SpaceIdentity(Cli:
+            SpaceCliProfile[] profiles =
                 [new("deploy", [new("DEPLOY_TOKEN", "${secret:DEPLOY}"), new("DEPLOY_TOKEN_AGAIN", "${secret:DEPLOY}")]),
-                 new("registry", [new("REGISTRY_TOKEN", "${secret:REGISTRY}")])])))).Succeeded);
+                 new("registry", [new("REGISTRY_TOKEN", "${secret:REGISTRY}")])];
+            if (compound) profiles = [.. profiles, new("signing", [new("SIGNED_ARTIFACT", "${secret:DEPLOY}/${secret:SIGNING}")])];
+            Assert.IsTrue((await spaces.UpdateSettingsAsync(space.Id, _ => new SpaceSettings(Identity: new SpaceIdentity(Cli: profiles)))).Succeeded);
             // As the host builds the environment of a shell.
             var secrets = new CodeAltaHost.ShellBoundSecrets(broker);
             var confirmations = new CodeAltaHost.ShellSecretConfirmations(broker, secrets, timeout ?? TimeSpan.FromMinutes(2));
@@ -324,12 +373,15 @@ public sealed class ShellSecretConfirmationsTests
         public Task<SessionIdentity> ShowAsync(string sessionId) => _resolver.ResolveAsync(_spaceId, null, sessionId, null, CancellationToken.None);
 
         // The use once something waits for its answer, as the prompt of the window sees it.
-        public async Task<PendingSecretUse> AwaitedAsync(string use)
+        public Task<PendingSecretUse> AwaitedAsync(string use) => AwaitedAsync(use, null);
+
+        // The use of one secret once something waits for its answer.
+        public async Task<PendingSecretUse> AwaitedAsync(string use, string? name)
         {
             var until = DateTime.UtcNow + TestTime.Seconds(30);
             while (DateTime.UtcNow < until)
             {
-                if (Broker.ListPending().FirstOrDefault(pending => pending.Use == use && pending.AwaitedUntil is not null) is { } found) return found;
+                if (Broker.ListPending().FirstOrDefault(pending => pending.Use == use && pending.AwaitedUntil is not null && (name is null || pending.Name == name)) is { } found) return found;
                 await Task.Delay(10);
             }
 

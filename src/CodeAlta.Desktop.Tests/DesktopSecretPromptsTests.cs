@@ -94,15 +94,20 @@ public sealed class DesktopSecretPromptsTests
         using var broker = profile.Broker();
         var service = new SecretsService(store, Epoch) { Credentials = broker };
         const string use = "shell of the session s1";
-        var waits = ((string[])["DEPLOY", "REGISTRY"]).Select(name =>
-        {
-            broker.AuthorizeUse(name, use);
-            return broker.WaitForConfirmationAsync(name, use, TimeSpan.FromMinutes(2));
-        }).ToArray();
+        // The window watches the uses as the session starts: they are asked for, then start waiting together.
+        var surface = new FakeSurface { Sessions = [new("s1", "project", "Fix the parser", true, 0, false)] };
+        using var prompts = new DesktopSecretPrompts(surface, broker);
+        foreach (var name in (string[])["DEPLOY", "REGISTRY"]) broker.AuthorizeUse(name, use);
+        var waits = broker.WaitForConfirmationsAsync(["DEPLOY", "REGISTRY"], use, TimeSpan.FromMinutes(2));
 
         // A user who is not in front of the window gets one notification for the start of the session, which names both.
-        var surface = new FakeSurface { Sessions = [new("s1", "project", "Fix the parser", true, 0, false)] };
-        using var prompts = new DesktopSecretPrompts(surface, broker.ListPending);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(30);
+        while (surface.Shown.Count == 0)
+        {
+            Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The user was not told.");
+            await Task.Delay(10);
+        }
+
         await prompts.RefreshAsync();
         var shown = surface.Shown.Single();
         Assert.AreEqual(("Use 2 secrets?", "s1"), (shown.Title, shown.ActivationData));
@@ -110,7 +115,7 @@ public sealed class DesktopSecretPromptsTests
 
         // One Confirm of the window answers both, with one verification of the user.
         Assert.AreEqual("ok", (await service.ConfirmUseAsync(new SecretUseRequest(Epoch, "DEPLOY", use) { Names = ["DEPLOY", "REGISTRY"] }, CancellationToken.None)).Status);
-        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Confirmed }, await Task.WhenAll(waits).WithinAsync(TestTime.Seconds(30)));
+        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Confirmed }, (await waits.WithinAsync(TestTime.Seconds(30))).ToArray());
         await prompts.RefreshAsync();
         CollectionAssert.AreEqual(new[] { shown.Id }, surface.Removed, "the notification goes once nothing of it waits");
 

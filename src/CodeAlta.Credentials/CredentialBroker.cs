@@ -122,6 +122,9 @@ public enum SecretConfirmationOutcome
 
     /// <summary>Nobody can confirm a use here, or the system cannot verify the user now.</summary>
     Unavailable,
+
+    /// <summary>What waited was stopped before the user answered: the use no longer waits.</summary>
+    Stopped,
 }
 
 /// <summary>Tells which secrets may be given differently now.</summary>
@@ -869,52 +872,133 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     public async Task<SecretConfirmationOutcome> WaitForConfirmationAsync(string name, string? use, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
+        var outcome = (await WaitForConfirmationsAsync([name], use, timeout, cancellationToken).ConfigureAwait(false))[0];
+        if (outcome == SecretConfirmationOutcome.Stopped) throw new TaskCanceledException(null, null, cancellationToken);
+        return outcome;
+    }
+
+    /// <summary>
+    /// Waits for the user's answers to the uses one start asks for at once (<see cref="WaitForConfirmationAsync"/>), such as all the
+    /// secrets the shell of a session that starts names: they start waiting together, so that the window is told of them at once and
+    /// asks about them in one prompt, and they share one time. It never throws for a wait that is stopped: the uses not answered
+    /// then end <see cref="SecretConfirmationOutcome.Stopped"/> and no longer wait, also when the stop comes before they started.
+    /// </summary>
+    /// <param name="names">The secrets.</param>
+    /// <param name="use">The use, as it was asked for; null for a use nobody names.</param>
+    /// <param name="timeout">How long it waits for the answers.</param>
+    /// <param name="cancellationToken">A token to stop waiting.</param>
+    /// <returns>What each ended with, in the order of <paramref name="names"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="names"/> or one of them is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not positive.</exception>
+    public async Task<IReadOnlyList<SecretConfirmationOutcome>> WaitForConfirmationsAsync(IReadOnlyList<string> names, string? use, TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        foreach (var name in names) ArgumentNullException.ThrowIfNull(name, nameof(names));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
-        if (_options.Verifier is not { } verifier || !CanPrompt) return SecretConfirmationOutcome.Unavailable;
-        // A system that cannot verify the user now (Windows Hello turned off since the secret asked before use) could never confirm
-        // the use: nothing waits for it.
-        if (!(await verifier.GetAvailabilityAsync(cancellationToken).ConfigureAwait(false)).Available) return SecretConfirmationOutcome.Unavailable;
-        var key = KeyOf(name, use);
-        ConfirmationWaiter waiter;
-        lock (_gate)
+        var outcomes = new SecretConfirmationOutcome[names.Count];
+        if (names.Count == 0) return outcomes;
+        if (_options.Verifier is not { } verifier || !CanPrompt)
         {
-            if (_disposed) return SecretConfirmationOutcome.Unavailable;
-            if (!IsPendingUse(name, use)) return HasGrant(key) ? SecretConfirmationOutcome.Confirmed : SecretConfirmationOutcome.Declined;
-            waiter = new ConfirmationWaiter(_options.Time.GetUtcNow() + timeout);
-            if (!_waiters.TryGetValue(key, out var waiters)) _waiters[key] = waiters = [];
-            waiters.Add(waiter);
+            Array.Fill(outcomes, SecretConfirmationOutcome.Unavailable);
+            return outcomes;
         }
 
-        RaisePending();
+        // A system that cannot verify the user now (Windows Hello turned off since the secret asked before use) could never confirm
+        // the uses: nothing waits for them.
+        bool available;
         try
         {
-            return await waiter.Outcome.Task.WaitAsync(timeout, _options.Time, cancellationToken).ConfigureAwait(false);
+            available = (await verifier.GetAvailabilityAsync(cancellationToken).ConfigureAwait(false)).Available;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Stopped before anything waited: the uses this start asked for stop waiting, unless something else waits for them.
+            lock (_gate)
+            {
+                foreach (var name in names)
+                {
+                    var key = KeyOf(name, use);
+                    if (IsPendingUse(name, use) && !_waiters.ContainsKey(key)) StopWaitingFor(name, use, key);
+                }
+            }
+
+            RaisePending();
+            Array.Fill(outcomes, SecretConfirmationOutcome.Stopped);
+            return outcomes;
+        }
+
+        if (!available)
+        {
+            Array.Fill(outcomes, SecretConfirmationOutcome.Unavailable);
+            return outcomes;
+        }
+
+        var waiting = new ConfirmationWaiter?[names.Count];
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                Array.Fill(outcomes, SecretConfirmationOutcome.Unavailable);
+                return outcomes;
+            }
+
+            // They start waiting together, under one time: the window reads them all at its next notice.
+            var until = _options.Time.GetUtcNow() + timeout;
+            for (var index = 0; index < names.Count; index++)
+            {
+                var key = KeyOf(names[index], use);
+                if (!IsPendingUse(names[index], use))
+                {
+                    outcomes[index] = HasGrant(key) ? SecretConfirmationOutcome.Confirmed : SecretConfirmationOutcome.Declined;
+                    continue;
+                }
+
+                var waiter = waiting[index] = new ConfirmationWaiter(until);
+                if (!_waiters.TryGetValue(key, out var waiters)) _waiters[key] = waiters = [];
+                waiters.Add(waiter);
+            }
+        }
+
+        if (waiting.All(static waiter => waiter is null)) return outcomes;
+        RaisePending();
+        var answers = Task.WhenAll(waiting.Where(static waiter => waiter is not null).Select(static waiter => waiter!.Outcome.Task));
+        var stopped = false;
+        try
+        {
+            await answers.WaitAsync(timeout, _options.Time, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            lock (_gate)
-            {
-                // The answer came as the time ended.
-                if (waiter.Outcome.Task.IsCompletedSuccessfully) return waiter.Outcome.Task.Result;
-                // The last that waited stops: nothing would take the confirmation now, so the use stops waiting.
-                if (Forget(key, waiter)) StopWaitingFor(name, use, key);
-            }
-
-            RaisePending();
-            return SecretConfirmationOutcome.TimedOut;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            lock (_gate)
-            {
-                // The last that waited was stopped before an answer: nothing would take the confirmation now, so the use stops
-                // waiting, as one not answered in time.
-                if (Forget(key, waiter) && !waiter.Outcome.Task.IsCompletedSuccessfully) StopWaitingFor(name, use, key);
-            }
-
-            RaisePending();
-            throw;
+            stopped = true;
         }
+
+        var ended = false;
+        lock (_gate)
+        {
+            for (var index = 0; index < names.Count; index++)
+            {
+                if (waiting[index] is not { } waiter) continue;
+                // The answer came, also as the time ended.
+                if (waiter.Outcome.Task.IsCompletedSuccessfully)
+                {
+                    outcomes[index] = waiter.Outcome.Task.Result;
+                    continue;
+                }
+
+                outcomes[index] = stopped ? SecretConfirmationOutcome.Stopped : SecretConfirmationOutcome.TimedOut;
+                ended = true;
+                // The last that waited stops: nothing would take the confirmation now, so the use stops waiting.
+                var key = KeyOf(names[index], use);
+                if (Forget(key, waiter)) StopWaitingFor(names[index], use, key);
+            }
+        }
+
+        if (ended) RaisePending();
+        return outcomes;
     }
 
     /// <summary>Forgets the waiting uses of a secret: the user declined them.</summary>

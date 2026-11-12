@@ -1251,7 +1251,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var names = read.Waiting();
             if (names.Count == 0) return false;
             var use = ShellUseOf(scope);
-            var outcomes = await Task.WhenAll(names.Select(name => WaitAsync(name, use, cancellationToken))).ConfigureAwait(false);
+            // They start waiting together: the window asks about them in one prompt, and tells the user once.
+            var outcomes = await broker.WaitForConfirmationsAsync(names, use, timeout, cancellationToken).ConfigureAwait(false);
             // The next build asks again for what the user confirmed, and keeps what the first build read.
             for (var index = 0; index < names.Count; index++)
                 read.Answered(names[index], outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed, ProblemOf(names[index], outcomes[index], timeout));
@@ -1267,22 +1268,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 : new SessionSecretOutcome(System.Collections.Frozen.FrozenDictionary<string, bool>.Empty, []);
         }
 
-        // A wait the user ended by stopping the session gives no outcome: the shell starts without the secret.
-        private async Task<CodeAlta.Credentials.SecretConfirmationOutcome?> WaitAsync(string name, string use, CancellationToken cancellationToken)
+        private static string? ProblemOf(string name, CodeAlta.Credentials.SecretConfirmationOutcome outcome, TimeSpan timeout) => outcome switch
         {
-            try
-            {
-                return await broker.WaitForConfirmationAsync(name, use, timeout, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return null;
-            }
-        }
-
-        private static string? ProblemOf(string name, CodeAlta.Credentials.SecretConfirmationOutcome? outcome, TimeSpan timeout) => outcome switch
-        {
-            null => $"The shell of this session started without the secret {name}: the session was stopped before its use was confirmed.",
+            // A wait the user ended by stopping the session: the shell starts without the secret.
+            CodeAlta.Credentials.SecretConfirmationOutcome.Stopped =>
+                $"The shell of this session started without the secret {name}: the session was stopped before its use was confirmed.",
             CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed => null,
             CodeAlta.Credentials.SecretConfirmationOutcome.Declined => $"The shell of this session started without the secret {name}: its use was denied.",
             CodeAlta.Credentials.SecretConfirmationOutcome.TimedOut =>
@@ -1327,7 +1317,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             _unasked = secrets.Noting(broker.WithoutAsking(recorded: attachment is not null));
             _asks = asks;
             _unattended = attachment?.Unattended == true;
-            _inherited = attachment?.Inherited is { Count: > 0 } inherited ? new Dictionary<string, bool>(inherited, StringComparer.OrdinalIgnoreCase) : null;
+            _inherited = attachment?.Inherited is { } inherited ? new Dictionary<string, bool>(inherited, StringComparer.OrdinalIgnoreCase) : null;
         }
 
         /// <inheritdoc />
@@ -1430,10 +1420,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
         // Under the gate: which secrets a read goes through, and why the session starts without the secret when nobody is asked.
         private (IBoundSecretSource Source, string? Refusal) SourceOf(string name, string? use)
         {
-            if (_inherited is not null && _inherited.TryGetValue(name, out var given))
+            if (_inherited is not null)
             {
-                if (!given) return (_unasked, "its use was not confirmed for the session that started this one");
-                // The session that started this one has the secret: this one takes it without asking the user again.
+                // The session that created this one answers for it, and the user is not asked again: neither for a secret that
+                // session was denied, nor for one it was never asked for (another profile, a vault that was locked then).
+                if (!_inherited.TryGetValue(name, out var given) || !given) return (_unasked, "its use was not confirmed for the session that started this one");
+                // That session has the secret: this one takes it without asking the user again.
                 _broker.AllowOnce(name, use);
                 return (_asked, null);
             }

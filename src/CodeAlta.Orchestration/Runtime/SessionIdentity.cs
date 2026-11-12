@@ -48,8 +48,9 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
 /// </param>
 /// <param name="Inherited">
 /// What the session that created this one was answered (<see cref="SessionIdentity.SecretAnswers"/>): this one is given the secrets
-/// that one was given, and starts without the others, without asking the user again. Null when no session created it, or when
-/// that session is not attached. A secret it does not name is asked for as for any session. Whoever gives it answers for the
+/// that one was given, and starts without the others, without asking the user again: also without a secret it does not name,
+/// which that session was never asked for. Null when no session created it, or when that session is not attached: the user is
+/// then asked as for any session. Whoever gives it answers for the
 /// session these answers come from: it has the secrets they give, so it must be the session the host recorded as the creator,
 /// never a parent the new session only names.
 /// </param>
@@ -153,6 +154,9 @@ public sealed class SessionIdentityResolver
     /// null waits for none, and those secrets are left out.
     /// </summary>
     public ISessionSecretConfirmations? Confirmations { get; set; }
+
+    // The most times the environment of a session that attaches is built again after the user confirmed secrets.
+    private const int MaximumConfirmationRounds = 16;
 
     /// <summary>Gets a new resolver that gives every session the usual settings (its <see cref="Environments"/> its own).</summary>
     public static SessionIdentityResolver None => new(null);
@@ -268,12 +272,19 @@ public sealed class SessionIdentityResolver
         confirmations.Begin(read.Scope, attachment);
         var identity = Of(read.Space, read.Profiles, read.Scope);
         if (identity.Identity is null) return identity;
-        bool confirmed;
         using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopWaiting))
-            confirmed = await confirmations.WaitAsync(read.Scope, waiting.Token).ConfigureAwait(false);
+        {
+            // Built again for the secrets the user confirmed: nothing was given for them before. A build can ask for a secret the
+            // one before did not reach, such as the second of a value that names two: it is waited for in turn, and each round
+            // needs a new confirmation of the user, so the rounds end.
+            for (var round = 0; round < MaximumConfirmationRounds && await confirmations.WaitAsync(read.Scope, waiting.Token).ConfigureAwait(false); round++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                identity = Of(read.Space, read.Profiles, read.Scope);
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
-        // Built again for the secrets the user confirmed: nothing was given for them before.
-        if (confirmed) identity = Of(read.Space, read.Profiles, read.Scope);
         var outcome = confirmations.End(read.Scope);
         return outcome.Answers.Count == 0 && outcome.Problems.Count == 0
             ? identity

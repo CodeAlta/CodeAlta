@@ -327,6 +327,50 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task The_uses_one_start_asks_for_start_waiting_together_and_a_stop_ends_them_all()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        string[] names = ["DEPLOY", "REGISTRY", "SIGNING"];
+        foreach (var name in names)
+        {
+            store.SetSecret(name, name.ToLowerInvariant() + "-value-1", "alice");
+            store.Bindings.SetAskBeforeUse(name, SecretAskDurations.FifteenMinutes);
+        }
+
+        var verifier = new Verifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        const string use = "shell of the session s1";
+        foreach (var name in names) broker.AuthorizeUse(name, use);
+        // What the window reads at each notice: how many uses something waits for.
+        var seen = new System.Collections.Concurrent.ConcurrentQueue<int>();
+        broker.PendingUsesChanged += (_, _) => seen.Enqueue(broker.ListPending().Count(static pending => pending.AwaitedUntil is not null));
+
+        using var stop = new CancellationTokenSource();
+        var waiting = broker.WaitForConfirmationsAsync(names, use, TimeSpan.FromMinutes(2), stop.Token);
+        Assert.HasCount(3, broker.ListPending().Where(static pending => pending.AwaitedUntil is not null).ToArray());
+        Assert.IsFalse(seen.Any(static count => count is 1 or 2), "the window never reads a part of what one start asks for");
+        Assert.AreEqual(1, broker.ListPending().Select(static pending => pending.AwaitedUntil).Distinct().Count(), "they share one time");
+
+        await broker.ConfirmAsync("REGISTRY", use);
+        stop.Cancel();
+        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Stopped, SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Stopped },
+            (await waiting.WithinAsync(TestTime.Seconds(30))).ToArray());
+        Assert.IsEmpty(broker.ListPending(), "a stop leaves no use waiting");
+
+        // Stopped while the system is asked whether it can verify the user, before anything waits: the use does not stay either.
+        broker.AuthorizeUse("DEPLOY", "shell of the session s2");
+        verifier.Asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var early = new CancellationTokenSource();
+        var probing = broker.WaitForConfirmationsAsync(["DEPLOY"], "shell of the session s2", TimeSpan.FromMinutes(2), early.Token);
+        await verifier.Asked.Task.WithinAsync(TestTime.Seconds(30));
+        early.Cancel();
+        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Stopped }, (await probing.WithinAsync(TestTime.Seconds(30))).ToArray());
+        Assert.IsEmpty(broker.ListPending(), "a stop before the wait started leaves no use waiting");
+        Assert.AreEqual(("shell of the session s2", "expired"), (broker.ListUses().First().Use, broker.ListUses().First().Outcome));
+    }
+
+    [TestMethod]
     public async Task A_read_that_asks_nobody_leaves_nothing_waiting_and_takes_no_confirmation_of_one_use()
     {
         using var vault = new FakeVault();
@@ -514,10 +558,21 @@ public sealed class CredentialBrokerTests
 
         public bool Available { get; set; } = true;
 
+        // Completed once the system is asked whether it can verify the user, when its answer is held back.
+        public TaskCompletionSource? Asked { get; set; }
+
         public List<string> Messages { get; } = [];
 
-        public ValueTask<UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken)
-            => ValueTask.FromResult(new UserPresenceAvailability(Available, Available ? null : "Windows Hello is not set up."));
+        public async ValueTask<UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken)
+        {
+            if (Asked is { } asked)
+            {
+                asked.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            return new UserPresenceAvailability(Available, Available ? null : "Windows Hello is not set up.");
+        }
 
         public ValueTask<UserPresenceResult> VerifyAsync(string message, CancellationToken cancellationToken)
         {

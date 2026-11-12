@@ -4677,10 +4677,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         bool unattended;
         try
         {
-            unattended = await FindLineageCreatorAsync(session, static createdBy => createdBy.Kind == AltaActorProvenance.AutomationKind, cancellationToken)
-                .ConfigureAwait(false) is not null;
+            unattended = await ComesFromAutomationAsync(session, cancellationToken).ConfigureAwait(false);
         }
-        catch (SessionLineageException)
+        catch (IOException)
         {
             // Whether an automation started it cannot be told: nobody is asked, as for one.
             unattended = true;
@@ -4689,12 +4688,37 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         IReadOnlyDictionary<string, bool>? inherited = null;
         if (session.CreatedBy is { SourceMachineId: null } createdBy && NormalizeOptionalText(createdBy.SourceSessionId) is { } creator
             && !string.Equals(creator, session.SessionId, StringComparison.Ordinal)
-            && _entries.TryGetValue(creator, out var started) && !started.IsTerminated && started.Identity.SecretAnswers.Count > 0)
+            && _entries.TryGetValue(creator, out var started) && !started.IsTerminated)
         {
+            // Also when it was answered nothing: what it was not given, this one is not asked for.
             inherited = started.Identity.SecretAnswers;
         }
 
         return new SessionSecretAttachment(unattended, inherited);
+    }
+
+    // Whether an automation created a session, or a session it comes from, up its lineage: by the parent each one names and by the
+    // session the host recorded as its creator. Both are followed, since an agent chooses the parent of the session it creates, and
+    // a parent that somebody attends must not hide the automation that really created it. A lineage too deep to follow is taken to
+    // come from one.
+    private async Task<bool> ComesFromAutomationAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var next = new Queue<SessionViewDescriptor>();
+        next.Enqueue(session);
+        while (next.TryDequeue(out var current))
+        {
+            if (!seen.Add(current.SessionId)) continue;
+            if (seen.Count > SessionToolGuards.MaximumLineageDepth) return true;
+            if (current.CreatedBy is { Kind: AltaActorProvenance.AutomationKind }) return true;
+            foreach (var from in (string?[])[NormalizeOptionalText(current.ParentSessionId), NormalizeOptionalText(current.CreatedBy?.SourceSessionId)])
+            {
+                if (from is null || seen.Contains(from)) continue;
+                if (await TryGetRecoverableSessionAsync(from, cancellationToken).ConfigureAwait(false) is { } found) next.Enqueue(found);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

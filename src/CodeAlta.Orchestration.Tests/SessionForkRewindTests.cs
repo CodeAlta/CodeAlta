@@ -593,6 +593,18 @@ public sealed class SessionForkRewindTests
         var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Part", session.SessionId, null, null, "business", CancellationToken.None);
         await SendAsync(host, child, options, "one").WithinAsync(TestTime.Seconds(30));
         Assert.IsEmpty(host.Credentials!.ListPending());
+
+        // Nor is one it creates under a parent that somebody attends, once the session of the automation is no longer attached:
+        // the parent a session names never hides who created it.
+        var attended = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Attended", null, null, null, null, CancellationToken.None);
+        var renamed = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Renamed", attended.SessionId,
+            new AltaActorProvenance { Kind = "agent", SourceSessionId = session.SessionId }, null, "business", CancellationToken.None);
+        await host.RuntimeService.DetachRuntimeSessionAsync(session.SessionId);
+        await host.RuntimeService.DetachRuntimeSessionAsync(renamed.SessionId);
+        await SendAsync(host, renamed, options, "one").WithinAsync(TestTime.Seconds(30));
+        StringAssert.Contains((await host.RuntimeService.GetSessionIdentityAsync(renamed.SessionId)).SecretProblems.Single(),
+            "nobody is asked for a session that an automation started");
+        Assert.IsEmpty(host.Credentials!.ListPending());
         Assert.IsFalse(provider.Requests.Any(request => request.Environment?.Get("DEPLOY_TOKEN") is not null), "nothing is given without a confirmation");
     }
 
@@ -641,25 +653,17 @@ public sealed class SessionForkRewindTests
         await sending.WithinAsync(TestTime.Seconds(30));
 
         // An agent chooses the parent of the session it creates: naming a session that has the secret gives nothing.
-        // It attaches as it is created: the user is asked, as for any session.
-        var creating = Task.Run(() => host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Claim", holder.SessionId,
-            new AltaActorProvenance { Kind = "agent", SourceSessionId = other.SessionId }, null, "business", CancellationToken.None));
-        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(30);
-        CodeAlta.Credentials.PendingSecretUse? asked;
-        while ((asked = host.Credentials.ListPending().FirstOrDefault(static pending => pending.AwaitedUntil is not null)) is null)
-        {
-            Assert.IsFalse(creating.IsCompleted, "the session started without asking the user");
-            Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The session that names a parent did not ask for the secret.");
-            await Task.Delay(10);
-        }
-
-        Assert.AreNotEqual($"shell of the session {holder.SessionId}", asked.Use);
-        host.Credentials.Decline("DEPLOY", asked.Use);
-        var claiming = await creating.WithinAsync(TestTime.Seconds(30));
-        Assert.AreEqual($"shell of the session {claiming.SessionId}", asked.Use);
+        // The session that created it was never given the secret, and answers for it: it starts without, and nobody is asked.
+        var claiming = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Claim", holder.SessionId,
+            new AltaActorProvenance { Kind = "agent", SourceSessionId = other.SessionId }, null, "business", CancellationToken.None).WithinAsync(TestTime.Seconds(30));
         await SendAsync(host, claiming, options, "one").WithinAsync(TestTime.Seconds(30));
 
-        Assert.IsNull(provider.Requests.Last(request => request.SessionId == claiming.SessionId).Environment!.Get("DEPLOY_TOKEN"), "the user is asked, and denied it");
+        Assert.IsNull(provider.Requests.Last(request => request.SessionId == claiming.SessionId).Environment!.Get("DEPLOY_TOKEN"),
+            "the secret of the parent it names is not given");
+        StringAssert.Contains((await host.RuntimeService.GetSessionIdentityAsync(claiming.SessionId)).SecretProblems.Single(),
+            "its use was not confirmed for the session that started this one");
+        Assert.IsEmpty(host.Credentials.ListPending());
+        Assert.AreEqual(1, Volatile.Read(ref verifier.Asked), "the user was verified once, for the session that holds the secret");
     }
 
     [TestMethod]
