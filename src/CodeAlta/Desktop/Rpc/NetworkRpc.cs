@@ -103,7 +103,14 @@ internal sealed class NetworkService
                 {
                     if (password is not null)
                     {
-                        _secrets!.SetSecret(settings.PasswordSecret!, password, SetBy);
+                        try { _secrets!.SetSecret(settings.PasswordSecret!, password, SetBy); }
+                        catch (Exception exception) when (CodeAltaNetwork.IsSecretFailure(exception))
+                        {
+                            // Nothing is saved: settings that name a password nobody could keep would only fail later.
+                            return Listing("write_failed", $"The password could not be kept as the secret {settings.PasswordSecret}: {exception.Message} "
+                                + "Check the store of the secrets in Settings > Secrets.", null);
+                        }
+
                         SecretChanged?.Invoke();
                     }
 
@@ -137,8 +144,20 @@ internal sealed class NetworkService
         catch (Exception exception) when (IsConfigurationFailure(exception)) { }
         if (SettingsOf(request.Mode, request.Url, request.Bypass, request.Authentication, request.User, secret, out var settings) is { } invalid)
             return new("invalid", invalid, false, null, null, 0, target.AbsoluteUri);
-        var password = !string.IsNullOrEmpty(request.Password) ? request.Password
-            : settings.Authentication == ProxyAuthentication.Password && _secrets!.TryGetSecret(settings.PasswordSecret!, out var kept) ? kept : null;
+        string? password = request.Password;
+        if (string.IsNullOrEmpty(password))
+        {
+            password = null;
+            try
+            {
+                if (settings.Authentication == ProxyAuthentication.Password && _secrets!.TryGetSecret(settings.PasswordSecret!, out var kept)) password = kept;
+            }
+            catch (Exception exception) when (CodeAltaNetwork.IsSecretFailure(exception))
+            {
+                return new("ok", $"The proxy password could not be read from the secret {settings.PasswordSecret}: {exception.Message} Type it to check the connection.",
+                    false, null, null, 0, target.AbsoluteUri);
+            }
+        }
         var proxy = NetworkProxy.Create(settings, password, _system);
         var via = proxy is null || proxy.IsBypassed(target) ? null : proxy.GetProxy(target);
         using var client = new HttpClient(_handler!(proxy), disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
@@ -204,7 +223,7 @@ internal sealed class NetworkService
     private bool HasSecret(string name)
     {
         try { return _secrets!.ListSecrets().Any(secret => string.Equals(secret.Name, name, StringComparison.Ordinal)); }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException) { return false; }
+        catch (Exception exception) when (CodeAltaNetwork.IsSecretFailure(exception)) { return false; }
     }
 
     // The message of the innermost failure: the refusal of a proxy, a name that does not resolve, a refused connection.

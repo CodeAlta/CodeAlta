@@ -102,6 +102,27 @@ public sealed class NetworkRpcTests
     }
 
     [TestMethod]
+    public async Task AStoreOfSecretsThatCannotBeUsed_RefusesTheSave_AndTheCheckSaysWhy()
+    {
+        var protector = new SwitchingProtector();
+        using var fixture = new Fixture(protector);
+        Assert.AreEqual("ok", (await fixture.Service.SaveAsync(new(Epoch, "manual", "http://proxy.corp:8080", [], "password", "jdoe", "kept"), CancellationToken.None)).Status);
+        protector.Available = false;
+
+        var saved = await fixture.Service.SaveAsync(new(Epoch, "manual", "http://proxy.corp:8080", [], "password", "jdoe", "new"), CancellationToken.None);
+        Assert.AreEqual("write_failed", saved.Status);
+        StringAssert.Contains(saved.Message, "Settings > Secrets");
+        Assert.AreEqual(1, fixture.Applied, "nothing was applied");
+
+        var check = await fixture.Service.CheckAsync(new(Epoch, null, "manual", "http://proxy.corp:8080", [], "password", "jdoe", null), CancellationToken.None);
+        Assert.AreEqual(("ok", false), (check.Status, check.Reached));
+        StringAssert.Contains(check.Message, "Type it to check the connection");
+        Assert.IsNull(fixture.Requested, "no request without its password");
+        // A password typed needs no store.
+        Assert.IsTrue((await fixture.Service.CheckAsync(new(Epoch, null, "manual", "http://proxy.corp:8080", [], "password", "jdoe", "typed"), CancellationToken.None)).Reached);
+    }
+
+    [TestMethod]
     public async Task Read_SaysWhenTheFileHoldsSettingsThatDoNotRun()
     {
         using var fixture = new Fixture();
@@ -115,12 +136,12 @@ public sealed class NetworkRpcTests
     {
         private NetworkService? _service;
 
-        public Fixture()
+        public Fixture(ISecretProtector? protector = null)
         {
             Root = Path.Combine(Path.GetTempPath(), "codealta-network-rpc-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
             // A key in a file: a test never touches the Keychain of the user.
-            Secrets = new LocalSecretStore(Root, new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(Root, "secrets", "key"))));
+            Secrets = new LocalSecretStore(Root, protector ?? new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(Root, "secrets", "key"))));
         }
 
         public string Root { get; }
@@ -165,6 +186,18 @@ public sealed class NetworkRpcTests
                 return Task.FromResult(new HttpResponseMessage(fixture.Answer));
             }
         }
+    }
+
+    private sealed class SwitchingProtector : ISecretProtector
+    {
+        public bool Available { get; set; } = true;
+
+        public string Kind => SecretProtectionKinds.File;
+
+        public byte[] Protect(ReadOnlySpan<byte> value) => Available ? [.. value.ToArray().Reverse()] : throw new SecretStoreUnavailableException("The Keychain is locked.");
+
+        public byte[] Unprotect(ReadOnlySpan<byte> protectedValue)
+            => Available ? [.. protectedValue.ToArray().Reverse()] : throw new SecretStoreUnavailableException("The Keychain is locked.");
     }
 
     private sealed class FixedProxy(Uri address) : IWebProxy

@@ -68,10 +68,47 @@ public sealed class CodeAltaNetworkTests
     }
 
     [TestMethod]
+    public void Read_OfAStoreThatCannotBeUsed_KeepsTheManualProxyWithoutPassword_AndSaysWhatToDo()
+    {
+        var root = NewRoot();
+        try
+        {
+            var settings = new ProxySettings(ProxyMode.Manual, "http://proxy.corp:8080", [], ProxyAuthentication.Password, "jdoe", ProxySettings.DefaultPasswordSecret);
+            var protector = new SwitchingProtector();
+            var store = new LocalSecretStore(root, protector);
+            store.SetSecret(ProxySettings.DefaultPasswordSecret, "s3cret", "test");
+            // The Keychain is locked, its key is gone, or the value was protected by another key: the start goes on.
+            protector.Available = false;
+            var (applied, password, error) = CodeAltaNetwork.ReadPassword(new LocalSecretStore(root, protector), settings);
+            Assert.AreEqual(ProxyMode.Manual, applied.Mode, "requests go through the proxy and get its 407, never around it");
+            Assert.IsNull(password);
+            StringAssert.Contains(error, "could not be read from the secret NETWORK_PROXY_PASSWORD");
+            StringAssert.Contains(error, "Settings > Network");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void ReadPassword_IsNotAskedOutsideTheManualPasswordMode()
     {
         var settings = new ProxySettings(ProxyMode.System, "http://proxy.corp:8080", [], ProxyAuthentication.Password, "jdoe", "MISSING_SECRET");
         Assert.AreEqual((settings, (string?)null, (string?)null), CodeAltaNetwork.ReadPassword("/nowhere", settings));
+    }
+
+    // A protection whose store goes away.
+    private sealed class SwitchingProtector : ISecretProtector
+    {
+        public bool Available { get; set; } = true;
+
+        public string Kind => SecretProtectionKinds.File;
+
+        public byte[] Protect(ReadOnlySpan<byte> value) => Available ? [.. value.ToArray().Reverse()] : throw new SecretStoreUnavailableException("The Keychain is locked.");
+
+        public byte[] Unprotect(ReadOnlySpan<byte> protectedValue)
+            => Available ? [.. protectedValue.ToArray().Reverse()] : throw new SecretStoreUnavailableException("The Keychain is locked.");
     }
 
     private static string NewRoot()

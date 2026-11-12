@@ -80,19 +80,40 @@ public sealed class CodeAltaNetwork
     /// <param name="settings">The settings.</param>
     /// <returns>The settings to apply, the password, and why the settings were not taken (the defaults then are).</returns>
     internal static (ProxySettings Settings, string? Password, string? Error) ReadPassword(string globalRoot, ProxySettings settings)
+        => settings is { Mode: ProxyMode.Manual, Authentication: ProxyAuthentication.Password, PasswordSecret: not null }
+            ? ReadPassword(new LocalSecretStore(globalRoot), settings)
+            : (settings, null, null);
+
+    /// <summary>Reads the password of the settings from a store, when they need one.</summary>
+    /// <param name="store">The store that keeps the secret.</param>
+    /// <param name="settings">The settings.</param>
+    /// <returns>
+    /// The settings to apply, the password, and what was wrong. A store that cannot be used (no Keychain, a key that is
+    /// gone, a value protected by another key, a secret kept in a vault that is locked) keeps the manual proxy without its
+    /// password: requests go through it and get its 407, never around it, and the error says what to do.
+    /// </returns>
+    internal static (ProxySettings Settings, string? Password, string? Error) ReadPassword(LocalSecretStore store, ProxySettings settings)
     {
+        ArgumentNullException.ThrowIfNull(store);
         if (settings is not { Mode: ProxyMode.Manual, Authentication: ProxyAuthentication.Password, PasswordSecret: { } secret }) return (settings, null, null);
         try
         {
-            if (new LocalSecretStore(globalRoot).TryGetSecret(secret, out var password)) return (settings, password, null);
+            if (store.TryGetSecret(secret, out var password)) return (settings, password, null);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException
-                                              or System.Security.Cryptography.CryptographicException or PlatformNotSupportedException)
+        catch (Exception exception) when (IsSecretFailure(exception))
         {
-            return (settings, null, $"The proxy password could not be read from the secret {secret}: {exception.Message}");
+            return (settings, null, $"The proxy password could not be read from the secret {secret}: {exception.Message} "
+                + "Check the store of the secrets in Settings > Secrets, then type the password again in Settings > Network.");
         }
 
         // The proxy is still used: it answers 407 to what it does not let through, which says what is wrong.
         return (settings, null, $"The secret {secret} that keeps the proxy password is not set.");
     }
+
+    /// <summary>Gets whether an exception says that a secret could not be read or kept, rather than a defect.</summary>
+    /// <param name="exception">The exception.</param>
+    /// <returns>True for a store of secrets that cannot be used now.</returns>
+    public static bool IsSecretFailure(Exception exception)
+        => exception is SecretStoreUnavailableException or IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException
+            or System.Security.Cryptography.CryptographicException or PlatformNotSupportedException;
 }
