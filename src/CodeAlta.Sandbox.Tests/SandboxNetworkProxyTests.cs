@@ -136,6 +136,28 @@ public sealed class SandboxNetworkProxyTests
         Assert.IsTrue(corporate.Requests.All(static request => !request.Contains("Proxy-Authorization", StringComparison.Ordinal)), "nothing sent but what was asked");
     }
 
+    [TestMethod]
+    public async Task TheHttpClientOfASandbox_GoesThroughTheUpstreamProxy_AtTheAddressItChecked()
+    {
+        using var origin = new EchoServer(http: true);
+        using var corporate = new UpstreamProxy(null, forward: true);
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("local", [new SandboxProfile { Name = "local", Network = SandboxNetwork.Hosts, LocalPorts = [origin.Port] }]),
+            new SandboxSessionFolders { WorkingDirectory = Path.GetTempPath() },
+            new SandboxHost { DataRoot = Path.Combine(Path.GetTempPath(), "codealta-proxy-tests"), HomeDirectory = Path.GetTempPath(), Environment = new Dictionary<string, string>() }, [], "s");
+        using var http = SandboxHttp.Create(policy, new HashSet<int>(), new FixedProxy(new Uri($"http://127.0.0.1:{corporate.Port}"), []));
+        Assert.AreEqual("ok", await http.GetStringAsync($"http://localhost:{origin.Port}/").WithinAsync(Deadline));
+        Assert.StartsWith($"CONNECT 127.0.0.1:{origin.Port} HTTP/1.1\r\n", corporate.Requests.Single());
+
+        // The rules of the sandbox come first: a port the profile does not list never reaches the upstream.
+        await Assert.ThrowsExactlyAsync<HttpRequestException>(() => http.GetStringAsync("http://localhost:445/"));
+        Assert.HasCount(1, corporate.Requests);
+
+        using var asking = new UpstreamProxy("Basic expected");
+        using var refused = SandboxHttp.Create(policy, new HashSet<int>(), new FixedProxy(new Uri($"http://127.0.0.1:{asking.Port}"), []));
+        var failure = await Assert.ThrowsExactlyAsync<HttpRequestException>(() => refused.GetStringAsync($"http://localhost:{origin.Port}/"));
+        Assert.Contains("407", failure.Message);
+    }
+
     private sealed class FixedProxy(Uri address, string[] bypassed) : IWebProxy
     {
         public ICredentials? Credentials { get; set; }
@@ -152,7 +174,7 @@ public sealed class SandboxNetworkProxyTests
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly System.Collections.Concurrent.ConcurrentQueue<string> _requests = new();
 
-        public UpstreamProxy(string? authorization)
+        public UpstreamProxy(string? authorization, bool forward = false)
         {
             _listener.Start();
             _ = Task.Run(async () =>
@@ -203,6 +225,18 @@ public sealed class SandboxNetworkProxyTests
                                 }
 
                                 await stream.WriteAsync("HTTP/1.1 200 Connection established\r\n\r\n"u8.ToArray());
+                                if (forward)
+                                {
+                                    // A proxy that connects where it is told, and carries the bytes.
+                                    var target = text.Split(' ')[1];
+                                    var colon = target.LastIndexOf(':');
+                                    using var origin = new TcpClient();
+                                    await origin.ConnectAsync(IPAddress.Parse(target[..colon].Trim('[', ']')), int.Parse(target[(colon + 1)..], System.Globalization.CultureInfo.InvariantCulture));
+                                    var originStream = origin.GetStream();
+                                    await Task.WhenAny(stream.CopyToAsync(originStream), originStream.CopyToAsync(stream));
+                                    return;
+                                }
+
                                 var buffer = new byte[4096];
                                 int read;
                                 while ((read = await stream.ReadAsync(buffer)) > 0) await stream.WriteAsync(buffer.AsMemory(0, read));

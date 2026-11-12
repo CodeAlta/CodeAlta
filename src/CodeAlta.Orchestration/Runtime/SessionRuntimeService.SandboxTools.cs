@@ -592,7 +592,8 @@ public sealed partial class SessionRuntimeService
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             if (profile.Network == SandboxNetwork.Off) return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') has no network.");
             var policy = runtime.SandboxWorkers.PolicyOf(await StartOfAsync(profile, options, cancellationToken).ConfigureAwait(false));
-            using var http = SandboxHttp.Create(policy, runtime.SandboxWorkers.ReservedPorts);
+            // Through the manual proxy of CodeAlta while one applies, as the programs of the sandbox go.
+            using var http = SandboxHttp.Create(policy, runtime.SandboxWorkers.ReservedPorts, CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
             var sandboxed = AgentBuiltInToolFactory.CreateDefaultTools(Copy(options, http, null, null)).Single(static candidate => candidate.Spec.Name == WebGet);
             return await sandboxed.Handler(invocation, cancellationToken).ConfigureAwait(false);
         }
