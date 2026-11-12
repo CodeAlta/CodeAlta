@@ -120,6 +120,31 @@ public sealed class SandboxNetworkProxyTests
     }
 
     [TestMethod]
+    public async Task AChallengeWithAChunkedBody_IsAnsweredOnItsOwnConnection()
+    {
+        var basic = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("jdoe:pw"));
+        using var corporate = new UpstreamProxy(basic, chunked: true);
+        await using var proxy = SandboxNetworkProxy.Start(null, [4444], [],
+            new FixedProxy(new Uri($"http://127.0.0.1:{corporate.Port}"), []) { Credentials = new NetworkCredential("jdoe", "pw") });
+        Assert.StartsWith("HTTP/1.1 200", await SendAsync(proxy, "CONNECT localhost:4444 HTTP/1.1\r\n\r\n", "ping"));
+        // NTLM signs in a connection: the body of a challenge, chunked with its trailers, is read and the connection kept.
+        Assert.HasCount(2, corporate.Connections);
+        Assert.AreEqual(corporate.Connections[0], corporate.Connections[1]);
+    }
+
+    [TestMethod]
+    public async Task AHeaderOfSeveralChallenges_IsReadAsTheSchemesItOffers()
+    {
+        var basic = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("jdoe:pw"));
+        using var corporate = new UpstreamProxy(basic, challenge: "Negotiate, NTLM, Basic realm=\"corp, inc\"");
+        await using var proxy = SandboxNetworkProxy.Start(null, [4444], [],
+            new FixedProxy(new Uri($"http://127.0.0.1:{corporate.Port}"), []) { Credentials = new NetworkCredential("jdoe", "pw") });
+        // Negotiate and NTLM, which this proxy refuses whatever they send, leave Basic to the end.
+        Assert.StartsWith("HTTP/1.1 200", await SendAsync(proxy, "CONNECT localhost:4444 HTTP/1.1\r\n\r\n", "ping"));
+        Assert.Contains($"Proxy-Authorization: {basic}\r\n", corporate.Requests[^1]);
+    }
+
+    [TestMethod]
     public async Task WhatTheUpstreamAsks_AndIsNotGiven_IsWhatTheSandboxGets()
     {
         using var corporate = new UpstreamProxy("Basic expected");
@@ -172,9 +197,10 @@ public sealed class SandboxNetworkProxyTests
     private sealed class UpstreamProxy : IDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
-        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _requests = new();
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(int Connection, string Head)> _requests = new();
+        private int _connections;
 
-        public UpstreamProxy(string? authorization, bool forward = false)
+        public UpstreamProxy(string? authorization, bool forward = false, string challenge = "Basic realm=\"corp\"", bool chunked = false)
         {
             _listener.Start();
             _ = Task.Run(async () =>
@@ -197,6 +223,7 @@ public sealed class SandboxNetworkProxyTests
                         var stream = client.GetStream();
                         try
                         {
+                            var connection = Interlocked.Increment(ref _connections);
                             while (true)
                             {
                                 var head = new StringBuilder();
@@ -208,11 +235,13 @@ public sealed class SandboxNetworkProxyTests
                                 }
 
                                 var text = head.ToString();
-                                _requests.Enqueue(text);
+                                _requests.Enqueue((connection, text));
                                 if (authorization is not null && !text.Contains($"Proxy-Authorization: {authorization}\r\n", StringComparison.Ordinal))
                                 {
-                                    // The connection stays for the answer to the challenge.
-                                    await stream.WriteAsync("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"corp\"\r\nContent-Length: 0\r\n\r\n"u8.ToArray());
+                                    // The connection stays for the answer to the challenge, after a body framed by its length or by chunks.
+                                    await stream.WriteAsync(Encoding.ASCII.GetBytes(chunked
+                                        ? $"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: {challenge}\r\nTransfer-Encoding: chunked\r\n\r\n5;note=x\r\nhello\r\n0\r\nX-Trailer: t\r\n\r\n"
+                                        : $"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: {challenge}\r\nContent-Length: 0\r\n\r\n"));
                                     continue;
                                 }
 
@@ -253,7 +282,9 @@ public sealed class SandboxNetworkProxyTests
 
         public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
-        public IReadOnlyList<string> Requests => [.. _requests];
+        public IReadOnlyList<string> Requests => [.. _requests.Select(static request => request.Head)];
+
+        public IReadOnlyList<int> Connections => [.. _requests.Select(static request => request.Connection)];
 
         public void Dispose() => _listener.Stop();
     }

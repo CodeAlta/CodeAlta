@@ -74,13 +74,15 @@ internal static class UpstreamProxyClient
                     // A scheme this computer cannot use (no Kerberos ticket, no NTLM): the next one is tried.
                     if (blob is null || status is not (NegotiateAuthenticationStatusCode.ContinueNeeded or NegotiateAuthenticationStatusCode.Completed)) break;
                     var ready = await ReadyAsync(exchange, proxy, reopen: leg == 0, cancellationToken).ConfigureAwait(false);
-                    if (ready is null) return exchange;
+                    // The proxy closed the connection of a leg: the next scheme gets a connection of its own.
+                    if (ready is null) break;
                     exchange = ready;
                     await exchange.SendAsync(headOf($"Proxy-Authorization: {scheme} {Convert.ToBase64String(blob)}\r\n"), cancellationToken).ConfigureAwait(false);
                     if (exchange.Status != 407) return exchange;
-                    if (!exchange.Challenges().TryGetValue(scheme, out var token) || string.IsNullOrEmpty(token)) return exchange;
+                    // Refused: no next leg of this scheme; the next scheme the proxy offers is tried.
+                    if (!exchange.Challenges().TryGetValue(scheme, out var token) || string.IsNullOrEmpty(token)) break;
                     try { incoming = Convert.FromBase64String(token); }
-                    catch (FormatException) { return exchange; }
+                    catch (FormatException) { break; }
                 }
 
                 if (exchange.Status != 407) return exchange;
@@ -157,6 +159,70 @@ internal static class UpstreamProxyClient
         return Encoding.ASCII.GetBytes(string.Join("\r\n", lines) + "\r\nX-CodeAlta-Sandbox: upstream\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     }
 
+    /// <summary>
+    /// Reads the challenges of <c>Proxy-Authenticate</c> headers (RFC 9110, 11.6.1): a header holds a list of challenges, each
+    /// a scheme with a token68 or auth-params, all separated by commas, and a quoted string may hold a comma
+    /// (<c>Negotiate, NTLM, Basic realm="corp, inc", charset="UTF-8"</c>).
+    /// </summary>
+    /// <param name="values">The values of the headers.</param>
+    /// <returns>The challenges by scheme, the first of a scheme, with its token68 or the text of its auth-params; empty for none.</returns>
+    internal static Dictionary<string, string> ParseChallenges(IEnumerable<string> values)
+    {
+        var challenges = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? scheme = null;
+        var parameters = new StringBuilder();
+        void Close()
+        {
+            if (scheme is not null) challenges.TryAdd(scheme, parameters.ToString());
+            scheme = null;
+            parameters.Clear();
+        }
+
+        foreach (var value in values)
+        {
+            foreach (var element in SplitList(value))
+            {
+                var space = element.IndexOfAny([' ', '\t']);
+                var head = space < 0 ? element : element[..space];
+                // An element whose first word holds '=' is an auth-param (realm="x", charset=UTF-8) of the challenge before;
+                // any other starts a challenge: its scheme, then a token68 or its first auth-param.
+                if (head.Contains('=', StringComparison.Ordinal))
+                {
+                    if (scheme is not null) parameters.Append(parameters.Length > 0 ? ", " : "").Append(element);
+                    continue;
+                }
+
+                Close();
+                scheme = head;
+                if (space >= 0) parameters.Append(element[(space + 1)..].Trim());
+            }
+        }
+
+        Close();
+        return challenges;
+    }
+
+    // The elements of a comma-separated list, trimmed, without the empty ones; a comma in a quoted string separates nothing.
+    private static IEnumerable<string> SplitList(string value)
+    {
+        var start = 0;
+        var quoted = false;
+        for (var index = 0; index <= value.Length; index++)
+        {
+            if (index < value.Length)
+            {
+                var character = value[index];
+                if (quoted && character == '\\') { index++; continue; }
+                if (character == '"') { quoted = !quoted; continue; }
+                if (quoted || character != ',') continue;
+            }
+
+            var element = value[start..Math.Min(index, value.Length)].Trim();
+            if (element.Length > 0) yield return element;
+            start = index + 1;
+        }
+    }
+
     /// <summary>Gets the value of a header of a head, or null.</summary>
     internal static string? HeaderOf(string head, string name)
         => head.Split("\r\n").Skip(1).Where(line => HeaderIs(line, name)).Select(static line => line[(line.IndexOf(':') + 1)..].Trim()).FirstOrDefault();
@@ -196,29 +262,51 @@ internal static class UpstreamProxyClient
             Status = parts.Length >= 2 && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var status) ? status : 0;
         }
 
-        /// <summary>Gets the challenges of the last answer, by scheme, with their token (empty for none).</summary>
+        /// <summary>Gets the challenges of the last answer, by scheme, with their token or parameters (empty for none).</summary>
         public Dictionary<string, string> Challenges()
-        {
-            var challenges = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var line in Answer.Split("\r\n").Skip(1).Where(static line => HeaderIs(line, "Proxy-Authenticate")))
-            {
-                var value = line[(line.IndexOf(':') + 1)..].Trim();
-                var space = value.IndexOf(' ');
-                var scheme = space < 0 ? value : value[..space];
-                challenges.TryAdd(scheme, space < 0 ? "" : value[(space + 1)..].Trim());
-            }
+            => ParseChallenges(Answer.Split("\r\n").Skip(1).Where(static line => HeaderIs(line, "Proxy-Authenticate")).Select(static line => line[(line.IndexOf(':') + 1)..]));
 
-            return challenges;
-        }
-
-        // Reads the body of the last answer to reuse the connection; false when the proxy closes it or the body has no length.
+        // Reads the body of the last answer to reuse the connection: by its length, or by its chunks and trailers (an NTLM
+        // challenge may come chunked, and its next leg must go on the same connection). False when the proxy closes the
+        // connection, or the body has no length or is longer than what is read to drop.
         public async Task<bool> TryDrainAsync(CancellationToken cancellationToken)
         {
             if (string.Equals(HeaderOf(Answer, "Connection"), "close", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(HeaderOf(Answer, "Proxy-Connection"), "close", StringComparison.OrdinalIgnoreCase)
-                || HeaderOf(Answer, "Transfer-Encoding") is not null
-                || !long.TryParse(HeaderOf(Answer, "Content-Length"), NumberStyles.None, CultureInfo.InvariantCulture, out var length) || length > MaximumDrainedBody)
-                return false;
+                || string.Equals(HeaderOf(Answer, "Proxy-Connection"), "close", StringComparison.OrdinalIgnoreCase)) return false;
+            if (HeaderOf(Answer, "Transfer-Encoding") is { } encoding)
+                return string.Equals(encoding, "chunked", StringComparison.OrdinalIgnoreCase) && await TryDrainChunksAsync(cancellationToken).ConfigureAwait(false);
+            if (!long.TryParse(HeaderOf(Answer, "Content-Length"), NumberStyles.None, CultureInfo.InvariantCulture, out var length) || length > MaximumDrainedBody) return false;
+            return await TryDrainBytesAsync(length, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<bool> TryDrainChunksAsync(CancellationToken cancellationToken)
+        {
+            long total = 0;
+            while (true)
+            {
+                // chunk-size [; extensions] CRLF
+                if (await ReadLineAsync(cancellationToken).ConfigureAwait(false) is not { } line) return false;
+                var semicolon = line.IndexOf(';');
+                var size = (semicolon < 0 ? line : line[..semicolon]).Trim();
+                if (!long.TryParse(size, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var length) || length < 0) return false;
+                if (length == 0) break;
+                total += length;
+                if (total > MaximumDrainedBody || !await TryDrainBytesAsync(length, cancellationToken).ConfigureAwait(false)) return false;
+                if (await ReadLineAsync(cancellationToken).ConfigureAwait(false) is not "") return false;
+            }
+
+            // The trailers, up to the blank line.
+            for (var count = 0; count < 64; count++)
+            {
+                if (await ReadLineAsync(cancellationToken).ConfigureAwait(false) is not { } trailer) return false;
+                if (trailer.Length == 0) return true;
+            }
+
+            return false;
+        }
+
+        private async Task<bool> TryDrainBytesAsync(long length, CancellationToken cancellationToken)
+        {
             var buffer = new byte[4096];
             while (length > 0)
             {
@@ -228,6 +316,21 @@ internal static class UpstreamProxyClient
             }
 
             return true;
+        }
+
+        // A line up to its CRLF, without it; null when the stream ends first or the line is too long.
+        private async Task<string?> ReadLineAsync(CancellationToken cancellationToken)
+        {
+            var line = new StringBuilder();
+            var one = new byte[1];
+            while (line.Length < 8192)
+            {
+                if (await Stream.ReadAsync(one, cancellationToken).ConfigureAwait(false) == 0) return null;
+                if (one[0] == '\n') return line.Length > 0 && line[^1] == '\r' ? line.ToString(0, line.Length - 1) : null;
+                line.Append((char)one[0]);
+            }
+
+            return null;
         }
 
         /// <inheritdoc />
