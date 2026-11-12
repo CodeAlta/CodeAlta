@@ -83,6 +83,9 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     const size = async (width: number, height: number) => {
       await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
       assert.equal(await wait(`innerWidth===${width} && innerHeight===${height}`), true);
+      // The page learns that the window turned narrow or wide on a later frame, through its media query: until then the
+      // Explorer button can still say what the old width showed, and a click would undo what the new width shows.
+      await frames();
     };
     // The frame once the Explorer is as asked: shown, by a click on its button when it is not, or hidden.
     const shown = async (open: boolean) => {
