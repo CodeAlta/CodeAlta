@@ -13,4 +13,5 @@ export const lentVersions: Readonly<Record<string, string>> = Object.freeze({
   "flexlayout-react": "0.11.0",
   "lucide-react": "0.511.0",
   "@xyflow/react": "12.12.0",
+  "@observablehq/plot": "0.6.19",
 });

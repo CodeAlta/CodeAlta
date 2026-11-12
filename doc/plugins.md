@@ -248,8 +248,8 @@ with each reload, so a new version is a new module address.
 
 ### Lent libraries
 
-Scripts import `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react`
-and `codealta` and get **the instances the window runs**. Sharing is a requirement, not a saving: two copies of React
+Scripts import `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react`,
+`@xyflow/react`, `@observablehq/plot` and `codealta` and get **the instances the window runs**. Sharing is a requirement, not a saving: two copies of React
 break hooks and contexts, and a plugin's popover must open in the window's layer with its theme.
 
 - Each library is an entry of the Vite build (`frontend/src/lent/*.ts`, listed in `lent/libraries.ts`) emitted at a
@@ -258,7 +258,7 @@ break hooks and contexts, and a plugin's popover must open in the window's layer
   `script-src` in `neoastra.json`; the build writes the map, and tests on both sides compare its hash with the policy.
   Adding a library means a new entry, `libraries.ts`, and the new hash.
 - There are two tiers. The HTML vocabulary and the `codealta` module (`html` for JSX without a build, hooks for the
-  `alta` object and RPC, Markdown, code, diagrams, icons, links, charts) are CodeAlta's and stay stable across
+  `alta` object and RPC, Markdown, code, diagrams, Vega-Lite charts, icons, links, charts) are CodeAlta's and stay stable across
   releases. The libraries follow their own versions (`alta.versions`). The application's state, RPC services and dock
   are never lent.
 - Agents write plugins from the skill's references (`codealta-plugin-runtime/references/script-api.md`,

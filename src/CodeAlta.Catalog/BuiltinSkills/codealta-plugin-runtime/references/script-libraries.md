@@ -4,7 +4,7 @@ Read this index to choose a library; follow its versioned declarations only for 
 
 ## Imports, versions and upstream references
 
-Versions below describe this CodeAlta build. In a running script, `alta.versions` is authoritative: package-name keys for the seven libraries, plus numeric `interface` for `codealta`. React subpaths share their parent package's version; they have no separate version key. Upstream websites can describe newer releases: use the **pinned declarations** for exact signatures, including deprecated aliases.
+Versions below describe this CodeAlta build. In a running script, `alta.versions` is authoritative: package-name keys for the eight libraries, plus numeric `interface` for `codealta`. React subpaths share their parent package's version; they have no separate version key. Upstream websites can describe newer releases: use the **pinned declarations** for exact signatures, including deprecated aliases.
 
 | Import | Version | Surface | API / repository / pinned declarations |
 | --- | --- | --- | --- |
@@ -17,6 +17,7 @@ Versions below describe this CodeAlta build. In a running script, `alta.versions
 | `flexlayout-react` | 0.11.0 | All root named runtime exports | [Guide / GitHub](https://github.com/caplin/FlexLayout#usage) · [types](https://unpkg.com/flexlayout-react@0.11.0/types/index.d.ts) |
 | `lucide-react` | 0.511.0 | All root named runtime exports | [API](https://lucide.dev/guide/packages/lucide-react) · [GitHub](https://github.com/lucide-icons/lucide) · [types / every icon name](https://unpkg.com/lucide-react@0.511.0/dist/lucide-react.d.ts) |
 | `@xyflow/react` | 12.12.0 | All root named runtime exports (React Flow) | [API](https://reactflow.dev/api-reference) · [GitHub](https://github.com/xyflow/xyflow) · [types](https://unpkg.com/@xyflow/react@12.12.0/dist/esm/index.d.ts) |
+| `@observablehq/plot` | 0.6.19 | All root named runtime exports (charts as SVG) | [API](https://observablehq.com/plot/api) · [GitHub](https://github.com/observablehq/plot) · [types](https://unpkg.com/@observablehq/plot@0.6.19/dist/index.d.ts) |
 | `codealta` | 1 | CodeAlta interface, not an npm package | [Exports and contracts](script-api.md) · [GitHub](https://github.com/CodeAlta/CodeAlta) |
 
 **Import rules.** Use named imports except for the three defaults explicitly listed above. Only the listed subpaths resolve: no `react-dom/server`, `react/jsx-dev-runtime`, Blueprint deep imports, `@blueprintjs/icons`, `@blueprintjs/select`, `@blueprintjs/datetime`, or `lucide-react/dynamic`. CSS imports, Node modules, CDN imports and `eval` are not an authoring path. Blueprint/Table/FlexLayout/React Flow styles already belong to the window; do not import their CSS, bundle React or replace the host's Blueprint providers. Own modules may use relative `.js` imports inside the plugin package. If compiling JSX yourself, emit JavaScript and keep the host libraries external; target `react/jsx-runtime`, not its development counterpart.
@@ -182,6 +183,52 @@ export default function Pipeline() {
 ```
 
 `samples/canvas-flow` is a complete graph whose nodes and links live in the plugin.
+
+## Observable Plot
+
+`@observablehq/plot` draws a chart from data in a few lines, as an SVG element: bars, lines, dots, areas, heat maps, box plots, histograms (`binX`), stacks, facets and tooltips (`tip`). It is a script's chart when the data is the script's own and the chart is not an ECharts option (`Chart`) or a Vega-Lite spec (`VegaLite`). Plot does not know the window: give it the theme from `useTheme()` (its font, text color, series and axis colors) and draw again when the theme or the data changes, in an effect that replaces the chart in an element of the component and removes it on cleanup. Plot's default width is 640: pass the width of the container. Its `tip` mark, with `pointerX` or `pointerY`, shows the datum under the pointer and needs no CSS of its own.
+
+<!-- exports: @observablehq/plot -->
+| Use | Named exports |
+| --- | --- |
+| Plot, legends and marks | `plot`, `legend`, `marks`, `auto`, `autoSpec`, `version` |
+| Marks | `area`, `areaX`, `areaY`, `arrow`, `barX`, `barY`, `boxX`, `boxY`, `cell`, `cellX`, `cellY`, `circle`, `contour`, `density`, `differenceX`, `differenceY`, `dot`, `dotX`, `dotY`, `frame`, `geo`, `graticule`, `hexagon`, `hexgrid`, `hull`, `image`, `line`, `lineX`, `lineY`, `linearRegressionX`, `linearRegressionY`, `link`, `raster`, `rect`, `rectX`, `rectY`, `ruleX`, `ruleY`, `sphere`, `spike`, `text`, `textX`, `textY`, `tickX`, `tickY`, `tip`, `tree`, `treeLink`, `treeNode`, `vector`, `vectorX`, `vectorY`, `voronoi`, `voronoiMesh`, `waffleX`, `waffleY`, `bollingerX`, `bollingerY`, `delaunayLink`, `delaunayMesh` |
+| Axes, grids and pointers | `axisFx`, `axisFy`, `axisX`, `axisY`, `gridFx`, `gridFy`, `gridX`, `gridY`, `crosshair`, `crosshairX`, `crosshairY`, `pointer`, `pointerX`, `pointerY` |
+| Mark classes | `Area`, `Arrow`, `BarX`, `BarY`, `Cell`, `Contour`, `Density`, `Dot`, `Frame`, `Geo`, `Hexgrid`, `Image`, `Line`, `Link`, `Mark`, `Raster`, `Rect`, `RuleX`, `RuleY`, `Text`, `TickX`, `TickY`, `Tip`, `Vector`, `WaffleX`, `WaffleY` |
+| Transforms | `bin`, `binX`, `binY`, `bollinger`, `centroid`, `cluster`, `dodgeX`, `dodgeY`, `filter`, `find`, `geoCentroid`, `group`, `groupX`, `groupY`, `groupZ`, `hexbin`, `initializer`, `map`, `mapX`, `mapY`, `normalize`, `normalizeX`, `normalizeY`, `reverse`, `select`, `selectFirst`, `selectLast`, `selectMaxX`, `selectMaxY`, `selectMinX`, `selectMinY`, `shiftX`, `shiftY`, `shuffle`, `sort`, `stackX`, `stackX1`, `stackX2`, `stackY`, `stackY1`, `stackY2`, `transform`, `window`, `windowX`, `windowY` |
+| Scales, intervals and formats | `scale`, `column`, `identity`, `indexOf`, `valueof`, `formatIsoDate`, `formatMonth`, `formatNumber`, `formatWeekday`, `interpolateNearest`, `interpolateNone`, `interpolatorBarycentric`, `interpolatorRandomWalk`, `numberInterval`, `timeInterval`, `utcInterval` |
+<!-- /exports -->
+
+```js
+import { useEffect, useRef } from "react";
+import { barY, plot, pointerX, ruleY, tip } from "@observablehq/plot";
+import { html, useRpc, useTheme } from "codealta";
+
+export default function Durations() {
+    const theme = useTheme();
+    const result = useRpc("runs.list", {}); // [{ step: "build", seconds: 42 }, ...]
+    const box = useRef(null);
+    useEffect(() => {
+        if (!result.data || !box.current) return;
+        const chart = plot({
+            width: box.current.clientWidth, height: 240, marginLeft: 48,
+            style: { background: "transparent", color: theme.text, fontFamily: theme.fontFamily },
+            color: { range: theme.series },
+            y: { grid: true, label: "Seconds" },
+            marks: [
+                barY(result.data, { x: "step", y: "seconds", fill: "step" }),
+                ruleY([0], { stroke: theme.axis }),
+                tip(result.data, pointerX({ x: "step", y: "seconds", fill: theme.tooltipBackground })),
+            ],
+        });
+        box.current.replaceChildren(chart);
+        return () => chart.remove();
+    }, [result.data, theme]);
+    return html`<div ref=${box} />`;
+}
+```
+
+`plot` returns an `<svg>` (a `<figure>` when it has a title or a legend): it is the script's own element, never a string for `innerHTML`. Plot draws text in `currentColor`, so `style.color` themes the axes and labels; `theme.series` gives the categorical colors and `theme.ramp` a sequential scheme (`color: { range: theme.ramp }`).
 
 ## Lucide
 

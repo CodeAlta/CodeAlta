@@ -23,6 +23,7 @@ export const lentLibraries: readonly LentLibrary[] = [
   { name: "flexlayout-react", entry: "src/lent/flexlayout.ts", file: "lib/flexlayout-react.js" },
   { name: "lucide-react", entry: "src/lent/lucide.ts", file: "lib/lucide-react.js" },
   { name: "@xyflow/react", entry: "src/lent/xyflow.ts", file: "lib/xyflow-react.js" },
+  { name: "@observablehq/plot", entry: "src/lent/plot.ts", file: "lib/observablehq-plot.js" },
   { name: "codealta", entry: "src/lent/codealta.ts", file: "lib/codealta.js" },
 ];
 
