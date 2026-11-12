@@ -54,9 +54,12 @@ internal static class ProjectPathNameFormatter
 
     private static bool TryGetPathLeaf(string projectPath, out string leaf)
     {
-        if (Uri.TryCreate(projectPath, UriKind.Absolute, out var uri))
+        // A local path is an absolute URI too (file:///Users/x/X.Y, file:///C:/x/X.Y): it is named after its folder below, whole,
+        // dots included. Only the address of a remote repository drops the .git of a clone.
+        if (Uri.TryCreate(projectPath, UriKind.Absolute, out var uri) && !uri.IsFile && !uri.IsUnc)
         {
-            var remoteName = Path.GetFileNameWithoutExtension(uri.AbsolutePath);
+            var remoteName = Uri.UnescapeDataString(uri.AbsolutePath.TrimEnd('/').Split('/')[^1]);
+            if (remoteName.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) remoteName = remoteName[..^4];
             if (!string.IsNullOrWhiteSpace(remoteName))
             {
                 leaf = remoteName;
