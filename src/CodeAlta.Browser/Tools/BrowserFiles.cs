@@ -328,6 +328,19 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
         if (name.StartsWith(".env.", StringComparison.OrdinalIgnoreCase)) return true;
         if (SecretExtensions.Any(extension => name.EndsWith(extension, StringComparison.OrdinalIgnoreCase))) return true;
         var parts = path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        return parts.Any(part => SecretFolders.Any(folder => string.Equals(part, folder, StringComparison.OrdinalIgnoreCase)));
+        for (var index = 0; index < parts.Length; index++)
+        {
+            if (!SecretFolders.Any(folder => string.Equals(parts[index], folder, StringComparison.OrdinalIgnoreCase))) continue;
+            // A worktree CodeAlta keeps in its folder (.alta/worktrees/<repository>/<name>) is the folder of a project, as
+            // InWorktree says of the secret roots: what is inside it is checked as anywhere else.
+            if (IsWorktreeOfCodeAlta(parts, index)) continue;
+            return true;
+        }
+
+        return false;
     }
+
+    private static bool IsWorktreeOfCodeAlta(string[] parts, int index)
+        => string.Equals(parts[index], ".alta", StringComparison.OrdinalIgnoreCase) && index + 3 < parts.Length &&
+           string.Equals(parts[index + 1], "worktrees", StringComparison.OrdinalIgnoreCase);
 }

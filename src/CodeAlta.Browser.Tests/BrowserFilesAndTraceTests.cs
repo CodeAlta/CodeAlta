@@ -36,6 +36,26 @@ public sealed class BrowserFilesAndTraceTests
     }
 
     [TestMethod]
+    public void AWorktreeOfCodeAlta_IsTheFolderOfItsProject_NotAFolderOfSecrets()
+    {
+        // A session that works in a worktree CodeAlta keeps under ~/.alta/worktrees/<repository>/<name> reads its project
+        // there; the rest of ~/.alta, a .alta folder of the project and the files of secrets by name stay refused.
+        var home = Path.Combine(Path.GetTempPath(), "codealta-files", "home");
+        var worktree = Path.Combine(home, ".alta", "worktrees", "codealta", "sparkling-kayak");
+        Assert.IsFalse(BrowserFiles.IsSecret(Path.Combine(worktree, "site", "index.html")));
+        Assert.IsFalse(BrowserFiles.IsSecret(worktree));
+        Assert.IsTrue(BrowserFiles.IsSecret(Path.Combine(worktree, ".env")));
+        Assert.IsTrue(BrowserFiles.IsSecret(Path.Combine(worktree, ".alta", "mcp.json")), "the .alta folder of the project");
+        Assert.IsTrue(BrowserFiles.IsSecret(Path.Combine(worktree, ".ssh", "config")));
+        Assert.IsTrue(BrowserFiles.IsSecret(Path.Combine(home, ".alta", "worktrees", "codealta")), "the folder of the worktrees of a repository");
+        Assert.IsTrue(BrowserFiles.IsSecret(Path.Combine(home, ".alta", "auth", "codex.json")));
+        Assert.IsTrue(BrowserFiles.IsSecret(Path.Combine(home, ".alta", "config.toml")));
+
+        var files = new BrowserFiles(worktree, [worktree], [worktree], Path.Combine(worktree, "tmp"));
+        Assert.AreEqual(Path.Combine(worktree, "site", "index.html"), files.ResolveRead("site/index.html", "filePaths"));
+    }
+
+    [TestMethod]
     public void AProfileInAFolderOfAnyName_KeepsItsFilesFromAPage_AsTheFolderOfCodeAltaDoes()
     {
         // A global chat of a separate profile works in the folder of the profile, which a page may read from.
