@@ -24,6 +24,8 @@ The window has four areas:
 
 In CodeAlta Desktop, the title bar has the buttons of the Explorer, the search, **Automations**, **Work items**, **Issues**, **Canvases**, **Bookmarks** and **Settings**; those that do not fit go in the **…** menu. It also has the space switch, the zoom and the theme switch. A [space](../spaces.md) is a group of projects with its own setup: the window shows one space at a time.
 
+In CodeAlta Desktop, right-click a text field, the prompt or a code editor, or press the menu key or `Shift+F10` in it, for **Cut**, **Copy**, **Paste** and **Select all**; a read-only field or editor only copies, and the text of a password is never copied. Right-click text you selected in the timeline or a dialog to **Copy** it.
+
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` (also `Ctrl+PageDown` / `Ctrl+PageUp`) | Next / previous open tab, in the order of the tab strip (desktop). In a code editor, they go through its files instead |
