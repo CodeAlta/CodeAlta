@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { chartTokens } from "../charts/tokens";
 import { chartFileRefusal, cssValue, createChartCache, createChartWorkerClient, vegaLiteConfig, type ChartAppearance, type ChartData, type ChartFile } from "./vegaLite";
 
@@ -94,9 +96,10 @@ test("a chart that reads files reads them again when a render finds it later, an
   assert.equal(cache.lookup(spec(), dark, data).pending, false);
 });
 
-test("the cache keeps the newest charts, within a number and a size", async () => {
-  const cache = createChartCache(async chart => ({ svg: `<svg>${"x".repeat(Number(chart.spec.size))}</svg>` }), { capacity: 2, maximumCharacters: 1_000 });
-  for (const size of [10, 20, 30]) await cache.draw(spec({ size }), dark, null);
+test("the cache keeps the newest charts, within a number and a size, once no render shows the older ones", async () => {
+  let time = 0;
+  const cache = createChartCache(async chart => ({ svg: `<svg>${"x".repeat(Number(chart.spec.size))}</svg>` }), { capacity: 2, maximumCharacters: 1_000, now: () => time });
+  for (const size of [10, 20, 30]) { await cache.draw(spec({ size }), dark, null); time += 20_000; }
   assert.equal(cache.usage().entries, 2);
   assert.equal(cache.lookup(spec({ size: 10 }), dark, null).svg, null, "the oldest is gone");
   await cache.draw(spec({ size: 2_000 }), dark, null);
@@ -161,4 +164,54 @@ test("a value of CSS is read as the browser reads it: escapes decoded, comments 
   assert.equal(cssValue("u/* a */rl(x)"), "url(x)");
   assert.equal(cssValue("\\0 \\110000 x"), "\ufffd\ufffdx");
   assert.equal(cssValue("rgb(1, 2, 3)"), "rgb(1, 2, 3)");
+});
+test("a page with more charts than the cache holds settles: the charts it shows keep their drawing", async () => {
+  let draws = 0;
+  const cache = createChartCache(async chart => { draws++; return { svg: `<svg>${String(chart.spec.n)}</svg>` }; });
+  const texts = Array.from({ length: 49 }, (_, index) => spec({ n: index }));
+  // A render looks up every chart of the page, then draws what is pending, and renders again: as `MarkdownContent` does.
+  let rounds = 0, pending = texts.length;
+  while (pending && rounds++ < 10) {
+    const waiting = texts.filter(text => cache.lookup(text, dark, null).pending);
+    pending = waiting.length;
+    await Promise.all(waiting.map(text => cache.draw(text, dark, null)));
+  }
+  assert.ok(rounds <= 3, `settled after ${rounds} renders`);
+  assert.equal(draws, 49, "each chart is drawn once");
+  assert.ok(texts.every(text => cache.lookup(text, dark, null).svg !== null));
+});
+
+test("past what it can keep of charts in use, a new chart is refused instead of taking the drawing of another", async () => {
+  let time = 0;
+  const cache = createChartCache(async () => ({ svg: "<svg/>" }), { capacity: 2, maximumCharacters: 1_000, now: () => time });
+  const texts = Array.from({ length: 12 }, (_, index) => spec({ n: index }));
+  for (const text of texts) { cache.lookup(text, dark, null); await cache.draw(text, dark, null); }
+  const shown = texts.map(text => cache.lookup(text, dark, null));
+  assert.ok(shown.slice(0, 8).every(found => found.svg === "<svg/>" && !found.pending), "the charts in use keep their drawing, up to four times the capacity");
+  assert.ok(shown.slice(8).every(found => found.refused === "Too many charts are shown at once" && !found.pending), JSON.stringify(shown.slice(8)));
+  // Charts no longer used for a while make room again.
+  time = 60_000;
+  const later = spec({ n: "later" });
+  await cache.draw(later, dark, null);
+  assert.equal(cache.lookup(later, dark, null).svg, "<svg/>");
+  assert.ok(cache.usage().entries <= 8);
+});
+
+test("a chart that read files keeps a digest of their text, not the text", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const cache = createChartCache(async () => ({ svg: "<svg/>" }));
+  // A large text may be kept outside the heap of V8 (an external string): both are counted.
+  const used = () => { const memory = process.memoryUsage(); return memory.heapUsed + memory.external; };
+  gc();
+  const before = used();
+  for (let index = 0; index < 16; index++) {
+    // A flat text of its own (`repeat` would make a rope that shares its parts).
+    const { data } = folder({ "out/a.csv": { status: "ok", text: `a\n${Buffer.alloc(2_000_000, 97 + index).toString("latin1")}` } }, `session:${index}`);
+    await cache.draw(withFile, dark, data);
+  }
+  // Buffers of the digests are released at a later collection.
+  for (let pass = 0; pass < 3; pass++) { await new Promise(resolve => setImmediate(resolve)); gc(); }
+  const kept = used() - before;
+  assert.ok(kept < 8_000_000, `the cache keeps ${kept} bytes for 16 charts of 2 MB files`);
 });

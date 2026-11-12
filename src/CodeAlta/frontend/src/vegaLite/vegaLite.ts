@@ -34,6 +34,9 @@ export const chartTimeLimit = 10_000;
 /** A longer SVG is not shown: what a chart draws past it is no chart a reader can see. */
 export const maximumChartSvgLength = 5_000_000;
 
+// Why a chart is not drawn while the charts shown leave no room in the cache.
+const tooMany = "Too many charts are shown at once";
+
 /** What a reader sees when a file is not read, by the status of the host. */
 export function chartFileRefusal(path: string, status: string): string {
   const shown = path.length > 80 ? `${path.slice(0, 79)}…` : path;
@@ -88,7 +91,18 @@ export function vegaLiteAppearance(width?: number): ChartAppearance {
 }
 
 type Drawn = Readonly<{ svg: string } | { refused: string }>;
-type Entry = { result: Drawn; files: Readonly<Record<string, string>> | null; checked: number; size: number };
+// A chart kept: what it drew, the digests of the files it read (never their text), when they were read, its size, and when a render
+// last showed it.
+type Entry = { result: Drawn; digests: Readonly<Record<string, string>> | null; checked: number; size: number; used: number };
+
+/** The time a chart a render showed is kept, whatever the capacity of the cache: a page that shows more charts settles. */
+export const chartInUse = 10_000;
+
+// The SHA-256 of a text, to know that a file changed without keeping it.
+async function digestOf(text: string): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /** What draws a prepared chart with the text of its files: an SVG to show as it is, or why it is not drawn. */
 export type ChartRenderer = (chart: PreparedChart, files: Readonly<Record<string, string>>, look: ChartAppearance) => Promise<Drawn>;
@@ -96,9 +110,12 @@ export type ChartRenderer = (chart: PreparedChart, files: Readonly<Record<string
 /**
  * Keeps the charts drawn from `vega-lite` blocks, by text, appearance and the folder their files are read from: Markdown is
  * rendered synchronously, so a chart is drawn once on the side and found here by every later render. At most `capacity`
- * charts and `maximumCharacters` of SVG are kept, the most recently used. A chart that reads files is read again when a render
- * finds it more than `freshness` milliseconds after its files were read, and drawn again only when one changed; until a chart is
- * drawn for a new appearance, its drawing for the one before is shown.
+ * charts and `maximumCharacters` of SVG are kept, the most recently used, but a chart a render showed in the last
+ * {@link chartInUse} milliseconds is never dropped for another, which would draw it again and drop another, for ever: past four
+ * times the capacity or twice the characters of such charts, a new chart is refused instead, until they are no longer shown. A
+ * chart that reads files keeps their digests, is read again when a render finds it more than `freshness` milliseconds after its
+ * files were read, and is drawn again only when one changed; until a chart is drawn for a new appearance, its drawing for the one
+ * before is shown.
  */
 export function createChartCache(render: ChartRenderer, limits: { capacity?: number; maximumCharacters?: number; freshness?: number; now?: () => number } = {}) {
   const capacity = limits.capacity ?? 48;
@@ -113,23 +130,33 @@ export function createChartCache(render: ChartRenderer, limits: { capacity?: num
   const textKey = (text: string, data: ChartData | null) => `${data?.key ?? ""}\n${text}`;
   const entryKey = (text: string, look: ChartAppearance, data: ChartData | null) => `${look.key}\n${textKey(text, data)}`;
 
+  // Drops the oldest charts that no render showed lately, until the cache is within its capacity.
+  function trim() {
+    const recent = now() - chartInUse;
+    for (const [oldest, value] of entries) {
+      if (entries.size <= capacity && characters <= maximumCharacters) break;
+      if (value.used > recent) continue;
+      entries.delete(oldest);
+      characters -= value.size;
+    }
+  }
+  // Whether the charts shown lately leave no room for another drawing.
+  const full = () => entries.size >= capacity * 4 || characters > maximumCharacters * 2;
   function store(key: string, text: string, data: ChartData | null, entry: Entry) {
     const old = entries.get(key);
     if (old) { characters -= old.size; entries.delete(key); }
     if (entry.size > maximumCharacters) return;
+    trim();
+    if ("svg" in entry.result && full()) entry = { ...entry, result: { refused: tooMany }, digests: null, size: tooMany.length };
     entries.set(key, entry);
     characters += entry.size;
+    trim();
     if ("svg" in entry.result) latest.set(textKey(text, data), key);
-    for (const [oldest, value] of entries) {
-      if (entries.size <= capacity && characters <= maximumCharacters) break;
-      entries.delete(oldest);
-      characters -= value.size;
-    }
-    while (latest.size > capacity * 2) latest.delete(latest.keys().next().value!);
+    while (latest.size > capacity * 8) latest.delete(latest.keys().next().value!);
   }
   function found(key: string): Entry | undefined {
     const entry = entries.get(key);
-    if (entry) { entries.delete(key); entries.set(key, entry); } // Most recently used last.
+    if (entry) { entries.delete(key); entries.set(key, entry); entry.used = now(); } // Most recently used last.
     return entry;
   }
   async function readFiles(chart: PreparedChart, data: ChartData | null): Promise<Readonly<{ files: Record<string, string> }> | ChartRefusal> {
@@ -146,13 +173,15 @@ export function createChartCache(render: ChartRenderer, limits: { capacity?: num
   }
   const same = (left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>) =>
     Object.keys(left).length === Object.keys(right).length && Object.entries(left).every(([name, value]) => right[name] === value);
+  const digestsOf = async (files: Readonly<Record<string, string>>) =>
+    Object.fromEntries(await Promise.all(Object.entries(files).map(async ([url, text]) => [url, await digestOf(text)] as const)));
 
   return {
     /** The chart of a text for a render: drawn, refused, or not drawn yet (with its drawing for another appearance, if any). */
     lookup(text: string, look: ChartAppearance, data: ChartData | null): ChartLookup {
       const entry = found(entryKey(text, look, data));
       if (entry) {
-        const pending = entry.files !== null && now() - entry.checked > freshness;
+        const pending = entry.digests !== null && now() - entry.checked > freshness;
         return "svg" in entry.result ? { svg: entry.result.svg, refused: null, pending } : { svg: null, refused: entry.result.refused, pending };
       }
       const before = latest.get(textKey(text, data));
@@ -163,22 +192,27 @@ export function createChartCache(render: ChartRenderer, limits: { capacity?: num
     draw(text: string, look: ChartAppearance, data: ChartData | null): Promise<void> {
       const key = entryKey(text, look, data);
       const known = entries.get(key);
-      if (known && (known.files === null || now() - known.checked <= freshness)) return Promise.resolve();
+      if (known && (known.digests === null || now() - known.checked <= freshness)) return Promise.resolve();
       let work = drawing.get(key);
       if (!work) {
         work = (async () => {
           const chart = prepareChart(text);
-          if ("refused" in chart) { store(key, text, data, { result: chart, files: null, checked: now(), size: chart.refused.length }); return; }
+          const used = now();
+          if ("refused" in chart) { store(key, text, data, { result: chart, digests: null, checked: used, size: chart.refused.length, used }); return; }
           const read = chart.files.length ? await readFiles(chart, data) : null;
           const checked = now();
-          if (read && "refused" in read) { store(key, text, data, { result: read, files: {}, checked, size: read.refused.length }); return; }
+          if (read && "refused" in read) { store(key, text, data, { result: read, digests: {}, checked, size: read.refused.length, used }); return; }
           const files = read ? read.files : null;
+          const digests = files ? await digestsOf(files) : null;
           const before = entries.get(key);
-          if (before && before.files && files && same(before.files, files)) { before.checked = checked; return; }
+          if (before && before.digests && digests && same(before.digests, digests)) { before.checked = checked; return; }
+          // The charts shown lately leave no room: this one is refused before it is drawn, until they are no longer shown.
+          trim();
+          if (!before && full()) { store(key, text, data, { result: { refused: tooMany }, digests: null, checked, size: tooMany.length, used }); return; }
           let result: Drawn;
           try { result = await render(chart, files ?? {}, look); } catch { result = { refused: "The chart could not be drawn" }; }
           const size = "svg" in result ? result.svg.length : result.refused.length;
-          store(key, text, data, { result, files, checked, size });
+          store(key, text, data, { result, digests, checked, size, used });
         })().catch(() => { /* Never rejects: the chart stays code. */ }).finally(() => drawing.delete(key));
         drawing.set(key, work);
       }
