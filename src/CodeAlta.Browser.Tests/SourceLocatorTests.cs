@@ -439,6 +439,33 @@ public sealed class SourceLocatorTests
     }
 
     [TestMethod]
+    public async Task AProfileInsideTheProject_IsNeitherSearchedNorRead()
+    {
+        // alta --profile <project>/profile: its settings and credentials are files of the project by their paths.
+        Write("src/Index.html", "<h2 class=\"title\">Dein Tag auf einen Blick</h2>\n");
+        var profile = Path.Combine(_project, "profile");
+        Write("profile/auth/provider.json", "{\"title\":\"Dein Tag auf einen Blick\"}");
+        Write("profile/browser/files/Saved.html", "<h2 class=\"title\">Dein Tag auf einen Blick</h2>\n");
+        var secret = Write("profile/config.toml", "<h2 class=\"title\">Dein Tag auf einen Blick</h2>\n");
+        var search = new SourceQuery
+        {
+            PageUrl = new Uri("http://localhost:5000/"), ProjectRoot = _project, ServerRoot = _project,
+            Element = new AnnotatedElement { Tag = "h2", Text = "Dein Tag auf einen Blick", Classes = ["title"] },
+        };
+        var byName = await new SourceLocator(NoFetch, Folders()).LocateAsync(search, CancellationToken.None);
+        Assert.IsTrue(byName.Any(static candidate => candidate.Path.StartsWith("profile/", StringComparison.Ordinal)), "by its name alone, it is searched: " + string.Join("; ", byName));
+
+        var files = new BrowserFiles(_project, [_project], [], _project) { SecretRoots = [profile] };
+        var found = await new SourceLocator(NoFetch, _ => ValueTask.FromResult(files)).LocateAsync(search, CancellationToken.None);
+        Assert.IsTrue(found.Any(static candidate => candidate.Path == "src/Index.html"), string.Join("; ", found));
+        Assert.IsFalse(found.Any(static candidate => candidate.Path.StartsWith("profile/", StringComparison.Ordinal)), string.Join("; ", found));
+        var gate = new SourceLocator.FileGate(files);
+        Assert.IsFalse(gate.CanRead(secret));
+        Assert.IsFalse(gate.CanRead(profile), "its folder is not traversed");
+        Assert.IsNull(gate.ReadChecked(secret), "nor read once opened");
+    }
+
+    [TestMethod]
     public void AFolderReplacedByALinkAfterTheCheck_IsNotRead()
     {
         TestLinks.RequireSymbolicLinks();

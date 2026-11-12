@@ -277,14 +277,39 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
                 return true;
             }
 
-            foreach (var folder in full == real ? new[] { full } : new[] { full, real })
-            {
-                if (IsWithin(path, folder) && !InWorktree(path, folder)) return true;
-            }
+            if (IsInResolvedSecretRoot(path, full == real ? [full] : [full, real])) return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// The folders of CodeAlta as written and as the system resolves them, once, for <see cref="IsInResolvedSecretRoot"/>.
+    /// A folder whose path cannot be resolved is null: everything is kept from a page then.
+    /// </summary>
+    internal static IReadOnlyList<string>? ResolveSecretRoots(IReadOnlyList<string> roots)
+    {
+        var folders = new List<string>();
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root)) continue;
+            try
+            {
+                folders.Add(Path.GetFullPath(root));
+                folders.Add(RealPath(root));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+            {
+                return null;
+            }
+        }
+
+        return folders;
+    }
+
+    /// <summary>Whether a full path is inside one of the folders <see cref="ResolveSecretRoots"/> gave, but in their worktrees.</summary>
+    internal static bool IsInResolvedSecretRoot(string path, IReadOnlyList<string>? folders)
+        => folders is null || folders.Any(folder => IsWithin(path, folder) && !InWorktree(path, folder));
 
     // Inside a worktree of the folder of CodeAlta, which a session works in as in the folder of its project.
     private static bool InWorktree(string path, string root)

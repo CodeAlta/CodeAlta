@@ -469,7 +469,8 @@ internal sealed partial class SourceLocator
 
     /// <summary>
     /// Whether one search may read a file or a folder: as <see cref="BrowserFiles.CanRead"/> decides it for the tools of the
-    /// session (inside its folders, not denied by its sandbox, no file of secrets), with the folders of the session resolved
+    /// session (inside its folders, not denied by its sandbox, no file of secrets, nothing of the folders of CodeAlta, a
+    /// separate profile inside a project included), with the folders of the session resolved
     /// once. A path is resolved at each check, never from a folder resolved before: a folder of the project can become a
     /// link while a search runs.
     /// </summary>
@@ -477,6 +478,7 @@ internal sealed partial class SourceLocator
     {
         private readonly string[] _roots = [.. files.ReadRoots.Select(Real)];
         private readonly string[] _denied = [.. files.Denied.Select(Real)];
+        private readonly IReadOnlyList<string>? _secretRoots = BrowserFiles.ResolveSecretRoots(files.SecretRoots);
 
         /// <summary>Whether the session may read a file or a folder, as its path is now.</summary>
         public bool CanRead(string path)
@@ -490,7 +492,7 @@ internal sealed partial class SourceLocator
             string real;
             try { real = BrowserFiles.RealPath(full); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
-            return Allows(real) && !BrowserFiles.IsSecret(full);
+            return Allows(real) && !BrowserFiles.IsSecret(full) && !BrowserFiles.IsInResolvedSecretRoot(full, _secretRoots);
         }
 
         /// <summary>The text of a file the session may read, checked as it was opened, or null.</summary>
@@ -538,7 +540,8 @@ internal sealed partial class SourceLocator
 
         // A path as the system resolves it that the session may read.
         private bool Allows(string real)
-            => _roots.Any(root => BrowserFiles.IsWithin(real, root)) && !_denied.Any(entry => BrowserFiles.IsWithin(real, entry)) && !BrowserFiles.IsSecret(real);
+            => _roots.Any(root => BrowserFiles.IsWithin(real, root)) && !_denied.Any(entry => BrowserFiles.IsWithin(real, entry)) && !BrowserFiles.IsSecret(real)
+                && !BrowserFiles.IsInResolvedSecretRoot(real, _secretRoots);
     }
 
     private static string Real(string path)
