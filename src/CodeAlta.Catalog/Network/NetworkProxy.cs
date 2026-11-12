@@ -143,6 +143,10 @@ public sealed partial class NetworkProxy : IWebProxy
         if (settings.GetError() is { } error) throw new ArgumentException(error, nameof(settings));
         var state = new State(settings, settings.Mode == ProxyMode.Manual ? new ProxyBypassList(settings.Bypass.IsDefault ? [] : settings.Bypass) : null,
             CredentialOf(settings, password), password);
+        // The variables are set one at a time: a program started during these few microseconds of a save may get some of
+        // the old ones and some of the new ones. Each address carries its own credentials, so no password goes to another
+        // proxy; at worst a host of the bypass list goes through the proxy once, or the other way. Making it whole would take
+        // one lock around every start of a program, including those of libraries and plugins, which CodeAlta does not own.
         var variables = settings.Mode == ProxyMode.System ? _original : EnvironmentOf(settings, password);
         lock (_gate)
         {
