@@ -636,6 +636,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
             pluginRuntime.Secrets.AttachBound(credentials);
             // The values of vaults given to the shells of the sessions, which never enter a sandbox under any name.
             var shellSecrets = new ShellBoundSecrets(credentials);
+            // The shell of a session that attaches waits for the user's answer to the secrets that ask before use.
+            var shellConfirmations = new ShellSecretConfirmations(credentials, shellSecrets, ShellConfirmationTimeout);
             // A secret given to a provider (its key, a variable of its CLI) is masked from then on, before the provider gets it; so is
             // one a plugin gives out (an MCP server's variables and headers), told to the runtime of the plugins.
             modelProviderRegistry.SecretIssued = secretMasker.Retain;
@@ -697,16 +699,16 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     // host-only one; each use of a value of the fleet is recorded for the session.
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
                         // Each secret is masked from the moment it is given, before the processes of the session take it.
-                        // One environment built is one use of each secret, whatever the number of variables that name it.
+                        // One resolution of an identity is one use of each secret, whatever the number of variables that name it and the
+                        // number of times its environment is built while it waits for confirmations.
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, new OneUseBoundSecrets(shellSecrets), ShellUseOf(scope)).Read,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, shellConfirmations.SecretsOf(scope), ShellUseOf(scope)).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
                         new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
                         new SessionSecretEnvironments(readOnlyGlobalState ? null : Path.Combine(catalogOptions.FleetRoot, "environment-admissions.json")))
                     {
-                        // The shell of a session that attaches waits for the user's answer to the secrets that ask before use.
-                        Confirmations = new ShellSecretConfirmations(credentials, ShellConfirmationTimeout),
+                        Confirmations = shellConfirmations,
                     }
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
@@ -1203,10 +1205,28 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// environment waits for (<see cref="CodeAlta.Credentials.CredentialBroker.ListPending"/> for <see cref="ShellUseOf"/>): CodeAlta
     /// Desktop shows each of them to the user. Nothing waits where nobody can answer.
     /// </summary>
+    /// <remarks>
+    /// The environment of a session that waited is built again, with the same scope: what the first build read is kept for it
+    /// (<see cref="SecretsOf"/>), and only the uses the user confirmed meanwhile are asked again. A confirmation of each use that the
+    /// first build took is not lost, and a use denied is not asked again.
+    /// </remarks>
     /// <param name="broker">The credential broker of the host.</param>
+    /// <param name="secrets">The secrets the shells of the sessions are given.</param>
     /// <param name="timeout">How long it waits.</param>
-    internal sealed class ShellSecretConfirmations(CodeAlta.Credentials.CredentialBroker broker, TimeSpan timeout) : ISessionSecretConfirmations
+    internal sealed class ShellSecretConfirmations(CodeAlta.Credentials.CredentialBroker broker, IBoundSecretSource secrets, TimeSpan timeout) : ISessionSecretConfirmations
     {
+        // What each resolution read, by its scope, which the builds of one resolution share; gone with the scope.
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<SecretScope, OneUseBoundSecrets> _resolutions = new();
+
+        /// <summary>Gets the secrets the environment of a resolution is built with: the same for every build of that scope.</summary>
+        /// <param name="scope">The work of the session, as one resolution gives it.</param>
+        /// <returns>The secrets.</returns>
+        public IBoundSecretSource SecretsOf(SecretScope scope)
+        {
+            ArgumentNullException.ThrowIfNull(scope);
+            return _resolutions.GetValue(scope, _ => new OneUseBoundSecrets(secrets));
+        }
+
         /// <inheritdoc />
         public async Task<IReadOnlyList<SessionSecretConfirmation>> WaitAsync(SecretScope scope, CancellationToken cancellationToken)
         {
@@ -1216,6 +1236,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var names = broker.ListPending().Where(pending => pending.Use == use).Select(static pending => pending.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (names.Length == 0) return [];
             var outcomes = await Task.WhenAll(names.Select(name => broker.WaitForConfirmationAsync(name, use, timeout, cancellationToken))).ConfigureAwait(false);
+            // The next build asks again for what the user confirmed, and keeps what the first build read.
+            if (_resolutions.TryGetValue(scope, out var read))
+                read.Forget([.. names.Where((_, index) => outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed)]);
             return [.. names.Select((name, index) => new SessionSecretConfirmation(name, outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed,
                 ProblemOf(name, outcomes[index], timeout)))];
         }
@@ -1231,12 +1254,14 @@ public sealed class CodeAltaHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// The secrets kept in vaults and the confirmations of the secrets that ask before use, for one environment built: each secret is
-    /// asked once, so that a confirmation of each use is one use for the environment, whatever the number of variables that name it.
+    /// The secrets kept in vaults and the confirmations of the secrets that ask before use, for one resolution of an environment: each
+    /// secret is asked once, so that a confirmation of each use is one use for the environment, whatever the number of variables that
+    /// name it and of the builds of that resolution, until <see cref="Forget"/> asks it again.
     /// </summary>
     /// <param name="inner">The secrets of the host.</param>
     internal sealed class OneUseBoundSecrets(IBoundSecretSource inner) : IBoundSecretSource
     {
+        private readonly Lock _gate = new();
         private readonly Dictionary<(string Name, string? Use), BoundSecretRead> _reads = [];
         private readonly Dictionary<(string Name, string? Use), string?> _authorizations = [];
 
@@ -1245,8 +1270,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
         {
             ArgumentNullException.ThrowIfNull(name);
             var key = (name.ToUpperInvariant(), use);
-            if (!_reads.TryGetValue(key, out var read)) _reads[key] = read = inner.ReadBound(name, use);
-            return read;
+            lock (_gate)
+            {
+                if (!_reads.TryGetValue(key, out var read)) _reads[key] = read = inner.ReadBound(name, use);
+                return read;
+            }
         }
 
         /// <inheritdoc />
@@ -1254,8 +1282,24 @@ public sealed class CodeAltaHost : IAsyncDisposable
         {
             ArgumentNullException.ThrowIfNull(name);
             var key = (name.ToUpperInvariant(), use);
-            if (!_authorizations.TryGetValue(key, out var problem)) _authorizations[key] = problem = inner.AuthorizeUse(name, use);
-            return problem;
+            lock (_gate)
+            {
+                if (!_authorizations.TryGetValue(key, out var problem)) _authorizations[key] = problem = inner.AuthorizeUse(name, use);
+                return problem;
+            }
+        }
+
+        /// <summary>Asks the secrets again at the next read, for every use: the user confirmed them since.</summary>
+        /// <param name="names">The secrets.</param>
+        public void Forget(IReadOnlyCollection<string> names)
+        {
+            ArgumentNullException.ThrowIfNull(names);
+            var upper = names.Select(static name => name.ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+            lock (_gate)
+            {
+                foreach (var key in _reads.Keys.Where(key => upper.Contains(key.Name)).ToArray()) _reads.Remove(key);
+                foreach (var key in _authorizations.Keys.Where(key => upper.Contains(key.Name)).ToArray()) _authorizations.Remove(key);
+            }
         }
     }
 

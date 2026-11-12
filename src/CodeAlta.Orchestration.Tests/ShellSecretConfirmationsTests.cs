@@ -14,6 +14,7 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class ShellSecretConfirmationsTests
 {
     private const string Value = "local-deploy-value-1";
+    private const string RegistryValue = "local-registry-value-1";
 
     [TestMethod]
     public async Task TheShell_WaitsForTheConfirmation_ThenGetsTheValue_InEachVariableThatNamesIt()
@@ -39,6 +40,41 @@ public sealed class ShellSecretConfirmationsTests
         await fixture.AwaitedAsync("shell of the session session-1");
         fixture.Broker.Decline("DEPLOY", "shell of the session session-1");
         Assert.IsNull((await again.WithinAsync(TestTime.Seconds(30))).Environment.Get("DEPLOY_TOKEN"));
+    }
+
+    [TestMethod]
+    public async Task ASecretConfirmedAheadForEachUse_StaysInTheShell_WhenAnotherIsConfirmedWhileItWaits()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.FifteenMinutes, second: true);
+        // REGISTRY is confirmed ahead for one use of the shell of the session; DEPLOY waits for the user.
+        Assert.AreEqual(UserPresenceResult.Verified, await fixture.Broker.ConfirmAsync("REGISTRY", "shell of the session session-7"));
+
+        var attaching = fixture.AttachAsync("session-7");
+        await fixture.AwaitedAsync("shell of the session session-7");
+        await fixture.Broker.ConfirmAsync("DEPLOY", "shell of the session session-7");
+        var identity = await attaching.WithinAsync(TestTime.Seconds(30));
+
+        Assert.AreEqual(RegistryValue, identity.Environment.Get("REGISTRY_TOKEN"), "the first build took its confirmation of each use, and the second keeps what it read");
+        Assert.AreEqual(Value, identity.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsEmpty(identity.SecretProblems);
+        Assert.IsEmpty(fixture.Broker.ListPending(), "nothing asks again");
+    }
+
+    [TestMethod]
+    public async Task ADeniedUse_IsNotAskedAgain_WhenAnotherIsConfirmedWhileItWaits()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.FifteenMinutes, second: true);
+
+        var attaching = fixture.AttachAsync("session-8");
+        await fixture.AwaitedAsync("shell of the session session-8");
+        fixture.Broker.Decline("REGISTRY", "shell of the session session-8");
+        await fixture.Broker.ConfirmAsync("DEPLOY", "shell of the session session-8");
+        var identity = await attaching.WithinAsync(TestTime.Seconds(30));
+
+        Assert.AreEqual(Value, identity.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsNull(identity.Environment.Get("REGISTRY_TOKEN"));
+        StringAssert.Contains(identity.SecretProblems.Single(), "REGISTRY: its use was denied");
+        Assert.IsEmpty(fixture.Broker.ListPending(), "the denied use does not wait again for a shell that started");
     }
 
     [TestMethod]
@@ -131,7 +167,7 @@ public sealed class ShellSecretConfirmationsTests
 
         public Verifier Verifier { get; }
 
-        public static async Task<Fixture> CreateAsync(string askBeforeUse, TimeSpan? timeout = null, bool canPrompt = true)
+        public static async Task<Fixture> CreateAsync(string askBeforeUse, TimeSpan? timeout = null, bool canPrompt = true, bool second = false)
         {
             var temp = new TempDirectory();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "global") };
@@ -139,18 +175,27 @@ public sealed class ShellSecretConfirmationsTests
             var store = new LocalSecretStore(options.GlobalRoot);
             store.SetSecret("DEPLOY", Value, "alice");
             store.Bindings.SetAskBeforeUse("DEPLOY", askBeforeUse);
+            // A second secret, confirmed for each use, in a variable of its own.
+            if (second)
+            {
+                store.SetSecret("REGISTRY", RegistryValue, "alice");
+                store.Bindings.SetAskBeforeUse("REGISTRY", SecretAskDurations.EachUse);
+            }
+
             var verifier = new Verifier();
             var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = options.GlobalRoot, Verifier = verifier, CanPrompt = canPrompt });
             var spaces = new SpaceCatalog(new ProjectCatalog(options));
             var space = (await spaces.CreateAsync("Deploy")).Space!;
             Assert.IsTrue((await spaces.UpdateSettingsAsync(space.Id, _ => new SpaceSettings(Identity: new SpaceIdentity(Cli:
-                [new("deploy", [new("DEPLOY_TOKEN", "${secret:DEPLOY}"), new("DEPLOY_TOKEN_AGAIN", "${secret:DEPLOY}")])])))).Succeeded);
+                [new("deploy", [new("DEPLOY_TOKEN", "${secret:DEPLOY}"), new("DEPLOY_TOKEN_AGAIN", "${secret:DEPLOY}")]),
+                 new("registry", [new("REGISTRY_TOKEN", "${secret:REGISTRY}")])])))).Succeeded);
             // As the host builds the environment of a shell.
+            var confirmations = new CodeAltaHost.ShellSecretConfirmations(broker, broker, timeout ?? TimeSpan.FromMinutes(2));
             var resolver = new SessionIdentityResolver(spaces, (identity, scope) => SpaceIdentityEnvironment.Create(identity,
-                    SecretReferenceResolver.ForScope(options.GlobalRoot, scope, shell: true, null, null, new CodeAltaHost.OneUseBoundSecrets(broker), CodeAltaHost.ShellUseOf(scope)).Read,
+                    SecretReferenceResolver.ForScope(options.GlobalRoot, scope, shell: true, null, null, confirmations.SecretsOf(scope), CodeAltaHost.ShellUseOf(scope)).Read,
                     temp.Path, OperatingSystem.IsWindows()), null, null)
             {
-                Confirmations = new CodeAltaHost.ShellSecretConfirmations(broker, timeout ?? TimeSpan.FromMinutes(2)),
+                Confirmations = confirmations,
             };
             return new Fixture(temp, broker, verifier, resolver, space.Id);
         }

@@ -169,7 +169,8 @@ public sealed class SessionIdentityResolver
     /// Gives the identity a session attaches with (<see cref="ResolveAsync(string?, string?, string?, string?, CancellationToken)"/>):
     /// when its environment waits for the confirmation of a secret that asks before use, it waits for the user's answer
     /// (<see cref="Confirmations"/>), then builds the environment again with the secrets the user confirmed. A secret denied or not
-    /// confirmed in time is left out, and named in <see cref="SessionIdentity.SecretProblems"/>.
+    /// confirmed in time is left out, and named in <see cref="SessionIdentity.SecretProblems"/>. Both builds are given the same
+    /// <see cref="SecretScope"/> instance, so that the builder can keep for the second what the first read.
     /// </summary>
     /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
     /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
