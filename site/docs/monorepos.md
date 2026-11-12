@@ -69,6 +69,17 @@ When you add a folder whose map declares sub-projects, CodeAlta Desktop says how
 
 **Set up with an agent…**, in the window or in the menu of the repository, puts a prompt in a new session of the repository. Its agent uses the built-in skill `codealta-monorepo`: it reads the workspace files, `CODEOWNERS` and the submodules, proposes the sub-projects and their labels, asks you, then writes the map. Read the prompt, change it if you like, and send it.
 
+## A map inside a sub-project
+
+A sub-project can have a project map of its own: a repository cloned inside another one, or a large folder of the same repository. It is then a repository too:
+
+- In the Explorer, its group nests in the group of its repository, under its label of that map: **platform › Repos › billing › Apps › invoices-api**.
+- **Sub-projects…** on its title opens its own map. On its row, the **⋯** menu has both **Sub-projects…** and **Sub-projects of the repository…**, for the map above it.
+- Its sub-projects get the setup of every repository above them, the nearest first, and their sessions write their own repository, the one of the nearer map.
+- Agents in a session of the sub-project read and change its own map with `alta project manifest`.
+
+Maps nest four levels deep. When two maps declare the same folder, the nearer one wins, and the other lists that entry among its problems. A map that is not read, because it is too deep or a link leads back to a folder whose map is read already, says why in the Sub-projects window and in `alta project manifest show`.
+
 ## What a sub-project gets from its repository
 
 A session of a sub-project works in its folder, and gets the setup of the repository on top of its own:
@@ -132,5 +143,5 @@ optional = true
 
 - A path stays inside the repository: no `..`, no absolute path, no link that leads out, and never a folder of settings such as `.alta`, `.claude`, `.git` or `.codex`, nor one inside.
 - A map declares up to 2,000 projects and 256 labels; labels go four levels deep.
-- The map of a folder that another map declares is not read: declare everything from the root. A folder two maps declare belongs to the nearer repository.
+- A sub-project can have a map of its own: see [A map inside a sub-project](#a-map-inside-a-sub-project). A folder two maps declare belongs to the nearer one.
 - Hidden sub-projects, and those you used, have a file of yours in `~/.alta/projects/`, as any project. The others are kept in memory.

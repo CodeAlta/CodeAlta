@@ -11,7 +11,7 @@ You cannot write under `.alta/` with your file tools: change the map with `alta 
 
 ## 1. Read the repository
 
-- `alta project manifest show` - the map as CodeAlta reads it: its labels, its projects with the state of their folders, and its problems. Without a map, it says `exists: false`.
+- `alta project manifest show` - the map as CodeAlta reads it: its labels, its projects with the state of their folders, and its problems. Without a map, it says `exists: false`. In a sub-project, it shows the map of its repository, or its own map when it has one (see "A map inside a sub-project").
 - `alta project manifest scan` - the folders that hold a project (a `package.json`, a `.csproj`, `Cargo.toml`, `go.mod`, `pyproject.toml`, ...) three levels down, the git submodules, and the files that tell how the repository is organized. Narrow it with `--glob "services/*"` (repeat it), choose what marks a project with `--marker`, go deeper with `--depth`.
 - Read the workspace files the scan names (`alta.project.manifest.workspace`): `pnpm-workspace.yaml`, the `workspaces` of `package.json`, `Cargo.toml` (`[workspace] members`), `go.work`, `nx.json` and the `project.json` files, `turbo.json`, `WORKSPACE`/`MODULE.bazel`, the `.sln` files, `settings.gradle`, `.gitmodules`.
 - Read `CODEOWNERS` when there is one: the teams that own folders are good labels.
@@ -53,6 +53,15 @@ alta project manifest show
 - The map is a file of the repository: tell the user to review it in Changes and commit it, so that everyone who adds the repository gets the same projects. The user also sees and edits it in CodeAlta Desktop, with **Sub-projects…** in the menu of the repository.
 - Offer an `AGENTS.md` for the sub-projects that have none: what the folder is, how to build and test it, its conventions. The `AGENTS.md` of the root still applies to them.
 - What a sub-project inherits from the repository: the `AGENTS.md` of every folder above it, the skills, prompts and MCP servers of the repository (its own win on a name), its `.alta/config.toml` under its own. Its plans and tasks are its own. Say so when the user wonders where to put something.
+
+## A map inside a sub-project
+
+A sub-project can have a map of its own, a nested map: a repository cloned inside this one (`repos/billing` with its own `.git`), or a large folder that the team organizes on its own. It is a repository too, with its labels and sub-projects, nested under its repository in CodeAlta Desktop.
+
+- Choose where a sub-project is declared: in the map of the nearest repository that owns it. A cloned repository keeps its map in its own repository, so that it works alone too.
+- `alta project manifest <command> --project <sub-project>` works on the map of that sub-project; in a session of a sub-project with a map, the commands work on its own map without `--project`.
+- `alta project manifest show` names the repository above in `parentId`, and the entries that have a map of their own in `subProjects`.
+- Maps nest four levels deep. A folder two maps declare belongs to the nearer one: the outer map lists the entry as a problem (`folder.claimed`); remove it there. A map too deep (`map.tooDeep`), or one that a link leads back to (`map.loop`), is not read: declare those projects in a map above it.
 
 ## Keep it right
 

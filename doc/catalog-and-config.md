@@ -168,8 +168,10 @@ The working directory of a session ties it to its project; a session in a git wo
 (`worktreeDirectory` of its summary).
 
 **Sub-projects.** A repository declares folders of it as projects in its project map, `<project>/.alta/projects.toml`
-(`ProjectManifest`): keys, relative paths, labels, `optional`, `write`. `ProjectCatalog.LoadAsync` reads the map of
-every project no other map declares and adds its sub-projects; they are computed, not copied.
+(`ProjectManifest`): keys, relative paths, labels, `optional`, `write`. `ProjectCatalog.LoadAsync` reads the maps of
+the projects and adds their sub-projects, then the maps of those sub-projects (nested maps), down to
+`ProjectManifest.MaximumDepth` levels; they are computed, not copied. A sub-project of a nested map inherits from its
+repository and from what that one inherits.
 
 - **Identity.** The id of a sub-project derives from the id of its repository and its key
   (`DeriveSubProjectId`), so it is the same before and after its file is written, and a folder that moves keeps it.
@@ -183,8 +185,10 @@ every project no other map declares and adds its sub-projects; they are computed
 - **Bounded reads.** The map is parsed once per text (`ParsedFileCache`) and the state of its folders is kept for that
   text; only missing folders are looked at again. A load walks no repository. A map with mistakes costs the entries
   at fault (`Problems`), never the load.
-- **One owner.** A folder two maps declare belongs to the nearer repository, and the map of a declared folder is not
-  read: one group per folder in the Explorer.
+- **One owner.** A load takes the folders from the outside in, so every map that can declare a folder is read before
+  it: a folder two maps declare belongs to the nearer repository, one project and one group per folder, and the outer
+  map reports the entry it lost. A map deeper than the bound, or whose folder is, through a link, one whose map is
+  read already, is not read and says why (`map.tooDeep`, `map.loop`): no walk is endless.
 - Labels of a map are served by `LabelCatalog` beside the user's, read-only, with ids `<repository slug>.<key>`.
   `ProjectManifestEditor` edits the map one table at a time (`ConfigTableSyntax`) under `ConfigFileLock`, and refuses a
   change that would add a problem.
