@@ -78,6 +78,11 @@ A sub-project can have a project map of its own: a repository cloned inside anot
 - Its sub-projects get the setup of every repository above them, the nearest first, and their sessions write their own repository, the one of the nearer map.
 - Agents in a session of the sub-project read and change its own map with `alta project manifest`.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-subprojects-nested.webp" alt="CodeAlta Desktop with the platform repository in the Explorer: under its label Repos, the group of billing with its own labels Apps and Libs and their sub-projects, and the Sub-projects window of platform › billing with invoices-api selected" loading="lazy">
+  <figcaption class="small text-secondary mt-2">billing, a sub-project of platform, has a map of its own: its group nests in the group of platform.</figcaption>
+</figure>
+
 Maps nest four levels deep. When two maps declare the same folder, the nearer one wins, and the other lists that entry among its problems. A map that is not read, because it is too deep or a link leads back to a folder whose map is read already, says why in the Sub-projects window and in `alta project manifest show`.
 
 ## What a sub-project gets from its repository
