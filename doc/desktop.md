@@ -342,11 +342,15 @@ drive the window and run `alta` commands through it.
 - **Transport.** Streamable HTTP on a Kestrel server of its own (`ModelContextProtocol.AspNetCore`). It listens
   before the host runs, with the tools of the window; `alta` joins them once the host runs. Requests share
   no state, so a client survives a restart of the application.
-- **Address.** `http://127.0.0.1:2582/mcp` (2583 for the developer instance, a free port on explicit roots), written
-  to `mcp_url.txt` beside the instance lock while it listens.
-- **Who is answered.** On loopback, the programs of this computer and no web page: a `Host` that is not loopback and
-  an `Origin` of a remote page are refused, since a web page could otherwise drive the window. A server bound to
-  another address asks for a bearer token (`mcp_token.txt`).
+- **Address.** `http://127.0.0.1:2582/mcp` (2583 for the developer instance, a free port on explicit roots or when
+  the port is taken, as by an instance on another profile), written to `mcp_url.txt` beside the instance lock while
+  it listens. The loopback port is also recorded in `CodeAlta/mcp-ports` of the local application data, shared by
+  the instances of the user whatever their profile: the browsers and sandboxes of every instance, and of `altacli`,
+  keep away from all of them.
+- **Who is answered.** On loopback, the programs of this computer and no web page: a `Host` that is not loopback, an
+  `Origin` of a remote page or of the server itself, and any request with Fetch Metadata (`Sec-Fetch-*`) are refused,
+  since a page, also one a session's browser opens on the loopback, could otherwise drive the window. A server bound
+  to another address asks for a bearer token (`mcp_token.txt`).
 - **UI tools** (`Desktop/Ui/`): the tools of Chrome DevTools MCP, with the same names and arguments so a model uses
   them unchanged, built on NeoAstra's in-page automation (`NeoAutomation`), the same on the three engines. Each window
   is a page. Sessions get them on request (`alta ui activate`, built-in plugin `ui`), and never a session whose

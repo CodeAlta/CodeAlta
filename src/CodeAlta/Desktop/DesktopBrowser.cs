@@ -28,11 +28,22 @@ internal static class DesktopBrowser
     /// </summary>
     /// <param name="mcpPort">The port the MCP server of this window asked for; 0 for one the system picks.</param>
     /// <param name="listeningPort">The port the MCP server of this window listens on now, null while it does not.</param>
-    internal static IReadOnlyList<int> ReservedPorts(int mcpPort, int? listeningPort)
+    internal static IReadOnlyList<int> ReservedPorts(int mcpPort, int? listeningPort) => ReservedPorts(mcpPort, listeningPort, []);
+
+    /// <summary>The ports of CodeAlta on this computer, with those the other instances of the user recorded (<see cref="CodeAlta.Core.IO.McpPortRecord"/>).</summary>
+    /// <param name="mcpPort">The port the MCP server of this window asked for; 0 for one the system picks.</param>
+    /// <param name="listeningPort">The port the MCP server of this window listens on now, null while it does not.</param>
+    /// <param name="others">The ports the MCP servers of the instances of this user listen on, whatever their profile.</param>
+    internal static IReadOnlyList<int> ReservedPorts(int mcpPort, int? listeningPort, IEnumerable<int> others)
     {
         List<int> ports = [Mcp.DesktopMcpEndpoint.DefaultPort, Mcp.DesktopMcpEndpoint.DeveloperPort];
         if (mcpPort > 0 && !ports.Contains(mcpPort)) ports.Add(mcpPort);
         if (listeningPort is { } listening && listening > 0 && !ports.Contains(listening)) ports.Add(listening);
+        foreach (var port in others)
+        {
+            if (port > 0 && !ports.Contains(port)) ports.Add(port);
+        }
+
         return ports;
     }
 }

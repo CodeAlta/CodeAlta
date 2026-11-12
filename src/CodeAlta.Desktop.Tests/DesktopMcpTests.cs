@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 using CodeAlta.Desktop.Mcp;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.Ui;
@@ -260,6 +261,121 @@ public sealed class DesktopMcpTests
         await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.PostAsync(status.Url, new StringContent("{}", Encoding.UTF8, "application/json")));
         await server.StartAsync();
         Assert.IsFalse(File.Exists(server.UrlPath));
+    }
+
+    [TestMethod]
+    public void Guard_RefusesEveryRequestOfAPage_WhateverItsOriginAndPort()
+    {
+        // Fetch Metadata: every browser of the sessions marks the requests of its pages, and no script removes the marks.
+        Assert.IsTrue(DesktopMcpGuard.FromPage("same-origin", null, null, null, "127.0.0.1:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, "no-cors", null, "http://127.0.0.1:5173", "127.0.0.1:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, "empty", null, "127.0.0.1:2582", 2582));
+        // An older browser: a page loaded from the address of the server itself, which no program sends.
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, null, "http://127.0.0.1:51234", "127.0.0.1:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, null, "http://localhost:51234", "localhost:51234", 51234));
+        // The programs of this computer: no mark, no origin, or the origin of a tool of their own.
+        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, null, "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage("", "", "", "", "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, "http://localhost:6274", "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, "null", "127.0.0.1:2582", 2582));
+    }
+
+    [TestMethod]
+    public async Task APageOfABrowser_IsNeverAnswered_ByTheServerOfAnInstanceOnAFreePort()
+    {
+        using var temp = new TempFolder();
+        using var other = new TcpListener(IPAddress.Loopback, 0);
+        other.Start();
+        // An instance on another profile: its port is a free one, which the guards of the normal instance knew nothing of.
+        var taken = ((IPEndPoint)other.LocalEndpoint).Port;
+        await using var server = new DesktopMcpServer(new DesktopMcpEndpoint("127.0.0.1", taken, Chosen: false), () => [], temp.Path, "1");
+        await server.StartAsync();
+        var url = server.Status.Url!;
+        var origin = new Uri(url).GetLeftPart(UriPartial.Authority);
+        using var client = new HttpClient();
+        const string list = """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""";
+
+        Assert.AreEqual(HttpStatusCode.OK, (await PostAsync(client, url, list)).Status, "a program of this computer");
+        // The page of a session's browser navigated to the address of the server, which fetches from it: same origin.
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await PostAsync(client, url, list, request =>
+        {
+            request.Headers.Add("Origin", origin);
+            request.Headers.Add("Sec-Fetch-Site", "same-origin");
+            request.Headers.Add("Sec-Fetch-Mode", "cors");
+        })).Status);
+        // A page of the loopback (a dev server, the server of the files of a project), blind.
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await PostAsync(client, url, list, request =>
+        {
+            request.Headers.Add("Origin", "http://127.0.0.1:5173");
+            request.Headers.Add("Sec-Fetch-Site", "same-site");
+            request.Headers.Add("Sec-Fetch-Mode", "no-cors");
+        })).Status);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await PostAsync(client, url, list, request => request.Headers.Add("Origin", origin))).Status, "an older browser");
+    }
+
+    [TestMethod]
+    public async Task TheInstancesOfTheUser_KnowThePortsOfEachOther_WhateverTheirProfile()
+    {
+        using var temp = new TempFolder();
+        var folder = Path.Combine(temp.Path, "mcp-ports");
+        using var other = new TcpListener(IPAddress.Loopback, 0);
+        other.Start();
+        var taken = ((IPEndPoint)other.LocalEndpoint).Port;
+        // Profile B, on a free port, records it; the normal instance reads the record.
+        var normal = new McpPortRecord(folder);
+        await using var b = new DesktopMcpServer(new DesktopMcpEndpoint("127.0.0.1", taken, Chosen: false), () => [], Path.Combine(temp.Path, "b"), "1")
+        {
+            Ports = new McpPortRecord(folder),
+        };
+        Assert.IsEmpty(normal.Current());
+        await b.StartAsync();
+        var port = b.ListeningPort!.Value;
+        // A reader of the moment: one reads the folder again at most once a second.
+        normal = new McpPortRecord(folder);
+        CollectionAssert.Contains(normal.Current().ToArray(), port);
+        CollectionAssert.Contains(DesktopBrowser.ReservedPorts(2582, 2582, normal.Current()).ToArray(), port, "the browser of the normal instance keeps away from it");
+
+        await b.SetEnabledAsync(false);
+        Assert.IsFalse(new McpPortRecord(folder).Current().Contains(port), "a server that stops withdraws its port");
+    }
+
+    [TestMethod]
+    public void ThePortRecord_CountsTheRunningProcessesOnly_AndReadsAgainOnceASecond()
+    {
+        using var temp = new TempFolder();
+        var folder = Directory.CreateDirectory(Path.Combine(temp.Path, "mcp-ports")).FullName;
+        var clock = new ManualClock();
+        var running = new HashSet<int> { 4242 };
+        var record = new McpPortRecord(folder, clock, running.Contains);
+        File.WriteAllBytes(Path.Combine(folder, "4242-51000"), []);
+        File.WriteAllBytes(Path.Combine(folder, "999999-51001"), []);
+        File.WriteAllBytes(Path.Combine(folder, "not-a-port"), []);
+        File.WriteAllBytes(Path.Combine(folder, "4242-70000"), []);
+        CollectionAssert.AreEqual(new[] { 51000 }, record.Current().ToArray());
+        Assert.IsFalse(File.Exists(Path.Combine(folder, "999999-51001")), "the record of a process that ended is removed");
+
+        record.Publish(51002);
+        CollectionAssert.AreEqual(new[] { 51000, 51002 }, record.Current().ToArray(), "its own port is read at once");
+        File.WriteAllBytes(Path.Combine(folder, "4242-51003"), []);
+        CollectionAssert.AreEqual(new[] { 51000, 51002 }, record.Current().ToArray(), "read again at most once a second");
+        clock.Advance(TimeSpan.FromSeconds(1));
+        CollectionAssert.AreEqual(new[] { 51000, 51002, 51003 }, record.Current().ToArray());
+        record.Publish(51004);
+        Assert.IsFalse(File.Exists(Path.Combine(folder, $"{Environment.ProcessId}-51002")), "one port per process");
+        record.Withdraw();
+        CollectionAssert.AreEqual(new[] { 51000, 51003 }, record.Current().ToArray());
+        StringAssert.EndsWith(McpPortRecord.DefaultFolder(), Path.Combine("CodeAlta", "mcp-ports"));
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _ticks = 1;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _ticks;
+
+        public void Advance(TimeSpan by) => _ticks += by.Ticks;
     }
 
     [TestMethod]

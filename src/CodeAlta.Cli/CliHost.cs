@@ -152,10 +152,13 @@ internal sealed class CliHost : IAsyncDisposable
             if (!request.Offline && environment.ConfigureModelProviders is null) modelsDev.StartBackgroundRefresh();
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             var catalog = new CatalogOptions { GlobalRoot = storage.GlobalRoot, StateRoot = storage.StateRoot, Config = request.Config };
+            // The MCP servers of CodeAlta Desktop, the free port of an instance on another profile too: no page and no sandbox reaches them.
+            var mcpPorts = new CodeAlta.Core.IO.McpPortRecord(CodeAlta.Core.IO.McpPortRecord.DefaultFolder());
             // The browsers of the sessions: headless, in profiles of CodeAlta only, since nobody is there to agree to the user's own.
             var browser = new BrowserPluginHost(storage.StateRoot) { HasUser = false, SecretRoots = [storage.GlobalRoot, storage.StateRoot] };
             host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
+                ReservedLocalPorts = mcpPorts.Current,
                 GlobalRoot = storage.GlobalRoot,
                 StateRoot = storage.StateRoot,
                 Config = request.Config,
@@ -214,7 +217,7 @@ internal sealed class CliHost : IAsyncDisposable
                     Fingerprint = reach.Fingerprint,
                 }
                 : null;
-            browser.ReservedPorts = static () => [2582, 2583];
+            browser.ReservedPorts = () => [2582, 2583, .. mcpPorts.Current()];
             // The alta commands without those of a user (ask, review), of a window, of a host that outlives the run (reminders,
             // automations) and of search; --code-mode wins over the settings, for every session.
             var alta = HeadlessAltaTools.Attach(host, new HeadlessAltaToolsOptions

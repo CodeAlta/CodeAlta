@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Net;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 using CodeAlta.Desktop.Ui;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -129,6 +130,12 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
     /// </summary>
     internal int? ListeningPort => Volatile.Read(ref _listeningPort) is var port and > 0 ? port : null;
 
+    /// <summary>
+    /// Gets where the port the server listens on the loopback is recorded for the other instances of this user, whatever
+    /// their profile, so that their browsers and sandboxes keep away from it; null to record it nowhere.
+    /// </summary>
+    internal McpPortRecord? Ports { get; init; }
+
     /// <summary>Starts listening when the server is turned on. A failure is kept in <see cref="Status"/>.</summary>
     internal async Task StartAsync()
     {
@@ -238,6 +245,8 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
             _application = application;
             var bound = BoundPort(application);
             Volatile.Write(ref _listeningPort, bound);
+            // On another address (a tailnet), the server asks for its token.
+            if (endpoint.IsLoopback) Ports?.Publish(bound);
             var url = endpoint.On(bound).Url;
             WriteUrl(url);
             Info($"The MCP server listens at {url}");
@@ -257,6 +266,7 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         _application = null;
         if (application is null) return;
         Volatile.Write(ref _listeningPort, 0);
+        Ports?.Withdraw();
         RemoveUrl();
         try
         {
@@ -304,8 +314,11 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         var application = builder.Build();
         application.Use(async (context, next) =>
         {
-            var status = DesktopMcpGuard.Check(context.Request.Host.Host, context.Request.Headers.Origin, context.Request.Headers.Authorization, token,
-                context.Connection.RemoteIpAddress);
+            var headers = context.Request.Headers;
+            var status = DesktopMcpGuard.FromPage(headers["Sec-Fetch-Site"], headers["Sec-Fetch-Mode"], headers["Sec-Fetch-Dest"], headers.Origin,
+                context.Request.Host.Value, context.Connection.LocalPort)
+                ? StatusCodes.Status403Forbidden
+                : DesktopMcpGuard.Check(context.Request.Host.Host, headers.Origin, headers.Authorization, token, context.Connection.RemoteIpAddress);
             if (status != DesktopMcpGuard.Allowed)
             {
                 context.Response.StatusCode = status;

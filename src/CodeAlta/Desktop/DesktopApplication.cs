@@ -395,6 +395,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             uiLifetime = ui;
             var uiSessions = new Ui.DesktopUiSessions();
             // The web browsers sessions drive: what the browser plugin learns of a session comes once the host runs.
+            // The MCP ports of the instances of this user, whatever their profile: this one records its own there, and its
+            // browser and sandboxes keep away from all of them. An instance on explicit roots keeps a record of its own.
+            var mcpPorts = new CodeAlta.Core.IO.McpPortRecord(roots.Home is null ? CodeAlta.Core.IO.McpPortRecord.DefaultFolder() : Path.Combine(options.DataRoot, "mcp-ports"));
             // A page never reads the files of the profile, wherever it is (--profile).
             var browserHost = new CodeAlta.Plugin.Browser.BrowserPluginHost(options.StateRoot ?? options.CatalogRoot!)
             {
@@ -468,7 +471,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // The Tailscale network is a choice of Settings, unless the start named the address.
             var tailnet = options.McpHost is null ? new Mcp.DesktopTailnetChoice(shell.McpTailnet, shell.SetMcpTailnet, Mcp.DesktopTailnet.FindAsync) : null;
             mcp = new Mcp.DesktopMcpServer(Mcp.DesktopMcpEndpoint.For(options), McpTools, options.StateRoot ?? options.CatalogRoot!,
-                DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer, tailnet);
+                DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer, tailnet) { Ports = mcpPorts };
             // A server that cannot listen says so in Settings: the application does not wait for it. Nothing in its start waits on a
             // loopback address, so it would build and start its web host on this thread, before the window is shown.
             _ = Task.Run(mcp.StartAsync);
@@ -569,7 +572,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 // No sandbox reaches the MCP server of the window, on whatever port it listens.
-                ReservedLocalPorts = () => mcp?.ListeningPort is { } listening ? [listening] : [],
+                ReservedLocalPorts = () => mcp?.ListeningPort is { } listening ? [listening, .. mcpPorts.Current()] : mcpPorts.Current(),
                 // The normal instance asks a locked vault to unlock; the developer instance never does, beside the one the user works in.
                 CredentialPrompts = !options.Developer,
                 // The developer instance asks a vault to unlock on a click, once the user lets it in Settings › Secrets.
@@ -1136,7 +1139,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var mcpPort = Mcp.DesktopMcpEndpoint.For(options).Port;
                 // The port it listens on is read at each check: it is another one when the one asked for was taken, and
                 // after a restart of the server.
-                browserHost.ReservedPorts = () => DesktopBrowser.ReservedPorts(mcpPort, mcp?.ListeningPort);
+                browserHost.ReservedPorts = () => DesktopBrowser.ReservedPorts(mcpPort, mcp?.ListeningPort, mcpPorts.Current());
                 // The UI tools and the browser tools have the same names: a session has one set or the other.
                 browserHost.Activated = sessionId => uiSessions.Set(sessionId, active: false);
                 uiSessions.Activated = browserHost.ReleaseTools;
