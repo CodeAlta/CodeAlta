@@ -232,6 +232,38 @@ internal sealed partial class SecretsService
         return new(result switch { UserPresenceResult.Verified => "ok", UserPresenceResult.Canceled => "canceled", _ => "unavailable" }, null);
     }
 
+    /// <summary>
+    /// Lists the uses of secrets that ask before use that wait for a confirmation, for the prompt of the window, which reads them
+    /// again at each <c>secrets-pending</c> notice of the shell: Confirm and Deny answer them as Settings › Secrets does.
+    /// </summary>
+    [NeoRpcMethod("pending")]
+    public async Task<SecretPendingEvent> PendingAsync(SecretsRequest request, CancellationToken cancellationToken)
+    {
+        if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, [], false, null);
+        return await PendingEventAsync(Credentials!, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<SecretPendingEvent> PendingEventAsync(CredentialBroker broker, CancellationToken cancellationToken)
+    {
+        var verification = broker.Verifier is { } verifier && broker.CanPrompt
+            ? await verifier.GetAvailabilityAsync(cancellationToken).ConfigureAwait(false)
+            : UserPresenceAvailability.None;
+        return new SecretPendingEvent("ok", [.. broker.ListPending().Select(PendingOf)], verification.Available, verification.Reason);
+    }
+
+    // A use the window prompts for is one something waits for, or one of a provider, a server or a plugin, which takes the secret at its
+    // next start: the shell of a session that nothing waits for any more started without it, and asks again when it attaches.
+    internal static PendingUseView PendingOf(PendingSecretUse pending)
+    {
+        var shell = CodeAlta.Orchestration.Hosting.CodeAltaHost.IsShellUse(pending.Use, out var sessionId);
+        return new PendingUseView(pending.Name, pending.Use, Format(pending.At))
+        {
+            SessionId = sessionId,
+            AwaitedUntil = pending.AwaitedUntil is { } until ? Format(until) : null,
+            Prompt = pending.AwaitedUntil is not null || !shell,
+        };
+    }
+
     /// <summary>Declines a use of a secret that asks before use.</summary>
     [NeoRpcMethod("declineUse")]
     public CredentialActionResult DeclineUse(SecretUseRequest request)
@@ -367,7 +399,7 @@ internal sealed partial class SecretsService
             Types = [.. broker.Types.List().Select(type => new CredentialTypeView(type.Type, type.DisplayName, type.Description, type.Icon, Safe(type.IconSvg), type.Website?.ToString(),
                 type.ReferenceHint, type.UnlockAsksPassword, broker.Types.IsBuiltIn(type.Type),
                 [.. type.Settings.Select(static setting => new CredentialTypeSettingView(setting.Key, setting.Label, setting.Kind.ToString().ToLowerInvariant(), setting.Description, setting.Placeholder, setting.Required))]))],
-            Pending = [.. broker.ListPending().Select(static pending => new PendingUseView(pending.Name, pending.Use, Format(pending.At)))],
+            Pending = [.. broker.ListPending().Select(PendingOf)],
             Uses = [.. broker.ListUses().Take(50).Select(static use => new SecretUseView(use.Name, use.Use, Format(use.At), use.Outcome))],
             Verification = new VerificationView(verification.Available, verification.Reason),
             CanPrompt = broker.CanPrompt,
@@ -559,13 +591,30 @@ internal sealed record CredentialTypeSettingView(string Key, string Label, strin
 /// <param name="Name">The secret.</param>
 /// <param name="Use">What asked; null when nothing named it.</param>
 /// <param name="At">When, in ISO 8601.</param>
-internal sealed record PendingUseView(string Name, string? Use, string At);
+internal sealed record PendingUseView(string Name, string? Use, string At)
+{
+    /// <summary>The session whose shell asks, for a use of the shell of a session; null otherwise.</summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>Until when something waits for the answer, in ISO 8601, such as the shell of a session that starts after it; null when nothing waits.</summary>
+    public string? AwaitedUntil { get; init; }
+
+    /// <summary>Whether the window asks the user at once: something waits for the answer, or the use takes the secret at its next start.</summary>
+    public bool Prompt { get; init; }
+}
+
+/// <summary>The uses that wait for a confirmation, as the prompt of the window shows them.</summary>
+/// <param name="Status"><c>ok</c>, or why they are not listed.</param>
+/// <param name="Pending">The uses, the oldest first.</param>
+/// <param name="CanConfirm">Whether the system can verify the user here, so that Confirm can be offered.</param>
+/// <param name="Reason">Why not, when it cannot.</param>
+internal sealed record SecretPendingEvent(string Status, PendingUseView[] Pending, bool CanConfirm, string? Reason);
 
 /// <summary>A recent use of a secret: never a value.</summary>
 /// <param name="Name">The secret.</param>
 /// <param name="Use">What asked for it.</param>
 /// <param name="At">When, in ISO 8601.</param>
-/// <param name="Outcome"><c>given</c>, <c>waits</c>, <c>confirmed</c>, <c>refused</c> or <c>unavailable</c>.</param>
+/// <param name="Outcome"><c>given</c>, <c>waits</c>, <c>confirmed</c>, <c>refused</c>, <c>expired</c> or <c>unavailable</c>.</param>
 internal sealed record SecretUseView(string Name, string? Use, string At, string Outcome);
 
 /// <summary>Whether the system can verify the user here.</summary>

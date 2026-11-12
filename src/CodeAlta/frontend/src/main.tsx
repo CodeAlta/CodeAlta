@@ -306,6 +306,8 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { SecretsSettings } from "./secrets/SecretsSettings";
+import { SecretUsePrompt } from "./secrets/SecretUsePrompt";
+import { secretsPendingEvent } from "./secrets/secretPrompt";
 import { isMachineProject, machinePageLink, machineRowState, readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
@@ -2437,6 +2439,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               ? "No file dialog is available on this desktop: drop the files on the prompt or paste them instead." : "The file dialog could not be shown.") }, "file-dialog-problem");
           // A plugin was built again, started or stopped while the application runs.
           else if (notice.kind === "plugins-changed") { setPluginRevision(value => value + 1); window.dispatchEvent(new Event(pluginsChangedEvent)); }
+          // A use of a secret that asks before use started or stopped waiting for the user: its prompt reads them again.
+          else if (notice.kind === "secrets-pending") window.dispatchEvent(new Event(secretsPendingEvent));
         }
       } catch { /* The bridge is gone; the window's own close still works. */ }
     })();
@@ -3073,6 +3077,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const openLinkedSession = useRef<(id: string) => void>(() => { });
   // A message can name a session of a project that is in another space: every session of the catalog has its title here.
   const sessionTitles = useMemo(() => new Map((catalog.current?.sessions ?? snapshot?.sessions ?? []).map(session => [session.id.toLowerCase(), session.title])), [snapshot]);
+  const sessionTitleOf = useCallback((id: string) => sessionTitles.get(id.toLowerCase()) ?? null, [sessionTitles]);
   const sessionLinks = useMemo<SessionLinks>(() => ({ title: id => sessionTitles.get(id.toLowerCase()) ?? null, open: id => openLinkedSession.current(id) }), [sessionTitles]);
   openLinkedSession.current = id => void openAutomationSession(id);
   // The tasks a text names in code, in the project of its session. The lists are read again regularly: what the texts
@@ -6827,6 +6832,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {entryGuide && !settingsOpen && <EntryAddedDialog onClose={() => setEntryGuide(false)}
       onShowInFinder={() => { void desktopShell.revealEntry({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The folder is named in the dialog. */ }); }} />}
     <UpdateToaster notification={updateNotice} />
+    {/* A use of a secret that asks before use waits for the user: asked at once, above the windows of the application. */}
+    {owned && status?.hostEpoch && <SecretUsePrompt epoch={status.hostEpoch} sessionTitle={sessionTitleOf} />}
     {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} trayIcon={shellPreferences?.trayIcon} onKeepRunning={keepRunning} onExit={exitOnClose}
       onCancel={() => setCloseQuestion(false)} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}

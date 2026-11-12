@@ -172,7 +172,7 @@ export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavaila
 export const secrets = Object.freeze({ list: async () => ({ status: "unavailable", protection: null, secrets: [], variables: [] }),
   setSecret: async () => ({ status: "unavailable", message: null }), rotateSecret: async () => ({ status: "unavailable", message: null }),
   deleteSecret: async () => ({ status: "unavailable", message: null }), setVariable: async () => ({ status: "unavailable", message: null }),
-  deleteVariable: async () => ({ status: "unavailable", message: null }) });
+  deleteVariable: async () => ({ status: "unavailable", message: null }), pending: async () => ({ status: "unavailable", pending: [], canConfirm: false, reason: null }) });
 export const machines = Object.freeze({ list: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }), refresh: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }),
   previewPairing: unavailable, pair: unavailable, forget: unavailable, newSession: unavailable, newSessionChoices: unavailable, watch: async () => (async function* () { })(),
   moveSettings: unavailable, setReceiveMoves: unavailable, movePreview: unavailable, moveSession: unavailable });

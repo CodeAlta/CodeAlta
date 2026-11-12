@@ -821,12 +821,23 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             ValueTask<IReadOnlyList<string>> SessionsWaitingAsync() => host.ListSessionsWaitingForPersonAsync();
             // A session that is done or waits for the user while the application is in the background: a notification,
             // which opens the session, and the mark of the application, until a window has the focus again.
-            sessionTurnAlerts = new DesktopTurnAlerts(new DesktopTurnAlertSurface(window, chrome.Services, host.RuntimeService,
+            var alertSurface = new DesktopTurnAlertSurface(window, chrome.Services, host.RuntimeService,
                 async _ => await SessionsWaitingAsync(), () => shell.TurnAlerts, () => windows.AnyFocused,
-                DesktopTurnAlertSurface.CanNotify(OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null)), DesktopTurnAlerts.Period);
+                DesktopTurnAlertSurface.CanNotify(OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null));
+            sessionTurnAlerts = new DesktopTurnAlerts(alertSurface, DesktopTurnAlerts.Period);
+            // A use of a secret that asks before use waits for the user while the application is in the background: a notification,
+            // which brings the window and its prompt back.
+            // The prompt of the page reads them again at each change.
+            var secretPrompts = host.Credentials is { } promptedCredentials ? new DesktopSecretPrompts(alertSurface, promptedCredentials) : null;
+            if (host.Credentials is { } watchedCredentials) watchedCredentials.PendingUsesChanged += (_, _) => shell.NotifySecretsPending();
             chrome.Services.Notifications.Activated += (_, activation) =>
             {
                 if (DesktopTurnAlerts.SessionOf(activation) is { } notifiedSession) shell.ShowSession(notifiedSession);
+                else if (DesktopSecretPrompts.IsPrompt(activation, out var askingSession))
+                {
+                    if (askingSession is not null) shell.ShowSession(askingSession);
+                    else shell.Show();
+                }
             };
             shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)

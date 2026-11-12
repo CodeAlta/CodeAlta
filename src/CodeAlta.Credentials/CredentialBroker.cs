@@ -89,14 +89,40 @@ public sealed record CredentialProviderView(string Id, string Type, string Displ
 /// <param name="Name">The secret.</param>
 /// <param name="Use">What asked for it; null when nothing named it.</param>
 /// <param name="At">When.</param>
-/// <param name="Outcome"><c>given</c>, <c>waits</c> (for a confirmation), <c>confirmed</c>, <c>refused</c> or <c>unavailable</c>.</param>
+/// <param name="Outcome">
+/// <c>given</c>, <c>waits</c> (for a confirmation), <c>confirmed</c>, <c>refused</c>, <c>expired</c> (what waited for the confirmation
+/// stopped waiting before the user answered) or <c>unavailable</c>.
+/// </param>
 public sealed record SecretUseRecord(string Name, string? Use, DateTimeOffset At, string Outcome);
 
 /// <summary>A use of a secret that asks before use, waiting for the user's confirmation.</summary>
 /// <param name="Name">The secret.</param>
 /// <param name="Use">What asked for it; null when nothing named it.</param>
 /// <param name="At">When it first asked.</param>
-public sealed record PendingSecretUse(string Name, string? Use, DateTimeOffset At);
+public sealed record PendingSecretUse(string Name, string? Use, DateTimeOffset At)
+{
+    /// <summary>
+    /// Gets until when something waits for the answer of the user (<see cref="CredentialBroker.WaitForConfirmationAsync"/>), such as
+    /// the shell of a session that starts once the use is confirmed or denied; null when nothing waits for it now.
+    /// </summary>
+    public DateTimeOffset? AwaitedUntil { get; init; }
+}
+
+/// <summary>What a wait for the confirmation of a use of a secret that asks before use ended with.</summary>
+public enum SecretConfirmationOutcome
+{
+    /// <summary>The user confirmed the use, after the system verified them: the secret can be given for it.</summary>
+    Confirmed,
+
+    /// <summary>The user denied the use.</summary>
+    Declined,
+
+    /// <summary>The user did not answer in time: the use no longer waits.</summary>
+    TimedOut,
+
+    /// <summary>Nobody can confirm a use here.</summary>
+    Unavailable,
+}
 
 /// <summary>Tells which secrets may be given differently now.</summary>
 public sealed class CredentialsChangedEventArgs(IReadOnlyCollection<string> names) : EventArgs
@@ -168,6 +194,8 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     private readonly Dictionary<string, SecretAvailability> _problems = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string Name, string Use), DateTimeOffset?> _grants = [];
     private readonly List<PendingSecretUse> _pending = [];
+    // What waits for the answer of the user to a pending use, by secret (upper case) and use.
+    private readonly Dictionary<(string Name, string Use), List<ConfirmationWaiter>> _waiters = [];
     private readonly LinkedList<SecretUseRecord> _uses = new();
     private readonly HashSet<string> _unlockedAtStart = new(StringComparer.Ordinal);
     // When an agent last had an unlock of a provider dismissed: it does not ask again for a while.
@@ -198,6 +226,12 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
     /// <summary>Raised when secrets may be given differently: a vault unlocked or locked, a secret bound, a use confirmed.</summary>
     public event EventHandler<CredentialsChangedEventArgs>? Changed;
+
+    /// <summary>
+    /// Raised when the uses that wait for a confirmation change (<see cref="ListPending"/>): a use starts or stops waiting, something
+    /// starts or stops waiting for its answer. The window shows them to the user as they come.
+    /// </summary>
+    public event EventHandler? PendingUsesChanged;
 
     /// <summary>Gets the types of providers.</summary>
     public CredentialProviderTypes Types => _types;
@@ -279,7 +313,12 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     /// <returns>The uses, the oldest first.</returns>
     public IReadOnlyList<PendingSecretUse> ListPending()
     {
-        lock (_gate) return [.. _pending];
+        lock (_gate)
+        {
+            return [.. _pending.Select(pending => _waiters.TryGetValue(KeyOf(pending.Name, pending.Use), out var waiters) && waiters.Count > 0
+                ? pending with { AwaitedUntil = waiters.Max(static waiter => waiter.Until) }
+                : pending)];
+        }
     }
 
     /// <summary>Lists the recent uses of the secrets, the newest first: never a value.</summary>
@@ -691,18 +730,87 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         if (result == UserPresenceResult.Verified)
         {
             var now = _options.Time.GetUtcNow();
+            List<ConfirmationWaiter>? waiters;
             lock (_gate)
             {
                 var time = SecretAskDurations.TimeOf(duration);
-                _grants[(name.ToUpperInvariant(), use ?? string.Empty)] = time is null ? null : time == TimeSpan.Zero ? DateTimeOffset.MinValue : now + time.Value;
+                _grants[KeyOf(name, use)] = time is null ? null : time == TimeSpan.Zero ? DateTimeOffset.MinValue : now + time.Value;
                 _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
                 Record(name, use, "confirmed");
+                _waiters.Remove(KeyOf(name, use), out waiters);
             }
 
+            // Told after the confirmation is kept: what waited reads the secret at once.
+            foreach (var waiter in waiters ?? []) waiter.Outcome.TrySetResult(SecretConfirmationOutcome.Confirmed);
             Raise([name], always: true);
+            RaisePending();
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Waits for the user's answer to a use of a secret that asks before use (<see cref="ListPending"/>), for a bounded time: the user
+    /// confirms it (<see cref="ConfirmAsync"/>, which the system verifies first) or denies it (<see cref="Decline"/>). The window shows
+    /// the use as awaited (<see cref="PendingSecretUse.AwaitedUntil"/>) while it waits. Nothing is given here: once confirmed, the use
+    /// reads the secret again, as it would have, within the time its confirmation lasts. When nothing waits for the use any more at
+    /// the end of the time, the use stops waiting (recorded <c>expired</c>).
+    /// </summary>
+    /// <param name="name">The secret.</param>
+    /// <param name="use">The use, as it was asked for; null for a use nobody names.</param>
+    /// <param name="timeout">How long it waits for the answer.</param>
+    /// <param name="cancellationToken">A token to stop waiting.</param>
+    /// <returns>
+    /// What it ended with: <see cref="SecretConfirmationOutcome.Confirmed"/> also when the use was confirmed already, and
+    /// <see cref="SecretConfirmationOutcome.Declined"/> for a use that no longer waits without a confirmation.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public async Task<SecretConfirmationOutcome> WaitForConfirmationAsync(string name, string? use, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+        if (_options.Verifier is null || !CanPrompt) return SecretConfirmationOutcome.Unavailable;
+        var key = KeyOf(name, use);
+        ConfirmationWaiter waiter;
+        lock (_gate)
+        {
+            if (_disposed) return SecretConfirmationOutcome.Unavailable;
+            if (!IsPendingUse(name, use)) return HasGrant(key) ? SecretConfirmationOutcome.Confirmed : SecretConfirmationOutcome.Declined;
+            waiter = new ConfirmationWaiter(_options.Time.GetUtcNow() + timeout);
+            if (!_waiters.TryGetValue(key, out var waiters)) _waiters[key] = waiters = [];
+            waiters.Add(waiter);
+        }
+
+        RaisePending();
+        try
+        {
+            return await waiter.Outcome.Task.WaitAsync(timeout, _options.Time, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            lock (_gate)
+            {
+                // The answer came as the time ended.
+                if (waiter.Outcome.Task.IsCompletedSuccessfully) return waiter.Outcome.Task.Result;
+                // The last that waited stops: nothing would take the confirmation now, so the use stops waiting.
+                if (Forget(key, waiter))
+                {
+                    _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
+                    Record(name, use, "expired");
+                }
+            }
+
+            RaisePending();
+            return SecretConfirmationOutcome.TimedOut;
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_gate) Forget(key, waiter);
+            RaisePending();
+            throw;
+        }
     }
 
     /// <summary>Forgets the waiting uses of a secret: the user declined them.</summary>
@@ -711,13 +819,22 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     public void Decline(string name, string? use)
     {
         ArgumentNullException.ThrowIfNull(name);
+        List<ConfirmationWaiter> declined = [];
         lock (_gate)
         {
             _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && (use is null || pending.Use == use));
             Record(name, use, "refused");
+            var upper = name.ToUpperInvariant();
+            foreach (var key in _waiters.Keys.Where(key => key.Name == upper && (use is null || key.Use == use)).ToArray())
+            {
+                declined.AddRange(_waiters[key]);
+                _waiters.Remove(key);
+            }
         }
 
+        foreach (var waiter in declined) waiter.Outcome.TrySetResult(SecretConfirmationOutcome.Declined);
         Raise([name], always: true);
+        RaisePending();
     }
 
     /// <summary>Forgets the confirmations given for a secret, so that its next use asks again.</summary>
@@ -770,6 +887,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     public void Dispose()
     {
         ProviderEntry[] entries;
+        ConfirmationWaiter[] waiters;
         lock (_gate)
         {
             if (_disposed) return;
@@ -777,8 +895,11 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             entries = [.. _providers.Values];
             _providers.Clear();
             _held.Clear();
+            waiters = [.. _waiters.Values.SelectMany(static list => list)];
+            _waiters.Clear();
         }
 
+        foreach (var waiter in waiters) waiter.Outcome.TrySetResult(SecretConfirmationOutcome.Unavailable);
         _expiry?.Dispose();
         foreach (var entry in entries) Release(entry);
     }
@@ -786,7 +907,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     // Under the gate: whether a use of a secret that asks before use is confirmed. A use that is not waits, and is recorded.
     private string? Authorize(string name, string? use)
     {
-        var key = (name.ToUpperInvariant(), use ?? string.Empty);
+        var key = KeyOf(name, use);
         var now = _options.Time.GetUtcNow();
         if (_grants.TryGetValue(key, out var until))
         {
@@ -809,10 +930,50 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
 
         Record(name, use, "waits");
-        if (!known) ThreadPool.UnsafeQueueUserWorkItem(static state => state.broker.Raise([state.name], always: true), (broker: this, name), preferLocal: false);
+        if (!known)
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(static state =>
+            {
+                state.broker.Raise([state.name], always: true);
+                state.broker.RaisePending();
+            }, (broker: this, name), preferLocal: false);
+        }
+
         return CanPrompt && _options.Verifier is not null
             ? $"{name} asks before use: confirm its use{(use is null ? string.Empty : $" for the {use}")} in Settings › Secrets of CodeAlta."
             : $"{name} asks before use, and nobody can confirm it here.";
+    }
+
+    private static (string Name, string Use) KeyOf(string name, string? use) => (name.ToUpperInvariant(), use ?? string.Empty);
+
+    // Under the gate: whether a use waits for the user's confirmation.
+    private bool IsPendingUse(string name, string? use)
+        => _pending.Any(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
+
+    // Under the gate: whether a use is confirmed now, without taking a confirmation of each use.
+    private bool HasGrant((string Name, string Use) key)
+        => _grants.TryGetValue(key, out var until) && (until is null || until == DateTimeOffset.MinValue || until > _options.Time.GetUtcNow());
+
+    // Under the gate: one waiter stops waiting; true when nothing waits for that use any more.
+    private bool Forget((string Name, string Use) key, ConfirmationWaiter waiter)
+    {
+        if (!_waiters.TryGetValue(key, out var waiters)) return true;
+        waiters.Remove(waiter);
+        if (waiters.Count > 0) return false;
+        _waiters.Remove(key);
+        return true;
+    }
+
+    private void RaisePending()
+    {
+        try
+        {
+            PendingUsesChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _options.Logger?.Warn($"A listener of the uses that wait failed: {exception.Message}");
+        }
     }
 
     private void Record(string name, string? use, string outcome)
@@ -1363,6 +1524,14 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             _options.Logger?.Warn($"A listener of the credentials failed: {exception.Message}");
         }
+    }
+
+    // Something that waits for the answer of the user to a use, until a time.
+    private sealed class ConfirmationWaiter(DateTimeOffset until)
+    {
+        public DateTimeOffset Until { get; } = until;
+
+        public TaskCompletionSource<SecretConfirmationOutcome> Outcome { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed record Held(string Value, string Provider, string Reference, DateTimeOffset? ExpiresAt)

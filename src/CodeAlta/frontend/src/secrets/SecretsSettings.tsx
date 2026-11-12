@@ -159,7 +159,7 @@ function RecentUses({ listing }: { listing: SecretsList }) {
   const { t, locale } = useShellLanguage();
   const [open, setOpen] = useState(false);
   const outcome = (value: string) => value === "given" ? t("given") : value === "waits" ? t("waits for you") : value === "confirmed" ? t("confirmed")
-    : value === "refused" ? t("declined") : t("not available");
+    : value === "refused" ? t("declined") : value === "expired" ? t("not answered in time") : t("not available");
   const uses = open ? listing.uses : listing.uses.slice(0, 5);
   return <Card className="appearance-settings secret-uses" aria-labelledby="secret-uses-title">
     <h2 id="secret-uses-title">{t("Recent uses")}</h2>

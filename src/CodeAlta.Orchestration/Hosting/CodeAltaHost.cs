@@ -697,12 +697,17 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     // host-only one; each use of a value of the fleet is recorded for the session.
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
                         // Each secret is masked from the moment it is given, before the processes of the session take it.
+                        // One environment built is one use of each secret, whatever the number of variables that name it.
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, shellSecrets, ShellUseOf(scope)).Read,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, new OneUseBoundSecrets(shellSecrets), ShellUseOf(scope)).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
                         new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
                         new SessionSecretEnvironments(readOnlyGlobalState ? null : Path.Combine(catalogOptions.FleetRoot, "environment-admissions.json")))
+                    {
+                        // The shell of a session that attaches waits for the user's answer to the secrets that ask before use.
+                        Confirmations = new ShellSecretConfirmations(credentials, ShellConfirmationTimeout),
+                    }
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,
@@ -1168,7 +1173,90 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <param name="scope">The work of the session; its run is the session.</param>
     /// <returns>The use.</returns>
     internal static string ShellUseOf(SecretScope scope)
-        => scope.RunId is { Length: > 0 } session ? $"shell of the session {session}" : "shell of a session";
+        => scope.RunId is { Length: > 0 } session ? ShellUsePrefix + session : "shell of a session";
+
+    private const string ShellUsePrefix = "shell of the session ";
+
+    /// <summary>Tells whether a use of a secret is the shell of a session, as the host names that use, and which session.</summary>
+    /// <param name="use">The use, such as <c>shell of the session 01a1…</c> or <c>provider anthropic</c>; null for a use nobody names.</param>
+    /// <param name="sessionId">The session whose shell it is; null for another use, or the shell of a session nobody names.</param>
+    /// <returns>True for the shell of a session.</returns>
+    public static bool IsShellUse(string? use, out string? sessionId)
+    {
+        sessionId = null;
+        if (use is null) return false;
+        if (use.StartsWith(ShellUsePrefix, StringComparison.Ordinal) && use.Length > ShellUsePrefix.Length)
+        {
+            sessionId = use[ShellUsePrefix.Length..];
+            return true;
+        }
+
+        return use == "shell of a session";
+    }
+
+    /// <summary>How long the shell of a session that attaches waits for the user's answer to a secret that asks before use.</summary>
+    internal static readonly TimeSpan ShellConfirmationTimeout = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Waits, for the shell of a session that attaches, for the user's answer to each use of a secret that asks before use that its
+    /// environment waits for (<see cref="CodeAlta.Credentials.CredentialBroker.ListPending"/> for <see cref="ShellUseOf"/>): CodeAlta
+    /// Desktop shows each of them to the user. Nothing waits where nobody can answer.
+    /// </summary>
+    /// <param name="broker">The credential broker of the host.</param>
+    /// <param name="timeout">How long it waits.</param>
+    internal sealed class ShellSecretConfirmations(CodeAlta.Credentials.CredentialBroker broker, TimeSpan timeout) : ISessionSecretConfirmations
+    {
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<SessionSecretConfirmation>> WaitAsync(SecretScope scope, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(scope);
+            if (scope.RunId is not { Length: > 0 }) return [];
+            var use = ShellUseOf(scope);
+            var names = broker.ListPending().Where(pending => pending.Use == use).Select(static pending => pending.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (names.Length == 0) return [];
+            var outcomes = await Task.WhenAll(names.Select(name => broker.WaitForConfirmationAsync(name, use, timeout, cancellationToken))).ConfigureAwait(false);
+            return [.. names.Select((name, index) => new SessionSecretConfirmation(name, outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed,
+                ProblemOf(name, outcomes[index], timeout)))];
+        }
+
+        private static string? ProblemOf(string name, CodeAlta.Credentials.SecretConfirmationOutcome outcome, TimeSpan timeout) => outcome switch
+        {
+            CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed => null,
+            CodeAlta.Credentials.SecretConfirmationOutcome.Declined => $"The shell of this session started without the secret {name}: its use was denied.",
+            CodeAlta.Credentials.SecretConfirmationOutcome.TimedOut =>
+                $"The shell of this session started without the secret {name}: its use was not confirmed within {timeout.TotalMinutes:0} minutes.",
+            _ => $"The shell of this session started without the secret {name}: it asks before use, and nobody can confirm it here.",
+        };
+    }
+
+    /// <summary>
+    /// The secrets kept in vaults and the confirmations of the secrets that ask before use, for one environment built: each secret is
+    /// asked once, so that a confirmation of each use is one use for the environment, whatever the number of variables that name it.
+    /// </summary>
+    /// <param name="inner">The secrets of the host.</param>
+    internal sealed class OneUseBoundSecrets(IBoundSecretSource inner) : IBoundSecretSource
+    {
+        private readonly Dictionary<(string Name, string? Use), BoundSecretRead> _reads = [];
+        private readonly Dictionary<(string Name, string? Use), string?> _authorizations = [];
+
+        /// <inheritdoc />
+        public BoundSecretRead ReadBound(string name, string? use)
+        {
+            ArgumentNullException.ThrowIfNull(name);
+            var key = (name.ToUpperInvariant(), use);
+            if (!_reads.TryGetValue(key, out var read)) _reads[key] = read = inner.ReadBound(name, use);
+            return read;
+        }
+
+        /// <inheritdoc />
+        public string? AuthorizeUse(string name, string? use)
+        {
+            ArgumentNullException.ThrowIfNull(name);
+            var key = (name.ToUpperInvariant(), use);
+            if (!_authorizations.TryGetValue(key, out var problem)) _authorizations[key] = problem = inner.AuthorizeUse(name, use);
+            return problem;
+        }
+    }
 
     /// <summary>
     /// The secrets kept in vaults as the shells of the sessions are given them: each value given is noted, so that a sandbox,

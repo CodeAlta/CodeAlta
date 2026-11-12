@@ -524,6 +524,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(SecretAskRequest))]
 [JsonSerializable(typeof(SecretBindRequest))]
 [JsonSerializable(typeof(SecretUseRequest))]
+[JsonSerializable(typeof(SecretPendingEvent))]
 [JsonSerializable(typeof(SecretsDeveloperUnlockRequest))]
 [JsonSerializable(typeof(SignInWriteRequest))]
 [JsonSerializable(typeof(SignInRequest))]

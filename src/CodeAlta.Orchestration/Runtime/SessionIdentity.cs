@@ -24,6 +24,32 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
     /// empty when they are all the space's.
     /// </summary>
     public IReadOnlyList<string> ProjectProfiles { get; init; } = [];
+
+    /// <summary>
+    /// Gets what the processes of the session start without: a sentence for each secret that asks before use whose use the user
+    /// denied or did not confirm in time when the session attached (<see cref="SessionIdentityResolver.ResolveForAttachmentAsync"/>);
+    /// empty when nothing is missing.
+    /// </summary>
+    public IReadOnlyList<string> SecretProblems { get; init; } = [];
+}
+
+/// <summary>A secret that asks before use whose confirmation the shell of a session waited for.</summary>
+/// <param name="Name">The secret.</param>
+/// <param name="Confirmed">Whether the user confirmed its use.</param>
+/// <param name="Problem">What the session is told when it was not confirmed, naming the secret; null when it was.</param>
+public sealed record SessionSecretConfirmation(string Name, bool Confirmed, string? Problem);
+
+/// <summary>
+/// Waits, when a session attaches, for the user to confirm the uses its shell asked for the secrets that ask before use: the host
+/// shows each of them to the user, who confirms or denies it.
+/// </summary>
+public interface ISessionSecretConfirmations
+{
+    /// <summary>Waits, for a bounded time, for the answers to the uses that the environment built for a session waits for.</summary>
+    /// <param name="scope">The work of the session, whose run is the session.</param>
+    /// <param name="cancellationToken">A token to stop waiting.</param>
+    /// <returns>The secrets it waited for, with their outcome; empty when none waits.</returns>
+    Task<IReadOnlyList<SessionSecretConfirmation>> WaitAsync(SecretScope scope, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -85,6 +111,12 @@ public sealed class SessionIdentityResolver
     /// </summary>
     public Action<string, string>? InheritWork { get; set; }
 
+    /// <summary>
+    /// Gets or sets what waits for the confirmations of the secrets that ask before use, which the environment of a session that
+    /// attaches waits for (<see cref="ResolveForAttachmentAsync"/>); null waits for none, and those secrets are left out.
+    /// </summary>
+    public ISessionSecretConfirmations? Confirmations { get; set; }
+
     /// <summary>Gets a new resolver that gives every session the usual settings (its <see cref="Environments"/> its own).</summary>
     public static SessionIdentityResolver None => new(null);
 
@@ -129,8 +161,46 @@ public sealed class SessionIdentityResolver
     /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public async Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
+        => await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false) is { } read
+            ? Of(read.Space, read.Profiles, read.Scope)
+            : SessionIdentity.Usual;
+
+    /// <summary>
+    /// Gives the identity a session attaches with (<see cref="ResolveAsync(string?, string?, string?, string?, CancellationToken)"/>):
+    /// when its environment waits for the confirmation of a secret that asks before use, it waits for the user's answer
+    /// (<see cref="Confirmations"/>), then builds the environment again with the secrets the user confirmed. A secret denied or not
+    /// confirmed in time is left out, and named in <see cref="SessionIdentity.SecretProblems"/>.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="sessionId">The session, the run its uses of values are recorded for.</param>
+    /// <param name="parentSessionId">The session that started it; null for none.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="OperationCanceledException">The read or the wait was canceled.</exception>
+    public async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+        CancellationToken cancellationToken)
     {
-        if (_spaces is null) return SessionIdentity.Usual;
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false) is not { } read) return SessionIdentity.Usual;
+        var identity = Of(read.Space, read.Profiles, read.Scope);
+        if (identity.Identity is null || Confirmations is not { } confirmations) return identity;
+        var waited = await confirmations.WaitAsync(read.Scope, cancellationToken).ConfigureAwait(false);
+        if (waited.Count == 0) return identity;
+        // Built again for the secrets the user confirmed: nothing was given for them before.
+        if (waited.Any(static confirmation => confirmation.Confirmed)) identity = Of(read.Space, read.Profiles, read.Scope);
+        return identity with
+        {
+            SecretProblems = [.. waited.Where(static confirmation => !confirmation.Confirmed).Select(static confirmation => confirmation.Problem ?? $"{confirmation.Name} was not given.")],
+        };
+    }
+
+    // The space, the profiles of the project and the scope of a session; null when the catalog cannot be read.
+    private async Task<(SpaceDescriptor Space, IReadOnlyList<SpaceCliProfile> Profiles, SecretScope Scope)?> ReadAsync(string? recordedSpaceId, string? projectId,
+        string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
+    {
+        if (_spaces is null) return null;
         SpaceDescriptor space;
         IReadOnlyList<SpaceCliProfile> profiles = [];
         try
@@ -145,10 +215,10 @@ public sealed class SessionIdentityResolver
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             // The catalog cannot be read now: nothing is set, as for a space without identity.
-            return SessionIdentity.Usual;
+            return null;
         }
 
-        return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.ScopeOf(sessionId))
+        return (space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.ScopeOf(sessionId))
         {
             RunId = sessionId,
             OwnerWork = IsOwnersWork(sessionId, parentSessionId),

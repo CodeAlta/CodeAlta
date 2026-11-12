@@ -240,6 +240,12 @@ internal sealed class DesktopShell
     internal void NotifyPluginsChanged() => Publish(new("plugins-changed", 0));
 
     /// <summary>
+    /// Tells the page that the uses of secrets that ask before use that wait for the user changed: its prompt reads them again
+    /// (<c>secrets.pending</c>).
+    /// </summary>
+    internal void NotifySecretsPending() => Publish(new("secrets-pending", 0));
+
+    /// <summary>
     /// Shows the window and tells the page to select a project that a start of <c>alta</c> added (<c>show-project</c>),
     /// with a space it joined. While no page watches (the application starts), the notice waits for the first one.
     /// </summary>

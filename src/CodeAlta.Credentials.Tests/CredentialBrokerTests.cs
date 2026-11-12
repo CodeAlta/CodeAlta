@@ -234,6 +234,80 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task A_use_that_waits_is_awaited_until_the_user_confirms_it_and_the_waits_share_the_answer()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.FifteenMinutes);
+        var verifier = new Verifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        var changes = 0;
+        broker.PendingUsesChanged += (_, _) => Interlocked.Increment(ref changes);
+        StringAssert.Contains(broker.AuthorizeUse("LOCAL", "shell of the session s1"), "asks before use");
+        Assert.IsNull(broker.ListPending().Single().AwaitedUntil, "nothing waits for the answer yet");
+
+        var first = broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromMinutes(2));
+        var second = broker.WaitForConfirmationAsync("local", "shell of the session s1", TimeSpan.FromMinutes(2));
+        Assert.IsNotNull(broker.ListPending().Single().AwaitedUntil, "the window shows that something waits");
+        Assert.IsFalse(first.IsCompleted);
+
+        Assert.AreEqual(UserPresenceResult.Verified, await broker.ConfirmAsync("LOCAL", "shell of the session s1"));
+        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Confirmed },
+            await Task.WhenAll(first, second).WithinAsync(TestTime.Seconds(30)));
+        Assert.HasCount(1, verifier.Messages, "one verification for the waits of one use");
+        Assert.IsNull(broker.AuthorizeUse("LOCAL", "shell of the session s1"), "the use is confirmed for as long as the secret says");
+        Assert.AreEqual(SecretConfirmationOutcome.Confirmed, await broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromSeconds(1)),
+            "a use confirmed already waits for nothing");
+        Assert.IsGreaterThanOrEqualTo(3, Volatile.Read(ref changes), "the window is told as the waits start and end");
+    }
+
+    [TestMethod]
+    public async Task A_denied_use_ends_its_waits_and_a_use_not_answered_in_time_stops_waiting()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.EachUse);
+        var verifier = new Verifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+
+        broker.AuthorizeUse("LOCAL", "shell of the session s1");
+        var denied = broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromMinutes(2));
+        broker.Decline("LOCAL", "shell of the session s1");
+        Assert.AreEqual(SecretConfirmationOutcome.Declined, await denied.WithinAsync(TestTime.Seconds(30)));
+        Assert.AreEqual(SecretConfirmationOutcome.Declined, await broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromSeconds(1)),
+            "a use that no longer waits, without a confirmation");
+
+        broker.AuthorizeUse("LOCAL", "shell of the session s2");
+        Assert.AreEqual(SecretConfirmationOutcome.TimedOut, await broker.WaitForConfirmationAsync("LOCAL", "shell of the session s2", TimeSpan.FromMilliseconds(200))
+            .WithinAsync(TestTime.Seconds(30)));
+        Assert.IsEmpty(broker.ListPending(), "a use nothing waits for stops waiting");
+        Assert.AreEqual(("shell of the session s2", "expired"), (broker.ListUses().First().Use, broker.ListUses().First().Outcome));
+        Assert.IsEmpty(verifier.Messages, "nothing is verified without the user's Confirm");
+
+        broker.AuthorizeUse("LOCAL", "shell of the session s3");
+        using var stop = new CancellationTokenSource();
+        var canceled = broker.WaitForConfirmationAsync("LOCAL", "shell of the session s3", TimeSpan.FromMinutes(2), stop.Token);
+        stop.Cancel();
+        await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => canceled);
+        Assert.IsNull(broker.ListPending().Single().AwaitedUntil, "a wait that stops leaves the use waiting, as it was before");
+    }
+
+    [TestMethod]
+    public async Task Nothing_waits_for_a_confirmation_where_nobody_can_answer()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.EachUse);
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = new Verifier() });
+        broker.AuthorizeUse("LOCAL", "shell of the session s1");
+
+        Assert.AreEqual(SecretConfirmationOutcome.Unavailable, await broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromMinutes(2)));
+    }
+
+    [TestMethod]
     public void The_providers_of_the_configuration_are_written_and_read_back_whole()
     {
         using var vault = new FakeVault();

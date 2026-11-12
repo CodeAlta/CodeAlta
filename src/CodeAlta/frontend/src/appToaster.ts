@@ -36,13 +36,14 @@ function appToaster(): AppToaster {
 // A window of the app is a modal <dialog>: it is in the top layer, above any z-index, and makes the rest of the page inert.
 // The toasts are shown in a popover layer, inside the topmost open modal dialog when there is one, shown after it so that
 // they are above it and can be clicked (a machine that asks to join while Settings is open); back on the page once it closes.
+// Another layer of the same kind (the prompt of a secret that asks before use) is raised the same way.
 // Over a window they start below its title bar, whose buttons (Close) stay within reach.
-function raise(layer: HTMLElement): void {
+export function raiseAboveWindows(layer: HTMLElement): void {
   const modals = Array.from(document.querySelectorAll("dialog")).filter(dialog => dialog.open && dialog.matches(":modal"));
   const host = modals.at(-1) ?? document.body;
   if (layer.parentElement !== host) {
     host.append(layer);
-    if (host !== document.body) host.addEventListener("close", () => raise(layer), { once: true });
+    if (host !== document.body) host.addEventListener("close", () => raiseAboveWindows(layer), { once: true });
   }
   const bar = host === document.body ? null : host.querySelector<HTMLElement>(".app-window-titlebar");
   if (bar) layer.style.setProperty("--app-toaster-top", `${Math.round(bar.getBoundingClientRect().bottom + 8)}px`);
@@ -58,7 +59,7 @@ function raise(layer: HTMLElement): void {
 export function showToast(toast: ToastProps, key?: string): void {
   const { toaster, keyed, layer } = appToaster();
   void toaster.then(value => {
-    raise(layer);
+    raiseAboveWindows(layer);
     if (key === undefined) value.show(toast);
     else showKeyed(value, keyed, key, toast);
   }, () => { /* Without a toaster the message is simply not shown. */ });
