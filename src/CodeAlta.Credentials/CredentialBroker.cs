@@ -120,7 +120,7 @@ public enum SecretConfirmationOutcome
     /// <summary>The user did not answer in time: the use no longer waits.</summary>
     TimedOut,
 
-    /// <summary>Nobody can confirm a use here.</summary>
+    /// <summary>Nobody can confirm a use here, or the system cannot verify the user now.</summary>
     Unavailable,
 }
 
@@ -771,7 +771,10 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
-        if (_options.Verifier is null || !CanPrompt) return SecretConfirmationOutcome.Unavailable;
+        if (_options.Verifier is not { } verifier || !CanPrompt) return SecretConfirmationOutcome.Unavailable;
+        // A system that cannot verify the user now (Windows Hello turned off since the secret asked before use) could never confirm
+        // the use: nothing waits for it.
+        if (!(await verifier.GetAvailabilityAsync(cancellationToken).ConfigureAwait(false)).Available) return SecretConfirmationOutcome.Unavailable;
         var key = KeyOf(name, use);
         ConfirmationWaiter waiter;
         lock (_gate)

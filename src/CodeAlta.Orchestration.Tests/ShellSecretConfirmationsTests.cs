@@ -98,7 +98,7 @@ public sealed class ShellSecretConfirmationsTests
         var identity = await fixture.AttachAsync("session-6").WithinAsync(TestTime.Seconds(30));
 
         Assert.IsNull(identity.Environment.Get("DEPLOY_TOKEN"));
-        StringAssert.Contains(identity.SecretProblems.Single(), "nobody can confirm it here");
+        StringAssert.Contains(identity.SecretProblems.Single(), "it cannot be confirmed here now");
     }
 
     [TestMethod]

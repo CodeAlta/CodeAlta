@@ -308,6 +308,24 @@ public sealed class CredentialBrokerTests
     }
 
     [TestMethod]
+    public async Task Nothing_waits_for_a_confirmation_while_the_system_cannot_verify_the_user()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.EachUse);
+        // Windows Hello was set up when the secret was told to ask before use, and is turned off now.
+        var verifier = new Verifier { Available = false };
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        broker.AuthorizeUse("LOCAL", "shell of the session s1");
+
+        Assert.AreEqual(SecretConfirmationOutcome.Unavailable, await broker.WaitForConfirmationAsync("LOCAL", "shell of the session s1", TimeSpan.FromMinutes(2))
+            .WithinAsync(TestTime.Seconds(30)));
+        Assert.IsNull(broker.ListPending().Single().AwaitedUntil, "nothing waited for the answer");
+        Assert.IsEmpty(verifier.Messages);
+    }
+
+    [TestMethod]
     public void The_providers_of_the_configuration_are_written_and_read_back_whole()
     {
         using var vault = new FakeVault();
@@ -331,9 +349,12 @@ public sealed class CredentialBrokerTests
     {
         public UserPresenceResult Answer { get; set; } = UserPresenceResult.Verified;
 
+        public bool Available { get; set; } = true;
+
         public List<string> Messages { get; } = [];
 
-        public ValueTask<UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken) => ValueTask.FromResult(new UserPresenceAvailability(true, null));
+        public ValueTask<UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken)
+            => ValueTask.FromResult(new UserPresenceAvailability(Available, Available ? null : "Windows Hello is not set up."));
 
         public ValueTask<UserPresenceResult> VerifyAsync(string message, CancellationToken cancellationToken)
         {

@@ -1226,7 +1226,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             CodeAlta.Credentials.SecretConfirmationOutcome.Declined => $"The shell of this session started without the secret {name}: its use was denied.",
             CodeAlta.Credentials.SecretConfirmationOutcome.TimedOut =>
                 $"The shell of this session started without the secret {name}: its use was not confirmed within {timeout.TotalMinutes:0} minutes.",
-            _ => $"The shell of this session started without the secret {name}: it asks before use, and nobody can confirm it here.",
+            _ => $"The shell of this session started without the secret {name}: it asks before use, and it cannot be confirmed here now.",
         };
     }
 
