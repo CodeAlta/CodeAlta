@@ -631,6 +631,14 @@ public sealed class SystemPromptInfrastructureTests
             + "Other projects of the repository: `alta project list --parent contoso`.", line.TrimEnd('\r'));
         Assert.AreEqual(prompt, Build(subProject.Copy()), "The same sub-project gives the same prompt.");
 
+        // A sub-project of a nested map: its repository is a sub-project of another one.
+        var platform = Path.Combine(Path.GetDirectoryName(repository)!, "platform-map");
+        var nested = subProject.Copy();
+        nested.OuterRepositories = [new("0b6f6d6e-0000-8000-8000-000000000009", "platform-map", "platform-map", platform)];
+        var nestedLine = Build(nested).Split('\n').Single(static text => text.StartsWith("- Repository:", StringComparison.Ordinal));
+        Assert.AreEqual($"- Repository: contoso ({repository}), itself a sub-project of platform-map ({platform}); this project is its folder `services/billing`. "
+            + "Other projects of the repository: `alta project list --parent contoso`.", nestedLine.TrimEnd('\r'));
+
         var plain = Build(new ProjectDescriptor { Id = "0b6f6d6e-0000-8000-8000-000000000000", Slug = "contoso", DisplayName = "contoso", ProjectPath = repository });
         Assert.IsFalse(plain.Contains("- Repository:", StringComparison.Ordinal), "A project that is no sub-project has no such line.");
     }

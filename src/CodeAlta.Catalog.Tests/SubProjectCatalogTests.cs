@@ -173,11 +173,11 @@ public sealed class SubProjectCatalogTests
     }
 
     [TestMethod]
-    public async Task AMapIsReadForAProjectNoOtherMapDeclares_AndTheNearerRepositoryWins()
+    public async Task AMapOfADeclaredFolderIsReadToo_AndTheNearerRepositoryWins()
     {
         using var fixture = new Fixture();
         var repository = await fixture.RepositoryAsync(Map);
-        // A declared folder with a map of its own: that map is not read.
+        // A declared folder with a map of its own: a nested map, read one level deeper.
         await fixture.WriteMapAsync(Path.Combine(repository.ProjectPath, "services", "billing"), "[projects.inner]\npath = \"inner\"\n");
         Directory.CreateDirectory(Path.Combine(repository.ProjectPath, "services", "billing", "inner"));
         // A project of the repository that no entry declares, with a map that declares a folder the root declares too.
@@ -185,7 +185,8 @@ public sealed class SubProjectCatalogTests
         await fixture.WriteMapAsync(tools.ProjectPath, "[projects.reports]\npath = \"reports\"\n");
 
         var projects = await fixture.Projects.LoadAsync();
-        Assert.IsFalse(projects.Any(static project => project.DeclaredKey == "inner"));
+        var billing = projects.Single(static project => project.DeclaredKey == "billing");
+        Assert.AreEqual(billing.Id, projects.Single(static project => project.DeclaredKey == "inner").ParentId);
         var reports = projects.Single(static project => project.DeclaredKey == "reports");
         Assert.AreEqual(tools.Id, reports.ParentId, "The folder belongs to the nearer repository.");
         Assert.IsNull(projects.Single(project => project.Id == tools.Id).ParentId);

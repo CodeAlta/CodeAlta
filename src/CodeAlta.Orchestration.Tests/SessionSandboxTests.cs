@@ -488,6 +488,39 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task ANestedMap_ItsSubProjectsWriteTheirOwnRepository_AndTheRootKeepsTheirSettings()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var repository = f.Project.ProjectPath;
+        var billing = await f.SubProjectAsync("billing", "repos/billing");
+        // billing has a map of its own (#433), with an optional entry nobody added.
+        Directory.CreateDirectory(Path.Combine(billing.ProjectPath, "services", "api"));
+        var old = Directory.CreateDirectory(Path.Combine(billing.ProjectPath, "tools", "old")).FullName;
+        Directory.CreateDirectory(Path.Combine(billing.ProjectPath, ".alta"));
+        File.WriteAllText(Path.Combine(billing.ProjectPath, ".alta", ProjectManifest.FileName),
+            "[projects.api]\npath = \"services/api\"\n\n[projects.old]\npath = \"tools/old\"\noptional = true\n");
+        var api = (await f.Projects.LoadAsync()).Single(static project => project.DeclaredKey == "api");
+        Assert.AreEqual(billing.Id, api.ParentId);
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+
+        await f.CreateSessionAsync("root");
+        Assert.IsTrue((await f.RoutedTools("root").CallAsync("write_file", new { path = Path.Combine("repos", "billing", "services", "api", "a.cs"), content = "a" })).Success);
+        var protectedByRoot = backend.Starts.Last().Protected.ToList();
+        foreach (var settings in new[] { Path.Combine(api.ProjectPath, ".alta", "config.toml"), Path.Combine(old, ".alta", "config.toml"),
+                     Path.Combine(billing.ProjectPath, ".alta", "projects.toml") })
+            CollectionAssert.Contains(protectedByRoot, settings, settings);
+
+        await f.CreateSessionAsync("api", api);
+        var tools = f.RoutedTools("api", api);
+        Assert.IsTrue((await tools.CallAsync("write_file", new { path = Path.Combine(billing.ProjectPath, "shared.cs"), content = "b" })).Success, "its repository is billing");
+        var policy = backend.Starts.Last();
+        CollectionAssert.Contains(policy.ReadWrite.ToList(), billing.ProjectPath);
+        Assert.IsFalse(policy.ReadWrite.Contains(repository, StringComparer.OrdinalIgnoreCase), "not the repository above billing");
+        Assert.IsFalse((await tools.CallAsync("write_file", new { path = Path.Combine(repository, "outer.cs"), content = "c" })).Success);
+    }
+
+    [TestMethod]
     public async Task ASessionOfTheRootOfAMonorepo_KeepsTheSettingsOfItsSubProjects()
     {
         var backend = new InProcessBackend();

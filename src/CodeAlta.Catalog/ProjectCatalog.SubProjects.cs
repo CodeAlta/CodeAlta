@@ -9,7 +9,9 @@ namespace CodeAlta.Catalog;
 /// <param name="Folder">Whether that folder is there, inside the repository.</param>
 /// <param name="Project">The project of the folder: a sub-project of the repository, archived when the user hid it; null for an optional entry nobody added, or a folder that is not there.</param>
 /// <param name="ClaimedBy">The repository project whose map is the one that counts for the folder, when it is another one (a nearer repository declares it too).</param>
-public sealed record SubProjectStatus(ProjectManifestEntry Entry, string FullPath, ProjectManifestFolderState Folder, ProjectDescriptor? Project, string? ClaimedBy = null);
+/// <param name="SubProjects">How many sub-projects the project of the entry has, when it has a map of its own (a nested map).</param>
+public sealed record SubProjectStatus(ProjectManifestEntry Entry, string FullPath, ProjectManifestFolderState Folder, ProjectDescriptor? Project, string? ClaimedBy = null,
+    int SubProjects = 0);
 
 /// <summary>The map of a repository project as the catalog reads it, with what each entry is.</summary>
 /// <param name="Repository">The repository project.</param>
@@ -17,8 +19,12 @@ public sealed record SubProjectStatus(ProjectManifestEntry Entry, string FullPat
 /// <param name="Exists">Whether the file exists.</param>
 /// <param name="Manifest">The map as read; <see cref="ProjectManifest.Empty"/> without a file.</param>
 /// <param name="Entries">Its entries, in the order of the file.</param>
-/// <param name="Problems">What was left out: the problems of the file, then those of the folders.</param>
-/// <param name="ClaimedBy">The repository whose map declares the folder of this project, which makes its own map ignored; null otherwise.</param>
+/// <param name="Problems">What was left out: why the map is not read, when it is not, the problems of the file, then those of the folders.</param>
+/// <param name="ClaimedBy">
+/// The repository whose map declares the folder of this project, when the map of this project is not read: nested deeper
+/// than <see cref="ProjectManifest.MaximumDepth"/>, or its folder is, through a link, the one of a repository whose map is
+/// read already. Null when the map counts, the map of a sub-project included.
+/// </param>
 public sealed record RepositoryMap(ProjectDescriptor Repository, string ManifestPath, bool Exists, ProjectManifest Manifest,
     IReadOnlyList<SubProjectStatus> Entries, IReadOnlyList<ProjectManifestProblem> Problems, string? ClaimedBy = null);
 
@@ -48,6 +54,12 @@ public sealed partial class ProjectCatalog
     private const long FolderRecheckMilliseconds = 30_000;
     private readonly Dictionary<string, (ProjectManifest Map, Dictionary<string, (string FullPath, ProjectManifestFolderState State)> Folders, long CheckedAt)> _folders
         = new(StringComparer.Ordinal);
+
+    // Where the folders of the nested maps are on the disk, under the same gate and for the same time as _folders.
+    private readonly Dictionary<string, (string Real, long CheckedAt)> _realFolders = new(StringComparer.OrdinalIgnoreCase);
+
+    // The maps of sub-projects the last load did not read, by the folder of the sub-project, with why; replaced whole by each load.
+    private IReadOnlyDictionary<string, ProjectManifestProblem> _ignoredMaps = new Dictionary<string, ProjectManifestProblem>();
 
     // The folders each sub-project inherits from, as the last load found them, replaced whole by each load: for the readers
     // that hold an identifier of a project and no descriptor.
@@ -128,7 +140,10 @@ public sealed partial class ProjectCatalog
     /// </summary>
     /// <param name="projectId">The identifier of the repository project.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The map, or null when no project has this identifier or the project is itself a sub-project.</returns>
+    /// <returns>
+    /// The map, or null when no project has this identifier. The map of a sub-project is its own: a nested map, which
+    /// counts unless <see cref="RepositoryMap.ClaimedBy"/> says why it does not.
+    /// </returns>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public async Task<RepositoryMap?> ReadRepositoryMapAsync(string projectId, CancellationToken cancellationToken = default)
     {
@@ -141,8 +156,21 @@ public sealed partial class ProjectCatalog
         var map = exists ? await ReadManifestAsync(repository.ProjectPath, cancellationToken).ConfigureAwait(false) : ProjectManifest.Empty;
         var folders = Folders(repository.ProjectPath, map);
         var byPath = projects.ToDictionary(static project => project.ProjectPath, StringComparer.OrdinalIgnoreCase);
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            names.TryAdd(project.Id, project.DisplayName);
+            if (project.ParentId is { } parentId) counts[parentId] = counts.GetValueOrDefault(parentId) + 1;
+        }
+
+        // Why the maps the last load did not read are left out: this one, and those of its entries.
+        var ignored = Volatile.Read(ref _ignoredMaps);
+        var notRead = exists && ignored.TryGetValue(repository.ProjectPath, out var why) ? why : null;
         var entries = new List<SubProjectStatus>(map.Projects.Count);
-        var problems = new List<ProjectManifestProblem>(map.Problems);
+        var problems = new List<ProjectManifestProblem>(map.Problems.Count + 1);
+        if (notRead is not null) problems.Add(notRead);
+        problems.AddRange(map.Problems);
         foreach (var entry in map.Projects)
         {
             var (full, state) = folders[entry.Key];
@@ -158,10 +186,18 @@ public sealed partial class ProjectCatalog
                 problems.Add(new(entry.Key, "folder.missing", $"The folder `{entry.Path}` of `{entry.Key}` is not there."));
             else if (state == ProjectManifestFolderState.Outside)
                 problems.Add(new(entry.Key, "folder.outside", $"The folder `{entry.Path}` of `{entry.Key}` is a link that leads out of the repository, or into a folder of settings: it is left out."));
-            entries.Add(new(entry, full, state, project, claimedBy));
+            else if (claimedBy is not null && notRead is null)
+            {
+                var nearer = names.GetValueOrDefault(claimedBy, claimedBy);
+                problems.Add(new(entry.Key, "folder.claimed",
+                    $"The folder `{entry.Path}` of `{entry.Key}` is declared by the map of {nearer} too, which is nearer and wins: it is a sub-project of {nearer}."));
+            }
+
+            if (project is not null && ignored.TryGetValue(project.ProjectPath, out var nested)) problems.Add(nested with { Key = entry.Key });
+            entries.Add(new(entry, full, state, project, claimedBy, project is null ? 0 : counts.GetValueOrDefault(project.Id)));
         }
 
-        return new(repository, path, exists, map, entries, problems, repository.ParentId);
+        return new(repository, path, exists, map, entries, problems, notRead is null ? null : repository.ParentId);
     }
 
     /// <summary>
@@ -208,16 +244,21 @@ public sealed partial class ProjectCatalog
         return (SubProjectShowStatus.Updated, project);
     }
 
-    /// <summary>Lists the repository projects whose map counts: projects that no other map declares, whose map declares something.</summary>
+    /// <summary>
+    /// Lists the repository projects whose map counts and declares something: the projects of their own, and the
+    /// sub-projects whose map is read (nested maps).
+    /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Each repository with its map, in the order of the catalog.</returns>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public async Task<IReadOnlyList<(ProjectDescriptor Repository, ProjectManifest Map)>> LoadRepositoryMapsAsync(CancellationToken cancellationToken = default)
     {
         var maps = new List<(ProjectDescriptor Repository, ProjectManifest Map)>();
-        foreach (var project in await LoadAsync(cancellationToken).ConfigureAwait(false))
+        var projects = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        var ignored = Volatile.Read(ref _ignoredMaps);
+        foreach (var project in projects)
         {
-            if (project.IsSubProject || !File.Exists(ProjectManifest.PathOf(project.ProjectPath))) continue;
+            if (!File.Exists(ProjectManifest.PathOf(project.ProjectPath)) || project.IsSubProject && ignored.ContainsKey(project.ProjectPath)) continue;
             var map = await ReadManifestAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
             if (map.Projects.Count > 0 || map.Labels.Count > 0) maps.Add((project, map));
         }
@@ -298,11 +339,14 @@ public sealed partial class ProjectCatalog
         return folders;
     }
 
-    // The projects of a load with the sub-projects the maps of the others declare. A map is read for a project that no
-    // other map declares; the folder of a project that two maps declare belongs to the nearer repository.
+    // The projects of a load with the sub-projects the maps declare: the maps of the projects, then those of their
+    // sub-projects (nested maps), down to ProjectManifest.MaximumDepth. The folder of a project that two maps declare
+    // belongs to the nearer repository.
     private async Task<List<ProjectDescriptor>> WithSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
     {
-        var result = await WithDeclaredSubProjectsAsync(projects, cancellationToken).ConfigureAwait(false);
+        var ignored = new Dictionary<string, ProjectManifestProblem>(StringComparer.OrdinalIgnoreCase);
+        var result = await WithDeclaredSubProjectsAsync(projects, ignored, cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref _ignoredMaps, ignored);
         var inherited = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var ofFolders = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var project in result)
@@ -318,69 +362,168 @@ public sealed partial class ProjectCatalog
         return result;
     }
 
-    private async Task<List<ProjectDescriptor>> WithDeclaredSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
+    // An entry of a map that declares a folder: the repository whose map it is, its place in the map, and how deep that
+    // map is (1 for the map of a project of its own). Order is the place of the repository among those read.
+    private readonly record struct MapClaim(ProjectDescriptor Repository, ProjectManifestEntry Entry, int Index, int Depth, int Order);
+
+    // The folders of a load from the outside in: a repository comes before the folders of its map, which are inside it.
+    private static readonly Comparer<string> OutsideIn = Comparer<string>.Create(static (left, right)
+        => left.Length != right.Length ? left.Length.CompareTo(right.Length) : StringComparer.OrdinalIgnoreCase.Compare(left, right));
+
+    private async Task<List<ProjectDescriptor>> WithDeclaredSubProjectsAsync(List<ProjectDescriptor> projects, Dictionary<string, ProjectManifestProblem> ignored,
+        CancellationToken cancellationToken)
     {
         if (projects.Count == 0) return projects;
-        var claims = new Dictionary<string, (ProjectDescriptor Repository, ProjectManifestEntry Entry)>(StringComparer.OrdinalIgnoreCase);
-        var repositories = new List<(ProjectDescriptor Repository, ProjectManifest Map)>();
-        foreach (var project in projects.OrderBy(static project => project.ProjectPath.Length).ThenBy(static project => project.ProjectPath, StringComparer.OrdinalIgnoreCase))
+        // The folders are taken from the outside in, so that every map that can declare a folder (those of the folders
+        // above it) is read before the folder is: the claim of the nearer one stays, and the folder then is a project of
+        // that repository. A sub-project with a map of its own is read in its turn, one level deeper.
+        var claims = new Dictionary<string, MapClaim>(StringComparer.OrdinalIgnoreCase);
+        var queue = new PriorityQueue<string, string>(OutsideIn);
+        var queued = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            if (queued.Add(project.ProjectPath)) queue.Enqueue(project.ProjectPath, project.ProjectPath);
+        }
+
+        var byPath = new Dictionary<string, ProjectDescriptor>(projects.Count, StringComparer.OrdinalIgnoreCase);
+        var byId = new Dictionary<string, ProjectDescriptor>(projects.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            byPath.TryAdd(project.ProjectPath, project);
+            byId.TryAdd(project.Id, project);
+        }
+
+        HashSet<string>? slugs = null;
+        var declared = new List<(int Order, int Index, ProjectDescriptor Project)>();
+        // The folders of the nested maps read, as they are on the disk.
+        var nestedFolders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var repositories = 0;
+        while (queue.TryDequeue(out var folder, out _))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (claims.ContainsKey(project.ProjectPath) || !File.Exists(ProjectManifest.PathOf(project.ProjectPath))) continue;
-            var map = await ReadManifestAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
-            if (map.Projects.Count == 0) continue;
-            repositories.Add((project, map));
-            var folders = Folders(project.ProjectPath, map);
-            foreach (var entry in map.Projects)
+            ProjectDescriptor? repository;
+            var depth = 1;
+            if (claims.TryGetValue(folder, out var claim))
             {
+                repository = Declare(folder, claim);
+                if (repository is null) continue;
+                depth = claim.Depth + 1;
+            }
+            // A project file whose folder moved into a folder a map declares is that sub-project now, and no other.
+            else if (!byPath.TryGetValue(folder, out repository) || repository.IsSubProject)
+            {
+                continue;
+            }
+
+            if (!File.Exists(ProjectManifest.PathOf(folder))) continue;
+            var map = await ReadManifestAsync(folder, cancellationToken).ConfigureAwait(false);
+            if (map.Projects.Count == 0) continue;
+            if (depth > 1 && NotRead(folder, claim, depth) is { } problem)
+            {
+                ignored[folder] = problem;
+                continue;
+            }
+
+            var order = repositories++;
+            var folders = Folders(folder, map);
+            for (var index = 0; index < map.Projects.Count; index++)
+            {
+                var entry = map.Projects[index];
                 var (full, state) = folders[entry.Key];
                 if (state != ProjectManifestFolderState.Ok) continue;
-                var folder = NormalizePath(full);
-                if (!string.Equals(folder, project.ProjectPath, StringComparison.OrdinalIgnoreCase)) claims[folder] = (project, entry);
+                var target = NormalizePath(full);
+                if (string.Equals(target, folder, StringComparison.OrdinalIgnoreCase)) continue;
+                // Inside this folder, so not taken yet: a nearer map read later declares it in its place.
+                claims[target] = new(repository, entry, index, depth, order);
+                if (queued.Add(target)) queue.Enqueue(target, target);
             }
         }
 
-        if (claims.Count == 0) return projects;
-        var byPath = projects.ToDictionary(static project => project.ProjectPath, StringComparer.OrdinalIgnoreCase);
-        var byId = projects.ToDictionary(static project => project.Id, StringComparer.OrdinalIgnoreCase);
-        var result = new List<ProjectDescriptor>(projects.Count + claims.Count);
+        if (declared.Count == 0) return projects;
+        var result = new List<ProjectDescriptor>(projects.Count + declared.Count);
         result.AddRange(projects);
-        var slugs = projects.Select(static project => project.Slug).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var (repository, map) in repositories)
+        result.AddRange(declared.OrderBy(static value => value.Order).ThenBy(static value => value.Index).Select(static value => value.Project));
+        return result;
+
+        // The project of a folder a map declares: the project of the folder, the project file of the entry whose folder
+        // moved, or a sub-project made from the entry; null for an optional entry nobody added.
+        ProjectDescriptor? Declare(string full, MapClaim claim)
         {
-            foreach (var entry in map.Projects)
+            var (repository, entry) = (claim.Repository, claim.Entry);
+            if (byPath.TryGetValue(full, out var existing))
             {
-                var full = NormalizePath(Path.Combine(repository.ProjectPath, entry.Path.Replace('/', Path.DirectorySeparatorChar)));
-                if (!claims.TryGetValue(full, out var claim) || claim.Repository.Id != repository.Id || claim.Entry.Key != entry.Key) continue;
-                if (byPath.TryGetValue(full, out var existing))
-                {
-                    Link(existing, repository, entry, claims);
-                    continue;
-                }
-
-                // A project file of this sub-project whose folder moved: the key names it. Its file is told the new
-                // folder before the first edit that needs it (GetEditableAsync).
-                // A project added by hand before the map declared its folder keeps its own identifier: its file names the entry.
-                var binding = BindingOf(repository, entry.Key);
-                if (byId.TryGetValue(DeriveSubProjectId(repository.Id, entry.Key), out var moved)
-                    || (moved = projects.FirstOrDefault(other => other.SourcePath is not null && string.Equals(other.DeclaredAs, binding, StringComparison.OrdinalIgnoreCase))) is not null)
-                {
-                    if (claims.ContainsKey(moved.ProjectPath) || Directory.Exists(moved.ProjectPath)) continue; // Two folders, one identity: the file keeps it.
-                    moved.MovedFrom = moved.ProjectPath;
-                    moved.ProjectPath = full;
-                    Link(moved, repository, entry, claims);
-                    continue;
-                }
-
-                if (entry.Optional) continue;
-                var declared = DeclaredProject(repository, entry, full, slugs);
-                Link(declared, repository, entry, claims);
-                slugs.Add(declared.Slug);
-                result.Add(declared);
+                Link(existing, repository, entry, claims);
+                return existing;
             }
+
+            // A project file of this sub-project whose folder moved: the key names it. Its file is told the new
+            // folder before the first edit that needs it (GetEditableAsync).
+            // A project added by hand before the map declared its folder keeps its own identifier: its file names the entry.
+            var binding = BindingOf(repository, entry.Key);
+            if (byId.TryGetValue(DeriveSubProjectId(repository.Id, entry.Key), out var moved)
+                || (moved = projects.FirstOrDefault(other => other.SourcePath is not null && string.Equals(other.DeclaredAs, binding, StringComparison.OrdinalIgnoreCase))) is not null)
+            {
+                if (moved.IsSubProject || claims.ContainsKey(moved.ProjectPath) || Directory.Exists(moved.ProjectPath)) return null; // Two folders, one identity: the file keeps it.
+                moved.MovedFrom = moved.ProjectPath;
+                moved.ProjectPath = full;
+                Link(moved, repository, entry, claims);
+                return moved;
+            }
+
+            if (entry.Optional) return null;
+            slugs ??= projects.Select(static project => project.Slug).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var project = DeclaredProject(repository, entry, full, slugs);
+            Link(project, repository, entry, claims);
+            slugs.Add(project.Slug);
+            declared.Add((claim.Order, claim.Index, project));
+            return project;
         }
 
-        return result;
+        // Why the map of a sub-project is not read: deeper than maps go, or its folder is, through a link, the folder of
+        // a repository above it (a loop) or of another nested map read already. Null when it is read.
+        ProjectManifestProblem? NotRead(string folder, MapClaim claim, int depth)
+        {
+            if (depth > ProjectManifest.MaximumDepth)
+            {
+                return new(null, "map.tooDeep", $"Its own project map is not read: maps nest {ProjectManifest.MaximumDepth} levels deep at most, and it would be level {depth}. "
+                    + "Declare its projects in a map above it.");
+            }
+
+            var real = RealFolder(folder);
+            var above = claim.Repository;
+            for (var level = 0; level < ProjectManifest.MaximumDepth; level++)
+            {
+                if (string.Equals(RealFolder(above.ProjectPath), real, StringComparison.OrdinalIgnoreCase))
+                    return new(null, "map.loop", $"Its own project map is not read: through a link, its folder is the one of {above.DisplayName}, whose map is read already.");
+                if (!claims.TryGetValue(above.ProjectPath, out var up)) break;
+                above = up.Repository;
+            }
+
+            if (nestedFolders.TryGetValue(real, out var first))
+                return new(null, "map.loop", $"Its own project map is not read: through a link, its folder is `{first}`, whose map is read already.");
+            nestedFolders[real] = folder;
+            return null;
+        }
+    }
+
+    // Where a folder of a nested map, or of a repository above one, is on the disk (ProjectManifest.RealFolder), looked
+    // at again after FolderRecheckMilliseconds as the folders of a map are: a load walks no path each time.
+    private string RealFolder(string folder)
+    {
+        var now = Environment.TickCount64;
+        lock (_foldersGate)
+        {
+            if (_realFolders.TryGetValue(folder, out var kept) && now - kept.CheckedAt <= FolderRecheckMilliseconds) return kept.Real;
+        }
+
+        var real = ProjectManifest.RealFolder(folder);
+        lock (_foldersGate)
+        {
+            if (_realFolders.Count >= 256 && !_realFolders.ContainsKey(folder)) _realFolders.Clear();
+            _realFolders[folder] = (real, now);
+        }
+
+        return real;
     }
 
     // How the file of a project added by hand names the entry of a map it was recognized as.
@@ -414,7 +557,7 @@ public sealed partial class ProjectCatalog
     private static ProjectDescriptor DeclaredProject(ProjectDescriptor repository, ProjectManifestEntry entry, string folder, IReadOnlyList<ProjectDescriptor> projects)
     {
         var project = DeclaredProject(repository, entry, folder, projects.Select(static project => project.Slug).ToHashSet(StringComparer.OrdinalIgnoreCase));
-        Link(project, repository, entry, new Dictionary<string, (ProjectDescriptor Repository, ProjectManifestEntry Entry)>());
+        Link(project, repository, entry, new Dictionary<string, MapClaim>());
         return project;
     }
 
@@ -442,8 +585,8 @@ public sealed partial class ProjectCatalog
 
     // Makes a project the sub-project an entry of a map declares: what the map says shows over what its file does not
     // say, and its file keeps its own values (ProjectDescriptor.ForFile).
-    private static void Link(ProjectDescriptor project, ProjectDescriptor repository, ProjectManifestEntry entry,
-        IReadOnlyDictionary<string, (ProjectDescriptor Repository, ProjectManifestEntry Entry)> claims)
+    // The repository can be a sub-project itself (a nested map): it was linked first, and what it inherits follows.
+    private static void Link(ProjectDescriptor project, ProjectDescriptor repository, ProjectManifestEntry entry, IReadOnlyDictionary<string, MapClaim> claims)
     {
         project.FileSpaces = [.. project.Spaces];
         project.FileDisplayName = project.SourcePath is null ? null : project.DisplayName;
@@ -458,11 +601,16 @@ public sealed partial class ProjectCatalog
         project.DeclaredLabels = [.. entry.Labels.Select(key => DeclaredLabelId(repository.Slug, key))];
         project.DeclaredOptional = entry.Optional;
         project.WriteScope = entry.Write;
-        project.InheritedSandbox = repository.Sandbox;
-        project.InheritedSkillFolders = [.. repository.SkillFolders];
+        project.InheritedSandbox = repository.EffectiveSandbox;
+        project.InheritedSkillFolders = [.. repository.EffectiveSkillFolders];
         project.RepositoryName = repository.DisplayName;
         project.RepositorySlug = repository.Slug;
-        // The declared folders of the same repository that hold this one, the nearest first, then the repository.
+        project.RepositoryPath = repository.ProjectPath;
+        project.OuterRepositories = repository is { ParentId: { } outerId, RepositoryPath: { } outerPath }
+            ? [new(outerId, repository.RepositorySlug ?? outerId, repository.RepositoryName ?? Path.GetFileName(outerPath), outerPath), .. repository.OuterRepositories]
+            : [];
+        // The declared folders of the same repository that hold this one, the nearest first, then the repository, then
+        // what the repository inherits when it is a sub-project itself.
         var roots = new List<string>();
         for (var folder = Path.GetDirectoryName(project.ProjectPath); folder is not null && folder.Length > repository.ProjectPath.Length;
              folder = Path.GetDirectoryName(folder))
@@ -471,6 +619,7 @@ public sealed partial class ProjectCatalog
         }
 
         roots.Add(repository.ProjectPath);
+        if (repository.IsSubProject) roots.AddRange(repository.InheritedRoots);
         project.InheritedRoots = roots;
     }
 }

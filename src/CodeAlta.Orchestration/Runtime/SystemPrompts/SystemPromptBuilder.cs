@@ -723,7 +723,9 @@ public sealed class SystemPromptBuilder
         // reach the other projects of the repository. What it says comes from the descriptor, the same at each build.
         if (request.Project is { IsSubProject: true, RepositoryPath: { } repositoryPath, SubPath: { } subPath } subProject)
         {
-            sessionLines.Add($"- Repository: {subProject.RepositoryName ?? Path.GetFileName(repositoryPath)} ({repositoryPath}); this project is its folder `{subPath}`. "
+            // A repository that is a sub-project itself (a nested map) names the repositories above it, the nearest first.
+            var outer = string.Concat(subProject.OuterRepositories.Select(static above => $", itself a sub-project of {above.Name} ({above.Path})"));
+            sessionLines.Add($"- Repository: {subProject.RepositoryName ?? Path.GetFileName(repositoryPath)} ({repositoryPath}){outer}; this project is its folder `{subPath}`. "
                 + $"Other projects of the repository: `alta project list --parent {subProject.RepositorySlug ?? subProject.ParentId}`.");
         }
 

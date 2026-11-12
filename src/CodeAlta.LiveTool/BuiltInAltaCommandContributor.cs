@@ -2294,6 +2294,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 ["displayName"] = repository.DisplayName,
                 ["projectPath"] = repository.ProjectPath,
             };
+            // Its repository is a sub-project too (a nested map): the repositories above it, the nearest first.
+            if (project.OuterRepositories.Count > 0)
+            {
+                record["outerRepositories"] = project.OuterRepositories.Select(static outer => new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = outer.Id,
+                    ["slug"] = outer.Slug,
+                    ["displayName"] = outer.Name,
+                    ["projectPath"] = outer.Path,
+                }).ToArray();
+            }
         }
 
         var subProjects = projects.Where(candidate => candidate.ParentId == project.Id).OrderBy(static candidate => candidate.SubPath, StringComparer.Ordinal).ToArray();

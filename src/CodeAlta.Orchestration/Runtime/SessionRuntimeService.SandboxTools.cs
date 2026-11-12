@@ -333,10 +333,27 @@ public sealed partial class SessionRuntimeService
             // Every entry of the map, those listed and those nobody added (optional, or claimed by no project yet): the
             // settings of each are out of reach, used or not.
             var map = await _projectCatalog.ReadRepositoryMapAsync(repositoryId, cancellationToken).ConfigureAwait(false);
-            var declared = projects.Where(candidate => string.Equals(candidate.ParentId, repositoryId, StringComparison.OrdinalIgnoreCase))
-                .Select(static candidate => candidate.ProjectPath)
+            // The sub-projects of the maps of its sub-projects too (nested maps), at every level: they are in its folder.
+            var inside = new List<ProjectDescriptor>();
+            var level = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { repositoryId };
+            var entries = new List<SubProjectStatus>(map?.Entries ?? []);
+            var parents = projects.Select(static candidate => candidate.ParentId).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+            for (var depth = 0; depth < ProjectManifest.MaximumDepth && level.Count > 0; depth++)
+            {
+                var below = projects.Where(candidate => candidate.ParentId is { } parentId && level.Contains(parentId)).ToList();
+                inside.AddRange(below);
+                level = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var child in below)
+                {
+                    if (!parents.Contains(child.Id)) continue;
+                    level.Add(child.Id);
+                    if (await _projectCatalog.ReadRepositoryMapAsync(child.Id, cancellationToken).ConfigureAwait(false) is { } nested) entries.AddRange(nested.Entries);
+                }
+            }
+
+            var declared = inside.Select(static candidate => candidate.ProjectPath)
                 // A folder that is not there yet is kept too: what the session would make there is no setting of its own.
-                .Concat(map?.Entries.Where(static entry => entry.Folder != ProjectManifestFolderState.Outside).Select(static entry => entry.FullPath) ?? [])
+                .Concat(entries.Where(static entry => entry.Folder != ProjectManifestFolderState.Outside).Select(static entry => entry.FullPath))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (declared.Count == 0) return ([], []);
             var worktree = _entries.TryGetValue(sessionId, out var entry) ? entry.WorktreeDirectory : null;

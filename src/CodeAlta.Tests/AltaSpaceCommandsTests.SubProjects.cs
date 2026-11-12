@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CodeAlta.LiveTool;
 
 namespace CodeAlta.Tests;
@@ -77,6 +78,49 @@ public sealed partial class AltaSpaceCommandsTests
         Assert.AreEqual("Billing service", (await fixture.Projects.LoadAsync()).Single(static project => project.DeclaredKey == "billing").DisplayName);
         await fixture.FailsAsync(AltaExitCodes.NotFound, "manifest.notFound", "project", "manifest", "remove", "web", "--project", contoso.Slug);
         Assert.IsTrue(fixture.View.Changes > 0, "The window reads the projects again.");
+    }
+
+    [TestMethod]
+    public async Task ProjectManifest_AMapInsideASubProject_IsReadAndWrittenAtItsLevel()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        // platform-map declares repos/billing, a git clone of its own with a map of its own (#433).
+        var platform = await fixture.AddProjectAsync("platform-map");
+        var billingFolder = Directory.CreateDirectory(Path.Combine(platform.ProjectPath, "repos", "billing")).FullName;
+        Directory.CreateDirectory(Path.Combine(billingFolder, ".git"));
+        foreach (var folder in new[] { "services/invoices-api", "libs/ledger", "libs/pdf" }) Directory.CreateDirectory(Path.Combine(billingFolder, folder));
+        await fixture.OkAsync("project", "manifest", "add", "repos/billing", "--project", platform.Slug);
+        await fixture.OkAsync("project", "manifest", "add", "services/invoices-api", "--project", "platform-map-billing", "--label", "apps");
+        await fixture.OkAsync("project", "manifest", "add", "libs/ledger", "--project", "platform-map-billing", "--label", "libs");
+        Assert.IsTrue(File.Exists(Path.Combine(billingFolder, ".alta", "projects.toml")), "The map of billing is written in billing.");
+
+        var refs = fixture.Single(await fixture.OkAsync("project", "list", "--parent", "platform-map-billing"), "alta.project.refs");
+        CollectionAssert.AreEquivalent(new[] { "platform-map-billing-invoices-api", "platform-map-billing-ledger" }, Slugs(refs));
+        var billing = fixture.Single(await fixture.OkAsync("project", "show", "platform-map-billing"), "alta.project.detail");
+        Assert.AreEqual(2, billing.GetProperty("subProjectCount").GetInt32());
+        Assert.AreEqual(platform.Id, billing.GetProperty("repository").GetProperty("projectId").GetString());
+        var invoices = fixture.Single(await fixture.OkAsync("project", "show", "platform-map-billing-invoices-api"), "alta.project.detail");
+        Assert.AreEqual(platform.Id, invoices.GetProperty("outerRepositories")[0].GetProperty("projectId").GetString());
+
+        var outer = fixture.Single(await fixture.OkAsync("project", "manifest", "show", platform.Slug), "alta.project.manifest");
+        Assert.AreEqual(2, outer.GetProperty("projects")[0].GetProperty("subProjects").GetInt32());
+        var billingId = billing.GetProperty("projectId").GetString()!;
+        // A session of billing reads and writes the map of billing; one of its sub-projects, the map of billing too.
+        foreach (var caller in new[] { billingId, invoices.GetProperty("projectId").GetString()! })
+        {
+            var identity = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = caller };
+            var inner = fixture.Single(await fixture.OkAsync(["project", "manifest", "show"], caller: identity), "alta.project.manifest");
+            Assert.AreEqual((billingId, platform.Id), (inner.GetProperty("projectId").GetString(), inner.GetProperty("parentId").GetString()));
+            Assert.AreEqual(JsonValueKind.Null, inner.GetProperty("claimedBy").ValueKind, "The map of a sub-project counts.");
+            Assert.IsTrue(inner.GetProperty("projects").EnumerateArray().All(static entry => entry.GetProperty("projectId").ValueKind == JsonValueKind.String));
+            Assert.AreEqual(0, inner.GetProperty("problems").GetArrayLength());
+        }
+
+        await fixture.OkAsync(["project", "manifest", "add", "libs/pdf"], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = billingId });
+        StringAssert.Contains(await File.ReadAllTextAsync(Path.Combine(billingFolder, ".alta", "projects.toml")), "libs/pdf");
+        Assert.IsFalse((await File.ReadAllTextAsync(Path.Combine(platform.ProjectPath, ".alta", "projects.toml"))).Contains("pdf", StringComparison.Ordinal));
+        var labels = Records(await fixture.OkAsync("label", "list", "--all")).Where(static line => Type(line) == "alta.label.item").ToArray();
+        Assert.AreEqual(billingId, labels.Single(static item => item.GetProperty("id").GetString() == "platform-map-billing.apps").GetProperty("repository").GetString());
     }
 
     [TestMethod]

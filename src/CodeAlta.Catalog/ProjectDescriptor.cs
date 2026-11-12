@@ -170,9 +170,25 @@ public sealed class ProjectDescriptor
     [JsonPropertyName("repository_slug")]
     public string? RepositorySlug { get; set; }
 
-    /// <summary>Gets the folder of the repository of a sub-project, the one of the project whose map declares it; null otherwise.</summary>
+    /// <summary>
+    /// Gets or sets the folder of the repository of a sub-project, the one of the project whose map declares it; null
+    /// for a project that is no sub-project. Without a value set, the last of <see cref="InheritedRoots"/>. Computed, never written.
+    /// </summary>
     [JsonIgnore]
-    public string? RepositoryPath => ParentId is null || InheritedRoots.Count == 0 ? null : InheritedRoots[^1];
+    public string? RepositoryPath
+    {
+        get => ParentId is null ? null : _repositoryPath ?? (InheritedRoots.Count == 0 ? null : InheritedRoots[^1]);
+        set => _repositoryPath = value;
+    }
+
+    private string? _repositoryPath;
+
+    /// <summary>
+    /// Gets or sets the repositories above the repository of a sub-project whose repository is itself a sub-project (a
+    /// map inside a sub-project), the nearest first; empty otherwise. Computed, never written.
+    /// </summary>
+    [JsonIgnore]
+    public List<ProjectRepositoryRef> OuterRepositories { get; set; } = [];
 
     /// <summary>Gets the sandbox of the sessions of the project: its own choice, else the one of its repository.</summary>
     [JsonIgnore]
@@ -247,6 +263,8 @@ public sealed class ProjectDescriptor
         InheritedSkillFolders = [.. InheritedSkillFolders],
         RepositoryName = RepositoryName,
         RepositorySlug = RepositorySlug,
+        _repositoryPath = _repositoryPath,
+        OuterRepositories = [.. OuterRepositories],
         FileSpaces = FileSpaces is null ? null : [.. FileSpaces],
         FileDisplayName = FileDisplayName,
         FileDescription = FileDescription,
@@ -330,4 +348,11 @@ public sealed class ProjectDescriptor
     }
 
 }
+
+/// <summary>A repository project as a sub-project names it: one above the repository of a sub-project of a nested map.</summary>
+/// <param name="Id">The identifier of the repository project.</param>
+/// <param name="Slug">Its slug.</param>
+/// <param name="Name">Its display name.</param>
+/// <param name="Path">Its folder.</param>
+public sealed record ProjectRepositoryRef(string Id, string Slug, string Name, string Path);
 

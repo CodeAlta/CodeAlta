@@ -31,7 +31,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             group,
             "A repository (a project of CodeAlta) can declare sub-projects: folders of it, any folder, a git submodule included, each a project with its own sessions, plans, tasks, skills and agents, on top of the setup of the repository (its skills, prompts, MCP servers, `config.toml`, `AGENTS.md`).",
             "The map is a file of the repository, committed with it: whoever adds the repository gets its sub-projects, grouped under it in the CodeAlta window with the labels of the map. These commands change the file; the user reviews the change in Changes and commits it.",
-            "Without --project, the repository is the project of the calling session (its repository when it is a sub-project), else the project of the current folder.",
+            "Without --project, the repository is the project of the calling session (its repository when it is a sub-project without a map of its own), else the project of the current folder.",
+            $"A sub-project can have a map of its own, a nested map: it is a repository too, with its labels and sub-projects. Maps nest {ProjectManifest.MaximumDepth} levels deep at most; when two maps declare the same folder, the nearer one wins and the other says so in its problems.",
             "To set a monorepo up, activate the skill `codealta-monorepo`: `alta skill activate codealta-monorepo`.",
             "Examples: `alta project manifest show`; `alta project manifest scan --glob \"services/*\"`; `alta project manifest add services/billing --name Billing --label backend`; `alta project manifest label backend --name Backend --color #2d72d2`.");
         return group;
@@ -45,7 +46,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("project=", "The repository project: id, slug or path.", value => projectRef ??= value);
         command.Add(async (_, _) => await HandleManifestShowAsync(context, projectRef).ConfigureAwait(false));
         AddHelpText(command,
-            "Each project names `folder`: `ok`, `missing` (nothing there) or `outside` (a link that leads out of the repository); `projectId` once it is listed; `hidden` when the user hid it; `optional` when it is listed only for those who add it.",
+            "Each project names `folder`: `ok`, `missing` (nothing there) or `outside` (a link that leads out of the repository); `projectId` once it is listed; `hidden` when the user hid it; `optional` when it is listed only for those who add it; `subProjects` when it has a map of its own; `claimedBy` when a nearer map declares its folder.",
+            "The map of a sub-project names its repository in `parentId`; `claimedBy` on the map says that it is not read, and its problems say why (nested too deep, or a link back to a folder whose map is read).",
             "Example: `alta project manifest show contoso`.");
         return command;
     }
@@ -170,8 +172,10 @@ internal sealed partial class BuiltInAltaCommandContributor
                 : $"Project '{reference}' was not found."));
         }
 
-        // A sub-project's map is the one of its repository, unless the sub-project is named.
-        if (reference is null && project.ParentId is { } parentId && await catalog.GetByIdAsync(parentId, context.CancellationToken).ConfigureAwait(false) is { } repository)
+        // A sub-project's map is the one of its repository, unless the sub-project is named or has a map of its own (a
+        // nested map): the map of the level the session works in.
+        if (reference is null && project.ParentId is { } parentId && !File.Exists(ProjectManifest.PathOf(project.ProjectPath))
+            && await catalog.GetByIdAsync(parentId, context.CancellationToken).ConfigureAwait(false) is { } repository)
         {
             project = repository;
         }
@@ -196,6 +200,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["projectPath"] = repository.ProjectPath,
             ["manifestPath"] = map.ManifestPath,
             ["exists"] = map.Exists,
+            ["parentId"] = repository.ParentId,
             ["claimedBy"] = map.ClaimedBy,
             ["labels"] = labels.Select(label => new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -220,6 +225,7 @@ internal sealed partial class BuiltInAltaCommandContributor
                 ["submodule"] = entry.Folder == ProjectManifestFolderState.Ok && File.Exists(Path.Combine(entry.FullPath, ".git")) ? true : null,
                 ["projectId"] = entry.Project?.Id,
                 ["hidden"] = entry.Project?.Archived == true ? true : null,
+                ["subProjects"] = entry.SubProjects > 0 ? entry.SubProjects : null,
                 ["claimedBy"] = entry.ClaimedBy,
             }).ToArray(),
             ["problems"] = map.Problems.Select(static problem => new Dictionary<string, object?>(StringComparer.Ordinal)

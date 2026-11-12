@@ -87,6 +87,12 @@ public sealed class ProjectManifest
     /// <summary>The longest description of a sub-project or of a label.</summary>
     public const int MaximumDescriptionLength = 2000;
 
+    /// <summary>
+    /// How many levels of maps are read: the map of a repository is the first, the map of one of its sub-projects the
+    /// second, and so on. A map deeper than that is not read, and says so.
+    /// </summary>
+    public const int MaximumDepth = 4;
+
     // The folders of settings and of agents that the sessions of a project never write (as AgentWriteGuard keeps them): a
     // sub-project is never one of them, nor inside one, by its path or through a link.
     private static readonly FrozenSet<string> SettingsFolderNames =
@@ -254,6 +260,29 @@ public sealed class ProjectManifest
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return (full, ProjectManifestFolderState.Missing);
+        }
+    }
+
+    // The folder a path is on the disk, every link on the way followed: two paths that lead to the same folder give the
+    // same text. A path that cannot be looked at is given as it is.
+    internal static string RealFolder(string path)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        try
+        {
+            var current = Path.GetPathRoot(full) ?? string.Empty;
+            foreach (var segment in full[current.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, segment);
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0 && Directory.ResolveLinkTarget(current, returnFinalTarget: true) is { } target)
+                    current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
+            }
+
+            return current;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return full;
         }
     }
 
