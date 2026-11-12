@@ -62,6 +62,11 @@ Turn on **Ask before use** on a secret, kept on this computer or in a vault, and
 
 The value of every secret of the computer is replaced by `***` before it is written or shown: in what tools return to the model, in session histories and their files, in what the window shows, in telemetry, and in the logs of CodeAlta Desktop and `altanode`. A secret a tool prints, or that an agent repeats, therefore never lands in a session file. A value read from a vault is masked from its first read. Values shorter than four characters are not masked.
 
+> [!WARNING]
+> A secret given to the shell of a session, through the [command line tools of a space](../spaces.md#command-line-tools), can be printed by a command the model runs. CodeAlta masks the output of the tools it runs itself. An agent that runs its own tools, such as Claude Code, Codex or GitHub Copilot, gets the variables in the environment of its program: what its own shell prints goes to its model and into its own files without passing through CodeAlta. Masking catches a value shown by mistake, not a command that encodes it: give a shell only the secrets its work needs, and use the [sandbox](../sessions/sandbox.md) and [Ask before use](#ask-before-use) for the others.
+>
+> The key of a provider, the `env` of a `claude-code` provider, and the `env` and headers of an MCP server go to their program, never to a shell the model drives.
+
 ## Agents
 
 Agents list the names with `alta secret list`, to write `${secret:NAME}` in a configuration, with where each value is kept and whether it can be given now (`alta secret test NAME`). They never read a value, and `alta secret set` is refused: ask the user to set it. What agents can do with vaults is in [Agents and vaults](vaults.md#agents-and-vaults).

@@ -208,7 +208,7 @@ A [sandboxed](../sessions/sandbox.md) session reaches neither the vaults nor the
 ## What it protects
 
 - Values stay out of configuration files, which hold names only, and out of `store.json` once they are in a vault. A file of a project cannot choose a vault item.
-- What a vault gives is masked from its first read, in what models see, in journals and in logs.
+- What a vault gives is masked from its first read, in what the tools of CodeAlta return to models, in journals and in logs. An agent that runs its own tools, such as Claude Code, sees a secret its shell prints: see [Masking](readme.md#masking).
 - A sandboxed session reaches no vault, and an agent changes nothing without your approval.
 
 > [!WARNING]
