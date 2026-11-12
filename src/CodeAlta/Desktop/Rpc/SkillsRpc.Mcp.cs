@@ -19,8 +19,8 @@ internal sealed partial class SkillsService
     /// <summary>Gets what finds the running MCP plugin, or null where the host has none.</summary>
     internal Func<McpPlugin?>? Mcp { get; init; }
 
-    /// <summary>Gets the home whose MCP policy the switches write; null for the user's.</summary>
-    internal string? McpHome { get; init; }
+    /// <summary>Gets the home, or the CodeAlta folder of a separate profile, whose MCP policy the switches write; default for the user's.</summary>
+    internal McpHome McpHome { get; init; }
 
     /// <summary>
     /// Lists the skills of the MCP servers as CodeAlta last listed them, with the ones turned off, without starting any
@@ -83,7 +83,7 @@ internal sealed partial class SkillsService
         {
             var result = await new McpManagementService().SetSkillEnabledAsync(request.Server!, request.Uri!, request.Enabled,
                 projectScope ? McpManagementScope.Project : McpManagementScope.Global,
-                new McpManagementRequest { ProjectDirectory = project.Root, UserHomeDirectory = McpHome, ProbeWritability = false }, CancellationToken.None).ConfigureAwait(false);
+                new McpManagementRequest { ProjectDirectory = project.Root, Home = McpHome, ProbeWritability = false }, CancellationToken.None).ConfigureAwait(false);
             return new("ok", result.Changed ? 1 : 0, null);
         }
         catch (InvalidDataException)

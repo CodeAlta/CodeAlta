@@ -54,6 +54,20 @@ public sealed partial class McpPlugin
         return DescribeServers(snapshot, new McpConfigCache(), new McpHome(userHomeDirectory, null), null, null);
     }
 
+    /// <summary>
+    /// Describes the servers of a configuration snapshot without a session, as <see cref="DescribeServers(McpManagementSnapshot, string?)"/>,
+    /// for a home and its CodeAlta root (a separate profile).
+    /// </summary>
+    /// <param name="snapshot">The configuration snapshot.</param>
+    /// <param name="home">The home and the CodeAlta root whose lists of tools are read.</param>
+    /// <returns>The servers in effect (enabled or disabled by policy), by key.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
+    public static IReadOnlyList<McpSessionServerView> DescribeServers(McpManagementSnapshot snapshot, McpHome home)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return DescribeServers(snapshot, new McpConfigCache(), home, null, null);
+    }
+
     private static IReadOnlyList<McpSessionServerView> DescribeServers(McpManagementSnapshot snapshot, McpConfigCache configCache, McpHome home,
         McpActivationState? activation, string? scope)
     {

@@ -12,7 +12,7 @@ namespace CodeAlta.Plugin.Mcp;
 /// </remarks>
 /// <param name="UserHomeDirectory">The home folder, or null for the one of the current user.</param>
 /// <param name="CodeAltaRoot">The CodeAlta root in place of <c>&lt;home&gt;/.alta</c>, or null.</param>
-internal readonly record struct McpHome(string? UserHomeDirectory, string? CodeAltaRoot)
+public readonly record struct McpHome(string? UserHomeDirectory, string? CodeAltaRoot)
 {
     /// <summary>A home alone, as the plugin always took it: its CodeAlta root is <c>&lt;home&gt;/.alta</c>.</summary>
     public static implicit operator McpHome(string? userHomeDirectory) => new(userHomeDirectory, null);

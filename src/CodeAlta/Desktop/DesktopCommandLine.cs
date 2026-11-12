@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Reflection;
 using CodeAlta.Hosting;
+using CodeAlta.Plugin.Mcp;
 
 namespace CodeAlta.Desktop;
 
@@ -68,6 +69,20 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     /// data root of the normal instance, also for a separate profile. Null for <see cref="DataRoot"/>.
     /// </summary>
     internal string? IntegrationRoot { get; init; }
+
+    /// <summary>
+    /// Where the MCP files are (<c>mcp.json</c>, the policy, the OAuth tokens, the caches): the folder of a separate
+    /// profile, which reads none of the MCP configurations other tools keep in the home of the user, as
+    /// <c>altacli --profile</c>; else the home the roots own, or the one of the user.
+    /// </summary>
+    internal McpHome McpHome => Profile is { } profile ? new McpHome(null, profile) : Owned?.Home;
+
+    /// <summary>
+    /// The home whose skills, agents and instructions of other tools (<c>~/.agents</c>, <c>~/.copilot</c>, <c>~/.claude</c>)
+    /// the sessions and the window read: none for a separate profile, as <c>altacli --profile</c>; else the home the roots
+    /// own, or the one of the user.
+    /// </summary>
+    internal string? OtherToolsHome => Profile is not null ? null : Owned?.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 }
 internal sealed record OwnedDesktopRoots(string Project, string? Home, string? Instructions, string? Builtin);
 

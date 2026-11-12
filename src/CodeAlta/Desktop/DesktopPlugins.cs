@@ -42,16 +42,7 @@ internal static class DesktopPlugins
             PluginType = typeof(JiraPlugin), Factory = static () => new JiraPlugin(),
             Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
-        new()
-        {
-            Id = Rpc.ComposerStatusService.McpPluginId, DisplayName = "MCP",
-            Description = "Connects CodeAlta to configured Model Context Protocol servers.",
-            // The window shows the views of MCP Apps where it keeps them away from its bridge, and loads the skills of
-            // the servers: a session asks the user on its card before one is loaded.
-            PluginType = typeof(McpPlugin),
-            Factory = static () => new McpPlugin(new McpPluginOptions { ShowsApps = DesktopMcpAppViews.IsSupported, LoadsSkills = true }),
-            Frontends = PluginFrontends.All | PluginFrontends.Cli,
-        },
+        McpDefinition(codeAltaRoot: null),
         new()
         {
             Id = "statistics", DisplayName = "Statistics",
@@ -75,6 +66,27 @@ internal static class DesktopPlugins
     ];
 
     /// <summary>
+    /// The built-in plugin definitions of a profile: those of <see cref="BuiltIns"/>, with the MCP plugin on the CodeAlta
+    /// folder of a separate profile: its <c>mcp.json</c>, policy, OAuth tokens and caches, and none of the MCP
+    /// configurations other tools keep in the home of the user, as <c>altacli --profile</c>.
+    /// </summary>
+    /// <param name="profileRoot">The CodeAlta folder of a separate profile (<c>--profile</c>); null for <c>~/.alta</c>.</param>
+    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInsFor(string? profileRoot)
+        => profileRoot is null ? BuiltIns
+            : [.. BuiltIns.Select(definition => definition.Id == Rpc.ComposerStatusService.McpPluginId ? McpDefinition(profileRoot) : definition)];
+
+    // The MCP plugin. The window shows the views of MCP Apps where it keeps them away from its bridge, and loads the skills
+    // of the servers: a session asks the user on its card before one is loaded.
+    private static BuiltInPluginDefinition McpDefinition(string? codeAltaRoot) => new()
+    {
+        Id = Rpc.ComposerStatusService.McpPluginId, DisplayName = "MCP",
+        Description = "Connects CodeAlta to configured Model Context Protocol servers.",
+        PluginType = typeof(McpPlugin),
+        Factory = () => new McpPlugin(new McpPluginOptions { ShowsApps = DesktopMcpAppViews.IsSupported, LoadsSkills = true, CodeAltaRoot = codeAltaRoot }),
+        Frontends = PluginFrontends.All | PluginFrontends.Cli,
+    };
+
+    /// <summary>
     /// The built-in plugins of a window: the ones of both applications, and the one that gives a session the
     /// tools that see and drive the window.
     /// </summary>
@@ -92,13 +104,15 @@ internal static class DesktopPlugins
     /// <param name="archives">The dedicated archive of the owning StateRoot, borrowed by the same Statistics plugin.</param>
     /// <param name="search">Where the Search plugin forwards the events of the sessions; without it the window has no Search plugin.</param>
     /// <param name="browser">What the browser plugin is given; without it the window has no browser plugin.</param>
+    /// <param name="profileRoot">The CodeAlta folder of a separate profile (<see cref="BuiltInsFor"/>); null for <c>~/.alta</c>.</param>
     internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands,
         ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null, Search.DesktopSearchRelay? search = null,
-        BrowserPluginHost? browser = null)
+        BrowserPluginHost? browser = null, string? profileRoot = null)
     {
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
-        var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals, archives) : definition)];
+        var shared = BuiltInsFor(profileRoot);
+        var builtIns = journals is null ? shared : [.. shared.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals, archives) : definition)];
         if (browser is not null) builtIns = [.. builtIns, BrowserDefinition(browser, PluginFrontends.Desktop)];
         // The landing page is the window's: the terminal application has no such plugin.
         builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];

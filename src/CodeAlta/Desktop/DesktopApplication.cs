@@ -549,6 +549,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 DiscoveryScope = roots.Home is null || roots.Instructions is null
                     ? null
                     : new SessionDiscoveryScope(roots.Home, roots.Instructions),
+                // A separate profile reads none of the user's home: not the skills, agents and instructions other tools
+                // keep there, as altacli --profile.
+                ReadsUserHome = options.OtherToolsHome is not null,
                 BuiltInSkillRoot = roots.Builtin,
                 ModelServerTransports = modelServerTransports.Resolve,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
@@ -592,7 +595,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
-                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost), PluginSafeMode = DesktopPlugins.SafeMode,
+                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost, options.Profile), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore,
                     privateNetworks),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
@@ -1019,10 +1022,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The local search of the window: the sessions of this instance, the guide, the skills, the tools and the plugins.
                 // Its indexer waits a little before its first pass, so it does not slow the start.
                 search = Search.DesktopSearch.Start(host, searchRelay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), documentation,
-                    roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost),
+                    options.OtherToolsHome,
+                    DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost, profileRoot: options.Profile),
                     options.ReviewOwnedCommandPermissions ? null : () => [.. ui.Tools.Select(static tool => (tool.Name, tool.Description))],
-                    static line => LogManager.GetLogger("CodeAlta.Search").Info(line), skillUsage: _skillUsage);
+                    static line => LogManager.GetLogger("CodeAlta.Search").Info(line), skillUsage: _skillUsage, mcpHome: options.McpHome);
                 // Search by meaning: a model downloaded once the user turns it on, run in a worker process of its own. An
                 // instance on explicit roots is automation and stays off the network: it has keyword search alone.
                 if (roots.Home is null)
@@ -1277,18 +1280,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         DownloadAllowed = roots.Home is null,
                     };
                     builder.AddClaudeCliService(claudeCli);
-                    mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
+                    mcpServers = new McpServersService(host.ProjectCatalog, epoch, options.McpHome);
                     builder.AddMcpServersService(mcpServers);
-                    var agentPrompts = new AgentPromptsService(host.ProjectCatalog, epoch,
-                        userProfileRoot: roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+                    var agentPrompts = new AgentPromptsService(host.ProjectCatalog, epoch, userProfileRoot: options.OtherToolsHome);
                     builder.AddAgentPromptsService(agentPrompts);
-                    // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
-                    var skills = new SkillsService(host.ProjectCatalog, host.SkillCatalog,
-                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch)
+                    // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI. A
+                    // separate profile reads none of the home.
+                    var skills = new SkillsService(host.ProjectCatalog, host.SkillCatalog, options.OtherToolsHome, epoch)
                     {
                         // The skills MCP servers publish, beside the local ones.
                         Mcp = () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(),
-                        McpHome = roots.Home,
+                        McpHome = options.McpHome,
                         Spaces = host.SpaceCatalog,
                     };
                     builder.AddSkillsService(skills);
@@ -1319,7 +1321,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
                         RemoteSessions = () => fleet is { } machines ? [.. machines.Hosts.SelectMany(static machine => machine.Listing.Sessions.Select(session => (machine.MachineId!, session)))] : [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
-                        SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost)).ReadAsync,
+                        SessionResources = new DesktopSessionResources(host, options.McpHome, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost, profileRoot: options.Profile)).ReadAsync,
                     });
                     builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch));
                     builder.AddSubProjectsService(new SubProjectsService(host.ProjectCatalog, spaceView, epoch));
@@ -1431,7 +1433,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         SessionFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token),
                         SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
                     });
-                    builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime)
+                    builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, options.McpHome, host.PluginRuntime)
                     {
                         SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
                         SessionSpaceFilter = (sessionId, token) => host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token),

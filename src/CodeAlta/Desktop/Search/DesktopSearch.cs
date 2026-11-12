@@ -3,6 +3,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Documentation;
 using CodeAlta.Catalog.Search;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugins;
 using CodeAlta.Search;
 
@@ -126,21 +127,22 @@ internal sealed class DesktopSearch : IAsyncDisposable
     /// <param name="relay">The relay through which the built-in Search plugin forwards the events of the sessions.</param>
     /// <param name="journals">The journals of the sessions of the instance.</param>
     /// <param name="documentation">The user guide that ships with the application, or null.</param>
-    /// <param name="profile">The profile folder of the user, for the skills and the prompts it has.</param>
+    /// <param name="profile">The profile folder of the user, for the skills and the prompts it has; null for none (a separate profile).</param>
     /// <param name="builtIns">The built-in plugins of the window.</param>
     /// <param name="uiTools">The tools of the window, or null when sessions do not get them.</param>
     /// <param name="log">Gets what is worth a line in the log.</param>
     /// <param name="options">The timings of the indexer; null for the defaults.</param>
     /// <param name="skillUsage">The recent use of the skills, which ranks the skills used most a little first; null for none.</param>
+    /// <param name="mcpHome">Where the MCP files are (the CodeAlta folder of a separate profile); null for those of <paramref name="profile"/>.</param>
     public static DesktopSearch Start(CodeAltaHost host, DesktopSearchRelay relay, ISessionJournalCatalog journals, ShippedDocumentation? documentation,
-        string profile, IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, Action<string>? log,
-        SearchIndexerOptions? options = null, DesktopSkillUsage? skillUsage = null)
+        string? profile, IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, Action<string>? log,
+        SearchIndexerOptions? options = null, DesktopSkillUsage? skillUsage = null, McpHome? mcpHome = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(relay);
         ArgumentNullException.ThrowIfNull(journals);
         var searchHost = new DesktopSearchHost(host, skillUsage);
-        var sources = new DesktopSearchSources(host, searchHost, documentation, profile, builtIns, uiTools);
+        var sources = new DesktopSearchSources(host, searchHost, documentation, profile, builtIns, uiTools, mcpHome);
         var store = new SearchIndexStore(host.CatalogOptions.SearchDatabasePath);
         var indexer = new SearchIndexer(store, journals, searchHost, sources.List, TimeProvider.System, options, log);
         var service = new SearchService(store, indexer, searchHost, journals)

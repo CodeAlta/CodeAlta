@@ -123,10 +123,14 @@ public sealed record McpManagementRequest
     /// <summary>Gets the user home directory override, primarily for tests.</summary>
     public string? UserHomeDirectory { get; init; }
 
-    // The CodeAlta root in place of <home>/.alta (McpHome.CodeAltaRoot), which a plugin with one gives its requests.
-    internal string? CodeAltaRoot { get; init; }
+    /// <summary>
+    /// Gets the CodeAlta folder of a separate profile in place of <c>&lt;home&gt;/.alta</c> (<see cref="McpHome.CodeAltaRoot"/>):
+    /// its <c>mcp.json</c>, policy and OAuth tokens; null for the one of the home. A plugin with one gives it to its requests.
+    /// </summary>
+    public string? CodeAltaRoot { get; init; }
 
-    internal McpHome Home
+    /// <summary>Gets the home and the CodeAlta root together.</summary>
+    public McpHome Home
     {
         get => new(UserHomeDirectory, CodeAltaRoot);
         init => (UserHomeDirectory, CodeAltaRoot) = (value.UserHomeDirectory, value.CodeAltaRoot);

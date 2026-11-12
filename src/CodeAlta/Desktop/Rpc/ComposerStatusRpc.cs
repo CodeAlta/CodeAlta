@@ -46,7 +46,7 @@ internal sealed class ComposerStatusService
 
     private readonly ProjectCatalog? _projects;
     private readonly string? _epoch;
-    private readonly string? _home;
+    private readonly McpHome _home;
     private readonly PluginRuntimeManager? _plugins;
     private readonly McpManagementService _mcp = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -71,11 +71,11 @@ internal sealed class ComposerStatusService
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
-    /// <param name="home">The user home that holds the global <c>.alta</c> folder, or null for the profile.</param>
+    /// <param name="home">The home that holds the global <c>.alta</c> folder, or the CodeAlta folder of a separate profile; default for the user's.</param>
     /// <param name="plugins">The host's plugin runtime, or null when the host runs no plugin.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal ComposerStatusService(ProjectCatalog projects, string epoch, string? home, PluginRuntimeManager? plugins = null)
+    internal ComposerStatusService(ProjectCatalog projects, string epoch, McpHome home, PluginRuntimeManager? plugins = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
@@ -179,7 +179,7 @@ internal sealed class ComposerStatusService
     // composer without one will be created in.
     private async Task<(McpManagementSnapshot Snapshot, SpaceFilter? Space)> SnapshotAsync(string? root, ComposerStatusRequest request, CancellationToken cancellationToken)
     {
-        var snapshot = _mcp.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = root, UserHomeDirectory = _home, ProbeWritability = false });
+        var snapshot = _mcp.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = root, Home = _home, ProbeWritability = false });
         var inSpace = request.SessionId is { } owner
             ? SessionSpaceFilter is { } filter ? await filter(owner, cancellationToken).ConfigureAwait(false) : null
             : NewSessionSpaceFilter is { } created ? await created(request.ProjectId, cancellationToken).ConfigureAwait(false) : null;

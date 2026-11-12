@@ -27,14 +27,17 @@ internal sealed class DesktopSessionResources
     internal const int MaximumNames = 128;
 
     private readonly CodeAltaHost _host;
-    private readonly string? _home;
+    private readonly McpHome _home;
     private readonly IReadOnlyList<BuiltInPluginDefinition> _builtIns;
 
     /// <summary>Initializes a new instance of the <see cref="DesktopSessionResources"/> class.</summary>
     /// <param name="host">The host of the window.</param>
-    /// <param name="home">The home folder the MCP servers of the user are read from; null for the one of the process.</param>
+    /// <param name="home">
+    /// The home folder the MCP servers, skills and agents of the user are read from, or the CodeAlta folder of a separate
+    /// profile, which reads none of the home; default for the one of the process.
+    /// </param>
     /// <param name="builtIns">The plugins that ship with the window, which its settings list whether they run or not.</param>
-    internal DesktopSessionResources(CodeAltaHost host, string? home, IReadOnlyList<BuiltInPluginDefinition>? builtIns = null)
+    internal DesktopSessionResources(CodeAltaHost host, McpHome home, IReadOnlyList<BuiltInPluginDefinition>? builtIns = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         (_host, _home, _builtIns) = (host, home, builtIns ?? []);
@@ -53,7 +56,8 @@ internal sealed class DesktopSessionResources
         var project = string.IsNullOrWhiteSpace(record.ProjectId) ? null
             : await _host.ProjectCatalog.GetByIdAsync(record.ProjectId, cancellationToken).ConfigureAwait(false);
         var space = await runtime.GetSpaceFilterAsync(record.SpaceId, project, cancellationToken).ConfigureAwait(false);
-        var profile = _home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        // A separate profile reads none of the home of the user: not the skills and agents other tools keep there.
+        var profile = _home.OtherToolsHome;
 
         var skillQuery = SkillCatalogQuery.ForProject(new CodeAltaConfigStore(_host.CatalogOptions), _host.CatalogOptions.GlobalRoot, profile,
             project, otherProjectRoots: null, space) with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = false, ModelVisibleOnly = true };
@@ -68,7 +72,7 @@ internal sealed class DesktopSessionResources
             UserProfileRoot = profile,
         }), space).Select(static prompt => prompt.DisplayName);
 
-        var mcp = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project?.ProjectPath, UserHomeDirectory = _home, ProbeWritability = false });
+        var mcp = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project?.ProjectPath, Home = _home, ProbeWritability = false });
         var servers = mcp.Policy.Enabled
             ? mcp.Servers.Where(server => server.State == McpManagementServerState.Configured && server.PolicyEnabled != false
                 && space.Allows(SpaceResourceKind.McpServer, server.Key)).Select(static server => server.Key)

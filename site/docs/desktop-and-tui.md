@@ -107,8 +107,9 @@ Appearance is not shared: the desktop app keeps its theme, color scheme, open ta
 CodeAlta Desktop can keep its profile in another folder than `~/.alta`, such as a folder your organization trusts, as [`altacli`](command-line.md) does: start it with `alta --profile <folder>`, or set the `CODEALTA_HOME` environment variable to that folder, for example in the environment of your account or in the shortcut that starts CodeAlta.
 
 - The folder holds everything of that profile: settings, providers and their credentials, projects, sessions, and the data of the window in its `desktop` folder. It is created when it does not exist.
+- The MCP servers, skills, agents and instructions that other tools keep in your home folder (`~/.claude`, `~/.agents`, `~/.copilot`...) are not read, as for `altacli --profile`.
 - An instance on another profile can run at the same time; `alta --profile <folder> --exit` exits the one on that folder.
-- The sessions get `CODEALTA_HOME`, so that `altacli` in their shells uses the same profile.
+- The sessions get `CODEALTA_HOME`, so that `altacli` in their shells uses the same profile, and the window lists the sessions it runs.
 - `--profile` does not go with `--dev`. CodeAlta TUI always uses `~/.alta`.
 
 ## What the desktop app adds

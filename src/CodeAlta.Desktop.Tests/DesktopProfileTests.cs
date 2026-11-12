@@ -1,4 +1,7 @@
+using CodeAlta.Catalog;
 using CodeAlta.Desktop;
+using CodeAlta.Desktop.Rpc;
+using CodeAlta.Plugin.Mcp;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -79,6 +82,51 @@ public sealed class DesktopProfileTests
         CollectionAssert.AreEqual(new[] { "--profile", Folder }, DesktopTerminalStart.Arguments(Parse(null, "--profile", Folder)!).ToArray());
         // The variable reaches the application through the environment it inherits, and names the profile again there.
         CollectionAssert.AreEqual(new[] { "--profile", Folder }, DesktopTerminalStart.Arguments(Parse(Folder)!).ToArray());
+    }
+
+    [TestMethod]
+    public void Profile_ReadsTheMcpFilesOfItsFolder_AndNothingOfTheHome()
+    {
+        var normal = Parse(null)!;
+        Assert.IsTrue(normal.McpHome.IsDefault, "~/.alta keeps the MCP files of the user, as before");
+        Assert.AreEqual(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), normal.OtherToolsHome);
+
+        var options = Parse(null, "--profile", Folder)!;
+        Assert.AreEqual(Folder, options.McpHome.Root);
+        Assert.IsNull(options.McpHome.OtherToolsHome, "no MCP configuration of another tool of the home");
+        Assert.IsNull(options.OtherToolsHome, "no skill, agent or instruction other tools keep in the home");
+    }
+
+    [TestMethod]
+    public async Task Profile_TheMcpSettingsAndThePluginUseTheFilesOfTheProfile()
+    {
+        var profile = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "alta-desktop-profile-mcp-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(profile, "mcp.json"), """{"mcpServers":{"profile-tool":{"command":"profile-tool"}}}""");
+            var options = Parse(null, "--profile", profile)!;
+
+            // Settings › MCP servers: the global servers are those of the profile, and an edit writes its mcp.json.
+            var service = new McpServersService(new ProjectCatalog(new CatalogOptions { GlobalRoot = profile }), "epoch", options.McpHome);
+            var listed = await service.ListAsync(new("epoch", null), default);
+            Assert.AreEqual("ok", listed.Status);
+            CollectionAssert.AreEqual(new[] { "profile-tool" }, listed.Servers.Select(static server => server.Key).ToArray(),
+                "nothing of ~/.alta/mcp.json, of the configurations of other tools or of this computer");
+            var saved = await service.SaveAsync(new("epoch", null, "Global", null, null, new("added", "Stdio", "npx", [], null, null, [], null, true)), default);
+            Assert.AreEqual("ok", saved.Status);
+            StringAssert.Contains(File.ReadAllText(Path.Combine(profile, "mcp.json")), "\"added\"");
+
+            // The plugin the sessions run.
+            var definition = DesktopPlugins.BuiltInsFor(profile).Single(static plugin => plugin.Id == ComposerStatusService.McpPluginId);
+            var plugin = (McpPlugin)definition.Factory();
+            var snapshot = plugin.ManagementService.RefreshSnapshot(new McpManagementRequest { ProbeWritability = false });
+            CollectionAssert.AreEquivalent(new[] { "added", "profile-tool" }, snapshot.Servers.Select(static server => server.Key).ToArray());
+            Assert.AreSame(DesktopPlugins.BuiltIns, DesktopPlugins.BuiltInsFor(null), "~/.alta keeps the plugins as they were");
+        }
+        finally
+        {
+            Directory.Delete(profile, recursive: true);
+        }
     }
 
     [TestMethod]

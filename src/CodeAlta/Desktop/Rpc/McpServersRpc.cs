@@ -43,7 +43,7 @@ internal sealed class McpServersService
     private const int MaximumDetailLength = 512;
     private readonly ProjectCatalog? _projects;
     private readonly string? _epoch;
-    private readonly string? _home;
+    private readonly McpHome _home;
     // A test tells a server what the sessions of the window tell it: a server that publishes skills lists them then.
     private readonly McpManagementService _management = new(new McpPluginOptions { ShowsApps = DesktopMcpAppViews.IsSupported, LoadsSkills = true });
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -63,10 +63,10 @@ internal sealed class McpServersService
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
-    /// <param name="home">The user home that holds the global <c>.alta</c> folder, or null for the profile.</param>
+    /// <param name="home">The home that holds the global <c>.alta</c> folder, or the CodeAlta folder of a separate profile; default for the user's.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal McpServersService(ProjectCatalog projects, string epoch, string? home)
+    internal McpServersService(ProjectCatalog projects, string epoch, McpHome home)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
@@ -78,11 +78,11 @@ internal sealed class McpServersService
     /// <summary>Creates the service for an owned host over a literal authorization.</summary>
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
-    /// <param name="home">The user home that holds the global <c>.alta</c> folder, or null for the profile.</param>
+    /// <param name="home">The home that holds the global <c>.alta</c> folder, or the CodeAlta folder of a separate profile; default for the user's.</param>
     /// <param name="login">The browser authorization of one server.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> or <paramref name="login"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal McpServersService(ProjectCatalog projects, string epoch, string? home, McpServerLogin login)
+    internal McpServersService(ProjectCatalog projects, string epoch, McpHome home, McpServerLogin login)
         : this(projects, epoch, home)
     {
         ArgumentNullException.ThrowIfNull(login);
@@ -510,7 +510,7 @@ internal sealed class McpServersService
     }
 
     private McpManagementRequest Paths(string? projectRoot)
-        => new() { ProjectDirectory = projectRoot, UserHomeDirectory = _home, ProbeWritability = false };
+        => new() { ProjectDirectory = projectRoot, Home = _home, ProbeWritability = false };
 
     private static bool IsDefinition(McpManagementServerSnapshot row)
         => row is { SourceScope: not null, Transport: not null }

@@ -78,8 +78,10 @@ public sealed class McpToolListCache
     public static string FolderOf(string? userHomeDirectory)
         => FolderOf(new McpHome(userHomeDirectory, null));
 
-    // The folder of the lists under the CodeAlta root of a home: cache/mcp/tools.
-    internal static string FolderOf(McpHome home)
+    /// <summary>The folder of the lists under the CodeAlta root of a home: <c>cache/mcp/tools</c>.</summary>
+    /// <param name="home">The home.</param>
+    /// <returns>The folder.</returns>
+    public static string FolderOf(McpHome home)
         => Path.Combine(home.Root, "cache", "mcp", "tools");
 
     /// <summary>

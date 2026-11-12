@@ -35,8 +35,8 @@ internal sealed class DesktopSearchSources
     private readonly CodeAltaHost _host;
     private readonly DesktopSearchHost _searchHost;
     private readonly ShippedDocumentation? _documentation;
-    private readonly string _profile;
-    private readonly string? _mcpHome;
+    private readonly string? _profile;
+    private readonly McpHome _mcpHome;
     private readonly IReadOnlyList<BuiltInPluginDefinition> _builtIns;
     private readonly Func<IReadOnlyList<(string Name, string Description)>>? _uiTools;
     private readonly Lock _gate = new();
@@ -49,14 +49,15 @@ internal sealed class DesktopSearchSources
     // The body of each SKILL.md as last read, by path: read again only when its length or its write time changes.
     private readonly Dictionary<string, (long Length, DateTime Written, string Body)> _skillBodies = new(StringComparer.Ordinal);
 
-    public DesktopSearchSources(CodeAltaHost host, DesktopSearchHost searchHost, ShippedDocumentation? documentation, string profile,
-        IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, string? mcpHome = null)
+    public DesktopSearchSources(CodeAltaHost host, DesktopSearchHost searchHost, ShippedDocumentation? documentation, string? profile,
+        IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, McpHome? mcpHome = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _searchHost = searchHost ?? throw new ArgumentNullException(nameof(searchHost));
         _documentation = documentation;
         _profile = profile;
-        // The MCP files of the user: those of the profile of the process unless the window runs on a home of its own.
+        // The MCP files of the user: those of the profile of the process unless the window runs on a home of its own, or on
+        // the folder of a separate profile.
         _mcpHome = mcpHome ?? profile;
         _builtIns = builtIns ?? [];
         _uiTools = uiTools;
@@ -546,7 +547,7 @@ internal sealed class DesktopSearchSources
         void Add(string? projectDirectory, string? projectId)
         {
             McpManagementSnapshot snapshot;
-            try { snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = _mcpHome, ProbeWritability = false }); }
+            try { snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, Home = _mcpHome, ProbeWritability = false }); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { return; }
             foreach (var server in snapshot.Servers)
             {
