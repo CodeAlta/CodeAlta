@@ -337,6 +337,32 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
     private protected override BrowserEngine Engine => BrowserEngine.Chromium;
 
     [TestMethod]
+    public async Task ATabAdoptedTwiceAtOnce_HasOneSession_AndItsRequestsLoad()
+    {
+        // NewPageAsync adopts the tab it created, and OnTargetCreated adopts it too when the first attachment takes more
+        // than its 100 ms: a second session would hold the requests of the tab in its Fetch, and nobody would answer it.
+        using var timeout = new CancellationTokenSource(BrowserToolTesting.Deadline);
+        var connection = (CodeAlta.Browser.Drivers.Cdp.CdpBrowserConnection)Host.Connection;
+        await using var opened = await connection.CreateContextAsync(new CodeAlta.Browser.Drivers.BrowserContextOptions
+        {
+            Isolated = true,
+            GatesLoopback = true,
+            Gate = static (_, _, _) => ValueTask.FromResult<string?>(null),
+        }, timeout.Token);
+        var context = (CodeAlta.Browser.Drivers.Cdp.CdpBrowserContext)opened;
+        var created = await connection.Connection.Browser.Target.CreateTargetAsync(
+            new CodeAlta.Browser.Cdp.TargetCreateTargetParams { Url = "about:blank", BrowserContextId = context.ContextId }, timeout.Token);
+
+        var pages = await Task.WhenAll(context.AdoptAsync(created.TargetId, raise: false, timeout.Token), context.AdoptAsync(created.TargetId, raise: true, timeout.Token));
+        Assert.AreSame(pages[0], pages[1]);
+        var page = pages[0];
+        await page.NavigateAsync(Host.Site.Url("/form"), TestTime.Seconds(30), timeout.Token).WithinAsync(TestTime.Seconds(60), "the navigation");
+        var reached = await page.EvaluateAsync("async () => { const r = await fetch('/api/data'); return 'reached ' + r.status; }", isFunction: true, [], timeout.Token)
+            .WithinAsync(TestTime.Seconds(30), "the fetch of the page");
+        StringAssert.Contains(reached, "reached 200");
+    }
+
+    [TestMethod]
     public async Task AScriptRunInADocumentJustReplaced_RunsInTheNewOne()
     {
         await using var session = Host.NewSession();

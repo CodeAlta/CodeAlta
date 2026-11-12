@@ -54,6 +54,9 @@ internal sealed partial class CdpPage : IChromiumPage
     /// <summary>Gets the id of the target of the tab.</summary>
     public string TargetId { get; }
 
+    /// <summary>Gets the id of the session attached to the tab.</summary>
+    internal string SessionId => _session.Id!;
+
     /// <inheritdoc />
     public string Url => Volatile.Read(ref _url);
 

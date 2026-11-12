@@ -158,6 +158,9 @@ internal sealed class CdpBrowserContext : IBrowserContext
     private readonly string? _contextId;
     private readonly ConcurrentDictionary<string, CdpPage> _pages = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _attaching = new(StringComparer.Ordinal);
+    // The attachment of each tab while it is made, which every adopter of the tab awaits: a tab has one session. A
+    // second one would enable Fetch with nobody to answer it, and the requests it holds would never load.
+    private readonly ConcurrentDictionary<string, Lazy<Task<CdpPage>>> _adopting = new(StringComparer.Ordinal);
     private readonly List<string> _order = [];
     private int _disposed;
 
@@ -170,6 +173,9 @@ internal sealed class CdpBrowserContext : IBrowserContext
 
     /// <summary>Gets how the tabs are opened.</summary>
     public BrowserContextOptions Options { get; }
+
+    /// <summary>Gets the id of the browser context of the session, or null for the windows of a shared profile.</summary>
+    internal string? ContextId => _contextId;
 
     /// <summary>Gets the connection.</summary>
     public CdpConnection Connection => _browser.Connection;
@@ -248,19 +254,51 @@ internal sealed class CdpBrowserContext : IBrowserContext
     // What waits for a tab to open: a tab that a tab of the session opens beside it.
     private readonly List<Action<TargetTargetInfo>> _watchers = [];
 
-    private async Task<CdpPage> AdoptAsync(string targetId, bool raise, CancellationToken cancellationToken)
+    // The page of a tab, attached once: a tab NewPageAsync created is also seen by OnTargetCreated, whose adoption may
+    // come while the attachment of NewPageAsync still runs (a browser under load takes more than its 100 ms); both get
+    // the same page. Only the adopter that started the attachment reports the tab.
+    internal async Task<CdpPage> AdoptAsync(string targetId, bool raise, CancellationToken cancellationToken)
     {
         if (_pages.TryGetValue(targetId, out var known)) return known;
-        var page = await CdpPage.AttachAsync(this, targetId, cancellationToken).ConfigureAwait(false);
-        if (!_pages.TryAdd(targetId, page))
-        {
-            page.DisposeSubscriptions();
-            return _pages[targetId];
-        }
-
-        lock (_order) _order.Add(targetId);
-        if (raise) PageOpened?.Invoke(page);
+        var mine = new Lazy<Task<CdpPage>>(() => AttachOnceAsync(targetId), LazyThreadSafetyMode.ExecutionAndPublication);
+        var attaching = _adopting.GetOrAdd(targetId, mine);
+        var started = ReferenceEquals(attaching, mine);
+        var page = await attaching.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (raise && started) PageOpened?.Invoke(page);
         return page;
+    }
+
+    // Attaches to a tab whatever adopter waits for it: one that stops waiting does not leave a tab half attached.
+    private async Task<CdpPage> AttachOnceAsync(string targetId)
+    {
+        try
+        {
+            // Attached between the look of an adopter and its turn.
+            if (_pages.TryGetValue(targetId, out var known)) return known;
+            var page = await CdpPage.AttachAsync(this, targetId, CancellationToken.None).ConfigureAwait(false);
+            if (!_pages.TryAdd(targetId, page))
+            {
+                // Never once adopters share the attachment; a session of its own would hold the requests of the tab.
+                await DetachAsync(page).ConfigureAwait(false);
+                return _pages[targetId];
+            }
+
+            lock (_order) _order.Add(targetId);
+            return page;
+        }
+        finally
+        {
+            _adopting.TryRemove(targetId, out _);
+        }
+    }
+
+    // Detaches the session of a page that is not the one of its tab: its Fetch, Network and Page domains end with it.
+    private async Task DetachAsync(CdpPage page)
+    {
+        page.DisposeSubscriptions();
+        try { await Connection.Browser.Target.DetachFromTargetAsync(new TargetDetachFromTargetParams { SessionId = page.SessionId }, CancellationToken.None).ConfigureAwait(false); }
+        catch (CdpException) { /* the tab closed */ }
+        Connection.Detach(page.SessionId);
     }
 
     internal void OnTargetCreated(TargetTargetInfo info)
