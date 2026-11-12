@@ -33,8 +33,18 @@ internal sealed record CliStorage(CliStorageMode Mode, bool Ephemeral, string Gl
     /// <summary>Gets the name of the mode, as the <c>_codealta/session</c> header gives it.</summary>
     public string Name => Ephemeral ? Mode.ToString().ToLowerInvariant() + "+ephemeral" : Mode.ToString().ToLowerInvariant();
 
-    /// <summary>Gets whether the run drops a marker for each new session, so that CodeAlta Desktop and TUI list it.</summary>
-    public bool WritesMarkers => Mode == CliStorageMode.Visible && !Ephemeral;
+    /// <summary>
+    /// Gets whether <c>--isolated</c> was given with a separate profile, which keeps the sessions of the run apart from
+    /// the window of that profile: they get no marker.
+    /// </summary>
+    public bool IsolatedProfile { get; init; }
+
+    /// <summary>
+    /// Gets whether the run drops a marker for each new session, so that CodeAlta Desktop and TUI list it: in the visible
+    /// mode, and on a separate profile, whose CodeAlta Desktop lists the sessions of its state root the same way. An
+    /// ephemeral run, an isolated one and a profile run with <c>--isolated</c> write none.
+    /// </summary>
+    public bool WritesMarkers => !Ephemeral && (Mode == CliStorageMode.Visible || (Mode == CliStorageMode.Profile && !IsolatedProfile));
 
     /// <summary>
     /// Resolves the roots of the options: <c>--profile</c> (or <see cref="CliEnvironment.HomeVariable"/>) first, then
@@ -87,7 +97,7 @@ internal sealed record CliStorage(CliStorageMode Mode, bool Ephemeral, string Gl
                 string.Create(CultureInfo.InvariantCulture, $"{Environment.ProcessId}-{Guid.NewGuid():N}"));
         }
 
-        storage = new CliStorage(mode, options.Ephemeral, globalRoot, stateRoot);
+        storage = new CliStorage(mode, options.Ephemeral, globalRoot, stateRoot) { IsolatedProfile = mode == CliStorageMode.Profile && options.Isolated };
         return true;
     }
 

@@ -191,6 +191,34 @@ public sealed class CliStorageTests
     }
 
     [TestMethod]
+    public async Task Profile_AnnouncesItsSessionsToTheDesktopOfTheProfile_UnlessIsolatedOrEphemeral()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var profile = Directory.CreateDirectory(Path.Combine(root.Root, "profile")).FullName;
+        var markers = new SessionMarkerStore(new CatalogOptions { GlobalRoot = profile });
+
+        // CodeAlta Desktop on the profile exports CODEALTA_HOME to its sessions: an altacli of a session shell gets it.
+        root.Variables[CliEnvironment.HomeVariable] = profile;
+        var run = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        Assert.IsNotNull(markers.TryRead(SessionIdOf(run)), "The desktop of the profile is told of the session.");
+
+        var named = await root.RunAsync(provider, ["run", Plain, "--profile", profile, "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, named.ExitCode, named.Stderr);
+        Assert.IsNotNull(markers.TryRead(SessionIdOf(named)));
+
+        var isolated = await root.RunAsync(provider, ["run", Plain, "--isolated", "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, isolated.ExitCode, isolated.Stderr);
+        Assert.IsNull(markers.TryRead(SessionIdOf(isolated)), "--isolated keeps the run apart from the window of the profile.");
+
+        var ephemeral = await root.RunAsync(provider, ["run", Plain, "--ephemeral", "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, ephemeral.ExitCode, ephemeral.Stderr);
+        Assert.IsNull(markers.TryRead(SessionIdOf(ephemeral)));
+        Assert.AreEqual(0, CliTestRoot.Files(root.Profile).Length, "~/.alta is not touched.");
+    }
+
+    [TestMethod]
     public async Task Profile_ReadsNoSkillsOrAgentsThatOtherToolsKeepInTheHome()
     {
         using var root = new CliTestRoot();

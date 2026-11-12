@@ -7,7 +7,7 @@ using XenoAtom.Logging;
 namespace CodeAlta.Cli;
 
 /// <summary>
-/// The markers of the sessions a visible run writes (<see cref="SessionMarkerStore"/>, writer <c>altacli</c>): CodeAlta
+/// The markers of the sessions a visible or profile run writes (<see cref="SessionMarkerStore"/>, writer <c>altacli</c>): CodeAlta
 /// Desktop and TUI list and refresh the sessions the markers name, since the run writes no application database of theirs.
 /// A session opened by the run, new or resumed, and every session it starts get one, each once its journal exists: at the
 /// opening when it already does, else at the first event of the session, and at the end of the run at the latest. Without
