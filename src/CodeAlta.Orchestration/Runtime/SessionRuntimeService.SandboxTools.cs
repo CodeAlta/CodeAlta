@@ -345,7 +345,9 @@ public sealed partial class SessionRuntimeService
                 level = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var child in below)
                 {
-                    if (!parents.Contains(child.Id)) continue;
+                    // Its own map counts whether or not one of its entries is a project yet: the settings of an optional
+                    // entry nobody added are out of reach too.
+                    if (!parents.Contains(child.Id) && !File.Exists(ProjectManifest.PathOf(child.ProjectPath))) continue;
                     level.Add(child.Id);
                     if (await _projectCatalog.ReadRepositoryMapAsync(child.Id, cancellationToken).ConfigureAwait(false) is { } nested) entries.AddRange(nested.Entries);
                 }

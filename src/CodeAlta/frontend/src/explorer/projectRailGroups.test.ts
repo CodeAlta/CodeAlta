@@ -124,13 +124,14 @@ test("the sub-projects of a nested map follow their repositories in the one list
   assert.deepEqual([...repositoryProjectIds("platform", nestedProjects())], ["platform", "billing", "checkout", "invoices", "ledger"]);
 });
 
-test("the menu of a nested repository opens its own sub-projects and those of its repository", () => {
+test("the menu of a sub-project opens its own sub-projects and those of its repository", () => {
   const projects = nestedProjects();
   const byId = (id: string) => projects.find(value => value.id === id)!;
-  assert.deepEqual(subProjectWindows(byId("platform"), projects), ["own"]);
-  assert.deepEqual(subProjectWindows(byId("billing"), projects), ["own", "repository"]);
-  assert.deepEqual(subProjectWindows(byId("checkout"), projects), ["repository"]);
-  assert.deepEqual(subProjectWindows(byId("solo"), projects), ["own"]);
+  assert.deepEqual(subProjectWindows(byId("platform")), ["own"]);
+  assert.deepEqual(subProjectWindows(byId("billing")), ["own", "repository"]);
+  // One that lists no sub-project has its own window too: its map may declare only optional folders, or be started there.
+  assert.deepEqual(subProjectWindows(byId("checkout")), ["own", "repository"]);
+  assert.deepEqual(subProjectWindows(byId("solo")), ["own"]);
 });
 
 test("while the list is filtered, a sub-project found keeps the repositories above it as a frame, unopened", () => {

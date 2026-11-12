@@ -144,12 +144,12 @@ export function projectTitle(project: WorkspaceProject, projects: readonly Works
 }
 
 /**
- * The windows of sub-projects the menu of a project opens: its own (`own`) for a project of its own, or a sub-project
- * with a map of its own (a nested map); that of its repository (`repository`) for a sub-project.
+ * The windows of sub-projects the menu of a project opens: its own (`own`), and that of its repository (`repository`)
+ * for a sub-project. A sub-project has its own too, whether or not it lists a sub-project yet: a map of its own (a
+ * nested map) may declare only optional folders nobody added, and its window is where a map is started.
  */
-export function subProjectWindows(project: WorkspaceProject, projects: readonly WorkspaceProject[]): readonly ("own" | "repository")[] {
-  if (!isSubProject(project)) return ["own"];
-  return projects.some(value => isSubProject(value) && value.parentId === project.id) ? ["own", "repository"] : ["repository"];
+export function subProjectWindows(project: WorkspaceProject): readonly ("own" | "repository")[] {
+  return isSubProject(project) ? ["own", "repository"] : ["own"];
 }
 
 /** The projects of the group of a repository: the repository, then its sub-projects, those of nested maps included. */

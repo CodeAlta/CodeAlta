@@ -257,7 +257,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         ...(authority?.labels ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => labelsAction(visible) }] : []),
         ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
-        ...(authority?.subProjects && !project.archived ? subProjectWindows(project, visible.context.snapshot?.projects ?? []).map(window => ({
+        ...(authority?.subProjects && !project.archived ? subProjectWindows(project).map(window => ({
           key: window === "own" ? "subprojects" : "subprojects-repository", label: t(window === "own" ? "Sub-projects…" : "Sub-projects of the repository…"),
           icon: "files" as const, onSelect: () => subProjectsAction(visible, window === "own") })) : []),
         ...(authority?.sandbox && !project.archived ? [{ key: "sandbox", label: `${t("Sandbox")}…`, icon: "sandbox" as const, onSelect: () => sandboxAction(visible) }] : []),

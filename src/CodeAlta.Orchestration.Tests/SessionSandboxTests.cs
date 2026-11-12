@@ -521,6 +521,24 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task ANestedMapOfOptionalEntriesOnly_TheRootKeepsTheirSettings()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        var billing = await f.SubProjectAsync("billing", "repos/billing");
+        // The map of billing declares only an optional entry nobody added: billing has no sub-project, and its map counts all the same.
+        var old = Directory.CreateDirectory(Path.Combine(billing.ProjectPath, "tools", "old")).FullName;
+        Directory.CreateDirectory(Path.Combine(billing.ProjectPath, ".alta"));
+        File.WriteAllText(Path.Combine(billing.ProjectPath, ".alta", ProjectManifest.FileName), "[projects.old]\npath = \"tools/old\"\noptional = true\n");
+        Assert.IsFalse((await f.Projects.LoadAsync()).Any(project => project.ParentId == billing.Id));
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+
+        await f.CreateSessionAsync("root");
+        Assert.IsTrue((await f.RoutedTools("root").CallAsync("write_file", new { path = Path.Combine("repos", "billing", "a.cs"), content = "a" })).Success);
+        CollectionAssert.Contains(backend.Starts.Last().Protected.ToList(), Path.Combine(old, ".alta", "config.toml"));
+    }
+
+    [TestMethod]
     public async Task ASessionOfTheRootOfAMonorepo_KeepsTheSettingsOfItsSubProjects()
     {
         var backend = new InProcessBackend();

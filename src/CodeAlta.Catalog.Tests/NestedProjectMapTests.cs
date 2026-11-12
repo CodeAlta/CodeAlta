@@ -173,6 +173,29 @@ public sealed class NestedProjectMapTests
     }
 
     [TestMethod]
+    public async Task AFolderTheInnerMapDeclaresAsOptional_BelongsToItWithoutAProject_AndTheOuterMapSaysSo()
+    {
+        using var fixture = new Fixture();
+        var (platform, billingFolder) = await fixture.PlatformAsync(clone: true);
+        // Nobody added the optional entry of billing: the folder has no project, and the nearer map wins it all the same.
+        Directory.CreateDirectory(Path.Combine(billingFolder, "libs", "pdf"));
+        await fixture.WriteMapAsync(billingFolder, BillingMap + "\n[projects.pdf]\npath = \"libs/pdf\"\noptional = true\n");
+        await fixture.WriteMapAsync(platform.ProjectPath, OuterMap + "\n[projects.all-pdf]\npath = \"repos/billing/libs/pdf\"\n");
+
+        var projects = await fixture.Projects.LoadAsync();
+        var billing = projects.Single(static project => project.DeclaredKey == "billing");
+        Assert.IsFalse(projects.Any(static project => project.ProjectPath.EndsWith(Path.Combine("libs", "pdf"), StringComparison.Ordinal)), "No project for the folder.");
+
+        var outer = (await fixture.Projects.ReadRepositoryMapAsync(platform.Id))!;
+        var entry = outer.Entries.Single(static entry => entry.Entry.Key == "all-pdf");
+        Assert.AreEqual((null, billing.Id), (entry.Project, entry.ClaimedBy));
+        var problem = outer.Problems.Single();
+        Assert.AreEqual(("all-pdf", "folder.claimed"), (problem.Key, problem.Code));
+        StringAssert.Contains(problem.Message, "billing");
+        Assert.AreEqual(0, (await fixture.Projects.ReadRepositoryMapAsync(billing.Id))!.Problems.Count);
+    }
+
+    [TestMethod]
     public async Task AHiddenSubProject_HidesTheSubProjectsOfItsMap_AndAnOptionalOneNobodyAddedReadsNoMap()
     {
         using var fixture = new Fixture();

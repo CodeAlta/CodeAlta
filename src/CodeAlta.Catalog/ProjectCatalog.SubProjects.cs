@@ -61,6 +61,10 @@ public sealed partial class ProjectCatalog
     // The maps of sub-projects the last load did not read, by the folder of the sub-project, with why; replaced whole by each load.
     private IReadOnlyDictionary<string, ProjectManifestProblem> _ignoredMaps = new Dictionary<string, ProjectManifestProblem>();
 
+    // The repository whose map won each folder a map declares, as the last load found it, by the folder; replaced whole by
+    // each load. An entry that made no project (optional, nobody added it) wins its folder all the same.
+    private IReadOnlyDictionary<string, string> _folderOwners = new Dictionary<string, string>();
+
     // The folders each sub-project inherits from, as the last load found them, replaced whole by each load: for the readers
     // that hold an identifier of a project and no descriptor.
     private IReadOnlyDictionary<string, IReadOnlyList<string>> _inheritedRoots = new Dictionary<string, IReadOnlyList<string>>();
@@ -166,6 +170,7 @@ public sealed partial class ProjectCatalog
 
         // Why the maps the last load did not read are left out: this one, and those of its entries.
         var ignored = Volatile.Read(ref _ignoredMaps);
+        var owners = Volatile.Read(ref _folderOwners);
         var notRead = exists && ignored.TryGetValue(repository.ProjectPath, out var why) ? why : null;
         var entries = new List<SubProjectStatus>(map.Projects.Count);
         var problems = new List<ProjectManifestProblem>(map.Problems.Count + 1);
@@ -176,10 +181,17 @@ public sealed partial class ProjectCatalog
             var (full, state) = folders[entry.Key];
             ProjectDescriptor? project = null;
             string? claimedBy = null;
-            if (state == ProjectManifestFolderState.Ok && byPath.TryGetValue(NormalizePath(full), out var found))
+            ProjectDescriptor? found = null;
+            if (state == ProjectManifestFolderState.Ok && byPath.TryGetValue(NormalizePath(full), out found))
             {
                 if (found.ParentId == repository.Id) project = found;
                 else claimedBy = found.ParentId;
+            }
+            // A nearer map that declares the folder wins it also when its entry made no project: an optional one nobody added.
+            else if (state == ProjectManifestFolderState.Ok && owners.TryGetValue(NormalizePath(full), out var owner)
+                && !string.Equals(owner, repository.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                claimedBy = owner;
             }
 
             if (state == ProjectManifestFolderState.Missing)
@@ -189,8 +201,9 @@ public sealed partial class ProjectCatalog
             else if (claimedBy is not null && notRead is null)
             {
                 var nearer = names.GetValueOrDefault(claimedBy, claimedBy);
-                problems.Add(new(entry.Key, "folder.claimed",
-                    $"The folder `{entry.Path}` of `{entry.Key}` is declared by the map of {nearer} too, which is nearer and wins: it is a sub-project of {nearer}."));
+                problems.Add(new(entry.Key, "folder.claimed", found is null
+                    ? $"The folder `{entry.Path}` of `{entry.Key}` is declared by the map of {nearer} too, which is nearer and wins: it is an optional sub-project of {nearer}, to add there."
+                    : $"The folder `{entry.Path}` of `{entry.Key}` is declared by the map of {nearer} too, which is nearer and wins: it is a sub-project of {nearer}."));
             }
 
             if (project is not null && ignored.TryGetValue(project.ProjectPath, out var nested)) problems.Add(nested with { Key = entry.Key });
@@ -345,8 +358,10 @@ public sealed partial class ProjectCatalog
     private async Task<List<ProjectDescriptor>> WithSubProjectsAsync(List<ProjectDescriptor> projects, CancellationToken cancellationToken)
     {
         var ignored = new Dictionary<string, ProjectManifestProblem>(StringComparer.OrdinalIgnoreCase);
-        var result = await WithDeclaredSubProjectsAsync(projects, ignored, cancellationToken).ConfigureAwait(false);
+        var owners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var result = await WithDeclaredSubProjectsAsync(projects, ignored, owners, cancellationToken).ConfigureAwait(false);
         Volatile.Write(ref _ignoredMaps, ignored);
+        Volatile.Write(ref _folderOwners, owners);
         var inherited = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var ofFolders = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var project in result)
@@ -371,7 +386,7 @@ public sealed partial class ProjectCatalog
         => left.Length != right.Length ? left.Length.CompareTo(right.Length) : StringComparer.OrdinalIgnoreCase.Compare(left, right));
 
     private async Task<List<ProjectDescriptor>> WithDeclaredSubProjectsAsync(List<ProjectDescriptor> projects, Dictionary<string, ProjectManifestProblem> ignored,
-        CancellationToken cancellationToken)
+        Dictionary<string, string> owners, CancellationToken cancellationToken)
     {
         if (projects.Count == 0) return projects;
         // The folders are taken from the outside in, so that every map that can declare a folder (those of the folders
@@ -439,6 +454,7 @@ public sealed partial class ProjectCatalog
             }
         }
 
+        foreach (var (target, claim) in claims) owners[target] = claim.Repository.Id;
         if (declared.Count == 0) return projects;
         var result = new List<ProjectDescriptor>(projects.Count + declared.Count);
         result.AddRange(projects);

@@ -74,7 +74,7 @@ When you add a folder whose map declares sub-projects, CodeAlta Desktop says how
 A sub-project can have a project map of its own: a repository cloned inside another one, or a large folder of the same repository. It is then a repository too:
 
 - In the Explorer, its group nests in the group of its repository, under its label of that map: **platform › Repos › billing › Apps › invoices-api**.
-- **Sub-projects…** on its title opens its own map. On its row, the **⋯** menu has both **Sub-projects…** and **Sub-projects of the repository…**, for the map above it.
+- **Sub-projects…** on its title opens its own map. On the row of a sub-project, the **⋯** menu has both **Sub-projects…**, for a map of its own, and **Sub-projects of the repository…**, for the map above it. A sub-project without a map starts one there.
 - Its sub-projects get the setup of every repository above them, the nearest first, and their sessions write their own repository, the one of the nearer map.
 - Agents in a session of the sub-project read and change its own map with `alta project manifest`.
 
