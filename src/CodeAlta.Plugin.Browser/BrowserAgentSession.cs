@@ -310,6 +310,9 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
             Gate = (url, kind, token) => CheckAsync(url, kind, asking: false, token),
             GateDocuments = IsUserProfile,
             BlockedPorts = ReservedPorts(),
+            // The ports of CodeAlta change while the browser runs (an MCP server turned on, on a free port, another instance
+            // started): every request to the loopback goes through the gate, which reads them at each one.
+            GatesLoopback = true,
             // The user sees where the agent acts in a browser with a window; the user's own browser always has its windows.
             ShowAgent = !Target.Headless || IsUserProfile,
         };

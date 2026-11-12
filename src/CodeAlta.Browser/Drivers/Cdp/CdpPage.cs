@@ -240,14 +240,11 @@ internal sealed partial class CdpPage : IChromiumPage
         await session.Network.EnableAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         await session.Log.EnableAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         await session.DOM.EnableAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (_owner.Options.Gate is not null && (_owner.Options.GateDocuments || _owner.Options.BlockedPorts.Count != 0))
+        if (_owner.Options.Intercepts)
         {
             var patterns = new List<FetchRequestPattern>();
             if (_owner.Options.GateDocuments) patterns.Add(new FetchRequestPattern { UrlPattern = "*", ResourceType = "Document", RequestStage = "Request" });
-            foreach (var port in _owner.Options.BlockedPorts)
-            {
-                foreach (var host in new[] { "127.0.0.1", "localhost", "[::1]" }) patterns.Add(new FetchRequestPattern { UrlPattern = $"*://{host}:{port}/*", RequestStage = "Request" });
-            }
+            patterns.AddRange(LoopbackPatterns(_owner.Options));
 
             await session.Fetch.EnableAsync(new FetchEnableParams { Patterns = [.. patterns] }, cancellationToken).ConfigureAwait(false);
         }
@@ -259,6 +256,21 @@ internal sealed partial class CdpPage : IChromiumPage
         }
 
         await session.Target.SetAutoAttachAsync(new TargetSetAutoAttachParams { AutoAttach = true, WaitForDebuggerOnStart = false, Flatten = true }, cancellationToken).ConfigureAwait(false);
+    }
+
+    // The requests to the loopback the gate sees: to any port when it checks the ports of the moment, else to the blocked ones.
+    internal static IEnumerable<FetchRequestPattern> LoopbackPatterns(BrowserContextOptions options)
+    {
+        if (options.GatesLoopback)
+        {
+            foreach (var host in BrowserContextOptions.LoopbackHosts) yield return new FetchRequestPattern { UrlPattern = $"*://{host}*", RequestStage = "Request" };
+            yield break;
+        }
+
+        foreach (var port in options.BlockedPorts)
+        {
+            foreach (var host in new[] { "127.0.0.1", "localhost", "[::1]" }) yield return new FetchRequestPattern { UrlPattern = $"*://{host}:{port}/*", RequestStage = "Request" };
+        }
     }
 
     private async Task AttachFrameAsync(TargetAttachedToTargetEvent item)

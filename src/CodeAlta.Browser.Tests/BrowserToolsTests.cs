@@ -55,6 +55,34 @@ public abstract class BrowserToolsTests
     }
 
     [TestMethod]
+    public async Task APortOfCodeAltaThatAppearsAfterTheContextOpened_IsNeverReached()
+    {
+        // An MCP server turned on, or on a free port, once the browser runs: the gate reads the ports at each request.
+        var refused = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
+        var asked = 0;
+        await using var session = Host.NewSession(context: options => options with
+        {
+            GatesLoopback = true,
+            Gate = (url, _, _) =>
+            {
+                Interlocked.Increment(ref asked);
+                return ValueTask.FromResult(refused.ContainsKey(url.Port) ? "a port of CodeAlta" : null);
+            },
+        });
+        var before = await session.CallAsync("navigate_page", $$"""{"type":"url","url":"{{Host.Site.Url("/form")}}"}""");
+        Assert.IsFalse(before.IsError, before.Text);
+        StringAssert.Contains(before.Text, "Sign in · Demo", before.Text);
+        Assert.IsTrue(Volatile.Read(ref asked) > 0, "a request to the loopback goes through the gate, whatever its port");
+
+        var reached = await session.CallAsync("evaluate_script", """{"function":"async () => { try { const r = await fetch('/api/data'); return 'reached ' + r.status; } catch (e) { return 'refused'; } }"}""");
+        StringAssert.Contains(reached.Text, "reached 200", reached.Text);
+
+        refused[Host.Site.Port] = 0;
+        var data = await session.CallAsync("evaluate_script", """{"function":"async () => { try { const r = await fetch('/api/data'); return 'reached ' + r.status; } catch (e) { return 'refused'; } }"}""");
+        StringAssert.Contains(data.Text, "refused", data.Text);
+    }
+
+    [TestMethod]
     public async Task TypeTextAndPressKeys()
     {
         await using var session = Host.NewSession();

@@ -98,16 +98,13 @@ internal sealed class BiDiPage : IBrowserPage
         }
 
         var options = _owner.Options;
-        if (options.Gate is not null && (options.GateDocuments || options.BlockedPorts.Count != 0))
+        if (options.Intercepts)
         {
             var intercept = new AddInterceptCommandParameters(InterceptPhase.BeforeRequestSent);
             intercept.Contexts.Add(Id);
             if (!options.GateDocuments)
             {
-                foreach (var port in options.BlockedPorts)
-                {
-                    foreach (var host in new[] { "127.0.0.1", "localhost", "[::1]" }) intercept.UrlPatterns.Add(new UrlPatternPattern { HostName = host, Port = port.ToString(CultureInfo.InvariantCulture) });
-                }
+                foreach (var pattern in LoopbackPatterns(options)) intercept.UrlPatterns.Add(pattern);
             }
 
             _intercept = (await Driver.Network.AddInterceptAsync(intercept).ConfigureAwait(false)).InterceptId;
@@ -121,6 +118,22 @@ internal sealed class BiDiPage : IBrowserPage
         catch (WebDriverBiDiException)
         {
             // It closed meanwhile.
+        }
+    }
+
+    // The requests to the loopback the gate sees: to any port of its names when it checks the ports of the moment, else to
+    // the blocked ones.
+    internal static IEnumerable<UrlPatternPattern> LoopbackPatterns(BrowserContextOptions options)
+    {
+        if (options.GatesLoopback)
+        {
+            foreach (var host in BrowserContextOptions.LoopbackHosts) yield return new UrlPatternPattern { HostName = host };
+            yield break;
+        }
+
+        foreach (var port in options.BlockedPorts)
+        {
+            foreach (var host in new[] { "127.0.0.1", "localhost", "[::1]" }) yield return new UrlPatternPattern { HostName = host, Port = port.ToString(CultureInfo.InvariantCulture) };
         }
     }
 

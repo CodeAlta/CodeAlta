@@ -66,12 +66,15 @@ internal sealed class BrowserTestHost : IAsyncDisposable
     /// A session of the tools in a context of its own, or in the windows of the browser's profile when not isolated; its
     /// selected tab follows the tab in front of the browser when asked, as in a browser the user opened.
     /// </summary>
-    public BrowserSession NewSession(Func<Uri, CancellationToken, ValueTask<string?>>? checkNavigation = null, bool isolated = true, bool followFrontTab = false, BrowserSignIn? signIn = null)
+    public BrowserSession NewSession(Func<Uri, CancellationToken, ValueTask<string?>>? checkNavigation = null, bool isolated = true, bool followFrontTab = false, BrowserSignIn? signIn = null,
+        Func<BrowserContextOptions, BrowserContextOptions>? context = null)
     {
         var files = new BrowserFiles(Folder, [Folder], [Folder], Path.Combine(Folder, "tmp"));
+        var options = new BrowserContextOptions { Isolated = isolated, DownloadDirectory = Path.Combine(Folder, "downloads") };
+        if (context is not null) options = context(options);
         return new BrowserSession(new BrowserSessionOptions
         {
-            OpenContext = cancellationToken => Connection.CreateContextAsync(new BrowserContextOptions { Isolated = isolated, DownloadDirectory = Path.Combine(Folder, "downloads") }, cancellationToken),
+            OpenContext = cancellationToken => Connection.CreateContextAsync(options, cancellationToken),
             Files = _ => ValueTask.FromResult(files),
             CheckNavigation = checkNavigation,
             FollowFrontTab = followFrontTab ? static () => true : null,

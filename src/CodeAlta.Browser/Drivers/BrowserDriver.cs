@@ -272,8 +272,21 @@ internal sealed record BrowserContextOptions
     /// <summary>Gets whether the gate sees the documents of the tabs, not only the requests to the ports of CodeAlta.</summary>
     public bool GateDocuments { get; init; }
 
-    /// <summary>Gets the ports of the loopback no request of the tabs may reach.</summary>
+    /// <summary>Gets the ports of the loopback no request of the tabs may reach, as they are when the context is created.</summary>
     public IReadOnlyList<int> BlockedPorts { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the gate sees every request to the loopback, whatever its port (<see cref="LoopbackHosts"/>), and not only
+    /// those to <see cref="BlockedPorts"/>: the ports CodeAlta keeps from the tabs change while a context lives (an MCP
+    /// server turned on, or listening on a free port), and the gate checks them at each request.
+    /// </summary>
+    public bool GatesLoopback { get; init; }
+
+    /// <summary>The names of the loopback that the tabs reach the ports of CodeAlta by, as their addresses write them.</summary>
+    public static IReadOnlyList<string> LoopbackHosts { get; } = ["127.0.0.1", "localhost", "[::1]", "0.0.0.0"];
+
+    /// <summary>Gets whether the gate sees some requests: the documents, or requests to the loopback.</summary>
+    internal bool Intercepts => Gate is not null && (GateDocuments || GatesLoopback || BlockedPorts.Count != 0);
 
     /// <summary>
     /// Gets whether the tabs show the user where the agent acts (see <see cref="IAgentActivityPage"/>): true for a browser
