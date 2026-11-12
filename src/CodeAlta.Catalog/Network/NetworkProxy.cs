@@ -20,7 +20,7 @@ namespace CodeAlta.Catalog.Network;
 /// environment of a sandboxed session is built by the sandbox from names it chooses, so it keeps the proxy of the sandbox.
 /// </para>
 /// </remarks>
-public sealed class NetworkProxy : IWebProxy
+public sealed partial class NetworkProxy : IWebProxy
 {
     /// <summary>The variables of the environment the programs read their proxy from, in both cases.</summary>
     public static IReadOnlyList<string> Variables { get; } = ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"];
@@ -201,6 +201,37 @@ public sealed class NetworkProxy : IWebProxy
             _ => true,
         };
     }
+
+    /// <summary>Gets the address of a proxy as it is shown: its scheme, host and port, never the user name and password it may hold.</summary>
+    /// <param name="proxy">The address of the proxy, such as one the system mode gives from <c>HTTPS_PROXY=http://user:password@host:port</c>.</param>
+    /// <returns>The address, such as <c>http://proxy.corp:8080</c>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="proxy"/> is null.</exception>
+    public static string DisplayAddress(Uri proxy)
+    {
+        ArgumentNullException.ThrowIfNull(proxy);
+        return proxy.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped);
+    }
+
+    /// <summary>Removes the user names and passwords of the addresses a text holds (<c>http://user:password@host</c>), and the values given.</summary>
+    /// <param name="text">The text, such as the message of a failed request; null for none.</param>
+    /// <param name="secrets">Values to remove as well, such as the password a check tried.</param>
+    /// <returns>The text without them.</returns>
+    public static string? RedactCredentials(string? text, params ReadOnlySpan<string?> secrets)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        foreach (var secret in secrets)
+        {
+            if (string.IsNullOrEmpty(secret)) continue;
+            text = text.Replace(secret, "***", StringComparison.Ordinal);
+            var escaped = Uri.EscapeDataString(secret);
+            if (escaped != secret) text = text.Replace(escaped, "***", StringComparison.Ordinal);
+        }
+
+        return UserInfoPattern().Replace(text, "${scheme}://");
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<scheme>[A-Za-z][A-Za-z0-9+.\-]*)://[^\s/@'""]+@")]
+    private static partial System.Text.RegularExpressions.Regex UserInfoPattern();
 
     // The address of the proxy for the programs, the user name and password escaped as a URL takes them.
     private static string AddressOf(Uri uri, string? user, string? password)

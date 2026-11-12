@@ -123,6 +123,25 @@ public sealed class NetworkRpcTests
     }
 
     [TestMethod]
+    public async Task TheUserNameAndPasswordOfTheSystemProxy_NeverReachThePage()
+    {
+        // HTTPS_PROXY=http://jdoe:s3cret@env-proxy:3128 in the environment CodeAlta started in.
+        using var fixture = new Fixture { System = new FixedProxy(new Uri("http://jdoe:s3cret@env-proxy:3128")) };
+        var listing = await fixture.Service.ReadAsync(new(Epoch), CancellationToken.None);
+        Assert.AreEqual("http://env-proxy:3128", listing.SystemProxy);
+
+        var check = await fixture.Service.CheckAsync(new(Epoch, null, "system", null, null, null, null, null), CancellationToken.None);
+        Assert.AreEqual("http://env-proxy:3128", check.Via);
+
+        fixture.Failure = new HttpRequestException("The proxy tunnel request to proxy 'http://jdoe:s3cret@env-proxy:3128/' failed with status code '407'.");
+        var failed = await fixture.Service.CheckAsync(new(Epoch, null, "system", null, null, null, null, null), CancellationToken.None);
+        Assert.IsFalse(failed.Message!.Contains("s3cret", StringComparison.Ordinal), failed.Message);
+        fixture.Failure = new HttpRequestException("Refused typed-pass by the proxy.");
+        var typed = await fixture.Service.CheckAsync(new(Epoch, null, "manual", "http://proxy.corp:8080", [], "password", "jdoe", "typed-pass"), CancellationToken.None);
+        Assert.IsFalse(typed.Message!.Contains("typed-pass", StringComparison.Ordinal), "the password tried is not repeated");
+    }
+
+    [TestMethod]
     public async Task Read_SaysWhenTheFileHoldsSettingsThatDoNotRun()
     {
         using var fixture = new Fixture();

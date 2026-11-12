@@ -172,15 +172,15 @@ internal sealed class NetworkService
             var status = (int)response.StatusCode;
             // A proxy that refuses or cannot reach the host answers itself (407, 502, 504): the host was not reached.
             var reached = response.StatusCode is not (HttpStatusCode.ProxyAuthenticationRequired or HttpStatusCode.BadGateway or HttpStatusCode.GatewayTimeout);
-            return new("ok", reached ? null : response.ReasonPhrase, reached, status, via?.GetLeftPart(UriPartial.Authority), (int)watch.ElapsedMilliseconds, target.AbsoluteUri);
+            return new("ok", reached ? null : NetworkProxy.RedactCredentials(response.ReasonPhrase, password), reached, status, ViaOf(via), (int)watch.ElapsedMilliseconds, target.AbsoluteUri);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new("ok", $"No answer within {CheckTimeout.TotalSeconds:0} seconds.", false, null, via?.GetLeftPart(UriPartial.Authority), (int)watch.ElapsedMilliseconds, target.AbsoluteUri);
+            return new("ok", $"No answer within {CheckTimeout.TotalSeconds:0} seconds.", false, null, ViaOf(via), (int)watch.ElapsedMilliseconds, target.AbsoluteUri);
         }
         catch (HttpRequestException exception)
         {
-            return new("ok", MessageOf(exception), false, exception.StatusCode is { } code ? (int)code : null, via?.GetLeftPart(UriPartial.Authority), (int)watch.ElapsedMilliseconds,
+            return new("ok", NetworkProxy.RedactCredentials(MessageOf(exception), password), false, exception.StatusCode is { } code ? (int)code : null, ViaOf(via), (int)watch.ElapsedMilliseconds,
                 target.AbsoluteUri);
         }
     }
@@ -204,14 +204,14 @@ internal sealed class NetworkService
         try { settings = _config!.LoadGlobalProxySettings(); }
         catch (Exception exception) when (IsConfigurationFailure(exception))
         {
-            return NetworkProxyResponse.Refused("config_invalid") with { Message = exception.GetBaseException().Message };
+            return NetworkProxyResponse.Refused("config_invalid") with { Message = NetworkProxy.RedactCredentials(exception.GetBaseException().Message) };
         }
 
         var applied = _applied!();
         var probe = new Uri(DefaultCheckTarget);
-        var system = _system is null || _system.IsBypassed(probe) ? null : _system.GetProxy(probe)?.GetLeftPart(UriPartial.Authority);
+        var system = _system is null || _system.IsBypassed(probe) ? null : ViaOf(_system.GetProxy(probe));
         return new NetworkProxyResponse(status, message, ProxySettings.NameOf(settings.Mode), settings.Url ?? "", [.. settings.Bypass], ProxySettings.NameOf(settings.Authentication),
-            settings.User ?? "", settings.PasswordSecret is { } secret && HasSecret(secret), ProxySettings.NameOf(applied.Mode), applyError, system,
+            settings.User ?? "", settings.PasswordSecret is { } secret && HasSecret(secret), ProxySettings.NameOf(applied.Mode), NetworkProxy.RedactCredentials(applyError), system,
             // The settings of the file are not those that run: another program changed the file since the start or the last save.
             !SameSettings(applied, settings));
     }
@@ -225,6 +225,9 @@ internal sealed class NetworkService
         try { return _secrets!.ListSecrets().Any(secret => string.Equals(secret.Name, name, StringComparison.Ordinal)); }
         catch (Exception exception) when (CodeAltaNetwork.IsSecretFailure(exception)) { return false; }
     }
+
+    // The proxy a request went through, as the page may show it: without the user name and password its address may hold.
+    private static string? ViaOf(Uri? proxy) => proxy is null ? null : NetworkProxy.DisplayAddress(proxy);
 
     // The message of the innermost failure: the refusal of a proxy, a name that does not resolve, a refused connection.
     private static string MessageOf(Exception exception)

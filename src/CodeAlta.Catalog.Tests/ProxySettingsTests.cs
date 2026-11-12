@@ -214,6 +214,17 @@ public sealed class ProxySettingsTests
     }
 
     [TestMethod]
+    public void TheAddressShown_NeverHoldsTheUserNameAndPasswordOfAProxy()
+    {
+        Assert.AreEqual("http://env-proxy:3128", NetworkProxy.DisplayAddress(new Uri("http://jdoe:p%40ss@env-proxy:3128/")));
+        Assert.AreEqual("https://[fd00::1]:8443", NetworkProxy.DisplayAddress(new Uri("https://u:p@[fd00::1]:8443")));
+        Assert.AreEqual("The proxy tunnel request to proxy 'http://env-proxy:3128/' failed.",
+            NetworkProxy.RedactCredentials("The proxy tunnel request to proxy 'http://jdoe:p%40ss@env-proxy:3128/' failed."));
+        Assert.AreEqual("Refused *** and ***.", NetworkProxy.RedactCredentials("Refused p@ss and p%40ss.", "p@ss"));
+        Assert.IsNull(NetworkProxy.RedactCredentials(null));
+    }
+
+    [TestMethod]
     public void Upstream_OfTheSandbox_IsTheManualProxyAlone()
     {
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
