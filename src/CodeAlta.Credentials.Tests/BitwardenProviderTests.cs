@@ -127,6 +127,67 @@ public sealed class BitwardenProviderTests
     }
 
     [TestMethod]
+    public async Task The_picker_syncs_before_it_lists_the_items_and_lists_the_cached_ones_when_the_sync_fails()
+    {
+        using var vault = NewVault();
+        vault.State["bw"]!["remoteItems"] = new JsonArray(new JsonObject
+        {
+            ["object"] = "item", ["id"] = "new-1", ["type"] = 1, ["name"] = "Added in the app", ["notes"] = null,
+            ["login"] = new JsonObject { ["username"] = "bob-user", ["password"] = "bw-password-value-111" }, ["fields"] = new JsonArray(),
+        });
+        vault.Save();
+        var provider = await UnlockedAsync(vault);
+
+        var items = await provider.BrowseAsync(new CredentialBrowseRequest(null), CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { "Added in the app", "GitHub", "Server notes" }, items.Entries.Select(static entry => entry.Label).ToArray(),
+            "an item added in the app or the web vault is listed once bw synced");
+        var calls = vault.Calls().ToList();
+        Assert.Contains("sync", calls);
+        Assert.IsLessThan(calls.IndexOf("list items"), calls.IndexOf("sync"), "the sync runs before the list");
+
+        await provider.BrowseAsync(new CredentialBrowseRequest(items.Entries[1].Id), CancellationToken.None);
+        Assert.AreEqual(1, vault.Calls().Count(static call => call == "sync"), "opening an item does not sync");
+
+        vault.Reload();
+        vault.State["bw"]!["syncFails"] = true;
+        vault.Save();
+        var offline = await provider.BrowseAsync(new CredentialBrowseRequest(null), CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { "Added in the app", "GitHub", "Server notes" }, offline.Entries.Select(static entry => entry.Label).ToArray(),
+            "offline, the items bw has cached are listed");
+        ProviderHarness.AssertHoldsNone(offline, Values);
+        ProviderHarness.AssertNoArgumentHolds(vault, SessionKey);
+    }
+
+    [TestMethod]
+    public async Task A_picker_closed_while_its_list_waits_or_syncs_leaves_no_bw_call_behind()
+    {
+        using var vault = NewVault();
+        vault.State["bw"]!["syncSeconds"] = 3;
+        vault.Save();
+        vault.WriteConfig($"[credentials.bw]\ntype = \"bitwarden\"\npath = \"{vault.TomlPath}\"\n");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        await broker.RefreshAsync();
+        Assert.AreEqual(CredentialProviderState.Ready, (await broker.UnlockAsync("bw", MasterPassword)).Status.State);
+
+        // The first picker syncs; the second one waits for the provider, and closes before its turn.
+        using var first = new CancellationTokenSource();
+        using var second = new CancellationTokenSource();
+        var running = broker.BrowseAsync("bw", null, first.Token);
+        var waiting = broker.BrowseAsync("bw", null, second.Token);
+        await second.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => waiting, "a call still queued leaves the queue");
+
+        // The first one closes too, while its sync runs: the sync is stopped and nothing is listed.
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        await first.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => running, "a sync already running is stopped");
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        var calls = vault.Calls();
+        Assert.AreEqual(1, calls.Count(static call => call == "sync"), "one sync only: the queued call never ran");
+        Assert.AreEqual(0, calls.Count(static call => call == "list items"), "the cancelled picker lists nothing");
+    }
+
+    [TestMethod]
     public async Task The_broker_unlocks_Bitwarden_with_the_master_password_typed_and_reads_its_bound_secrets()
     {
         using var vault = NewVault();

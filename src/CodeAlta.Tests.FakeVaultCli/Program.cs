@@ -33,7 +33,8 @@ return args switch
     _ => Fail("unknown command", 64),
 };
 
-// bw: state "bw" = { status: "unauthenticated" | "locked", email, masterPassword, sessionKey, items: [the items as bw writes them] }.
+// bw: state "bw" = { status: "unauthenticated" | "locked", email, masterPassword, sessionKey, items: [the items as bw writes them],
+// remoteItems: [items on the server only, until a sync], syncFails: a sync that cannot reach the server, syncSeconds: a slow sync }.
 // The vault is unlocked for a call whose BW_SESSION is the session key.
 int Bw(string[] arguments)
 {
@@ -61,6 +62,23 @@ int Bw(string[] arguments)
     if (!unlocked) return Fail("Vault is locked.", 1);
     switch (arguments)
     {
+        case ["sync"]:
+            if (bw["syncSeconds"]?.GetValue<int>() is { } seconds) Thread.Sleep(TimeSpan.FromSeconds(seconds));
+            if (bw["syncFails"]?.GetValue<bool>() == true) return Fail("fetch failed, reason: getaddrinfo ENOTFOUND vault.bitwarden.com", 1);
+            if (bw["remoteItems"]?.AsArray() is { Count: > 0 } remote)
+            {
+                foreach (var added in remote.ToList())
+                {
+                    remote.Remove(added);
+                    items.Add(added);
+                }
+
+                if (items.Parent is null) bw["items"] = items;
+                if (bw.Parent is null) state["bw"] = bw;
+                File.WriteAllText(statePath, state.ToJsonString());
+            }
+
+            return Print("Syncing complete.");
         case ["list", "items"]:
             return Print(items.ToJsonString());
         case ["get", "item", var id]:

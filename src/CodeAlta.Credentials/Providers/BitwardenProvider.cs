@@ -180,6 +180,8 @@ internal sealed class BitwardenProvider : ICredentialProvider
         var session = SessionKey ?? throw new CredentialProviderException(CredentialFailure.Locked, "Bitwarden is locked: unlock it with its master password.");
         if (request.Parent is null)
         {
+            // An item added in the app or the web vault is in the cache of bw only after a sync: the list follows one.
+            await SyncAsync(program, session, cancellationToken).ConfigureAwait(false);
             // The list of items holds their values too: only the ids, names and types are read of it.
             var list = await RunCheckedAsync(program, ["list", "items"], session, cancellationToken, maximumOutput: 32 * 1024 * 1024).ConfigureAwait(false);
             try
@@ -259,6 +261,33 @@ internal sealed class BitwardenProvider : ICredentialProvider
         }
 
         throw VaultText.Failure(CredentialFailure.Failed, $"Bitwarden failed: {result.Summary()}.", result);
+    }
+
+    // bw sync asks the server whether anything changed, and downloads only then. Offline, or when the server does not answer in a
+    // few seconds, the list goes on with what bw has cached; a vault locked or signed out meanwhile fails as the list would.
+    private async Task SyncAsync(string program, string session, CancellationToken cancellationToken)
+    {
+        var result = await RunAsync(program, ["sync"], session, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.ExitCode == 0 || result.TimedOut) return;
+            if (result.Error.Contains("not logged in", StringComparison.OrdinalIgnoreCase))
+            {
+                Forget(session);
+                throw new CredentialProviderException(CredentialFailure.SignInNeeded, "Sign in to Bitwarden with bw login, then unlock.");
+            }
+
+            if (result.Error.Contains("locked", StringComparison.OrdinalIgnoreCase))
+            {
+                Forget(session);
+                throw new CredentialProviderException(CredentialFailure.Locked, "Bitwarden is locked: unlock it with its master password.");
+            }
+        }
+        finally
+        {
+            VaultText.Zero(result.Output);
+        }
     }
 
     private Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, string? session, TimeSpan timeout, CancellationToken cancellationToken)

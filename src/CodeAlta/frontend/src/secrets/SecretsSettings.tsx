@@ -61,7 +61,8 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
     deleteVariable: name => api.deleteVariable({ expectedEpoch, name }),
   };
   const run = (call: () => Result) => mutate(call, "Saved.");
-  const browse = useCallback((provider: string, parent: string | null) => api.browse({ expectedEpoch, id: provider, parent }), [api, expectedEpoch]);
+  const browse = useCallback((provider: string, parent: string | null, signal?: AbortSignal) => api.browse({ expectedEpoch, id: provider, parent }, { signal }),
+    [api, expectedEpoch]);
   // A host with a credential broker offers the vaults; without a provider yet, using a vault item adds one first.
   const vaults: SecretVaultActions | null = listing && listing.types.length > 0 ? {
     keepInVault: name => { if (listing.providers.length > 0) setBinding({ name }); else setProviderDialog({ editing: null }); },
