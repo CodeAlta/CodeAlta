@@ -760,8 +760,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     Installed = DesktopUpdateInstaller.ConsumeResult(options.DataRoot),
                     Install = !selfUpdate ? null : prerelease =>
                     {
-                        if (!DesktopUpdateInstaller.Start(options.DataRoot, updateLauncher!, updateDotnet!,
-                            CodeAltaNuGetUpdateChecker.UpdateArguments(AppUpdateService.PackageId, prerelease))) return false;
+                        // The entry of the desktop is one for the computer; the application starts again on its profile.
+                        if (!DesktopUpdateInstaller.Start(options.DataRoot, options.IntegrationRoot ?? options.DataRoot, updateLauncher!, updateDotnet!,
+                            CodeAltaNuGetUpdateChecker.UpdateArguments(AppUpdateService.PackageId, prerelease), DesktopCommandLine.RelaunchArguments(options))) return false;
                         // The workspace exits in its own way, with its questions; the configuration editor has none to ask.
                         if (shell.HasWorkspace) shell.RequestUserExit();
                         else shell.RequestExit(confirmed: true);

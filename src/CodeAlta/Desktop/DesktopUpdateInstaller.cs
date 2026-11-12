@@ -29,6 +29,11 @@ internal static class DesktopUpdateInstaller
     /// or when <paramref name="cancel"/> appears (the user decided not to exit after all).
     /// </summary>
     internal static string WindowsScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher)
+        => WindowsScript(processId, dotnet, arguments, log, result, cancel, launcher, relaunch: []);
+
+    // relaunch: the arguments the application is started again with, those that select its profile (--profile).
+    internal static string WindowsScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher,
+        IReadOnlyList<string> relaunch)
     {
         var script = new StringBuilder();
         script.Append("@echo off\r\n");
@@ -53,7 +58,9 @@ internal static class DesktopUpdateInstaller
         // The launcher is the SDK's script for the installed version. The helper becomes it (no call, so
         // nothing returns here): it runs in this console, which has no window, until the application's window
         // is shown (see DesktopTerminalStart).
-        script.Append(BatchQuote(launcher)).Append("\r\n");
+        script.Append(BatchQuote(launcher));
+        foreach (var argument in relaunch) script.Append(' ').Append(BatchQuote(argument));
+        script.Append("\r\n");
         return script.ToString();
     }
 
@@ -65,6 +72,13 @@ internal static class DesktopUpdateInstaller
     /// the script points it at the version the launcher now starts before it opens the bundle.
     /// </summary>
     internal static string UnixScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher, string? bundle, string? appLink, bool macOS)
+        => UnixScript(processId, dotnet, arguments, log, result, cancel, launcher, bundle, appLink, macOS, relaunch: []);
+
+    // relaunch: the arguments the application is started again with, those that select its profile (--profile). The bundle
+    // is then opened as a new instance with them: an instance of the bundle on another profile may run, which open would
+    // only bring to the front.
+    internal static string UnixScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher, string? bundle,
+        string? appLink, bool macOS, IReadOnlyList<string> relaunch)
     {
         var script = new StringBuilder();
         script.Append("#!/bin/sh\n");
@@ -93,11 +107,15 @@ internal static class DesktopUpdateInstaller
             // A bundle whose link names no application would start nothing.
             linked = "{ [ ! -L " + link + " ] || [ -e " + DesktopIntegration.ShellQuote(appLink.TrimEnd('/') + "/" + typeof(DesktopUpdateInstaller).Assembly.GetName().Name + ".dll") + " ]; }";
         }
+        var words = string.Concat(relaunch.Select(static argument => " " + DesktopIntegration.ShellQuote(argument)));
         if (bundle is not null)
+        {
             // The bundle keeps the icon and the place of the application in the Dock; the launcher when it does not open.
-            script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ] && ").Append(linked).Append(" && /usr/bin/open ").Append(DesktopIntegration.ShellQuote(bundle)).Append("; then exit 0; fi\n");
-        if (macOS) script.Append("exec ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1\n");
-        else script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1 &\n");
+            var open = relaunch.Count == 0 ? DesktopIntegration.ShellQuote(bundle) : "-n " + DesktopIntegration.ShellQuote(bundle) + " --args" + words;
+            script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ] && ").Append(linked).Append(" && /usr/bin/open ").Append(open).Append("; then exit 0; fi\n");
+        }
+        if (macOS) script.Append("exec ").Append(DesktopIntegration.ShellQuote(launcher)).Append(words).Append(" >/dev/null 2>&1\n");
+        else script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(words).Append(" >/dev/null 2>&1 &\n");
         return script.ToString();
     }
 
@@ -148,8 +166,14 @@ internal static class DesktopUpdateInstaller
     /// Starts the script for this process. The update happens once the application has exited; until then
     /// <see cref="Cancel"/> calls it off.
     /// </summary>
+    /// <param name="dataRoot">The data of the window of this instance, where the script and its outcome are kept.</param>
+    /// <param name="integrationRoot">The root of the entry of the desktop, one for the computer, whose application link is refreshed on macOS.</param>
+    /// <param name="launcher">The launcher of the installed tool.</param>
+    /// <param name="dotnet">The <c>dotnet</c> that updates it.</param>
+    /// <param name="arguments">The arguments of <c>dotnet</c>.</param>
+    /// <param name="relaunch">The arguments the application is started again with: those that select its profile.</param>
     /// <returns>True when the script is running.</returns>
-    internal static bool Start(string dataRoot, string launcher, string dotnet, IReadOnlyList<string> arguments)
+    internal static bool Start(string dataRoot, string integrationRoot, string launcher, string dotnet, IReadOnlyList<string> arguments, IReadOnlyList<string> relaunch)
     {
         try
         {
@@ -161,7 +185,7 @@ internal static class DesktopUpdateInstaller
             if (OperatingSystem.IsWindows())
             {
                 var script = Path.Combine(folder, "update.cmd");
-                File.WriteAllText(script, WindowsScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher), new UTF8Encoding(false));
+                File.WriteAllText(script, WindowsScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, relaunch), new UTF8Encoding(false));
                 start.FileName = Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } shell ? shell : "cmd.exe";
                 start.ArgumentList.Add("/d");
                 start.ArgumentList.Add("/c");
@@ -171,7 +195,7 @@ internal static class DesktopUpdateInstaller
             {
                 var script = Path.Combine(folder, "update.sh");
                 File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher,
-                    DesktopIntegration.EntryPath(), DesktopMacBundle.AppLink(dataRoot), macOS: true), new UTF8Encoding(false));
+                    DesktopIntegration.EntryPath(), DesktopMacBundle.AppLink(integrationRoot), macOS: true, relaunch), new UTF8Encoding(false));
                 var helper = Path.Combine(folder, "CodeAlta Update.app");
                 var contents = Path.Combine(helper, "Contents");
                 var executable = Path.Combine(contents, "MacOS", MacHelperExecutable);
@@ -195,7 +219,8 @@ internal static class DesktopUpdateInstaller
             else
             {
                 var script = Path.Combine(folder, "update.sh");
-                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, bundle: null, appLink: null, macOS: false), new UTF8Encoding(false));
+                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, bundle: null, appLink: null, macOS: false, relaunch),
+                    new UTF8Encoding(false));
                 start.FileName = "/bin/sh";
                 start.ArgumentList.Add("-c");
                 // Detached from this process, which is about to end.

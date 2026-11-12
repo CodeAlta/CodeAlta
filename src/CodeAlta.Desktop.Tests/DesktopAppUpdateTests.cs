@@ -412,6 +412,36 @@ public sealed class DesktopAppUpdateTests
     }
 
     [TestMethod]
+    public void UpdateHelper_StartsASeparateProfileAgainOnItsProfile_AsANewInstanceOfTheBundle()
+    {
+        string[] arguments = ["tool", "update", "-g", "CodeAlta"];
+        string[] relaunch = ["--profile", "/Volumes/work/o'b profile"];
+        var unix = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(4242, "/d", arguments, "/l", "/r", "/c", "/Users/me/.dotnet/tools/alta",
+            "/Users/me/Applications/CodeAlta.app", "/Users/me/Library/Application Support/CodeAlta/desktop/integration/app", macOS: true, relaunch);
+        // The instance of the bundle on ~/.alta may run: open would only bring it to the front.
+        StringAssert.Contains(unix, " && /usr/bin/open -n '/Users/me/Applications/CodeAlta.app' --args '--profile' '/Volumes/work/o'\\''b profile'; then exit 0; fi\n");
+        Assert.IsTrue(unix.EndsWith("\nexec '/Users/me/.dotnet/tools/alta' '--profile' '/Volumes/work/o'\\''b profile' >/dev/null 2>&1\n", StringComparison.Ordinal));
+        // The link of the bundle is the one of the computer, beside the data of the normal instance.
+        StringAssert.Contains(unix, "/bin/ln -sfn \"$(/usr/bin/dirname \"$target\")\" '/Users/me/Library/Application Support/CodeAlta/desktop/integration/app'\n");
+        var linux = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", null, null, macOS: false, relaunch);
+        Assert.IsTrue(linux.EndsWith("\nnohup '/alta' '--profile' '/Volumes/work/o'\\''b profile' >/dev/null 2>&1 &\n", StringComparison.Ordinal));
+        var windows = CodeAlta.Desktop.DesktopUpdateInstaller.WindowsScript(4242, @"C:\dotnet.exe", arguments, @"C:\l", @"C:\r", @"C:\c",
+            @"C:\Users\me\.dotnet\tools\alta.cmd", [@"--profile", @"D:\100% work"]);
+        Assert.AreEqual("\"C:\\Users\\me\\.dotnet\\tools\\alta.cmd\" \"--profile\" \"D:\\100%% work\"", windows.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)[^1]);
+
+        // ~/.alta is started as before: no argument, the bundle opened as it was.
+        Assert.AreEqual(CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", "/b.app", "/app", macOS: true),
+            CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", "/b.app", "/app", macOS: true, []));
+        CollectionAssert.AreEqual(Array.Empty<string>(), CodeAlta.Desktop.DesktopCommandLine.RelaunchArguments(Parse(null)!).ToArray());
+        var profile = Path.Combine(Path.GetTempPath(), "alta-update-profile");
+        CollectionAssert.AreEqual(new[] { "--profile", profile }, CodeAlta.Desktop.DesktopCommandLine.RelaunchArguments(Parse(profile)!).ToArray(),
+            "a profile of CODEALTA_HOME is named: the helper may not inherit it");
+    }
+
+    private static CodeAlta.Desktop.DesktopLaunchOptions? Parse(string? home, params string[] args)
+        => CodeAlta.Desktop.DesktopCommandLine.TryParse(args, _ => true, _ => false, home, out var options, out _) ? options : null;
+
+    [TestMethod]
     public void UpdateHelper_OnMacOS_IsABackgroundApplicationOfItsOwn()
     {
         // launchd ends what an application started once it exits: the script runs as a bundle that launchd starts.

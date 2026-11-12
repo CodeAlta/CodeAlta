@@ -473,6 +473,18 @@ internal static class DesktopCommandLine
         };
     }
 
+    /// <summary>
+    /// The arguments that start the application again on the profile of a start (an update that starts it again): the
+    /// <c>--profile</c> of a separate profile, which an inherited <c>CODEALTA_HOME</c> may not name; none for <c>~/.alta</c>.
+    /// </summary>
+    /// <param name="options">The options of the start.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    internal static IReadOnlyList<string> RelaunchArguments(DesktopLaunchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return options.Profile is { } profile ? [ProfileOption, profile] : [];
+    }
+
     // A separate profile keeps all of its data in its folder, the data of the window too: a profile is moved off the home
     // folder of the user (where it may not be trusted) as a whole.
     private static DesktopLaunchOptions CreateProfileOptions(string profile, string? project) =>
