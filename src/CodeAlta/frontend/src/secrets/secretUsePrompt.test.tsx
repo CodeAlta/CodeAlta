@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ShellLanguageContext } from "../shellLanguage";
 import { SecretUsePromptCard } from "./SecretUsePrompt";
-import { confirmationNote, promptedUses, useKey, whoAsks, withoutAnswer, type PromptedUse } from "./secretPrompt";
+import { confirmationNote, groupKey, promptedGroups, promptedUses, useKey, whoAsks, withoutAnswer, type PromptedUse } from "./secretPrompt";
 
 const never = () => assert.fail("rendering must not act");
 const render = (element: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
@@ -19,6 +19,21 @@ test("the prompt asks first about what waits for the answer, and leaves out the 
   assert.deepEqual(promptedUses([provider, stale, shell]).map(use => use.name), ["GITHUB_TOKEN", "ANTHROPIC_API_KEY"]);
   assert.deepEqual(promptedUses(null), []);
   assert.equal(useKey({ name: "github_token", use: null }), "GITHUB_TOKEN\n");
+});
+
+test("the secrets one session start asks for are one prompt, the most urgent use first", () => {
+  const registry: PromptedUse = { ...shell, name: "REGISTRY_TOKEN", at: "2026-11-12T09:00:01Z" };
+  const unnamed: PromptedUse = { name: "A", use: null, at: "2026-11-12T08:58:00Z", sessionId: null, awaitedUntil: null, prompt: true };
+  const groups = promptedGroups([provider, registry, stale, shell, unnamed, { ...unnamed, name: "B" }, { ...shell, name: "github_token" }]);
+  assert.deepEqual(groups.map(group => [group.use.use ?? null, group.names]), [
+    ["shell of the session 01a1-session", ["GITHUB_TOKEN", "REGISTRY_TOKEN"]],
+    [null, ["A"]],
+    [null, ["B"]],
+    ["provider anthropic", ["ANTHROPIC_API_KEY"]],
+  ], "one answer for a use, a use nobody names on its own, and a secret named twice once");
+  assert.equal(groupKey(groups[0]), "shell of the session 01a1-session\nGITHUB_TOKEN\nREGISTRY_TOKEN");
+  assert.deepEqual(promptedGroups(undefined), []);
+  assert.equal(withoutAnswer(shell, "en", true)?.key, "Without an answer by {time}, it starts without them.");
 });
 
 test("who asks is named: the shell of a session by its title, else the use as the host names it", () => {
@@ -50,6 +65,16 @@ test("the card names the secret and the session, offers Confirm… and Deny, and
   assert.match(html, />Deny</);
   assert.match(html, /title="Windows Hello or Touch ID verifies you first\."[^>]*>|Confirm…/);
   assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Confirm…/, "Confirm is offered");
+});
+
+test("the card of several secrets counts them and lists their names, for one Confirm… and one Deny", () => {
+  const html = render(createElement(SecretUsePromptCard, { use: shell, names: ["GITHUB_TOKEN", "REGISTRY_TOKEN", "NPM_TOKEN"], more: 0, canConfirm: true, reason: null,
+    busy: false, note: null, sessionTitle: titles, onConfirm: never, onDeny: never }));
+  assert.match(html, /Use 3 secrets\?/);
+  assert.match(html, /<code>GITHUB_TOKEN<\/code>.*<code>REGISTRY_TOKEN<\/code>.*<code>NPM_TOKEN<\/code>/);
+  assert.match(html, /it starts without them\./);
+  assert.equal(html.match(/Confirm…/g)?.length, 1);
+  assert.doesNotMatch(html, /Use the secret/);
 });
 
 test("where the system cannot verify the user, Confirm is not offered and the card says why", () => {

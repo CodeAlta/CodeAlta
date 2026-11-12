@@ -85,6 +85,42 @@ public sealed class DesktopSecretPromptsTests
     }
 
     [TestMethod]
+    public async Task TheSecretsOneSessionStartAsksFor_AreOneNotification_AndOneAnswer()
+    {
+        using var profile = new Profile();
+        var store = new LocalSecretStore(profile.Root);
+        store.SetSecret("REGISTRY", "local-registry-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("REGISTRY", SecretAskDurations.FifteenMinutes);
+        using var broker = profile.Broker();
+        var service = new SecretsService(store, Epoch) { Credentials = broker };
+        const string use = "shell of the session s1";
+        var waits = ((string[])["DEPLOY", "REGISTRY"]).Select(name =>
+        {
+            broker.AuthorizeUse(name, use);
+            return broker.WaitForConfirmationAsync(name, use, TimeSpan.FromMinutes(2));
+        }).ToArray();
+
+        // A user who is not in front of the window gets one notification for the start of the session, which names both.
+        var surface = new FakeSurface { Sessions = [new("s1", "project", "Fix the parser", true, 0, false)] };
+        using var prompts = new DesktopSecretPrompts(surface, broker.ListPending);
+        await prompts.RefreshAsync();
+        var shown = surface.Shown.Single();
+        Assert.AreEqual(("Use 2 secrets?", "s1"), (shown.Title, shown.ActivationData));
+        StringAssert.Contains(shown.Body, "The shell of the session “Fix the parser” asks for DEPLOY, REGISTRY.");
+
+        // One Confirm of the window answers both, with one verification of the user.
+        Assert.AreEqual("ok", (await service.ConfirmUseAsync(new SecretUseRequest(Epoch, "DEPLOY", use) { Names = ["DEPLOY", "REGISTRY"] }, CancellationToken.None)).Status);
+        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Confirmed }, await Task.WhenAll(waits).WithinAsync(TestTime.Seconds(30)));
+        await prompts.RefreshAsync();
+        CollectionAssert.AreEqual(new[] { shown.Id }, surface.Removed, "the notification goes once nothing of it waits");
+
+        // And one Deny refuses both.
+        foreach (var name in (string[])["DEPLOY", "REGISTRY"]) broker.AuthorizeUse(name, "shell of the session s2");
+        Assert.AreEqual("ok", service.DeclineUse(new SecretUseRequest(Epoch, "DEPLOY", "shell of the session s2") { Names = ["DEPLOY", "REGISTRY"] }).Status);
+        Assert.IsEmpty(broker.ListPending());
+    }
+
+    [TestMethod]
     public async Task AUserInFrontOfTheWindow_SeesItsPrompt_AndTheSettingOfTheAlertsIsFollowed()
     {
         var surface = new FakeSurface { Foreground = true };

@@ -138,6 +138,117 @@ public sealed class ShellSecretConfirmationsTests
     }
 
     [TestMethod]
+    public async Task ASessionNobodyIsInFrontOf_StartsAtOnce_WithoutTheSecret_AndNothingWaits()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.FifteenMinutes);
+
+        // The wait would last 2 minutes: nobody is asked for a run of an automation.
+        var identity = await fixture.AttachAsync("session-9", new SessionSecretAttachment(Unattended: true, Inherited: null)).WithinAsync(TestTime.Seconds(30));
+
+        Assert.IsNull(identity.Environment.Get("DEPLOY_TOKEN"));
+        StringAssert.Contains(identity.SecretProblems.Single(), "started without the secret DEPLOY: it asks before use, and nobody is asked for a session that an automation started");
+        Assert.IsFalse(identity.SecretAnswers["DEPLOY"]);
+        Assert.IsEmpty(fixture.Broker.ListPending(), "no use waits for a user who is not there");
+        Assert.IsEmpty(fixture.Verifier.Messages);
+        Assert.AreEqual(("shell of the session session-9", "unavailable"), (fixture.Broker.ListUses().First().Use, fixture.Broker.ListUses().First().Outcome));
+    }
+
+    [TestMethod]
+    public async Task ASessionAnotherSessionStarted_TakesTheAnswersOfThatSession_WithoutAskingAgain()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.EachUse, second: true);
+        var starting = fixture.AttachAsync("parent");
+        await fixture.AwaitedAsync("shell of the session parent");
+        await fixture.Broker.ConfirmAsync("DEPLOY", "shell of the session parent");
+        fixture.Broker.Decline("REGISTRY", "shell of the session parent");
+        var parent = await starting.WithinAsync(TestTime.Seconds(30));
+        Assert.IsTrue(parent.SecretAnswers["deploy"], "the answers are read whatever the case of the name");
+        Assert.IsFalse(parent.SecretAnswers["REGISTRY"]);
+
+        var child = await fixture.AttachAsync("child", new SessionSecretAttachment(Unattended: false, parent.SecretAnswers)).WithinAsync(TestTime.Seconds(30));
+
+        Assert.AreEqual(Value, child.Environment.Get("DEPLOY_TOKEN"), "the session that started it has the secret");
+        Assert.IsNull(child.Environment.Get("REGISTRY_TOKEN"), "a secret denied to the session that started it is not asked for again");
+        StringAssert.Contains(child.SecretProblems.Single(), "REGISTRY: its use was not confirmed for the session that started this one");
+        Assert.HasCount(1, fixture.Verifier.Messages, "the user was verified once, for the first session");
+        Assert.IsEmpty(fixture.Broker.ListPending());
+
+        // What the child starts takes the same answers in turn.
+        var grandchild = await fixture.AttachAsync("grandchild", new SessionSecretAttachment(Unattended: false, child.SecretAnswers)).WithinAsync(TestTime.Seconds(30));
+        Assert.AreEqual(Value, grandchild.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsNull(grandchild.Environment.Get("REGISTRY_TOKEN"));
+        Assert.HasCount(1, fixture.Verifier.Messages);
+    }
+
+    [TestMethod]
+    public async Task TheIdentityOfASessionThatDoesNotAttach_AsksNobody_AndTakesNoConfirmation()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.EachUse);
+
+        var shown = await fixture.ShowAsync("session-10");
+        Assert.IsNull(shown.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsEmpty(fixture.Broker.ListPending(), "showing a session leaves no use waiting");
+        Assert.IsEmpty(fixture.Broker.ListUses(), "and records none");
+
+        // Confirmed ahead for one use: showing the session does not take the confirmation its start needs.
+        await fixture.Broker.ConfirmAsync("DEPLOY", "shell of the session session-10");
+        Assert.IsNull((await fixture.ShowAsync("session-10")).Environment.Get("DEPLOY_TOKEN"));
+        var identity = await fixture.AttachAsync("session-10").WithinAsync(TestTime.Seconds(30));
+        Assert.AreEqual(Value, identity.Environment.Get("DEPLOY_TOKEN"));
+    }
+
+    [TestMethod]
+    public async Task AStoppedSession_StartsWithoutTheSecret_AndLeavesNoUseWaiting()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.FifteenMinutes);
+        using var stop = new CancellationTokenSource();
+
+        var attaching = fixture.AttachAsync("session-11", SessionSecretAttachment.Attended, stop.Token);
+        await fixture.AwaitedAsync("shell of the session session-11");
+        stop.Cancel();
+        var identity = await attaching.WithinAsync(TestTime.Seconds(30));
+
+        StringAssert.Contains(identity.SecretProblems.Single(), "the session was stopped before its use was confirmed");
+        Assert.IsEmpty(fixture.Broker.ListPending());
+        Assert.AreEqual("expired", fixture.Broker.ListUses().First().Outcome);
+    }
+
+    [TestMethod]
+    public async Task AStart_WaitsOnlyForTheUsesItsOwnEnvironmentAskedFor()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.FifteenMinutes);
+        // A use of another secret that the session left waiting, which its environment does not name.
+        fixture.Broker.AuthorizeUse("OTHER", "shell of the session session-12");
+
+        var attaching = fixture.AttachAsync("session-12");
+        await fixture.AwaitedAsync("shell of the session session-12");
+        await fixture.Broker.ConfirmAsync("DEPLOY", "shell of the session session-12");
+        var identity = await attaching.WithinAsync(TestTime.Seconds(30));
+
+        Assert.AreEqual(Value, identity.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsEmpty(identity.SecretProblems, "the start did not wait for a secret its environment does not name");
+    }
+
+    [TestMethod]
+    public async Task ASecretConfirmed_ThatTheLastBuildIsNotGiven_IsNamedToTheSession_AndNoLongerWaits()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.EachUse);
+        const string use = "shell of the session session-13";
+        var read = new CodeAltaHost.ResolutionSecrets(fixture.Broker, fixture.Secrets, asks: true, SessionSecretAttachment.Attended);
+
+        Assert.IsNotNull(read.AuthorizeUse("DEPLOY", use));
+        CollectionAssert.AreEqual(new[] { "DEPLOY" }, read.Waiting().ToArray());
+        // The user confirmed, but the confirmation is gone when the environment is built again (taken or forgotten meanwhile).
+        read.Answered("DEPLOY", confirmed: true, problem: null);
+        Assert.IsNotNull(read.AuthorizeUse("DEPLOY", use), "the last build is not given the secret");
+        var outcome = read.End(use);
+
+        StringAssert.Contains(outcome.Problems.Single(), "DEPLOY: its use was confirmed, but the secret could not be given");
+        Assert.IsFalse(outcome.Answers["DEPLOY"]);
+        Assert.IsEmpty(fixture.Broker.ListPending(), "a use nothing waits for is not left to the user");
+    }
+
+    [TestMethod]
     public void TheShellOfASession_IsKnownByItsUse()
     {
         Assert.IsTrue(CodeAltaHost.IsShellUse("shell of the session s1", out var session));
@@ -154,14 +265,17 @@ public sealed class ShellSecretConfirmationsTests
         private readonly SessionIdentityResolver _resolver;
         private readonly string _spaceId;
 
-        private Fixture(TempDirectory temp, CredentialBroker broker, Verifier verifier, SessionIdentityResolver resolver, string spaceId)
+        private Fixture(TempDirectory temp, CredentialBroker broker, CodeAltaHost.ShellBoundSecrets secrets, Verifier verifier, SessionIdentityResolver resolver, string spaceId)
         {
             _temp = temp;
             Broker = broker;
+            Secrets = secrets;
             Verifier = verifier;
             _resolver = resolver;
             _spaceId = spaceId;
         }
+
+        public CodeAltaHost.ShellBoundSecrets Secrets { get; }
 
         public CredentialBroker Broker { get; }
 
@@ -190,17 +304,24 @@ public sealed class ShellSecretConfirmationsTests
                 [new("deploy", [new("DEPLOY_TOKEN", "${secret:DEPLOY}"), new("DEPLOY_TOKEN_AGAIN", "${secret:DEPLOY}")]),
                  new("registry", [new("REGISTRY_TOKEN", "${secret:REGISTRY}")])])))).Succeeded);
             // As the host builds the environment of a shell.
-            var confirmations = new CodeAltaHost.ShellSecretConfirmations(broker, broker, timeout ?? TimeSpan.FromMinutes(2));
+            var secrets = new CodeAltaHost.ShellBoundSecrets(broker);
+            var confirmations = new CodeAltaHost.ShellSecretConfirmations(broker, secrets, timeout ?? TimeSpan.FromMinutes(2));
             var resolver = new SessionIdentityResolver(spaces, (identity, scope) => SpaceIdentityEnvironment.Create(identity,
                     SecretReferenceResolver.ForScope(options.GlobalRoot, scope, shell: true, null, null, confirmations.SecretsOf(scope), CodeAltaHost.ShellUseOf(scope)).Read,
                     temp.Path, OperatingSystem.IsWindows()), null, null)
             {
                 Confirmations = confirmations,
             };
-            return new Fixture(temp, broker, verifier, resolver, space.Id);
+            return new Fixture(temp, broker, secrets, verifier, resolver, space.Id);
         }
 
         public Task<SessionIdentity> AttachAsync(string sessionId) => _resolver.ResolveForAttachmentAsync(_spaceId, null, sessionId, null, CancellationToken.None);
+
+        public Task<SessionIdentity> AttachAsync(string sessionId, SessionSecretAttachment attachment, CancellationToken stopWaiting = default)
+            => _resolver.ResolveForAttachmentAsync(_spaceId, null, sessionId, null, attachment, stopWaiting, CancellationToken.None);
+
+        // The identity of a session that does not attach, as the window reads it to show it.
+        public Task<SessionIdentity> ShowAsync(string sessionId) => _resolver.ResolveAsync(_spaceId, null, sessionId, null, CancellationToken.None);
 
         // The use once something waits for its answer, as the prompt of the window sees it.
         public async Task<PendingSecretUse> AwaitedAsync(string use)

@@ -291,7 +291,90 @@ public sealed class CredentialBrokerTests
         var canceled = broker.WaitForConfirmationAsync("LOCAL", "shell of the session s3", TimeSpan.FromMinutes(2), stop.Token);
         stop.Cancel();
         await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => canceled);
-        Assert.IsNull(broker.ListPending().Single().AwaitedUntil, "a wait that stops leaves the use waiting, as it was before");
+        Assert.IsEmpty(broker.ListPending(), "a wait that was stopped leaves no use waiting: nothing would take its confirmation");
+        Assert.AreEqual(("shell of the session s3", "expired"), (broker.ListUses().First().Use, broker.ListUses().First().Outcome));
+        Assert.AreEqual(UserPresenceResult.Verified, await broker.ConfirmAsync("LOCAL", "shell of the session s3"), "the use can still be confirmed ahead, for its next start");
+    }
+
+    [TestMethod]
+    public async Task One_verification_confirms_the_secrets_a_use_asks_for_at_once()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        foreach (var name in (string[])["DEPLOY", "REGISTRY", "SIGNING"])
+        {
+            store.SetSecret(name, name.ToLowerInvariant() + "-value-1", "alice");
+            store.Bindings.SetAskBeforeUse(name, SecretAskDurations.FifteenMinutes);
+        }
+
+        var verifier = new Verifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        const string use = "shell of the session s1";
+        foreach (var name in (string[])["DEPLOY", "REGISTRY", "SIGNING"]) broker.AuthorizeUse(name, use);
+        var waits = ((string[])["DEPLOY", "REGISTRY", "SIGNING"]).Select(name => broker.WaitForConfirmationAsync(name, use, TimeSpan.FromMinutes(2))).ToArray();
+        // One of them is denied before the user confirms the others.
+        broker.Decline("SIGNING", use);
+
+        Assert.AreEqual(UserPresenceResult.Verified, await broker.ConfirmAsync(["DEPLOY", "registry", "DEPLOY"], use));
+
+        StringAssert.Contains(verifier.Messages.Single(), "the secrets DEPLOY and registry for the shell of the session s1", "one verification names them all");
+        CollectionAssert.AreEqual(new[] { SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Confirmed, SecretConfirmationOutcome.Declined },
+            await Task.WhenAll(waits).WithinAsync(TestTime.Seconds(30)));
+        Assert.IsNull(broker.AuthorizeUse("DEPLOY", use));
+        Assert.IsNull(broker.AuthorizeUse("REGISTRY", use));
+        Assert.IsEmpty(broker.ListPending());
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => broker.ConfirmAsync(Array.Empty<string>(), use));
+    }
+
+    [TestMethod]
+    public async Task A_read_that_asks_nobody_leaves_nothing_waiting_and_takes_no_confirmation_of_one_use()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("ONCE", "once-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("ONCE", SecretAskDurations.EachUse);
+        store.SetSecret("LASTING", "lasting-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LASTING", SecretAskDurations.FifteenMinutes);
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = new Verifier(), CanPrompt = true });
+        const string use = "shell of the session s1";
+        var shown = broker.WithoutAsking(recorded: false);
+
+        StringAssert.Contains(shown.AuthorizeUse("ONCE", use), "is not confirmed");
+        Assert.IsEmpty(broker.ListPending(), "nothing waits for the user");
+        Assert.IsEmpty(broker.ListUses(), "what only shows an environment records no use");
+
+        // Confirmed ahead: a confirmation of one use stays for the use that starts, and one that lasts is taken as it is.
+        await broker.ConfirmAsync("ONCE", use);
+        await broker.ConfirmAsync("LASTING", use);
+        Assert.IsNotNull(shown.AuthorizeUse("ONCE", use), "a confirmation of one use is not taken by a read that asks nobody");
+        Assert.IsNull(shown.AuthorizeUse("LASTING", use), "a confirmation that lasts is");
+        Assert.IsNull(broker.AuthorizeUse("ONCE", use), "the confirmation of one use is still there for the use that starts");
+
+        // A program that starts without the secret records it.
+        StringAssert.Contains(broker.WithoutAsking(recorded: true).AuthorizeUse("ONCE", "shell of the session s2"), "is not confirmed");
+        Assert.AreEqual(("shell of the session s2", "unavailable"), (broker.ListUses().First().Use, broker.ListUses().First().Outcome));
+        Assert.IsEmpty(broker.ListPending());
+    }
+
+    [TestMethod]
+    public void What_a_confirmed_use_started_takes_the_secret_once_without_asking()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile);
+        store.SetSecret("LOCAL", "local-value-1", "alice");
+        store.Bindings.SetAskBeforeUse("LOCAL", SecretAskDurations.FifteenMinutes);
+        var verifier = new Verifier();
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, Verifier = verifier, CanPrompt = true });
+        Assert.IsTrue(broker.AsksBeforeUse("local"));
+        Assert.IsFalse(broker.AsksBeforeUse("OTHER"));
+
+        broker.AllowOnce("LOCAL", "shell of the session child");
+
+        Assert.IsNull(broker.AuthorizeUse("LOCAL", "shell of the session child"));
+        Assert.IsEmpty(verifier.Messages, "the user is not asked again");
+        StringAssert.Contains(broker.AuthorizeUse("LOCAL", "shell of the session child"), "asks before use", "once: its next start asks");
+        broker.Expire("LOCAL", "shell of the session child");
+        Assert.IsEmpty(broker.ListPending(), "a use nothing takes any more no longer waits");
     }
 
     [TestMethod]

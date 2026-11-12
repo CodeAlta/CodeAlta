@@ -34,6 +34,39 @@ export function promptedUses(pending: readonly PromptedUse[] | null | undefined)
   });
 }
 
+/** What the prompt asks about at once: the secrets one use waits for, such as all those the shell of a session that starts asks for. */
+export type PromptedGroup = Readonly<{
+  /** The most urgent of them: who asks, and until when something waits for the answer. */
+  use: PromptedUse;
+  /** The secrets of that use, in the order they are asked about. */
+  names: readonly string[];
+}>;
+
+/**
+ * The uses the prompt asks about, one answer for each: the secrets that one use waits for are asked about together, the most urgent
+ * use first. A use nobody names is asked about on its own.
+ */
+export function promptedGroups(pending: readonly PromptedUse[] | null | undefined): PromptedGroup[] {
+  const groups: { use: PromptedUse; names: string[] }[] = [];
+  const byUse = new Map<string, { use: PromptedUse; names: string[] }>();
+  for (const use of promptedUses(pending)) {
+    const group = use.use ? byUse.get(use.use) : undefined;
+    if (group) {
+      if (!group.names.some(name => name.toUpperCase() === use.name.toUpperCase())) group.names.push(use.name);
+      continue;
+    }
+    const added = { use, names: [use.name] };
+    groups.push(added);
+    if (use.use) byUse.set(use.use, added);
+  }
+  return groups;
+}
+
+/** The key of what one answer covers: the use and its secrets. */
+export function groupKey(group: PromptedGroup): string {
+  return `${group.use.use ?? ""}\n${group.names.map(name => name.toUpperCase()).join("\n")}`;
+}
+
 /** Who asks for the secret, and what waits for the answer: the shell of a session by its title, else the use as the host names it. */
 export function whoAsks(use: PromptedUse, sessionTitle: (id: string) => string | null): PromptText {
   if (use.sessionId) {
@@ -47,11 +80,12 @@ export function whoAsks(use: PromptedUse, sessionTitle: (id: string) => string |
 }
 
 /** What happens without an answer, for a use something waits for: it goes on without the secret at that time. */
-export function withoutAnswer(use: PromptedUse, locale: string): PromptText | null {
+export function withoutAnswer(use: PromptedUse, locale: string, several = false): PromptText | null {
   if (!use.awaitedUntil) return null;
   const time = new Date(use.awaitedUntil);
   if (Number.isNaN(time.getTime())) return null;
-  return { key: "Without an answer by {time}, it starts without the secret.", parameters: { time: time.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) } };
+  return { key: several ? "Without an answer by {time}, it starts without them." : "Without an answer by {time}, it starts without the secret.",
+    parameters: { time: time.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) } };
 }
 
 /** What the prompt says after Confirm…, from the status of the confirmation; null when it was confirmed. */

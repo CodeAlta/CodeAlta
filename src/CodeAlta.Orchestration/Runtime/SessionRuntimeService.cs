@@ -2290,9 +2290,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
         else
         {
+            // Nobody is asked for a session nobody is in front of, and a session another one started takes the answers of that one.
+            var secretAttachment = await SecretAttachmentOfAsync(session, cancellationToken).ConfigureAwait(false);
             using var secretWait = _secretWaits.Begin(session.SessionId);
             identity = await Identities.ResolveForAttachmentAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId,
-                secretWait.Token, cancellationToken).ConfigureAwait(false);
+                secretAttachment, secretWait.Token, cancellationToken).ConfigureAwait(false);
         }
 
         if (identity.SecretProblems.Count > 0 && !_disposed && !string.IsNullOrWhiteSpace(session.SessionId))
@@ -4661,6 +4663,38 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             await Task.CompletedTask.ConfigureAwait(false);
             return entry.Projector.ProjectHistory(history);
         }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // How a session attaches for the secrets that ask before use. Nobody is in front of a session that an automation started, nor
+    // of the sessions that come from it: the user is not asked, and is not made to wait. A session another session created takes
+    // the answers that session was given when it attached, while it is attached: its shell already has those secrets, and could
+    // hand them over itself. Only the session that created it counts, as the host recorded it: the parent a session names is
+    // chosen by the agent that creates it, and naming a session that has a secret must never give that secret.
+    private async Task<SessionSecretAttachment> SecretAttachmentOfAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        // A host that asks nobody for these secrets has nothing to decide.
+        if (!Identities.IsEnabled || Identities.Confirmations is null) return SessionSecretAttachment.Attended;
+        bool unattended;
+        try
+        {
+            unattended = await FindLineageCreatorAsync(session, static createdBy => createdBy.Kind == AltaActorProvenance.AutomationKind, cancellationToken)
+                .ConfigureAwait(false) is not null;
+        }
+        catch (SessionLineageException)
+        {
+            // Whether an automation started it cannot be told: nobody is asked, as for one.
+            unattended = true;
+        }
+
+        IReadOnlyDictionary<string, bool>? inherited = null;
+        if (session.CreatedBy is { SourceMachineId: null } createdBy && NormalizeOptionalText(createdBy.SourceSessionId) is { } creator
+            && !string.Equals(creator, session.SessionId, StringComparison.Ordinal)
+            && _entries.TryGetValue(creator, out var started) && !started.IsTerminated && started.Identity.SecretAnswers.Count > 0)
+        {
+            inherited = started.Identity.SecretAnswers;
+        }
+
+        return new SessionSecretAttachment(unattended, inherited);
     }
 
     /// <summary>

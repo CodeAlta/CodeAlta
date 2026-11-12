@@ -5,15 +5,16 @@ import { secrets, type SecretPendingEvent } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { raiseAboveWindows } from "../appToaster";
 import { useShellLanguage } from "../shellLanguage";
-import { confirmationNote, promptedUses, secretsPendingEvent, useKey, whoAsks, withoutAnswer, type PromptText, type PromptedUse } from "./secretPrompt";
+import { confirmationNote, groupKey, promptedGroups, secretsPendingEvent, whoAsks, withoutAnswer, type PromptText, type PromptedUse } from "./secretPrompt";
 
 type PromptApi = Pick<typeof secrets, "pending" | "confirmUse" | "declineUse">;
 
 /**
  * The prompt of the window for the secrets that ask before use: as soon as a use waits for the user (the shell of a session that
  * starts, a provider, an MCP server), it names the secret and who asks, and offers Confirm…, which the system verifies first
- * (Windows Hello, Touch ID), and Deny. It is shown above the windows of the application, and goes once nothing waits. It reads the
- * uses when it starts and at each `secrets-pending` notice of the shell (`secretsPendingEvent`).
+ * (Windows Hello, Touch ID), and Deny. The secrets one use waits for, such as all those of a session that starts, are one prompt and
+ * one verification. It is shown above the windows of the application, and goes once nothing waits. It reads the uses when it starts
+ * and at each `secrets-pending` notice of the shell (`secretsPendingEvent`).
  */
 export function SecretUsePrompt({ epoch, api = secrets, sessionTitle }: {
   epoch: string | null; api?: PromptApi;
@@ -40,18 +41,20 @@ export function SecretUsePrompt({ epoch, api = secrets, sessionTitle }: {
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, 20_000);
     return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener(secretsPendingEvent, load); };
   }, [epoch, api]);
-  const uses = promptedUses(event?.pending);
-  const current = uses[0] ?? null;
+  const groups = promptedGroups(event?.pending);
+  const current = groups[0] ?? null;
   const layer = usePromptLayer(current !== null);
   if (!current || !layer || !epoch) return null;
-  const key = useKey(current);
+  const key = groupKey(current);
   async function answer(confirm: boolean) {
     if (!current || !epoch) return;
     setBusy(true);
     try {
+      // One answer for the secrets this use waits for: the system verifies the user once.
+      const request = { expectedEpoch: epoch, name: current.names[0], use: current.use.use ?? null, names: [...current.names] };
       const result = confirm
-        ? await api.confirmUse({ expectedEpoch: epoch, name: current.name, use: current.use ?? null }, { timeoutMilliseconds: 180_000 })
-        : await api.declineUse({ expectedEpoch: epoch, name: current.name, use: current.use ?? null }, { timeoutMilliseconds: 15_000 });
+        ? await api.confirmUse(request, { timeoutMilliseconds: 180_000 })
+        : await api.declineUse(request, { timeoutMilliseconds: 15_000 });
       const text = confirmationNote(result.status);
       setNote(text ? { key, text } : null);
     } catch {
@@ -60,22 +63,28 @@ export function SecretUsePrompt({ epoch, api = secrets, sessionTitle }: {
       setBusy(false);
     }
   }
-  return createPortal(<SecretUsePromptCard use={current} more={uses.length - 1} canConfirm={event?.canConfirm ?? false} reason={event?.reason ?? null}
+  return createPortal(<SecretUsePromptCard use={current.use} names={current.names} more={groups.length - 1} canConfirm={event?.canConfirm ?? false} reason={event?.reason ?? null}
     busy={busy} note={note?.key === key ? note.text : null} sessionTitle={sessionTitle}
     onConfirm={() => void answer(true)} onDeny={() => void answer(false)} />, layer);
 }
 
-/** The card of the prompt: one use, the most urgent, and how many more wait. */
-export function SecretUsePromptCard({ use, more, canConfirm, reason, busy, note, sessionTitle, onConfirm, onDeny }: {
-  use: PromptedUse; more: number; canConfirm: boolean; reason: string | null; busy: boolean; note: PromptText | null;
+/** The card of the prompt: one use, the most urgent, with the secrets it waits for, and how many more uses wait. */
+export function SecretUsePromptCard({ use, names = [use.name], more, canConfirm, reason, busy, note, sessionTitle, onConfirm, onDeny }: {
+  use: PromptedUse;
+  /** The secrets of that use one answer covers; the secret of the use alone when omitted. */
+  names?: readonly string[];
+  more: number; canConfirm: boolean; reason: string | null; busy: boolean; note: PromptText | null;
   sessionTitle: (id: string) => string | null; onConfirm: () => void; onDeny: () => void;
 }) {
   const { t, locale } = useShellLanguage();
   const asker = whoAsks(use, sessionTitle);
-  const deadline = withoutAnswer(use, locale);
+  const several = names.length > 1;
+  const deadline = withoutAnswer(use, locale, several);
   return <Card className="secret-use-prompt" role="alertdialog" aria-labelledby="secret-use-prompt-title" aria-describedby="secret-use-prompt-asker"
-    data-secret={use.name} elevation={3}>
-    <h2 id="secret-use-prompt-title"><AppIcon name="shield" size={16} />{t("Use the secret {name}?", { name: use.name })}</h2>
+    data-secret={names.join(" ")} elevation={3}>
+    <h2 id="secret-use-prompt-title"><AppIcon name="shield" size={16} />
+      {several ? t("Use {count} secrets?", { count: String(names.length) }) : t("Use the secret {name}?", { name: names[0] ?? use.name })}</h2>
+    {several && <ul className="secret-use-prompt-names">{names.map(name => <li key={name}><code>{name}</code></li>)}</ul>}
     <p id="secret-use-prompt-asker">{t(asker.key, asker.parameters)}</p>
     {deadline && <p className="secret-use-prompt-deadline">{t(deadline.key, deadline.parameters)}</p>}
     {!canConfirm && <p className="secret-use-prompt-note">{reason ?? t("The system cannot verify you now.")}</p>}

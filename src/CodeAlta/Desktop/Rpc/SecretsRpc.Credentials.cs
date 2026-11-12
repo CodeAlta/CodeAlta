@@ -222,13 +222,18 @@ internal sealed partial class SecretsService
         return new("ok", null);
     }
 
-    /// <summary>Confirms a use of a secret that asks before use: the system verifies the user first.</summary>
+    /// <summary>
+    /// Confirms a use of a secret that asks before use: the system verifies the user first. One verification confirms the secrets
+    /// of <see cref="SecretUseRequest.Names"/> for that use, such as all those the shell of a session that starts asks for.
+    /// </summary>
     [NeoRpcMethod("confirmUse")]
     public async Task<CredentialActionResult> ConfirmUseAsync(SecretUseRequest request, CancellationToken cancellationToken)
     {
         if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
-        var result = await Credentials!.ConfirmAsync(request!.Name, string.IsNullOrEmpty(request.Use) ? null : request.Use, cancellationToken).ConfigureAwait(false);
-        if (result == UserPresenceResult.Verified) Changed([request.Name]);
+        var names = NamesOf(request!);
+        if (names.Length == 0) return new("invalid", "No secret is named.");
+        var result = await Credentials!.ConfirmAsync(names, string.IsNullOrEmpty(request!.Use) ? null : request.Use, cancellationToken).ConfigureAwait(false);
+        if (result == UserPresenceResult.Verified) Changed(names);
         return new(result switch { UserPresenceResult.Verified => "ok", UserPresenceResult.Canceled => "canceled", _ => "unavailable" }, null);
     }
 
@@ -269,9 +274,13 @@ internal sealed partial class SecretsService
     public CredentialActionResult DeclineUse(SecretUseRequest request)
     {
         if (RefuseCredentials(request?.ExpectedEpoch) is { } refused) return new(refused, null);
-        Credentials!.Decline(request!.Name, string.IsNullOrEmpty(request.Use) ? null : request.Use);
+        foreach (var name in NamesOf(request!)) Credentials!.Decline(name, string.IsNullOrEmpty(request!.Use) ? null : request.Use);
         return new("ok", null);
     }
+
+    // The secrets an answer covers: the ones it lists, else the one it names.
+    private static string[] NamesOf(SecretUseRequest request)
+        => [.. (request.Names is { Length: > 0 } names ? names : [request.Name]).Where(static name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>Adds or changes a sign-in of websites: the vault items of its user name, password and one-time code, and its sites.</summary>
     [NeoRpcMethod("saveSignIn")]
@@ -751,4 +760,8 @@ internal sealed record SiteGrantRequest(string ExpectedEpoch, string Id, string?
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="Name">The secret.</param>
 /// <param name="Use">What asked; empty when nothing named it.</param>
-internal sealed record SecretUseRequest(string ExpectedEpoch, string Name, string? Use);
+internal sealed record SecretUseRequest(string ExpectedEpoch, string Name, string? Use)
+{
+    /// <summary>The secrets one answer covers, when the same use asks for several at once; null for <see cref="Name"/> alone.</summary>
+    public string[]? Names { get; init; }
+}

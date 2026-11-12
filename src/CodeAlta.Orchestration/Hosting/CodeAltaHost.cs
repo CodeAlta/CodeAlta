@@ -1201,9 +1201,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
     internal static readonly TimeSpan ShellConfirmationTimeout = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Waits, for the shell of a session that attaches, for the user's answer to each use of a secret that asks before use that its
-    /// environment waits for (<see cref="CodeAlta.Credentials.CredentialBroker.ListPending"/> for <see cref="ShellUseOf"/>): CodeAlta
-    /// Desktop shows each of them to the user. Nothing waits where nobody can answer.
+    /// Decides, for the shell of a session that attaches, what it gets of the secrets that ask before use that its environment
+    /// names. A session the user is in front of waits for the user's answer to each use it asked for
+    /// (<see cref="CodeAlta.Credentials.CredentialBroker.ListPending"/> for <see cref="ShellUseOf"/>), which CodeAlta Desktop shows.
+    /// Nobody is asked for a session nobody is in front of, which starts at once without them, and a session another one started
+    /// takes the answers of that one. An environment built for a session that does not attach asks nobody either. Nothing waits
+    /// where nobody can answer.
     /// </summary>
     /// <remarks>
     /// The environment of a session that waited is built again, with the same scope: what the first build read is kept for it
@@ -1213,10 +1216,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <param name="broker">The credential broker of the host.</param>
     /// <param name="secrets">The secrets the shells of the sessions are given.</param>
     /// <param name="timeout">How long it waits.</param>
-    internal sealed class ShellSecretConfirmations(CodeAlta.Credentials.CredentialBroker broker, IBoundSecretSource secrets, TimeSpan timeout) : ISessionSecretConfirmations
+    internal sealed class ShellSecretConfirmations(CodeAlta.Credentials.CredentialBroker broker, ShellBoundSecrets secrets, TimeSpan timeout) : ISessionSecretConfirmations
     {
         // What each resolution read, by its scope, which the builds of one resolution share; gone with the scope.
-        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<SecretScope, OneUseBoundSecrets> _resolutions = new();
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<SecretScope, ResolutionSecrets> _resolutions = new();
 
         /// <summary>Gets the secrets the environment of a resolution is built with: the same for every build of that scope.</summary>
         /// <param name="scope">The work of the session, as one resolution gives it.</param>
@@ -1224,23 +1227,44 @@ public sealed class CodeAltaHost : IAsyncDisposable
         public IBoundSecretSource SecretsOf(SecretScope scope)
         {
             ArgumentNullException.ThrowIfNull(scope);
-            return _resolutions.GetValue(scope, _ => new OneUseBoundSecrets(secrets));
+            // A scope whose attachment nothing began. The shell of no session in particular (a terminal of the user) asks as it
+            // always did: its use waits in Settings, where the user confirms it ahead. The environment of a session that does not
+            // attach (what the window shows of it, a job started while it is not attached) asks nobody: nothing waits for an
+            // answer, and it takes no confirmation the next start of the session would need.
+            return _resolutions.GetValue(scope, created => new ResolutionSecrets(broker, secrets, asks: created.RunId is not { Length: > 0 }, attachment: null));
         }
 
         /// <inheritdoc />
-        public async Task<IReadOnlyList<SessionSecretConfirmation>> WaitAsync(SecretScope scope, CancellationToken cancellationToken)
+        public void Begin(SecretScope scope, SessionSecretAttachment attachment)
         {
             ArgumentNullException.ThrowIfNull(scope);
-            if (scope.RunId is not { Length: > 0 }) return [];
+            ArgumentNullException.ThrowIfNull(attachment);
+            _resolutions.AddOrUpdate(scope, new ResolutionSecrets(broker, secrets, asks: true, attachment));
+        }
+
+        /// <inheritdoc />
+        public async Task<bool> WaitAsync(SecretScope scope, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(scope);
+            if (scope.RunId is not { Length: > 0 } || !_resolutions.TryGetValue(scope, out var read)) return false;
+            // Only the uses this environment asked for: not one an earlier start of the session left.
+            var names = read.Waiting();
+            if (names.Count == 0) return false;
             var use = ShellUseOf(scope);
-            var names = broker.ListPending().Where(pending => pending.Use == use).Select(static pending => pending.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            if (names.Length == 0) return [];
             var outcomes = await Task.WhenAll(names.Select(name => WaitAsync(name, use, cancellationToken))).ConfigureAwait(false);
             // The next build asks again for what the user confirmed, and keeps what the first build read.
-            if (_resolutions.TryGetValue(scope, out var read))
-                read.Forget([.. names.Where((_, index) => outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed)]);
-            return [.. names.Select((name, index) => new SessionSecretConfirmation(name, outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed,
-                ProblemOf(name, outcomes[index], timeout)))];
+            for (var index = 0; index < names.Count; index++)
+                read.Answered(names[index], outcomes[index] == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed, ProblemOf(names[index], outcomes[index], timeout));
+            return outcomes.Any(static outcome => outcome == CodeAlta.Credentials.SecretConfirmationOutcome.Confirmed);
+        }
+
+        /// <inheritdoc />
+        public SessionSecretOutcome End(SecretScope scope)
+        {
+            ArgumentNullException.ThrowIfNull(scope);
+            return _resolutions.TryGetValue(scope, out var read)
+                ? read.End(ShellUseOf(scope))
+                : new SessionSecretOutcome(System.Collections.Frozen.FrozenDictionary<string, bool>.Empty, []);
         }
 
         // A wait the user ended by stopping the session gives no outcome: the shell starts without the secret.
@@ -1270,14 +1294,41 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <summary>
     /// The secrets kept in vaults and the confirmations of the secrets that ask before use, for one resolution of an environment: each
     /// secret is asked once, so that a confirmation of each use is one use for the environment, whatever the number of variables that
-    /// name it and of the builds of that resolution, until <see cref="Forget"/> asks it again.
+    /// name it and of the builds of that resolution, until the user confirmed it meanwhile (<see cref="Answered"/>). It also keeps
+    /// what each secret that asks before use ended with, for the session and for the sessions it starts.
     /// </summary>
-    /// <param name="inner">The secrets of the host.</param>
-    internal sealed class OneUseBoundSecrets(IBoundSecretSource inner) : IBoundSecretSource
+    internal sealed class ResolutionSecrets : IBoundSecretSource
     {
+        private readonly CodeAlta.Credentials.CredentialBroker _broker;
+        private readonly IBoundSecretSource _asked;
+        private readonly IBoundSecretSource _unasked;
+        private readonly bool _asks;
+        private readonly bool _unattended;
+        private readonly Dictionary<string, bool>? _inherited;
         private readonly Lock _gate = new();
         private readonly Dictionary<(string Name, string? Use), BoundSecretRead> _reads = [];
         private readonly Dictionary<(string Name, string? Use), string?> _authorizations = [];
+        // What each secret that asks before use ended with, by its name in upper case, in the order they were read.
+        private readonly Dictionary<string, Answer> _answers = new(StringComparer.Ordinal);
+        private readonly List<Answer> _order = [];
+
+        /// <summary>Initializes the secrets of one resolution.</summary>
+        /// <param name="broker">The credential broker of the host.</param>
+        /// <param name="secrets">The secrets the shells of the sessions are given.</param>
+        /// <param name="asks">Whether a use that is not confirmed waits for the user; false asks nobody.</param>
+        /// <param name="attachment">How the session attaches; null for an environment built without attaching.</param>
+        public ResolutionSecrets(CodeAlta.Credentials.CredentialBroker broker, ShellBoundSecrets secrets, bool asks, SessionSecretAttachment? attachment)
+        {
+            ArgumentNullException.ThrowIfNull(broker);
+            ArgumentNullException.ThrowIfNull(secrets);
+            _broker = broker;
+            _asked = secrets;
+            // A use left out is recorded when a session starts without the secret, not when its environment is only shown.
+            _unasked = secrets.Noting(broker.WithoutAsking(recorded: attachment is not null));
+            _asks = asks;
+            _unattended = attachment?.Unattended == true;
+            _inherited = attachment?.Inherited is { Count: > 0 } inherited ? new Dictionary<string, bool>(inherited, StringComparer.OrdinalIgnoreCase) : null;
+        }
 
         /// <inheritdoc />
         public BoundSecretRead ReadBound(string name, string? use)
@@ -1286,7 +1337,18 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var key = (name.ToUpperInvariant(), use);
             lock (_gate)
             {
-                if (!_reads.TryGetValue(key, out var read)) _reads[key] = read = inner.ReadBound(name, use);
+                if (_reads.TryGetValue(key, out var read)) return read;
+                var (source, refusal) = SourceOf(name, use);
+                _reads[key] = read = source.ReadBound(name, use);
+                if (read.Value is not null)
+                {
+                    if (_broker.AsksBeforeUse(name)) Note(name).State = AnswerState.Given;
+                }
+                else if (read.AwaitsConfirmation)
+                {
+                    Unconfirmed(name, source, refusal);
+                }
+
                 return read;
             }
         }
@@ -1298,22 +1360,134 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var key = (name.ToUpperInvariant(), use);
             lock (_gate)
             {
-                if (!_authorizations.TryGetValue(key, out var problem)) _authorizations[key] = problem = inner.AuthorizeUse(name, use);
+                if (_authorizations.TryGetValue(key, out var problem)) return problem;
+                var (source, refusal) = SourceOf(name, use);
+                _authorizations[key] = problem = source.AuthorizeUse(name, use);
+                if (problem is null) Note(name).State = AnswerState.Given;
+                else Unconfirmed(name, source, refusal);
                 return problem;
             }
         }
 
-        /// <summary>Asks the secrets again at the next read, for every use: the user confirmed them since.</summary>
-        /// <param name="names">The secrets.</param>
-        public void Forget(IReadOnlyCollection<string> names)
+        /// <summary>Gets the secrets whose use this resolution asked the user for, and that wait for the answer.</summary>
+        /// <returns>The names.</returns>
+        public IReadOnlyList<string> Waiting()
         {
-            ArgumentNullException.ThrowIfNull(names);
-            var upper = names.Select(static name => name.ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+            lock (_gate) return [.. _order.Where(static answer => answer.State == AnswerState.Waits).Select(static answer => answer.Name)];
+        }
+
+        /// <summary>Keeps the answer of the user to a use this resolution waited for: a secret confirmed is asked again at its next read.</summary>
+        /// <param name="name">The secret.</param>
+        /// <param name="confirmed">Whether the user confirmed its use.</param>
+        /// <param name="problem">What the session is told when it was not.</param>
+        public void Answered(string name, bool confirmed, string? problem)
+        {
+            ArgumentNullException.ThrowIfNull(name);
+            var upper = name.ToUpperInvariant();
             lock (_gate)
             {
-                foreach (var key in _reads.Keys.Where(key => upper.Contains(key.Name)).ToArray()) _reads.Remove(key);
-                foreach (var key in _authorizations.Keys.Where(key => upper.Contains(key.Name)).ToArray()) _authorizations.Remove(key);
+                var answer = Note(name);
+                answer.Confirmed = confirmed;
+                answer.State = confirmed ? AnswerState.Confirmed : AnswerState.Refused;
+                answer.Problem = confirmed ? null : problem ?? $"The shell of this session started without the secret {name}.";
+                if (!confirmed) return;
+                foreach (var key in _reads.Keys.Where(key => key.Name == upper).ToArray()) _reads.Remove(key);
+                foreach (var key in _authorizations.Keys.Where(key => key.Name == upper).ToArray()) _authorizations.Remove(key);
             }
+        }
+
+        /// <summary>
+        /// Ends the resolution, once its environment is built for the last time: a secret the user confirmed that the last build was
+        /// not given is left out as the others, and its use no longer waits.
+        /// </summary>
+        /// <param name="use">The use of the shell of the session.</param>
+        /// <returns>What each secret that asks before use ended with, and what the session is told.</returns>
+        public SessionSecretOutcome End(string? use)
+        {
+            List<string> expired = [];
+            SessionSecretOutcome outcome;
+            lock (_gate)
+            {
+                foreach (var answer in _order.Where(static answer => answer.State is AnswerState.Waits or AnswerState.Confirmed))
+                {
+                    // Asked again by the last build, which nothing waits for: the shell starts without it.
+                    if (answer.State == AnswerState.Waits) expired.Add(answer.Name);
+                    answer.Problem = answer.Confirmed
+                        ? $"The shell of this session started without the secret {answer.Name}: its use was confirmed, but the secret could not be given."
+                        : $"The shell of this session started without the secret {answer.Name}: its use is not confirmed.";
+                    answer.State = AnswerState.Refused;
+                }
+
+                outcome = new SessionSecretOutcome(
+                    System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(_order, static answer => answer.Name, static answer => answer.State == AnswerState.Given, StringComparer.OrdinalIgnoreCase),
+                    [.. _order.Where(static answer => answer.State != AnswerState.Given && answer.Problem is not null).Select(static answer => answer.Problem!)]);
+            }
+
+            foreach (var name in expired) _broker.Expire(name, use);
+            return outcome;
+        }
+
+        // Under the gate: which secrets a read goes through, and why the session starts without the secret when nobody is asked.
+        private (IBoundSecretSource Source, string? Refusal) SourceOf(string name, string? use)
+        {
+            if (_inherited is not null && _inherited.TryGetValue(name, out var given))
+            {
+                if (!given) return (_unasked, "its use was not confirmed for the session that started this one");
+                // The session that started this one has the secret: this one takes it without asking the user again.
+                _broker.AllowOnce(name, use);
+                return (_asked, null);
+            }
+
+            if (_unattended) return (_unasked, "it asks before use, and nobody is asked for a session that an automation started");
+            return (_asks ? _asked : _unasked, null);
+        }
+
+        // Under the gate: a secret that asks before use was not given, since its use is not confirmed.
+        private void Unconfirmed(string name, IBoundSecretSource source, string? refusal)
+        {
+            var answer = Note(name);
+            if (ReferenceEquals(source, _asked))
+            {
+                answer.State = AnswerState.Waits;
+                return;
+            }
+
+            answer.State = AnswerState.Refused;
+            answer.Problem = refusal is null ? null : $"The shell of this session started without the secret {name}: {refusal}.";
+        }
+
+        // Under the gate: the answer of a secret, added at its first read.
+        private Answer Note(string name)
+        {
+            var upper = name.ToUpperInvariant();
+            if (_answers.TryGetValue(upper, out var answer)) return answer;
+            _answers[upper] = answer = new Answer(name);
+            _order.Add(answer);
+            return answer;
+        }
+
+        private enum AnswerState
+        {
+            // The shell has the secret.
+            Given,
+            // The user is asked, and the answer is awaited.
+            Waits,
+            // The user confirmed the use: the next build reads the secret.
+            Confirmed,
+            // The shell starts without the secret.
+            Refused,
+        }
+
+        private sealed class Answer(string name)
+        {
+            public string Name { get; } = name;
+
+            public AnswerState State { get; set; }
+
+            // Whether the user confirmed the use during this resolution.
+            public bool Confirmed { get; set; }
+
+            public string? Problem { get; set; }
         }
     }
 
@@ -1324,16 +1498,28 @@ public sealed class CodeAltaHost : IAsyncDisposable
     internal sealed class ShellBoundSecrets : IBoundSecretSource
     {
         private readonly IBoundSecretSource _inner;
-        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _given = new(StringComparer.Ordinal);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _given;
 
         /// <summary>Initializes a new instance of the <see cref="ShellBoundSecrets"/> class.</summary>
         /// <param name="inner">The secrets kept in vaults the host holds.</param>
         public ShellBoundSecrets(IBoundSecretSource inner)
+            : this(inner, new(StringComparer.Ordinal))
+        {
+        }
+
+        private ShellBoundSecrets(IBoundSecretSource inner, System.Collections.Concurrent.ConcurrentDictionary<string, byte> given)
         {
             ArgumentNullException.ThrowIfNull(inner);
             _inner = inner;
+            _given = given;
             Given = new Values(_given);
         }
+
+        /// <summary>Gets the same secrets read another way, such as without asking the user: the values it gives are noted here too.</summary>
+        /// <param name="other">The other way to read the secrets the host holds.</param>
+        /// <returns>The secrets.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="other"/> is null.</exception>
+        public ShellBoundSecrets Noting(IBoundSecretSource other) => new(other, _given);
 
         /// <summary>Gets the values given so far, as they are when they are read: a value given later is in it then.</summary>
         public IReadOnlyCollection<string> Given { get; }

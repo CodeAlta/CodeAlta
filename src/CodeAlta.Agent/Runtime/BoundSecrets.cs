@@ -24,6 +24,22 @@ public sealed record BoundSecretRead(string? Value, string? Problem)
         ArgumentException.ThrowIfNullOrWhiteSpace(problem);
         return new(null, problem);
     }
+
+    /// <summary>
+    /// Gets whether the value is held and only the confirmation of its use is missing, for a secret that asks before use: it can be
+    /// given once the user confirms that use.
+    /// </summary>
+    public bool AwaitsConfirmation { get; init; }
+
+    /// <summary>Creates the answer of a secret that asks before use whose use is not confirmed.</summary>
+    /// <param name="problem">Why, naming the secret.</param>
+    /// <returns>The answer.</returns>
+    /// <exception cref="ArgumentException"><paramref name="problem"/> is blank.</exception>
+    public static BoundSecretRead Unconfirmed(string problem)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(problem);
+        return new(null, problem) { AwaitsConfirmation = true };
+    }
 }
 
 /// <summary>

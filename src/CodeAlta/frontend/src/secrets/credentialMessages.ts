@@ -285,6 +285,7 @@ export const credentialMessages = {
     "{date} まで確認なしでそこに入力されます。削除すると再び確認されます。",
     "在 {date} 之前会在那里填写而不询问你。移除它即可重新询问。"],
   "Use the secret {name}?": ["¿Usar el secreto {name}?", "Utiliser le secret {name} ?", "Das Geheimnis {name} verwenden?", "シークレット {name} を使用しますか?", "使用机密 {name}？"],
+  "Use {count} secrets?": ["¿Usar {count} secretos?", "Utiliser {count} secrets ?", "{count} Geheimnisse verwenden?", "{count} 件のシークレットを使用しますか?", "使用 {count} 个机密？"],
   "The shell of the session “{title}” waits for your answer to start.": [
     "El shell de la sesión «{title}» espera tu respuesta para iniciarse.",
     "Le shell de la session « {title} » attend votre réponse pour démarrer.",
@@ -306,6 +307,12 @@ export const credentialMessages = {
     "Ohne Antwort bis {time} startet sie ohne das Geheimnis.",
     "{time} までに回答がない場合、シークレットなしで起動します。",
     "如果在 {time} 前没有回答，它将在没有该机密的情况下启动。"],
+  "Without an answer by {time}, it starts without them.": [
+    "Sin respuesta antes de las {time}, se inicia sin ellos.",
+    "Sans réponse avant {time}, il démarre sans eux.",
+    "Ohne Antwort bis {time} startet sie ohne sie.",
+    "{time} までに回答がない場合、それらなしで起動します。",
+    "如果在 {time} 前没有回答，它将在没有这些机密的情况下启动。"],
   "The verification was canceled: confirm again, or deny.": [
     "La verificación se canceló: confirma de nuevo o deniega.",
     "La vérification a été annulée : confirmez à nouveau, ou refusez.",

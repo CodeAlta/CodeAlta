@@ -105,6 +105,21 @@ its space), `shell of the session <id>`, `triggers of the automations of the pro
 taken by one operation: an MCP server reads its secrets once for its validation and its start. Without a user, the use is recorded as pending and the secret is not given;
 the page of Settings asks again. The broker records the recent uses (secret, use, time, outcome), never a value.
 
+**The shell of a session** is asked for when the session attaches, never later: its environment is built once
+(`ShellSecretConfirmations`, `ResolutionSecrets` in `CodeAltaHost`). The confirmation decides which sessions get a secret,
+not what their commands do with it.
+
+- A session the user is in front of waits for the answer to the uses its own environment asked for, for a bounded time,
+  then builds its environment again; the uses of one start are one prompt and one verification. What is denied, not
+  answered or stopped leaves no use waiting.
+- A session nobody is in front of (a creator of the automation kind anywhere up its lineage) asks nobody: the secret is
+  left out at once.
+- A session another session created takes the answers that session was given when it attached
+  (`SessionIdentity.SecretAnswers`), while that session is attached: it already has those values. Only the creator the
+  host recorded counts, never the parent a session names, which the agent that creates it chooses.
+- An environment built for a session that does not attach (what the window shows, a job of a session not attached)
+  asks nobody and takes no confirmation of one use (`CredentialBroker.WithoutAsking`).
+
 It is a check of CodeAlta, not encryption: a program that runs as the user is stopped by the vault, not by CodeAlta.
 
 ## Sign-ins of websites

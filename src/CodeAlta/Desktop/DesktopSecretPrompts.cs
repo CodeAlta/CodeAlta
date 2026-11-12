@@ -84,8 +84,26 @@ internal sealed class DesktopSecretPrompts : IDisposable
     internal static NeoNotificationRequest NotificationOf(string id, PendingUseView pending, string? sessionTitle)
     {
         ArgumentNullException.ThrowIfNull(pending);
-        var body = $"{Capitalized(WhoAsks(pending.Use, sessionTitle))} asks for it. Open CodeAlta to confirm or deny.";
-        return new NeoNotificationRequest { Id = id, Title = Cut($"Use the secret {pending.Name}?", MaximumTitle), Body = Cut(body, MaximumBody), ActivationData = pending.SessionId ?? string.Empty };
+        return NotificationOf(id, [pending], sessionTitle);
+    }
+
+    /// <summary>The notification of the secrets one use waits for, such as all those the shell of a session that starts asks for; never a value.</summary>
+    /// <param name="id">The identity of the notification.</param>
+    /// <param name="pending">The secrets of that use that wait: at least one.</param>
+    /// <param name="sessionTitle">The title of the session whose shell asks; null when it is not known.</param>
+    /// <returns>The notification.</returns>
+    /// <exception cref="ArgumentException"><paramref name="pending"/> is empty.</exception>
+    internal static NeoNotificationRequest NotificationOf(string id, IReadOnlyList<PendingUseView> pending, string? sessionTitle)
+    {
+        ArgumentNullException.ThrowIfNull(pending);
+        if (pending.Count == 0) throw new ArgumentException("No use waits.", nameof(pending));
+        var first = pending[0];
+        var several = pending.Count > 1;
+        var title = several ? $"Use {pending.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} secrets?" : $"Use the secret {first.Name}?";
+        var body = several
+            ? $"{Capitalized(WhoAsks(first.Use, sessionTitle))} asks for {string.Join(", ", pending.Select(static use => use.Name))}. Open CodeAlta to confirm or deny."
+            : $"{Capitalized(WhoAsks(first.Use, sessionTitle))} asks for it. Open CodeAlta to confirm or deny.";
+        return new NeoNotificationRequest { Id = id, Title = Cut(title, MaximumTitle), Body = Cut(body, MaximumBody), ActivationData = first.SessionId ?? string.Empty };
     }
 
     /// <summary>Reads the uses that wait, tells the user of the new ones while the application is in the background, and removes the notifications of those that no longer wait.</summary>
@@ -101,8 +119,9 @@ internal sealed class DesktopSecretPrompts : IDisposable
             var current = prompted.Select(static pending => (pending.Name.ToUpperInvariant(), pending.Use)).ToHashSet();
             foreach (var gone in _told.Keys.Where(key => !current.Contains(key)).ToArray())
             {
-                if (_told[gone] is { } id) await Try(token => _surface.RemoveNotificationAsync(id, token), cancellationToken).ConfigureAwait(false);
-                _told.Remove(gone);
+                // A notification names the secrets one use waits for: it goes with the last of them.
+                if (_told.Remove(gone, out var id) && id is not null && !_told.ContainsValue(id))
+                    await Try(token => _surface.RemoveNotificationAsync(id, token), cancellationToken).ConfigureAwait(false);
             }
 
             var fresh = prompted.Where(pending => !_told.ContainsKey((pending.Name.ToUpperInvariant(), pending.Use))).ToArray();
@@ -111,17 +130,19 @@ internal sealed class DesktopSecretPrompts : IDisposable
             // The window shows its prompt: a user in front of it needs nothing more.
             var background = !_surface.IsForeground && mode != DesktopTurnAlertMode.Off;
             var titles = background ? _surface.ReadSessions().ToDictionary(static session => session.SessionId, static session => session.Title, StringComparer.OrdinalIgnoreCase) : null;
-            foreach (var pending in fresh)
+            // One notification for what one use asks for: the shell of a session that starts names all its secrets at once.
+            foreach (var asked in fresh.GroupBy(static pending => pending.Use, StringComparer.Ordinal))
             {
+                var uses = asked.ToArray();
                 string? id = null;
                 if (background && mode == DesktopTurnAlertMode.All)
                 {
                     id = NotificationPrefix + (++_next).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    var title = pending.SessionId is { } session ? titles!.GetValueOrDefault(session) : null;
-                    if (await Try(token => _surface.NotifyAsync(NotificationOf(id, pending, title), token), cancellationToken).ConfigureAwait(false) != NeoDesktopStatus.Success) id = null;
+                    var title = uses[0].SessionId is { } session ? titles!.GetValueOrDefault(session) : null;
+                    if (await Try(token => _surface.NotifyAsync(NotificationOf(id, uses, title), token), cancellationToken).ConfigureAwait(false) != NeoDesktopStatus.Success) id = null;
                 }
 
-                _told[(pending.Name.ToUpperInvariant(), pending.Use)] = id;
+                foreach (var pending in uses) _told[(pending.Name.ToUpperInvariant(), pending.Use)] = id;
             }
 
             if (background) await Try(_surface.RequestAttentionAsync, cancellationToken).ConfigureAwait(false);

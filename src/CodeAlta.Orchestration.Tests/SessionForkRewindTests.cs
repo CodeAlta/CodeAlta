@@ -541,7 +541,7 @@ public sealed class SessionForkRewindTests
         var identity = await host.RuntimeService.GetSessionIdentityAsync(session.SessionId);
         Assert.IsNull(identity.Environment.Get("DEPLOY_TOKEN"), "nothing is given without a confirmation");
         StringAssert.Contains(identity.SecretProblems.Single(), "the session was stopped before its use was confirmed");
-        Assert.IsNull(host.Credentials!.ListPending().Single(pending => pending.Use == use).AwaitedUntil, "nothing waits for the answer any more");
+        Assert.IsFalse(host.Credentials!.ListPending().Any(pending => pending.Use == use), "a session that was stopped leaves no use waiting");
         Assert.IsFalse(provider.Requests.Any(request => request.Environment?.Get("DEPLOY_TOKEN") is not null));
     }
 
@@ -566,8 +566,100 @@ public sealed class SessionForkRewindTests
         // The abort waits for the preparation, which no longer waits for the user.
         await abort.Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
         await send.Receipt.Completion.WithinAsync(TestTime.Seconds(30));
-        Assert.IsNull(host.Credentials!.ListPending().Single(pending => pending.Use == use).AwaitedUntil);
+        Assert.IsFalse(host.Credentials!.ListPending().Any(pending => pending.Use == use), "a send that was stopped leaves no use waiting");
         Assert.IsFalse(provider.Requests.Any(request => request.Environment?.Get("DEPLOY_TOKEN") is not null), "nothing is given without a confirmation");
+    }
+
+    [TestMethod]
+    public async Task ASessionAnAutomationStarted_StartsAtOnce_WithoutASecretThatAsksBeforeUse_AndSoDoesWhatItStarts()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider);
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Nightly", null,
+            new AltaActorProvenance { Kind = AltaActorProvenance.AutomationKind, AutomationId = "nightly" }, null, "business", CancellationToken.None);
+        await GiveTheSecretAsync(host, session.SessionId);
+
+        // The wait for the user lasts 2 minutes: nobody is in front of a run of an automation, so nobody is asked.
+        await SendAsync(host, session, options, "one").WithinAsync(TestTime.Seconds(30));
+
+        var identity = await host.RuntimeService.GetSessionIdentityAsync(session.SessionId);
+        Assert.IsNull(identity.Environment.Get("DEPLOY_TOKEN"));
+        StringAssert.Contains(identity.SecretProblems.Single(), "nobody is asked for a session that an automation started");
+        Assert.IsEmpty(host.Credentials!.ListPending(), "no use waits for a user who is not there");
+
+        // A session it starts is not attended either.
+        var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Part", session.SessionId, null, null, "business", CancellationToken.None);
+        await SendAsync(host, child, options, "one").WithinAsync(TestTime.Seconds(30));
+        Assert.IsEmpty(host.Credentials!.ListPending());
+        Assert.IsFalse(provider.Requests.Any(request => request.Environment?.Get("DEPLOY_TOKEN") is not null), "nothing is given without a confirmation");
+    }
+
+    [TestMethod]
+    public async Task ASessionAnotherSessionStarted_TakesTheSecretThatSessionWasGiven_AndTheUserIsNotAskedAgain()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        var verifier = new AvailableVerifier { Answer = CodeAlta.Credentials.UserPresenceResult.Verified };
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider, verifier);
+        var options = Options(temp, provider);
+        var parent = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Deploy", null, null, null, "business", CancellationToken.None);
+        var use = $"shell of the session {parent.SessionId}";
+        await GiveTheSecretAsync(host, parent.SessionId);
+        var sending = Task.Run(() => SendAsync(host, parent, options, "one"));
+        await AwaitedAsync(host, use);
+        Assert.AreEqual(CodeAlta.Credentials.UserPresenceResult.Verified, await host.Credentials!.ConfirmAsync("DEPLOY", use));
+        await sending.WithinAsync(TestTime.Seconds(30));
+        Assert.AreEqual("local-deploy-value-1", provider.Requests.Last(request => request.SessionId == parent.SessionId).Environment!.Get("DEPLOY_TOKEN"));
+
+        // The session the first one creates, as the host records who created it.
+        var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Part", parent.SessionId,
+            new AltaActorProvenance { Kind = "agent", SourceSessionId = parent.SessionId }, null, "business", CancellationToken.None);
+        await SendAsync(host, child, options, "one").WithinAsync(TestTime.Seconds(30));
+
+        Assert.AreEqual("local-deploy-value-1", provider.Requests.Last(request => request.SessionId == child.SessionId).Environment!.Get("DEPLOY_TOKEN"),
+            "the session that started it has the secret");
+        Assert.AreEqual(1, Volatile.Read(ref verifier.Asked), "the user was verified once, for the first session");
+        Assert.IsEmpty(host.Credentials.ListPending());
+    }
+
+    [TestMethod]
+    public async Task ASessionThatNamesAParentItWasNotCreatedBy_DoesNotTakeTheSecretOfThatParent()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        var verifier = new AvailableVerifier { Answer = CodeAlta.Credentials.UserPresenceResult.Verified };
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider, verifier);
+        var options = Options(temp, provider);
+        var holder = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Deploy", null, null, null, "business", CancellationToken.None);
+        var other = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Other", null, null, null, null, CancellationToken.None);
+        await GiveTheSecretAsync(host, holder.SessionId);
+        var sending = Task.Run(() => SendAsync(host, holder, options, "one"));
+        await AwaitedAsync(host, $"shell of the session {holder.SessionId}");
+        Assert.AreEqual(CodeAlta.Credentials.UserPresenceResult.Verified, await host.Credentials!.ConfirmAsync("DEPLOY", $"shell of the session {holder.SessionId}"));
+        await sending.WithinAsync(TestTime.Seconds(30));
+
+        // An agent chooses the parent of the session it creates: naming a session that has the secret gives nothing.
+        // It attaches as it is created: the user is asked, as for any session.
+        var creating = Task.Run(() => host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Claim", holder.SessionId,
+            new AltaActorProvenance { Kind = "agent", SourceSessionId = other.SessionId }, null, "business", CancellationToken.None));
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(30);
+        CodeAlta.Credentials.PendingSecretUse? asked;
+        while ((asked = host.Credentials.ListPending().FirstOrDefault(static pending => pending.AwaitedUntil is not null)) is null)
+        {
+            Assert.IsFalse(creating.IsCompleted, "the session started without asking the user");
+            Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The session that names a parent did not ask for the secret.");
+            await Task.Delay(10);
+        }
+
+        Assert.AreNotEqual($"shell of the session {holder.SessionId}", asked.Use);
+        host.Credentials.Decline("DEPLOY", asked.Use);
+        var claiming = await creating.WithinAsync(TestTime.Seconds(30));
+        Assert.AreEqual($"shell of the session {claiming.SessionId}", asked.Use);
+        await SendAsync(host, claiming, options, "one").WithinAsync(TestTime.Seconds(30));
+
+        Assert.IsNull(provider.Requests.Last(request => request.SessionId == claiming.SessionId).Environment!.Get("DEPLOY_TOKEN"), "the user is asked, and denied it");
     }
 
     [TestMethod]
@@ -736,7 +828,10 @@ public sealed class SessionForkRewindTests
     };
 
     // A host of CodeAlta Desktop whose space gives its sessions the secret DEPLOY, which asks before use.
-    private static async Task<CodeAltaHost> CreateHostWithAskingSecretAsync(TempDirectory temp, RecordingProvider provider)
+    private static Task<CodeAltaHost> CreateHostWithAskingSecretAsync(TempDirectory temp, RecordingProvider provider)
+        => CreateHostWithAskingSecretAsync(temp, provider, new AvailableVerifier());
+
+    private static async Task<CodeAltaHost> CreateHostWithAskingSecretAsync(TempDirectory temp, RecordingProvider provider, AvailableVerifier verifier)
     {
         var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(temp.GlobalRoot);
         store.SetSecret("DEPLOY", "local-deploy-value-1", "alice");
@@ -751,7 +846,7 @@ public sealed class SessionForkRewindTests
                 StartPlugins = false,
                 AppliesSpaceIdentities = true,
                 CredentialPrompts = true,
-                UserPresenceVerifier = new AvailableVerifier(),
+                UserPresenceVerifier = verifier,
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             },
             CancellationToken.None);
@@ -818,8 +913,15 @@ public sealed class SessionForkRewindTests
         public ValueTask<CodeAlta.Credentials.UserPresenceAvailability> GetAvailabilityAsync(CancellationToken cancellationToken)
             => ValueTask.FromResult(new CodeAlta.Credentials.UserPresenceAvailability(true, null));
 
+        public CodeAlta.Credentials.UserPresenceResult Answer { get; init; } = CodeAlta.Credentials.UserPresenceResult.Canceled;
+
+        public int Asked;
+
         public ValueTask<CodeAlta.Credentials.UserPresenceResult> VerifyAsync(string message, CancellationToken cancellationToken)
-            => ValueTask.FromResult(CodeAlta.Credentials.UserPresenceResult.Canceled);
+        {
+            Interlocked.Increment(ref Asked);
+            return ValueTask.FromResult(Answer);
+        }
     }
 
     // Answers every prompt and keeps the requests it was sent.

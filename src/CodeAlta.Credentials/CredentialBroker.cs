@@ -726,46 +726,134 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     /// <param name="use">What will use it; null for a use nobody names.</param>
     /// <param name="cancellationToken">A token to stop.</param>
     /// <returns>What the verification ended with.</returns>
-    public async Task<UserPresenceResult> ConfirmAsync(string name, string? use, CancellationToken cancellationToken = default)
+    public Task<UserPresenceResult> ConfirmAsync(string name, string? use, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
+        return ConfirmAsync([name], use, cancellationToken);
+    }
+
+    /// <summary>
+    /// Confirms one use of several secrets that ask before use with one verification of the user
+    /// (<see cref="ConfirmAsync(string, string?, CancellationToken)"/>): what the shell of a session that starts asks for at once. Each
+    /// confirmation lasts as long as its secret says. A secret whose use was denied or stopped waiting while the system verified the
+    /// user is left out; when that leaves none, the verification ends <see cref="UserPresenceResult.Canceled"/>.
+    /// </summary>
+    /// <param name="names">The secrets.</param>
+    /// <param name="use">What will use them; null for a use nobody names.</param>
+    /// <param name="cancellationToken">A token to stop.</param>
+    /// <returns>What the verification ended with.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="names"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="names"/> names no secret.</exception>
+    public async Task<UserPresenceResult> ConfirmAsync(IReadOnlyCollection<string> names, string? use, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        var asked = names.Where(static name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (asked.Length == 0) throw new ArgumentException("No secret is named.", nameof(names));
         if (_options.Verifier is not { } verifier || !CanPrompt) return UserPresenceResult.Unavailable;
-        var duration = SafeAskBeforeUse(name) ?? SecretAskDurations.FifteenMinutes;
-        var key = KeyOf(name, use);
-        (long Use, long Uses) refusals;
-        lock (_gate) refusals = RefusalsOf(key);
-        var result = await verifier.VerifyAsync($"Use the secret {name}{(use is null ? string.Empty : $" for the {use}")}?", cancellationToken).ConfigureAwait(false);
-        if (result == UserPresenceResult.Verified)
+        var durations = asked.Select(name => SafeAskBeforeUse(name) ?? SecretAskDurations.FifteenMinutes).ToArray();
+        (long Use, long Uses)[] refusals;
+        lock (_gate) refusals = [.. asked.Select(name => RefusalsOf(KeyOf(name, use)))];
+        var what = asked.Length == 1 ? $"the secret {asked[0]}" : $"the secrets {string.Join(", ", asked[..^1])} and {asked[^1]}";
+        var result = await verifier.VerifyAsync($"Use {what}{(use is null ? string.Empty : $" for the {use}")}?", cancellationToken).ConfigureAwait(false);
+        if (result != UserPresenceResult.Verified) return result;
+        var now = _options.Time.GetUtcNow();
+        List<string> confirmed = [];
+        List<ConfirmationWaiter> told = [];
+        lock (_gate)
         {
-            var now = _options.Time.GetUtcNow();
-            List<ConfirmationWaiter>? waiters;
-            lock (_gate)
+            for (var index = 0; index < asked.Length; index++)
             {
+                var name = asked[index];
+                var key = KeyOf(name, use);
                 // The use was denied, or stopped waiting, while the system verified the user: that answer stands, and this verification
-                // gives nothing. The user confirms again a use that asks again.
-                if (RefusalsOf(key) != refusals) return UserPresenceResult.Canceled;
-                var time = SecretAskDurations.TimeOf(duration);
-                _grants[KeyOf(name, use)] = time is null ? null : time == TimeSpan.Zero ? DateTimeOffset.MinValue : now + time.Value;
+                // gives nothing for it. The user confirms again a use that asks again.
+                if (RefusalsOf(key) != refusals[index]) continue;
+                var time = SecretAskDurations.TimeOf(durations[index]);
+                _grants[key] = time is null ? null : time == TimeSpan.Zero ? DateTimeOffset.MinValue : now + time.Value;
                 _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
                 Record(name, use, "confirmed");
-                _waiters.Remove(KeyOf(name, use), out waiters);
+                if (_waiters.Remove(key, out var waiters)) told.AddRange(waiters);
+                confirmed.Add(name);
             }
-
-            // Told after the confirmation is kept: what waited reads the secret at once.
-            foreach (var waiter in waiters ?? []) waiter.Outcome.TrySetResult(SecretConfirmationOutcome.Confirmed);
-            Raise([name], always: true);
-            RaisePending();
         }
 
+        if (confirmed.Count == 0) return UserPresenceResult.Canceled;
+        // Told after the confirmations are kept: what waited reads the secrets at once.
+        foreach (var waiter in told) waiter.Outcome.TrySetResult(SecretConfirmationOutcome.Confirmed);
+        Raise(confirmed, always: true);
+        RaisePending();
         return result;
     }
 
     /// <summary>
+    /// Lets a use take a secret that asks before use once, without asking the user: what was given the secret under a confirmation
+    /// of the user started that use, such as a session started by a session whose shell has the secret. A confirmation the use
+    /// already has is kept. Only a host calls it, for a use it knows comes from a confirmed one.
+    /// </summary>
+    /// <param name="name">The secret.</param>
+    /// <param name="use">The use that takes it; null for a use nobody names.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    public void AllowOnce(string name, string? use)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        lock (_gate)
+        {
+            var key = KeyOf(name, use);
+            if (!HasGrant(key)) _grants[key] = DateTimeOffset.MinValue;
+        }
+    }
+
+    /// <summary>
+    /// Ends the wait of a use that nothing takes any more (<see cref="ListPending"/>): what asked went on without the secret. It is
+    /// recorded <c>expired</c>, and a verification of the user that runs meanwhile gives nothing for it.
+    /// </summary>
+    /// <param name="name">The secret.</param>
+    /// <param name="use">The use; null for a use nobody names.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    public void Expire(string name, string? use)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        List<ConfirmationWaiter>? waiters;
+        lock (_gate)
+        {
+            if (!IsPendingUse(name, use)) return;
+            var key = KeyOf(name, use);
+            StopWaitingFor(name, use, key);
+            _waiters.Remove(key, out waiters);
+        }
+
+        foreach (var waiter in waiters ?? []) waiter.Outcome.TrySetResult(SecretConfirmationOutcome.TimedOut);
+        RaisePending();
+    }
+
+    /// <summary>Tells whether a secret asks before use.</summary>
+    /// <param name="name">The secret.</param>
+    /// <returns>True when its use needs a confirmation of the user.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    public bool AsksBeforeUse(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return SafeAskBeforeUse(name) is not null;
+    }
+
+    /// <summary>
+    /// Gets these secrets as they are given without asking the user: a secret that asks before use is given only for a use whose
+    /// confirmation still lasts. A use that is not confirmed is left out: it does not wait for the user (<see cref="ListPending"/>),
+    /// and a confirmation of one use is not taken. What nobody is in front of reads through it, and what only shows an environment.
+    /// </summary>
+    /// <param name="recorded">
+    /// Whether a use left out is recorded in the recent uses (<c>unavailable</c>): true when a program starts without the secret,
+    /// false for a read that starts none.
+    /// </param>
+    /// <returns>The secrets.</returns>
+    public IBoundSecretSource WithoutAsking(bool recorded) => new UnaskedSecrets(this, recorded ? Asking.NobodyRecorded : Asking.Nobody);
+
+    /// <summary>
     /// Waits for the user's answer to a use of a secret that asks before use (<see cref="ListPending"/>), for a bounded time: the user
-    /// confirms it (<see cref="ConfirmAsync"/>, which the system verifies first) or denies it (<see cref="Decline"/>). The window shows
+    /// confirms it (<see cref="ConfirmAsync(string, string?, CancellationToken)"/>, which the system verifies first) or denies it (<see cref="Decline"/>). The window shows
     /// the use as awaited (<see cref="PendingSecretUse.AwaitedUntil"/>) while it waits. Nothing is given here: once confirmed, the use
     /// reads the secret again, as it would have, within the time its confirmation lasts. When nothing waits for the use any more at
-    /// the end of the time, the use stops waiting (recorded <c>expired</c>).
+    /// the end of the time, or once what waited was stopped, the use stops waiting (recorded <c>expired</c>).
     /// </summary>
     /// <param name="name">The secret.</param>
     /// <param name="use">The use, as it was asked for; null for a use nobody names.</param>
@@ -809,12 +897,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                 // The answer came as the time ended.
                 if (waiter.Outcome.Task.IsCompletedSuccessfully) return waiter.Outcome.Task.Result;
                 // The last that waited stops: nothing would take the confirmation now, so the use stops waiting.
-                if (Forget(key, waiter))
-                {
-                    _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
-                    Record(name, use, "expired");
-                    Refuse(key);
-                }
+                if (Forget(key, waiter)) StopWaitingFor(name, use, key);
             }
 
             RaisePending();
@@ -822,7 +905,13 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
         catch (OperationCanceledException)
         {
-            lock (_gate) Forget(key, waiter);
+            lock (_gate)
+            {
+                // The last that waited was stopped before an answer: nothing would take the confirmation now, so the use stops
+                // waiting, as one not answered in time.
+                if (Forget(key, waiter) && !waiter.Outcome.Task.IsCompletedSuccessfully) StopWaitingFor(name, use, key);
+            }
+
             RaisePending();
             throw;
         }
@@ -866,7 +955,12 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     }
 
     /// <inheritdoc />
-    public BoundSecretRead ReadBound(string name, string? use)
+    public BoundSecretRead ReadBound(string name, string? use) => ReadBound(name, use, Asking.User);
+
+    /// <inheritdoc />
+    public string? AuthorizeUse(string name, string? use) => AuthorizeUse(name, use, Asking.User);
+
+    private BoundSecretRead ReadBound(string name, string? use, Asking asking)
     {
         ArgumentNullException.ThrowIfNull(name);
         if (!_store.Bindings.TryGet(name, out var binding))
@@ -876,24 +970,23 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             if (Fresh(binding) is not { } held)
             {
                 var availability = GetAvailabilityUnlocked(binding);
-                Record(binding.Name, use, "unavailable");
+                if (asking != Asking.Nobody) Record(binding.Name, use, "unavailable");
                 return BoundSecretRead.Unavailable(availability.Message ?? $"{binding.Name} cannot be read from its vault now.");
             }
 
-            if (SafeAskBeforeUse(binding.Name) is not null && Authorize(binding.Name, use) is { } waits) return BoundSecretRead.Unavailable(waits);
+            if (SafeAskBeforeUse(binding.Name) is not null && Authorize(binding.Name, use, asking) is { } waits) return BoundSecretRead.Unconfirmed(waits);
             Record(binding.Name, use, "given");
             return BoundSecretRead.Of(held.Value);
         }
     }
 
-    /// <inheritdoc />
-    public string? AuthorizeUse(string name, string? use)
+    private string? AuthorizeUse(string name, string? use, Asking asking)
     {
         ArgumentNullException.ThrowIfNull(name);
         string? problem;
         lock (_gate)
         {
-            problem = Authorize(name, use);
+            problem = Authorize(name, use, asking);
             if (problem is null) Record(name, use, "given");
         }
 
@@ -922,21 +1015,33 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     }
 
     // Under the gate: whether a use of a secret that asks before use is confirmed. A use that is not waits, and is recorded.
-    private string? Authorize(string name, string? use)
+    private string? Authorize(string name, string? use, Asking asking)
     {
         var key = KeyOf(name, use);
         var now = _options.Time.GetUtcNow();
         if (_grants.TryGetValue(key, out var until))
         {
             if (until is null || until > now) return null;
-            // A confirmation of each use is used once.
+            // A confirmation of each use is used once, by a read the user is asked for: a read that asks nobody leaves it.
             if (until == DateTimeOffset.MinValue)
             {
-                _grants.Remove(key);
-                return null;
+                if (asking == Asking.User)
+                {
+                    _grants.Remove(key);
+                    return null;
+                }
             }
+            else
+            {
+                _grants.Remove(key);
+            }
+        }
 
-            _grants.Remove(key);
+        if (asking != Asking.User)
+        {
+            // Nobody is asked: the use neither waits for the user nor is shown to them.
+            if (asking == Asking.NobodyRecorded) Record(name, use, "unavailable");
+            return $"{name} asks before use, and its use{(use is null ? string.Empty : $" for the {use}")} is not confirmed.";
         }
 
         var known = _pending.Any(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
@@ -978,6 +1083,14 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
     // Under the gate: a use was denied or stopped waiting.
     private void Refuse((string Name, string Use) key) => _refusals[key] = _refusals.GetValueOrDefault(key) + 1;
+
+    // Under the gate: a use stops waiting for the user, since nothing would take its confirmation now.
+    private void StopWaitingFor(string name, string? use, (string Name, string Use) key)
+    {
+        _pending.RemoveAll(pending => string.Equals(pending.Name, name, StringComparison.OrdinalIgnoreCase) && pending.Use == use);
+        Record(name, use, "expired");
+        Refuse(key);
+    }
 
     // Under the gate: one waiter stops waiting; true when nothing waits for that use any more.
     private bool Forget((string Name, string Use) key, ConfirmationWaiter waiter)
@@ -1549,6 +1662,22 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             _options.Logger?.Warn($"A listener of the credentials failed: {exception.Message}");
         }
+    }
+
+    // Who a read of a secret that asks before use asks: the user, or nobody, with or without a record of the use left out.
+    private enum Asking
+    {
+        User,
+        NobodyRecorded,
+        Nobody,
+    }
+
+    // The secrets as they are given without asking the user (WithoutAsking).
+    private sealed class UnaskedSecrets(CredentialBroker broker, Asking asking) : IBoundSecretSource
+    {
+        public BoundSecretRead ReadBound(string name, string? use) => broker.ReadBound(name, use, asking);
+
+        public string? AuthorizeUse(string name, string? use) => broker.AuthorizeUse(name, use, asking);
     }
 
     // Something that waits for the answer of the user to a use, until a time.

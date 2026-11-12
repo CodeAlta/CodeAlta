@@ -76,7 +76,7 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
     {!listing ? <SettingsUnavailable loading={loading} icon="secret" title="Secrets unavailable" />
       : <>
         {listing.pending.length > 0 && <PendingUses listing={listing} busy={busy}
-          onConfirm={(name, use) => run(() => api.confirmUse({ expectedEpoch, name, use }))} onDecline={(name, use) => run(() => api.declineUse({ expectedEpoch, name, use }))} />}
+          onConfirm={(name, use) => run(() => api.confirmUse({ expectedEpoch, name, use, names: null }))} onDecline={(name, use) => run(() => api.declineUse({ expectedEpoch, name, use, names: null }))} />}
         <SecretsBody listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} vaults={vaults}
           secretActions={<>
             {vaults && <Button size="small" icon={<CredentialIcon icon={listing.providers[0]?.icon ?? "secret"} size={14} />} disabled={!epoch || busy}

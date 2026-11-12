@@ -31,25 +31,61 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
     /// empty when nothing is missing.
     /// </summary>
     public IReadOnlyList<string> SecretProblems { get; init; } = [];
+
+    /// <summary>
+    /// Gets what each secret that asks before use ended with when the session attached, by the name of the secret, whatever its
+    /// case: true when the processes of the session were given it, false when they started without it. A session this one starts
+    /// takes these answers instead of asking the user again (<see cref="SessionSecretAttachment.Inherited"/>). Empty when the
+    /// environment of the session names no such secret.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> SecretAnswers { get; init; } = System.Collections.Frozen.FrozenDictionary<string, bool>.Empty;
 }
 
-/// <summary>A secret that asks before use whose confirmation the shell of a session waited for.</summary>
-/// <param name="Name">The secret.</param>
-/// <param name="Confirmed">Whether the user confirmed its use.</param>
-/// <param name="Problem">What the session is told when it was not confirmed, naming the secret; null when it was.</param>
-public sealed record SessionSecretConfirmation(string Name, bool Confirmed, string? Problem);
+/// <summary>How a session attaches, for the secrets that ask before use that its environment names.</summary>
+/// <param name="Unattended">
+/// Whether nobody is in front of the session, such as a run of an automation and the sessions it starts: nobody is asked, and a
+/// secret whose use is not confirmed is left out at once.
+/// </param>
+/// <param name="Inherited">
+/// What the session that created this one was answered (<see cref="SessionIdentity.SecretAnswers"/>): this one is given the secrets
+/// that one was given, and starts without the others, without asking the user again. Null when no session created it, or when
+/// that session is not attached. A secret it does not name is asked for as for any session. Whoever gives it answers for the
+/// session these answers come from: it has the secrets they give, so it must be the session the host recorded as the creator,
+/// never a parent the new session only names.
+/// </param>
+public sealed record SessionSecretAttachment(bool Unattended, IReadOnlyDictionary<string, bool>? Inherited)
+{
+    /// <summary>Gets the attachment of a session the user is in front of, that no session started.</summary>
+    public static SessionSecretAttachment Attended { get; } = new(false, null);
+}
+
+/// <summary>What the secrets that ask before use ended with for a session that attached.</summary>
+/// <param name="Answers">Each secret by its name: true when it was given (<see cref="SessionIdentity.SecretAnswers"/>).</param>
+/// <param name="Problems">A sentence for each secret the session starts without, naming it (<see cref="SessionIdentity.SecretProblems"/>).</param>
+public sealed record SessionSecretOutcome(IReadOnlyDictionary<string, bool> Answers, IReadOnlyList<string> Problems);
 
 /// <summary>
-/// Waits, when a session attaches, for the user to confirm the uses its shell asked for the secrets that ask before use: the host
-/// shows each of them to the user, who confirms or denies it.
+/// Decides, when a session attaches, what its shell gets of the secrets that ask before use: the host shows the user the uses
+/// that wait, who confirms or denies them; nobody is asked for a session nobody is in front of, and a session another one started
+/// takes the answers of that one.
 /// </summary>
 public interface ISessionSecretConfirmations
 {
+    /// <summary>Starts the attachment of a session, before its environment is built for the first time.</summary>
+    /// <param name="scope">The work of the session, whose run is the session: the instance its environment is built with.</param>
+    /// <param name="attachment">How it attaches.</param>
+    void Begin(SecretScope scope, SessionSecretAttachment attachment);
+
     /// <summary>Waits, for a bounded time, for the answers to the uses that the environment built for a session waits for.</summary>
-    /// <param name="scope">The work of the session, whose run is the session.</param>
-    /// <param name="cancellationToken">A token to stop waiting: the uses not confirmed then are given as not confirmed.</param>
-    /// <returns>The secrets it waited for, with their outcome; empty when none waits.</returns>
-    Task<IReadOnlyList<SessionSecretConfirmation>> WaitAsync(SecretScope scope, CancellationToken cancellationToken);
+    /// <param name="scope">The work of the session, as given to <see cref="Begin"/>.</param>
+    /// <param name="cancellationToken">A token to stop waiting: the uses not confirmed then are left out.</param>
+    /// <returns>True when the user confirmed a use: the environment is built again, for the secrets confirmed.</returns>
+    Task<bool> WaitAsync(SecretScope scope, CancellationToken cancellationToken);
+
+    /// <summary>Ends the attachment, once the environment is built for the last time.</summary>
+    /// <param name="scope">The work of the session, as given to <see cref="Begin"/>.</param>
+    /// <returns>What each secret that asks before use ended with, and what the session is told.</returns>
+    SessionSecretOutcome End(SecretScope scope);
 }
 
 /// <summary>
@@ -112,8 +148,9 @@ public sealed class SessionIdentityResolver
     public Action<string, string>? InheritWork { get; set; }
 
     /// <summary>
-    /// Gets or sets what waits for the confirmations of the secrets that ask before use, which the environment of a session that
-    /// attaches waits for (<see cref="ResolveForAttachmentAsync"/>); null waits for none, and those secrets are left out.
+    /// Gets or sets what decides what the shell of a session that attaches gets of the secrets that ask before use
+    /// (<see cref="ResolveForAttachmentAsync(string?, string?, string, string?, SessionSecretAttachment, CancellationToken, CancellationToken)"/>);
+    /// null waits for none, and those secrets are left out.
     /// </summary>
     public ISessionSecretConfirmations? Confirmations { get; set; }
 
@@ -170,7 +207,8 @@ public sealed class SessionIdentityResolver
     /// when its environment waits for the confirmation of a secret that asks before use, it waits for the user's answer
     /// (<see cref="Confirmations"/>), then builds the environment again with the secrets the user confirmed. A secret denied or not
     /// confirmed in time is left out, and named in <see cref="SessionIdentity.SecretProblems"/>. Both builds are given the same
-    /// <see cref="SecretScope"/> instance, so that the builder can keep for the second what the first read.
+    /// <see cref="SecretScope"/> instance, so that the builder can keep for the second what the first read. An identity resolved
+    /// without attaching (<see cref="ResolveAsync(string?, string?, string?, string?, CancellationToken)"/>) asks the user nothing.
     /// </summary>
     /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
     /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
@@ -198,24 +236,48 @@ public sealed class SessionIdentityResolver
     /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    public async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+    public Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
         CancellationToken stopWaiting, CancellationToken cancellationToken)
+        => ResolveForAttachmentAsync(recordedSpaceId, projectId, sessionId, parentSessionId, SessionSecretAttachment.Attended, stopWaiting, cancellationToken);
+
+    /// <summary>
+    /// Gives the identity a session attaches with (<see cref="ResolveForAttachmentAsync(string?, string?, string, string?, CancellationToken, CancellationToken)"/>),
+    /// for a session nobody is in front of, or one another session started: nobody is asked for the first, which starts at once
+    /// without the secrets whose use is not confirmed, and the second takes the answers of the session that started it. What each
+    /// secret ended with is in <see cref="SessionIdentity.SecretAnswers"/>, for the sessions this one starts.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="sessionId">The session, the run its uses of values are recorded for.</param>
+    /// <param name="parentSessionId">The session that started it; null for none.</param>
+    /// <param name="attachment">How it attaches, for the secrets that ask before use.</param>
+    /// <param name="stopWaiting">Ends the wait for the confirmations, not the resolution.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="attachment"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+        SessionSecretAttachment attachment, CancellationToken stopWaiting, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(attachment);
         if (await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false) is not { } read) return SessionIdentity.Usual;
+        if (Confirmations is not { } confirmations) return Of(read.Space, read.Profiles, read.Scope);
+        // Told before the first build: it decides which secrets the user is asked for.
+        confirmations.Begin(read.Scope, attachment);
         var identity = Of(read.Space, read.Profiles, read.Scope);
-        if (identity.Identity is null || Confirmations is not { } confirmations) return identity;
-        IReadOnlyList<SessionSecretConfirmation> waited;
+        if (identity.Identity is null) return identity;
+        bool confirmed;
         using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopWaiting))
-            waited = await confirmations.WaitAsync(read.Scope, waiting.Token).ConfigureAwait(false);
+            confirmed = await confirmations.WaitAsync(read.Scope, waiting.Token).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        if (waited.Count == 0) return identity;
         // Built again for the secrets the user confirmed: nothing was given for them before.
-        if (waited.Any(static confirmation => confirmation.Confirmed)) identity = Of(read.Space, read.Profiles, read.Scope);
-        return identity with
-        {
-            SecretProblems = [.. waited.Where(static confirmation => !confirmation.Confirmed).Select(static confirmation => confirmation.Problem ?? $"{confirmation.Name} was not given.")],
-        };
+        if (confirmed) identity = Of(read.Space, read.Profiles, read.Scope);
+        var outcome = confirmations.End(read.Scope);
+        return outcome.Answers.Count == 0 && outcome.Problems.Count == 0
+            ? identity
+            : identity with { SecretProblems = outcome.Problems, SecretAnswers = outcome.Answers };
     }
 
     // The space, the profiles of the project and the scope of a session; null when the catalog cannot be read.
