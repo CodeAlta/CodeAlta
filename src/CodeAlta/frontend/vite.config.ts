@@ -8,6 +8,7 @@ import { appModuleFile, appModules } from "./src/lent/appModules";
 import { importMapText, lentLibraries } from "./src/lent/libraries";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
 import { workletFile } from "./src/speech/workletFile";
+import { chartWorkerFile } from "./src/vegaLite/chartWorkerFile";
 
 // Blueprint's stylesheet reaches the bundle with its palette literals turned into palette variables, so a
 // color scheme (src/colorSchemes.ts) restyles every Blueprint component by redefining those variables.
@@ -73,6 +74,23 @@ const speechWorklet = (): Plugin => {
   };
 };
 
+// The worker that draws the charts of `vega-lite` blocks (src/vegaLite) is an entry of the build of its own, at the address the page
+// starts it by: Vega and Vega-Lite load with the first chart, never with the page.
+const chartWorker = (): Plugin => {
+  const entry = fileURLToPath(new URL("./src/vegaLite/vegaLite.worker.ts", import.meta.url));
+  return {
+    name: "codealta:chart-worker",
+    buildStart() { this.emitFile({ type: "chunk", id: entry, fileName: chartWorkerFile }); },
+    // The development server has no bundle: the same address is the module of the source.
+    configureServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        if (request.url?.split("?", 1)[0] === `/${chartWorkerFile}`) request.url = "/src/vegaLite/vegaLite.worker.ts";
+        next();
+      });
+    },
+  };
+};
+
 // The libraries lent to plugins (src/lent) are entries of the build of their own, at fixed addresses (lib/<name>.js), that share
 // their code with the application's: a module of a plugin that imports them gets the instances the application runs. Their
 // exports are kept whole (a build of the application alone drops what its entry does not export), so a library is complete and
@@ -112,7 +130,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), lentModules()],
+  plugins: [blueprintPalette(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), chartWorker(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   // The phone page is a second document, built to dist/mobile.html; its files (manifest, icons, service worker, the script
   // that applies its theme before it paints) are in public/mobile and land in dist/mobile.
