@@ -68,6 +68,28 @@ test("a vault item is found by its name in any vault, its hidden field is picked
     }, options);
   });
 
+test("a search at the top of Bitwarden matches the names of its items without opening each one", { skip: !edge, timeout: testLimit(90_000) },
+  async () => {
+    await withCanvas(async page => {
+      await page.until(`document.querySelectorAll(".secret-row").length > 0`, "the secrets");
+      await page.clickText(".secrets-settings button", "Add from a vault…");
+      await page.until(`${ask("#vault-binding-provider")}`, "the choice of the vault");
+      await page.evaluate(`(() => { const select = ${ask("#vault-binding-provider")}; select.value = "vault"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+      await page.until(`[...document.querySelectorAll(".vault-browser-entry")].map(e => e.textContent).join("|") === "GitHublogin|Server notesnote"`, "the items of Bitwarden");
+      await page.click(".vault-browser-search input");
+      await page.type("git");
+      await page.until(`[...document.querySelectorAll(".vault-browser-entry")].map(e => e.textContent).join("|") === "GitHublogin"`, "GitHub found by its name");
+      assert.equal(await page.evaluate(`!!${ask(".vault-browser-reading")}`), false, "nothing is still being searched");
+      assert.deepEqual(await page.evaluate(`window.secretsFixture.browses.filter(call => call.id === "vault" && call.parent !== null).map(call => call.parent)`), [],
+        "no item of Bitwarden is opened by the search");
+
+      // The item still opens onto its fields, and its hidden field is picked.
+      await page.key("Enter", 13);
+      await page.until(`${ask(".vault-browser-picked")}?.textContent === "GitHub › password"`, "the password picked by itself");
+      assert.deepEqual(page.problems, []);
+    }, options);
+  });
+
 test("a picker closed while its vault is still listing aborts the call, so that nothing stays queued for the vault", { skip: !edge, timeout: testLimit(90_000) },
   async () => {
     await withCanvas(async page => {

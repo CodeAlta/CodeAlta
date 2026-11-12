@@ -87,7 +87,7 @@ type Shown = Readonly<{ entry: CredentialEntryView; folder: Step | null }>;
 /**
  * The entries of a vault, opened one level at a time, with a search: inside an item or a folder it filters what is listed; at the
  * top it also looks into each folder (the vaults of 1Password, the groups of KeePassXC), so that an item is found by its name
- * without knowing where it is. A field is picked by a click; the one hidden field of an item is picked when the item opens.
+ * without knowing where it is. Bitwarden lists its items at the top: their names are all a search needs there. A field is picked by a click; the one hidden field of an item is picked when the item opens.
  */
 export function VaultBrowser({ provider, hint, browse, picked, onPick, typed, onType, typedInput = true, autoPick = true, autoFocus = false }: {
   provider: CredentialProviderRpcView; hint: string | null; browse: BrowseVault;
@@ -114,7 +114,10 @@ export function VaultBrowser({ provider, hint, browse, picked, onPick, typed, on
     return () => { alive = false; abort.abort(); };
   }, [provider.id, parent, browse]);
   const searching = query.trim().length > 0;
-  const folders = useMemo(() => parent === null && page?.status === "ok" ? page.entries.filter(entry => entry.kind === "folder") : [], [parent, page]);
+  // A Bitwarden item is a folder of fields: its name is all a search needs, and opening each one costs a call of bw.
+  const searchInside = provider.type !== "bitwarden";
+  const folders = useMemo(() => searchInside && parent === null && page?.status === "ok" ? page.entries.filter(entry => entry.kind === "folder") : [],
+    [searchInside, parent, page]);
   // The folders asked for once, and whether the browser is still shown: a read that ends later is kept only then, and a read
   // still queued when it closes is aborted.
   const asked = useRef(new Set<string>());
