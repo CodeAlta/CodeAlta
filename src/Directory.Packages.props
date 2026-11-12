@@ -13,7 +13,7 @@
     <!-- Reads the enterprise managed settings of Copilot accounts; its runtime is pinned in CopilotPinnedRuntime, bumped with it. -->
     <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.31" />
     <PackageVersion Include="MinVer" Version="8.0.0" />
-    <PackageVersion Include="NeoAstra" Version="1.12.0" />
+    <PackageVersion Include="NeoAstra" Version="1.13.2" />
     <PackageVersion Include="MSTest" Version="4.5.2" />
     <PackageVersion Include="Markdig" Version="1.6.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
