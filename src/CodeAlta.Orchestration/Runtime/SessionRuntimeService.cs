@@ -6837,11 +6837,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         /// <summary>
         /// The queued prompt whose run this event shows started: the first user message while the drain sends it. The send
         /// returns only when the run ends, so the item is marked sent here, and not waiting for as long as its run works.
+        /// A turn the provider started by itself can run before the one of the queued prompt: its message is not the prompt's.
         /// </summary>
         public string? TakeQueueItemStartedBy(AgentEvent @event)
         {
             if (_drainedQueueItemId is not { } queueItemId
-                || @event is not AgentContentCompletedEvent { Kind: AgentContentKind.User, RunId: not null })
+                || @event is not AgentContentCompletedEvent { Kind: AgentContentKind.User, RunId: not null } message
+                || string.Equals(message.Provenance, AgentPromptProvenance.Provider, StringComparison.Ordinal))
             {
                 return null;
             }
