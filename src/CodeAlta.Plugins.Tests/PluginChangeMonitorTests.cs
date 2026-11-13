@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins.Tests;
@@ -13,29 +15,13 @@ public sealed class PluginChangeMonitorTests
         Directory.CreateDirectory(packageDirectory);
         var root = new PluginRoot { RootPath = temp.Path, Scope = PluginScope.Global };
         await using var monitor = new FileSystemPluginChangeMonitor([root], TimeSpan.FromMilliseconds(100));
-        var changes = new List<PluginSourceChange>();
-        using var signal = new ManualResetEventSlim();
-        monitor.Changed += (_, change) =>
-        {
-            lock (changes)
-            {
-                changes.Add(change);
-            }
-
-            signal.Set();
-        };
+        var published = new ConcurrentQueue<PluginSourceChange>();
+        monitor.Changed += (_, change) => published.Enqueue(change);
 
         monitor.Start();
         File.WriteAllText(Path.Combine(packageDirectory, "plugin.cs"), "// changed");
 
-        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
-        PluginSourceChange[] snapshot;
-        lock (changes)
-        {
-            snapshot = [.. changes];
-        }
-
-        Assert.IsTrue(snapshot.Any(change => change.PackageId == "hello"));
+        await PublishedAsync(published, static change => change.PackageId == "hello");
         Assert.IsTrue(monitor.PendingChanges.Any(change => change.PackageId == "hello"));
     }
 
@@ -49,29 +35,41 @@ public sealed class PluginChangeMonitorTests
         File.WriteAllText(source, "// initial");
         var root = new PluginRoot { RootPath = temp.Path, Scope = PluginScope.Global };
         await using var monitor = new FileSystemPluginChangeMonitor([root], TimeSpan.FromMilliseconds(50));
-        using var signal = new ManualResetEventSlim();
-        monitor.Changed += (_, _) => signal.Set();
+        var published = new ConcurrentQueue<PluginSourceChange>();
+        monitor.Changed += (_, change) => published.Enqueue(change);
 
         monitor.Start();
         File.Move(source, Path.Combine(packageDirectory, "plugin2.cs"));
 
-        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
+        await PublishedAsync(published, static change => change.PackageId == "hello");
         Assert.IsTrue(monitor.PendingChanges.Any(change => change.PackageId == "hello"));
         monitor.MarkProcessed("hello");
         Assert.IsFalse(monitor.PendingChanges.Any(change => change.PackageId == "hello"));
-        signal.Reset();
 
         File.WriteAllText(Path.Combine(temp.Path, "Directory.Build.props"), "<Project />");
-        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
+        await PublishedAsync(published, static change => change.Kind == PluginSourceChangeKind.BuildFilesChanged);
         Assert.IsTrue(monitor.PendingChanges.Any(change => change.Kind == PluginSourceChangeKind.BuildFilesChanged));
         monitor.MarkProcessed(null, root);
         Assert.AreEqual(0, monitor.PendingChanges.Count);
-        signal.Reset();
 
         File.WriteAllText(Path.Combine(packageDirectory, "plugin3.cs"), "// changed");
-        Assert.IsTrue(signal.Wait(TestTime.Seconds(5)));
+        await PublishedAsync(published, static change => change.Path?.EndsWith("plugin3.cs", StringComparison.Ordinal) == true);
         monitor.ClearPending();
         Assert.AreEqual(0, monitor.PendingChanges.Count);
+    }
+
+    // Waits for the change a step made. A change in a package is published twice, for the package and for its folder (a
+    // change of the root), in either order: the next change published is not always the one of the file just written.
+    private static async Task PublishedAsync(ConcurrentQueue<PluginSourceChange> published, Func<PluginSourceChange, bool> expected)
+    {
+        var limit = TestTime.Seconds(5);
+        var waited = Stopwatch.StartNew();
+        while (!published.Any(expected))
+        {
+            if (waited.Elapsed > limit)
+                Assert.Fail($"The change was not published in time. Published: {string.Join(", ", published.Select(static change => $"{change.Kind} {change.Path}"))}");
+            await Task.Delay(10);
+        }
     }
 
     [TestMethod]
