@@ -76,4 +76,10 @@ public sealed record NodeHostOptions
 
     /// <summary>Gets the options of the automations, for tests (a clock, the credential kinds); null for the defaults.</summary>
     internal NodeAutomationOptions? Automations { get; init; }
+
+    /// <summary>
+    /// Gets whether the host shows the next prompt a session suggests, as a desktop does, for tests of what the node API
+    /// carries; false, the default, as a node shows none.
+    /// </summary>
+    internal bool ShowsPromptSuggestions { get; init; }
 }

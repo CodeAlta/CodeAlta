@@ -89,11 +89,11 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
     public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
         Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities,
         Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment,
-        Func<ModelProviderDescriptor, bool>? isPersonalProvider, CodeAlta.ModelServers.ModelHost? modelServers = null)
+        Func<ModelProviderDescriptor, bool>? isPersonalProvider, CodeAlta.ModelServers.ModelHost? modelServers = null, bool showsPromptSuggestions = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var provider = new ScriptedFleetProvider();
-        var host = await CreateHostAsync(root, provider, appliesSpaceIdentities, cancellationToken);
+        var host = await CreateHostAsync(root, provider, appliesSpaceIdentities, showsPromptSuggestions, cancellationToken);
         var nodeFleet = Path.Combine(root, "node-fleet");
         var identity = DeviceIdentity.LoadOrCreate(nodeFleet);
         IReadOnlyList<string> addresses = [];
@@ -111,10 +111,13 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         {
             _restart = Service,
             _appliesSpaceIdentities = appliesSpaceIdentities,
+            _showsPromptSuggestions = showsPromptSuggestions,
         };
     }
 
     private bool _appliesSpaceIdentities;
+
+    private bool _showsPromptSuggestions;
 
     /// <summary>
     /// Stops the node API and its host, then starts a fresh host on the same profile and the node API on it, as a node that
@@ -125,7 +128,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         await _listener.DisposeAsync();
         await Service.DisposeAsync();
         await _host.DisposeAsync();
-        _host = await CreateHostAsync(_root, Provider, _appliesSpaceIdentities, cancellationToken);
+        _host = await CreateHostAsync(_root, Provider, _appliesSpaceIdentities, _showsPromptSuggestions, cancellationToken);
         Service = _restart!(_host);
         _listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), Service.ServeAsync);
         Addresses = [FleetDirectConnector.Format(IPAddress.Loopback, _listener.LocalEndPoint.Port)];
@@ -133,6 +136,11 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
 
     /// <summary>Creates a real host on a profile under <paramref name="root"/>, its turns scripted by <paramref name="provider"/>.</summary>
     internal static Task<CodeAltaHost> CreateHostAsync(string root, ScriptedFleetProvider provider, bool appliesSpaceIdentities, CancellationToken cancellationToken)
+        => CreateHostAsync(root, provider, appliesSpaceIdentities, showsPromptSuggestions: false, cancellationToken);
+
+    /// <summary>Creates a real host as above that shows the next prompt a session suggests, as a desktop does, when asked.</summary>
+    internal static Task<CodeAltaHost> CreateHostAsync(string root, ScriptedFleetProvider provider, bool appliesSpaceIdentities, bool showsPromptSuggestions,
+        CancellationToken cancellationToken)
     {
         var global = Path.Combine(root, "global");
         var project = Path.Combine(root, "project");
@@ -143,7 +151,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         {
             GlobalRoot = global, CurrentProjectPath = project, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
             PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, OwnsLogging = false, IsHeadless = true,
-            ConfigureModelProviders = provider.Register, AppliesSpaceIdentities = appliesSpaceIdentities,
+            ConfigureModelProviders = provider.Register, AppliesSpaceIdentities = appliesSpaceIdentities, ShowsPromptSuggestions = showsPromptSuggestions,
         }, cancellationToken);
     }
 

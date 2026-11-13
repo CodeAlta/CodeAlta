@@ -158,6 +158,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private readonly FleetProjectEditor _projectEditor;
     private readonly HashSet<string> _warnedUnreadable = new(StringComparer.Ordinal);
     private readonly FleetAgentSessions _agents;
+    private readonly CodeAlta.Catalog.CodeAltaConfigStore _configStore;
     private int _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="FleetNodeService"/> class.</summary>
@@ -170,6 +171,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         TrustedDeviceStore.ValidateName(options.Name, nameof(options));
         _options = options;
         _host = options.Host;
+        _configStore = new CodeAlta.Catalog.CodeAltaConfigStore(options.Host.CatalogOptions);
         _worktrees = new FleetSessionWorktrees(options.Host.CatalogOptions);
         _worktreeCleanup = new FleetSessionWorktreeCleanup(options.Host, options.TimeProvider);
         _trusted = options.TrustedDevices;

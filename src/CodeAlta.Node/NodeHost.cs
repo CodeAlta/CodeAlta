@@ -198,6 +198,7 @@ public sealed class NodeHost : IAsyncDisposable
             BuiltInSkillRoot = options.BuiltInSkillRoot,
             IsHeadless = true,
             HasInteractiveUi = false,
+            ShowsPromptSuggestions = options.ShowsPromptSuggestions,
             OwnsLogging = false,
             // Permissions: a node is installed to run agents, as CodeAlta Desktop runs them, with the permission mode of each
             // session; it is not a headless run of altacli, whose FullTrust grants every request whatever the mode:

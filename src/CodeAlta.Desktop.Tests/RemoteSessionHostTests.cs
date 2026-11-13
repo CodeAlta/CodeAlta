@@ -311,6 +311,68 @@ public sealed class RemoteSessionHostTests
     }
 
     [TestMethod]
+    public async Task RuntimeState_ShowsTheSuggestionOfTheMachine_WithAndWithoutEntry_WhileThisComputerShowsThem()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, null, null, false, null, null, showsPromptSuggestions: true);
+        var machine = await fixture.PairViewerAsync(token);
+        var shows = true;
+        await using var host = new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, cancellation),
+            Quick with { ShowsPromptSuggestions = () => Volatile.Read(ref shows) });
+        host.Start();
+        await WaitForAsync(() => host.State == RemoteMachineState.Online, "the machine to be online", token);
+        var created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(Title: "Suggesting session"), "create-suggesting", token);
+        Assert.IsTrue(await host.WaitListedAsync(created.SessionId, Patience, token));
+        fixture.Provider.Turns.Enqueue(static (_, _) => Task.FromResult(ScriptedFleetProvider.Answer(
+            $"Done.\n{AgentNextPromptTag.Opening}run the tests{AgentNextPromptTag.Closing}")));
+        var admission = host.AdmitSend(new OwnedTextSendRequest("send-suggesting", created.SessionId, "Do it"), token);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await admission.Receipt!.Completion.WithinAsync(Patience, token)).Outcome);
+
+        // Attached on the machine: the entry says it, with the run whose answer made it.
+        SessionRuntimeCurrentState state = null!;
+        await WaitForAsync(async () => (state = await host.ReadRuntimeStateAsync(created.SessionId, token)).Entry?.PromptSuggestion is not null,
+            "the suggestion of the entry", token);
+        var run = state.Entry!.PromptSuggestionRunId;
+        Assert.AreEqual("run the tests", state.Entry.PromptSuggestion);
+        Assert.IsNotNull(run, "The suggestion names the run it answers.");
+        Assert.IsNull(state.PromptSuggestion, "A session with an entry says it on its entry only.");
+
+        // Detached there, as a session nobody shows is once idle: the state says what its journal keeps.
+        Assert.IsTrue(await fixture.Host.RuntimeService.DetachRuntimeSessionAsync(created.SessionId).WithinAsync(Patience, token));
+        state = await host.ReadRuntimeStateAsync(created.SessionId, token);
+        Assert.IsNull(state.Entry);
+        Assert.AreEqual(("run the tests", run), (state.PromptSuggestion, state.PromptSuggestionRunId));
+
+        // The user of this computer turned suggestions off: none shows, whatever the machine says.
+        Volatile.Write(ref shows, false);
+        state = await host.ReadRuntimeStateAsync(created.SessionId, token);
+        Assert.AreEqual((null, null), (state.PromptSuggestion, state.PromptSuggestionRunId));
+    }
+
+    [TestMethod]
+    public async Task RuntimeState_ShowsNoSuggestion_WithoutTheOption()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, null, null, false, null, null, showsPromptSuggestions: true);
+        var machine = await fixture.PairViewerAsync(token);
+        await using var host = new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, cancellation), Quick);
+        host.Start();
+        await WaitForAsync(() => host.State == RemoteMachineState.Online, "the machine to be online", token);
+        var created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(Title: "Suggesting session"), "create-plain", token);
+        var store = fixture.Host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var summary = await store.GetSessionSummaryAsync(created.SessionId, token);
+        Assert.IsNotNull(summary);
+        await store.UpsertSessionAsync(summary with { PromptSuggestion = "commit it", PromptSuggestionRunId = new AgentRunId("run-1") }, token);
+        Assert.IsTrue(await fixture.Host.RuntimeService.DetachRuntimeSessionAsync(created.SessionId, token));
+        Assert.AreEqual("commit it", (await fixture.Host.RuntimeService.GetShownStateAsync(created.SessionId, token)).PromptSuggestion,
+            "The machine shows it.");
+
+        var state = await host.ReadRuntimeStateAsync(created.SessionId, token);
+
+        Assert.AreEqual((null, null), (state.PromptSuggestion, state.PromptSuggestionRunId), "A host made without the option shows none.");
+    }
+
+    [TestMethod]
     public void ToReplacement_KeepsTheTextsToolsAndLifecycleOfTheNode()
     {
         var display = new FleetSessionDisplay("w", "s", 7, 5, true, false, new FleetDisplayLifecycle("RunSubmitted", "run-1", null), 2, null, null,

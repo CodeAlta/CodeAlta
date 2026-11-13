@@ -554,7 +554,17 @@ public sealed record FleetSessionRef(string SessionId);
 /// <param name="AttachmentGeneration">The attachment of the session in that runtime; null when it is not attached.</param>
 /// <param name="ActiveRunId">The run at work; null when none.</param>
 /// <param name="QueueDrainInProgress">Whether queued prompts are being sent.</param>
-public sealed record FleetSessionState(string SessionId, Guid RuntimeInstanceId, long? AttachmentGeneration, string? ActiveRunId, bool QueueDrainInProgress);
+public sealed record FleetSessionState(string SessionId, Guid RuntimeInstanceId, long? AttachmentGeneration, string? ActiveRunId, bool QueueDrainInProgress)
+{
+    /// <summary>
+    /// Gets the next prompt the session suggests, as the node shows it (its bounded text); null when it suggests none, when
+    /// the node shows no suggestion or its user turned them off, and always from an older node.
+    /// </summary>
+    public string? PromptSuggestion { get; init; }
+
+    /// <summary>Gets the run whose answer made <see cref="PromptSuggestion"/>, when it is known; null otherwise, and always from an older node.</summary>
+    public string? PromptSuggestionRunId { get; init; }
+}
 
 /// <summary>The parameters of <c>sessions.history</c>.</summary>
 /// <param name="SessionId">The session.</param>

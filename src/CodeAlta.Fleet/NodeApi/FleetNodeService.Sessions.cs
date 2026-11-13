@@ -276,9 +276,37 @@ public sealed partial class FleetNodeService
     private async Task<FleetSessionState> SessionStateAsync(FleetNodeCall call, FleetSessionRef parameters, CancellationToken cancellationToken)
     {
         var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
-        var state = await _host.RuntimeService.GetCurrentStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        // The state a desktop shows, with the suggestion of the session as this node would show it (its entry's, or the one its
+        // journal keeps once it has none), cut to its bound. The entry keeps what its last run suggested whatever the setting
+        // says now: a node that shows none, or whose user turned them off since, carries none, and the entry keeps it.
+        var state = await _host.RuntimeService.GetShownStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var (text, runId) = state.Entry is { } entry
+            ? (entry.PromptSuggestion, entry.PromptSuggestionRunId)
+            : (state.PromptSuggestion, state.PromptSuggestionRunId);
+        var suggestion = _host.RuntimeService.ShowsPromptSuggestions && _configStore.LoadGlobalPromptSuggestions()
+            ? AgentPromptSuggestionEvent.Normalize(text)
+            : null;
         return new FleetSessionState(sessionId, state.RuntimeInstanceId, state.Entry?.AttachmentGeneration, state.Entry?.ActiveRunId,
-            state.Entry?.QueueDrainInProgress ?? false);
+            state.Entry?.QueueDrainInProgress ?? false)
+        {
+            PromptSuggestion = suggestion,
+            PromptSuggestionRunId = suggestion is not null && IsSuggestionRunId(runId) ? runId : null,
+        };
+    }
+
+    // The run of a suggestion as the desktop's runtime state takes an identity (SessionRuntimeStateRpc): trimmed, not blank,
+    // at most 256 characters, without control characters or a broken surrogate pair. Another one is left out, never cut: the
+    // suggestion goes without its run.
+    private static bool IsSuggestionRunId(string? value)
+    {
+        if (value is not { Length: > 0 and <= 256 } || string.IsNullOrWhiteSpace(value) || value != value.Trim()) return false;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsControl(value[i])) return false;
+            if (char.IsSurrogate(value[i]) && (!char.IsHighSurrogate(value[i]) || ++i == value.Length || !char.IsLowSurrogate(value[i]))) return false;
+        }
+
+        return true;
     }
 
     // Windows of the journal by cursor, read by the owned workspace as the desktop's history routes read them
