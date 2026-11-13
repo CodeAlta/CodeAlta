@@ -9,7 +9,7 @@ import { welcomeLogo } from "./welcomeLogo";
 
 const noChrome: ComposerChromeValue = {};
 
-export function NewSessionWorkspace({ project, worktree = false, cloud = false, machine = null, machineSetup, preferredHeight, onHeight, chrome, starting, worktreeStatus, children }: {
+export function NewSessionWorkspace({ project, worktree = false, cloud = false, machine = null, machineSetup, preferredHeight, onHeight, chrome, starting, worktreeStatus, shellSlot, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
   /** The next session of the project works in a new git worktree, not in the folder of the project. */
   worktree?: boolean;
@@ -25,11 +25,14 @@ export function NewSessionWorkspace({ project, worktree = false, cloud = false, 
   starting?: ReactNode;
   /** Where the worktree of the next session is while its prompt is typed, under the welcome. */
   worktreeStatus?: ReactNode;
+  /** Takes the place over the welcome where the prompt shows its shell commands, as a session shows them over its timeline. */
+  shellSlot?: (element: HTMLDivElement | null) => void;
 }) {
   const { t } = useShellLanguage();
   const logo = useMemo(() => welcomeLogo(font), []);
   const composer = useComposerLayout(preferredHeight, onHeight);
   return <div className="session-workspace blank-project" data-active="true" data-cloud={cloud || undefined} ref={composer.workspaceRef}>
+    <div className="session-timeline-area">
     <div className="timeline-scroll new-session-welcome">
       {starting ?? <div className="welcome-content">
         <div className="blank-project-logo" role="img" aria-label="CodeAlta">
@@ -49,6 +52,8 @@ export function NewSessionWorkspace({ project, worktree = false, cloud = false, 
         <p>{t("Switch projects in the sidebar before sending if you want a different scope.")}</p>
         <p>{t("Reopen any session tab to continue previous work.")}</p></>}
       </div>}
+    </div>
+    {shellSlot && <div className="shell-command-slot" ref={shellSlot} />}
     </div>
     <div className="composer-resize-bar" ref={composer.barRef}><ComposerSplitter {...composer.splitter} /></div>
     <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}

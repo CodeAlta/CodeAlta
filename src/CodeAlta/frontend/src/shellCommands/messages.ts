@@ -8,8 +8,6 @@ export const shellCommandMessages = {
     "Führt einen Shell-Befehl im Ordner dieser Sitzung aus (!): seine Ausgabe geht mit Ihrer nächsten Nachricht mit.",
     "このセッションのフォルダーでシェルコマンドを実行します (!)。出力は次のプロンプトに添付されます。",
     "在此会话的文件夹中运行 Shell 命令 (!)：其输出随你的下一条提示发送。"],
-  "Run a shell command in the folder of this session (!)": ["Ejecutar un comando de shell en la carpeta de esta sesión (!)", "Exécuter une commande shell dans le dossier de cette session (!)",
-    "Einen Shell-Befehl im Ordner dieser Sitzung ausführen (!)", "このセッションのフォルダーでシェルコマンドを実行 (!)", "在此会话的文件夹中运行 Shell 命令 (!)"],
   "{count} shell commands: show them": ["{count} comandos de shell: mostrarlos", "{count} commandes shell : les afficher", "{count} Shell-Befehle: anzeigen", "シェルコマンド {count} 件を表示", "{count} 个 Shell 命令：显示"],
   "Type a shell command to run in the folder of this session…": ["Escribe un comando de shell para ejecutarlo en la carpeta de esta sesión…",
     "Tapez une commande shell à exécuter dans le dossier de cette session…", "Shell-Befehl eingeben, der im Ordner dieser Sitzung ausgeführt wird…",

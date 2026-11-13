@@ -6,8 +6,10 @@ import { toBase64 } from "../promptImages";
  * output too long to be streamed whole), or why it did not run.
  */
 export type ShellCommandEvent = Readonly<{ kind: string; value?: string | null; status?: string | null; exitCode?: number | null; omitted?: number | null }>;
-/** Asks the host to run a command in the folder of a session; aborting the signal ends it. */
-export type ShellCommandRun = (sessionId: string, command: string, signal: AbortSignal) => Promise<AsyncIterable<ShellCommandEvent>>;
+/** What a command runs for: a session, in its folder, or the project of a session to start, in the folder of the project. */
+export type ShellCommandTarget = Readonly<{ sessionId: string; projectId?: undefined } | { projectId: string; sessionId?: undefined }>;
+/** Asks the host to run a command for a session or a project; aborting the signal ends it. */
+export type ShellCommandRun = (target: ShellCommandTarget, command: string, signal: AbortSignal) => Promise<AsyncIterable<ShellCommandEvent>>;
 
 export type ShellCommandState = "running" | "done" | "stopped" | "failed";
 /** A command run from the prompt (`!`), as it was shown. */
@@ -41,9 +43,10 @@ const empty: ShellCommandView = Object.freeze({ entries: Object.freeze([]), show
 const outputDelay = 50;
 
 /**
- * The shell commands of the sessions (a prompt that starts with `!`), for the lifetime of a window: run by the host in
- * the folder of the session, kept here by session, the latest last. Also whether the prompt of a session is in shell
- * mode. A command goes on when its panel is closed; it ends when it is stopped or removed, or when the window closes.
+ * The shell commands of the prompts (a prompt that starts with `!`), for the lifetime of a window: run by the host in
+ * the folder of a session or of the project of a session to start, kept here by prompt (the id of a session, or the
+ * scope of a draft), the latest last. Also whether a prompt is in shell mode. A command goes on when its panel is
+ * closed; it ends when it is stopped or removed, or when the window closes.
  */
 export function createShellCommands(start: ShellCommandRun, limit = shellCommandLimit) {
   const views = new Map<string, ShellCommandView>();
@@ -67,7 +70,7 @@ export function createShellCommands(start: ShellCommandRun, limit = shellCommand
     update(sessionId, id, entry => entry.state === "running" ? { ...entry, state: "stopped", endedAt: new Date().toISOString() } : entry);
   };
 
-  async function run(sessionId: string, id: number, command: string, controller: AbortController, onEnd?: (entry: ShellCommandEntry) => void) {
+  async function run(sessionId: string, id: number, command: string, target: ShellCommandTarget, controller: AbortController, onEnd?: (entry: ShellCommandEntry) => void) {
     let pending = "";
     let timer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
@@ -81,7 +84,7 @@ export function createShellCommands(start: ShellCommandRun, limit = shellCommand
       update(sessionId, id, entry => entry.state === "running" ? change({ ...entry, endedAt: new Date().toISOString() }) : entry);
     };
     try {
-      const events = await start(sessionId, command, controller.signal);
+      const events = await start(target, command, controller.signal);
       for await (const event of events) {
         if (controller.signal.aborted) return;
         if (event.kind === "started") update(sessionId, id, entry => ({ ...entry, folder: event.value ?? null }));
@@ -129,7 +132,7 @@ export function createShellCommands(start: ShellCommandRun, limit = shellCommand
      * Runs a command in the folder of a session and shows it as it runs; `onEnd` is told once it ended, whatever the way.
      * Null when it is not run: blank, too long, or {@link shellCommandConcurrency} commands of the session still run.
      */
-    run(sessionId: string, command: string, onEnd?: (entry: ShellCommandEntry) => void): number | null {
+    run(sessionId: string, command: string, target: ShellCommandTarget, onEnd?: (entry: ShellCommandEntry) => void): number | null {
       const text = command.trim();
       if (!text || text.length > shellCommandMaxLength) return null;
       if ((views.get(sessionId)?.entries.filter(entry => entry.state === "running").length ?? 0) >= shellCommandConcurrency) return null;
@@ -147,7 +150,7 @@ export function createShellCommands(start: ShellCommandRun, limit = shellCommand
       const controller = new AbortController();
       running.set(id, controller);
       set(sessionId, { entries: kept, shown: id, listing: false });
-      void run(sessionId, id, text, controller, onEnd);
+      void run(sessionId, id, text, target, controller, onEnd);
       return id;
     },
     /** Ends a command that runs, and what it started. */

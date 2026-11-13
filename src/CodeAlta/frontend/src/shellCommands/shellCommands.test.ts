@@ -11,8 +11,8 @@ const ended = (store: ReturnType<typeof createShellCommands>, session: string) =
 
 test("a command streams its output, ends with its exit code and is told to whoever ran it", async () => {
   const calls: string[] = [];
-  const store = createShellCommands(async (session, command) => {
-    calls.push(`${session}:${command}`);
+  const store = createShellCommands(async (target, command) => {
+    calls.push(`${target.sessionId ?? `project ${target.projectId}`}:${command}`);
     return (async function* (): AsyncGenerator<ShellCommandEvent> {
       yield { kind: "started", value: "C:\\work" };
       yield { kind: "output", value: "On branch main\n" };
@@ -22,7 +22,7 @@ test("a command streams its output, ends with its exit code and is told to whoev
   });
   let told: ShellCommandEntry | null = null;
   const done = ended(store, "a");
-  const id = store.run("a", "  git status  ", entry => { told = entry; })!;
+  const id = store.run("a", "  git status  ", { sessionId: "a" }, entry => { told = entry; })!;
   assert.equal(store.view("a").shown, id, "the panel shows the command as it runs");
   assert.equal(store.runningCount("a"), 1);
   const entry = await done;
@@ -32,6 +32,9 @@ test("a command streams its output, ends with its exit code and is told to whoev
   assert.deepEqual([entry.state, entry.exitCode, entry.folder], ["done", 0, "C:\\work"]);
   assert.equal(told, entry);
   assert.deepEqual(calls, ["a:git status"]);
+  // The draft of a session to start runs its commands in the folder of its project.
+  store.run("draft:p", "ls", { projectId: "p" });
+  assert.deepEqual(calls, ["a:git status", "project p:ls"]);
   assert.deepEqual(store.view("b").entries, [], "each session has its own commands");
   assert.equal(store.runningCount("a"), 0);
 });
@@ -47,9 +50,9 @@ test("a command that cannot run says why, and one stopped is ended on the host",
     })();
   });
   const failed = ended(store, "a");
-  store.run("a", "bad");
+  store.run("a", "bad", { sessionId: "a" });
   assert.deepEqual((await failed).failure, { status: "missing_folder", message: "C:\\gone" });
-  const id = store.run("a", "watch")!;
+  const id = store.run("a", "watch", { sessionId: "a" })!;
   store.stop("a", id);
   assert.equal(signals[1].aborted, true);
   assert.equal(store.view("a").entries.at(-1)!.state, "stopped");
@@ -57,9 +60,9 @@ test("a command that cannot run says why, and one stopped is ended on the host",
   assert.deepEqual(store.view("a").entries.map(entry => entry.command), ["bad"]);
   assert.equal(store.view("a").listing, true, "removing the command shown lists the others");
   // Each command that runs holds a channel of the window: a session runs a few at once, not more.
-  for (let index = 0; index < shellCommandConcurrency; index++) assert.notEqual(store.run("a", `watch ${index}`), null);
-  assert.equal(store.run("a", "one more"), null);
-  assert.notEqual(store.run("b", "elsewhere"), null, "another session runs its own");
+  for (let index = 0; index < shellCommandConcurrency; index++) assert.notEqual(store.run("a", `watch ${index}`, { sessionId: "a" }), null);
+  assert.equal(store.run("a", "one more", { sessionId: "a" }), null);
+  assert.notEqual(store.run("b", "elsewhere", { sessionId: "b" }), null, "another session runs its own");
   store.dispose();
 });
 
@@ -72,7 +75,7 @@ test("the prompt mode is by session, and the commands are recalled once in a row
   assert.equal(changes, 1, "a mode that does not change tells nobody");
   assert.equal(store.mode("a"), true);
   assert.equal(store.mode("b"), false);
-  for (const command of ["ls", "ls", "git status"]) store.run("a", command);
+  for (const command of ["ls", "ls", "git status"]) store.run("a", command, { sessionId: "a" });
   assert.deepEqual(store.commands("a"), ["ls", "git status"]);
   store.close("a");
   assert.equal(store.isOpen("a"), false);

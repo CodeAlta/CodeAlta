@@ -147,6 +147,8 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       const shellMode = "document.querySelector('#session-prompt')?.hasAttribute('data-shell')";
       const bang = () => key("!", "Digit1", 49);
       // A `!` that starts an empty prompt turns it into a shell command and is not written; Backspace in the empty prompt gives it back.
+      // A prompt without commands has no button for them.
+      assert.equal(await evaluate("!!document.querySelector('.composer-shell-commands')"), false);
       await evaluate("document.querySelector('#session-prompt').focus()");
       await bang();
       assert.equal(await wait(`${shellMode} && promptText()==='' && document.querySelector('.composer-status-line')?.textContent.startsWith('Shell command')`), true);

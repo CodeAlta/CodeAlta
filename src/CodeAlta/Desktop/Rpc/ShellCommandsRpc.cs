@@ -2,17 +2,17 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Jobs;
-using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
 /// The shell commands of the composer (a prompt that starts with <c>!</c>): a command the user types runs in the folder
-/// the session works in, in the shell of the <c>shell_command</c> tool and with the variables of the session's commands,
-/// and what it writes streams back to the page. It is the user's own command, as in a terminal of the window: no
-/// permission is asked and the sandbox of the session does not apply. Nothing is written to the session; the page keeps
-/// the commands, and gives an output to the model only as an attachment of a prompt the user sends.
+/// the session works in, or in the folder of the project of a session to start, in the shell of the <c>shell_command</c>
+/// tool and with the variables of the session's commands (for a project, of the space the window shows), and what it
+/// writes streams back to the page. It is the user's own command, as in a terminal of the window: no permission is asked
+/// and the sandbox of the session does not apply. Nothing is written to a session; the page keeps the commands, and gives
+/// an output to the model only as an attachment of a prompt the user sends.
 /// </summary>
 [NeoRpcService("shellCommands", Version = 1)]
 internal sealed class ShellCommandsService
@@ -25,28 +25,23 @@ internal sealed class ShellCommandsService
     /// <summary>Most characters of the end of an output past <see cref="MaximumOutputCharacters"/> sent with its exit code: a summary or an error is often there.</summary>
     internal const int MaximumTailCharacters = 20_000;
 
-    private readonly Func<string, CancellationToken, ValueTask<string?>> _folder;
-    private readonly Func<string, CancellationToken, Task<AgentProcessEnvironment>> _environment;
+    private readonly Func<ShellCommandTarget, CancellationToken, Task<ShellCommandPlace?>> _place;
     private readonly ShellCommandStarter _start;
     private readonly string _epoch;
 
-    /// <summary>Creates the service on the runtime of the sessions.</summary>
-    /// <param name="runtime">Gives the variables of the commands of a session.</param>
-    /// <param name="folder">Gives the folder a session works in (its worktree, when it has one); null for a session that is not known.</param>
+    /// <summary>Creates the service on what finds where a command runs, the shell of the <c>shell_command</c> tool starting it.</summary>
+    /// <param name="place">Gives the folder and the variables of a session or a project; null for one that is not known.</param>
     /// <param name="epoch">The epoch of the host.</param>
-    internal ShellCommandsService(SessionRuntimeService runtime, Func<string, CancellationToken, ValueTask<string?>> folder, string epoch)
-        : this(folder, (runtime ?? throw new ArgumentNullException(nameof(runtime))).GetSessionProcessEnvironmentAsync, ShellCommandProcess.Start, epoch) { }
+    internal ShellCommandsService(Func<ShellCommandTarget, CancellationToken, Task<ShellCommandPlace?>> place, string epoch)
+        : this(place, ShellCommandProcess.Start, epoch) { }
 
-    /// <summary>Creates the service on what finds the folder and the variables of a session, and what starts a command.</summary>
-    internal ShellCommandsService(Func<string, CancellationToken, ValueTask<string?>> folder,
-        Func<string, CancellationToken, Task<AgentProcessEnvironment>> environment, ShellCommandStarter start, string epoch)
+    /// <summary>Creates the service on what finds where a command runs and what starts it.</summary>
+    internal ShellCommandsService(Func<ShellCommandTarget, CancellationToken, Task<ShellCommandPlace?>> place, ShellCommandStarter start, string epoch)
     {
-        ArgumentNullException.ThrowIfNull(folder);
-        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(place);
         ArgumentNullException.ThrowIfNull(start);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        _folder = folder;
-        _environment = environment;
+        _place = place;
         _start = start;
         _epoch = epoch;
     }
@@ -61,7 +56,9 @@ internal sealed class ShellCommandsService
 
     internal async IAsyncEnumerable<ShellCommandEvent> RunAsync(ShellCommandRequest? request, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (request is null || string.IsNullOrWhiteSpace(request.SessionId) || request.SessionId.Length > 256
+        // A command runs for a session, or for the project of a session to start: one of them, never both.
+        if (request is null || string.IsNullOrWhiteSpace(request.SessionId) == string.IsNullOrWhiteSpace(request.ProjectId)
+            || request.SessionId?.Length > 256 || request.ProjectId?.Length > 256
             || string.IsNullOrWhiteSpace(request.Command) || request.Command.Length > MaximumCommandLength)
         {
             yield return ShellCommandEvent.Error("invalid_request", null);
@@ -74,7 +71,8 @@ internal sealed class ShellCommandsService
             yield break;
         }
 
-        var (folder, environment, failure) = await ResolveAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+        var target = string.IsNullOrWhiteSpace(request.SessionId) ? new ShellCommandTarget(null, request.ProjectId) : new ShellCommandTarget(request.SessionId, null);
+        var (folder, environment, failure) = await ResolveAsync(target, cancellationToken).ConfigureAwait(false);
         if (failure is not null)
         {
             yield return failure;
@@ -114,15 +112,14 @@ internal sealed class ShellCommandsService
         }
     }
 
-    private async Task<(string? Folder, AgentProcessEnvironment? Environment, ShellCommandEvent? Failure)> ResolveAsync(string sessionId, CancellationToken cancellationToken)
+    private async Task<(string? Folder, AgentProcessEnvironment? Environment, ShellCommandEvent? Failure)> ResolveAsync(ShellCommandTarget target, CancellationToken cancellationToken)
     {
         try
         {
-            var folder = await _folder(sessionId, cancellationToken).ConfigureAwait(false);
-            if (folder is null) return (null, null, ShellCommandEvent.Error("missing_session", null));
-            if (!Directory.Exists(folder)) return (null, null, ShellCommandEvent.Error("missing_folder", folder));
-            var environment = await _environment(sessionId, cancellationToken).ConfigureAwait(false);
-            return (folder, environment, null);
+            var place = await _place(target, cancellationToken).ConfigureAwait(false);
+            if (place is null) return (null, null, ShellCommandEvent.Error(target.SessionId is null ? "missing_project" : "missing_session", null));
+            if (!Directory.Exists(place.Folder)) return (null, null, ShellCommandEvent.Error("missing_folder", place.Folder));
+            return (place.Folder, place.Environment, null);
         }
         catch (ObjectDisposedException) { return (null, null, ShellCommandEvent.Error("closed", null)); }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -174,9 +171,16 @@ internal sealed class ShellCommandsService
 
 /// <summary>A shell command of the composer.</summary>
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
-/// <param name="SessionId">The session whose folder the command runs in.</param>
+/// <param name="SessionId">The session whose folder the command runs in; null for a command of the project of a session to start.</param>
+/// <param name="ProjectId">The project whose folder the command runs in, before its session starts; null for a command of a session.</param>
 /// <param name="Command">The command line, as the user typed it after <c>!</c>.</param>
-internal sealed record ShellCommandRequest(string ExpectedHostEpoch, string SessionId, string Command);
+internal sealed record ShellCommandRequest(string ExpectedHostEpoch, string? SessionId, string? ProjectId, string Command);
+
+/// <summary>What a command runs for: a session, or the project of a session to start.</summary>
+internal sealed record ShellCommandTarget(string? SessionId, string? ProjectId);
+
+/// <summary>Where a command runs: the folder, and the variables over the environment of the application.</summary>
+internal sealed record ShellCommandPlace(string Folder, AgentProcessEnvironment Environment);
 
 /// <summary>An event of a shell command of the composer.</summary>
 /// <param name="Kind"><c>started</c>, <c>output</c>, <c>exit</c> or <c>error</c>.</param>
@@ -184,7 +188,7 @@ internal sealed record ShellCommandRequest(string ExpectedHostEpoch, string Sess
 /// The folder it runs in (<c>started</c>), what it wrote (<c>output</c>), the end of what was not sent of its output
 /// (<c>exit</c>, at most <see cref="ShellCommandsService.MaximumTailCharacters"/>; null when everything was sent), or what failed (<c>error</c>).
 /// </param>
-/// <param name="Status">For an error: <c>invalid_request</c>, <c>stale_epoch</c>, <c>missing_session</c>, <c>missing_folder</c>, <c>closed</c> or <c>failed</c>.</param>
+/// <param name="Status">For an error: <c>invalid_request</c>, <c>stale_epoch</c>, <c>missing_session</c>, <c>missing_project</c>, <c>missing_folder</c>, <c>closed</c> or <c>failed</c>.</param>
 /// <param name="ExitCode">For <c>exit</c>: the exit code of the command, <c>-1</c> when it could not be read.</param>
 /// <param name="Omitted">For <c>exit</c>: the characters of its output past the limit, which were not streamed.</param>
 internal sealed record ShellCommandEvent(string Kind, string? Value, string? Status, int? ExitCode, int? Omitted)

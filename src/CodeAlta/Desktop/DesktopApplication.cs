@@ -1412,8 +1412,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSideQuestionService(new SideQuestionService(host.RuntimeService, epoch));
-                    builder.AddShellCommandsService(new ShellCommandsService(host.RuntimeService,
-                        async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false), epoch));
+                    // A command of a session runs in its folder with the variables of its commands; one of the session to start,
+                    // in the folder of its project with the identity of the space the window shows, as a terminal of the window.
+                    builder.AddShellCommandsService(new ShellCommandsService(async (target, token) =>
+                    {
+                        if (target.SessionId is { } sessionId)
+                            return await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false) is { } folder
+                                ? new ShellCommandPlace(folder, await host.RuntimeService.GetSessionProcessEnvironmentAsync(sessionId, token).ConfigureAwait(false)) : null;
+                        if (await host.ProjectCatalog.GetByIdAsync(target.ProjectId!, token).ConfigureAwait(false) is not { Archived: false } project) return null;
+                        var identity = await host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, project.Id, token).ConfigureAwait(false);
+                        return new ShellCommandPlace(project.ProjectPath, identity.Environment);
+                    }, epoch));
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime, canvases?.Modules));
                     // The code editor also opens on the folder of a skill that the Skills page names, and on the
                     // folder of a file that a link names when no project has it.

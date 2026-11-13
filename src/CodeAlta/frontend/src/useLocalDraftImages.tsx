@@ -47,13 +47,22 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
     }
     finally { finish(); }
   }
-  // The links of the attach menu (issues, a folder), once each: they become text when the prompt is sent.
+  // The attachments that are no file of the user, once each: the links of the attach menu (issues, a folder), which become
+  // text when the prompt is sent, and the outputs of the shell commands of the prompt.
   function addLinks(links: readonly SessionPromptImage[]) {
     invalidate();
     if (!capture()) { setNotice(true); return; }
     const current = owner.get(key);
     const added = links.filter(link => !current.some(item => item.mediaType === link.mediaType && item.base64 === link.base64));
     if (added.length) setNotice(!owner.replace(key, current, [...current, ...added]));
+  }
+  // Attachments taken out of the draft by their content: the output of a shell command its panel takes out.
+  function remove(attachments: readonly SessionPromptImage[]) {
+    invalidate();
+    if (!capture()) { setNotice(true); return; }
+    const current = owner.get(key);
+    const kept = current.filter(item => !attachments.some(value => value.mediaType === item.mediaType && value.base64 === item.base64));
+    if (kept.length !== current.length) setNotice(!owner.replace(key, current, kept));
   }
   const editable = !!capture();
   const attachments = <PromptImageAttachments images={images} disabled={!editable}
@@ -64,5 +73,5 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
     }} remove={index => {
       invalidate(); if (capture()) setNotice(!owner.replace(key, images, images.filter((_, i) => i !== index)));
     }} />;
-  return { images, paste, attach, addLinks, attachments, invalidate };
+  return { images, paste, attach, addLinks, remove, attachments, invalidate };
 }

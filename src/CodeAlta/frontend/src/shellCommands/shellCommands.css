@@ -90,7 +90,7 @@
 .shell-command-run > .bp6-input-group { flex: 1; min-width: 0; }
 .shell-command-run .bp6-input { font-family: var(--code-font); }
 .shell-command-field-sigil { display: inline-flex; align-items: center; height: 100%; padding: 0 2px 0 10px; }
-.shell-command .shell-command-run .bp6-button.bp6-intent-primary, .prompt-surface .composer-send-group .bp6-button.bp6-intent-primary.composer-shell-run,
+.shell-command .shell-command-run .bp6-button.bp6-intent-primary, .prompt-surface .bp6-button.bp6-intent-primary.composer-shell-run,
 .prompt-surface .composer-send-group:has(.composer-shell-run) .bp6-button.bp6-intent-primary.composer-send-options { background-color: var(--shell-accent); color: #fff; }
-.shell-command .shell-command-run .bp6-button.bp6-intent-primary:disabled, .prompt-surface .composer-send-group .bp6-button.bp6-intent-primary.composer-shell-run:disabled,
+.shell-command .shell-command-run .bp6-button.bp6-intent-primary:disabled, .prompt-surface .bp6-button.bp6-intent-primary.composer-shell-run:disabled,
 .prompt-surface .composer-send-group:has(.composer-shell-run) .bp6-button.bp6-intent-primary.composer-send-options:disabled { background-color: color-mix(in srgb, var(--shell-accent) 45%, var(--panel-2)); color: color-mix(in srgb, #fff 70%, transparent); }

@@ -22,10 +22,12 @@ import { promptKeysHint } from "./promptKeys";
 import { MicButton } from "./speech/MicButton";
 import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
 import { useShellLanguage } from "./shellLanguage";
+import { shellAttachment, type ShellCommands, type ShellCommandTarget } from "./shellCommands/shellCommands";
+import { holdsShellOutput, useShellPrompt } from "./shellCommands/useShellPrompt";
 
 const noSubscription = () => () => { };
 
-export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true, folder = null, placeholder, busyStatus }: {
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true, folder = null, placeholder, busyStatus, shell }: {
   active?: boolean;
   /** The folder of the project the draft starts a session in: the folder dialog of the attach menu opens there. */
   folder?: string | null;
@@ -45,9 +47,15 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     /** What the prompt bar of a session that does not exist yet shows in place of a session's own facts. */
     surface?: { epoch: string; onOpenProviders: () => void; contextTokens: number | null } };
   localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attach: (files: File[], origin: HTMLElement) => void;
-    addLinks: (links: readonly ReturnType<typeof linkAttachment>[]) => void; attachments: ReactNode; invalidate: () => void;
+    addLinks: (links: readonly ReturnType<typeof linkAttachment>[]) => void; remove: (attachments: readonly ReturnType<typeof linkAttachment>[]) => void;
+    attachments: ReactNode; invalidate: () => void;
     /** The attachments of the draft. */
     images: readonly ReturnType<typeof linkAttachment>[] };
+  /**
+   * The shell commands of the prompt of a session to start (`!`): they run for its project, and their outputs go in its
+   * attachments, with the prompt that starts the session. Only for a draft that takes attachments.
+   */
+  shell?: Readonly<{ store: ShellCommands; target: ShellCommandTarget | null; slot: HTMLElement | null }>;
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -56,6 +64,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   const [expanded, setExpanded] = useState(false);
   const [imageNotice, setImageNotice] = useState("");
   function refuseImagePaste(event: ClipboardEvent<HTMLElement>) {
+    if (!event.clipboardData.files.length && shellPrompt.takeText(event.clipboardData.getData("text/plain"))) { event.preventDefault(); return; }
     if (localDraft && localImages) { localImages.paste(event); return; }
     if (event.clipboardData.files.length) { event.preventDefault(); setImageNotice("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred."); }
   }
@@ -63,6 +72,19 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     : setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
   const restoredText = useRef(text);
   const promptInput = useRef<PromptInput>(null);
+  const [shellNotice, setShellNotice] = useState("");
+  const shellPrompt = useShellPrompt({ store: localDraft && localImages ? shell?.store : undefined, prompt: `draft:${sessionId}`, target: shell?.target ?? null,
+    input: promptInput, text: () => readLocal() ?? "", value: text,
+    clear: () => { localDraft?.edit(""); promptInput.current?.replaceText(""); }, enabled: !!localDraft && !localDraft.busy,
+    attach: (entry, attached) => {
+      if (!localImages || localDraft?.busy) return "later";
+      if (attached) localImages.addLinks([shellAttachment(entry)]); else localImages.remove([shellAttachment(entry)]);
+      return "done";
+    },
+    attached: entry => holdsShellOutput(localImages?.images ?? [], entry), notice: setShellNotice,
+    slot: shell?.slot ?? null, active, onSubmit: () => { shellPrompt.take(); } });
+  // A draft in shell mode runs its command on Enter, whatever its Send would do.
+  const submitDraft = () => { if (!shellPrompt.take() && localDraft && !localDraft.disabled) localDraft.submit(); };
   const referenceScope = useContext(ProjectReferenceContext);
   const [issueRequest, setIssueRequest] = useState(0);
   // As the composer of a session: a folder of the project is a project reference, any other a link to its full path.
@@ -89,12 +111,13 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   }, [sessionId, draft, draftIndicators]);
   return <>
     {!expanded && localDraft && localImages && localImages.attachments}
-    <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<span className="composer-foreground-status">
+    <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} place={shellPrompt.button}
+      status={shellPrompt.status ?? <span className="composer-foreground-status">
       {localDraft?.busy ? <ActivitySpinner size={14} /> : <AppIcon name="prompt" size={14} />}
       <span className="composer-foreground-text">{localDraft?.busy && busyStatus ? busyStatus : t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}</span>
     </span>}
     expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
-    notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
+    notice={<>{localDraft?.notice}{shellNotice && <p role="status">{shellNotice}</p>}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
     options={localDraft && localImages ? <><AttachMenu id={`attach-files-${sessionId}`} disabled={localDraft.busy} onFiles={localImages.attach} {...attachActions} />{localDraft.options}</> : localDraft?.options}
     onDropFiles={localDraft && localImages && !localDraft.busy ? localImages.attach : null}
     attachedBytes={localImages ? attachmentBytes(localImages.images) : 0}
@@ -112,27 +135,30 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         endIcon={<kbd>{equationKey}</kbd>}>{t("Insert equation")}</Button>}
       {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
     </> }}
-    editor={{ id: active ? "catalog-prompt" : `catalog-prompt-${sessionId}`, ref: promptInput, onPaste: refuseImagePaste, label: t("Message"), disabled: expanded,
-      onCompositionStart: () => localImages?.invalidate(), value: text, onChange: edit, onKeyDown: event => {
-        if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
+    editor={{ id: active ? "catalog-prompt" : `catalog-prompt-${sessionId}`, ref: promptInput, onPaste: refuseImagePaste, onType: shellPrompt.takeText, label: t("Message"), disabled: expanded,
+      onCompositionStart: () => localImages?.invalidate(), value: text, onChange: value => { setShellNotice(""); edit(value); }, shell: shellPrompt.mode, onKeyDown: event => {
+        if (shellPrompt.keyDown(event)) return;
+        if (!shellPrompt.mode && dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
         promptInput.current!, onOpenHelp, onOpenCommands)) { event.preventDefault(); event.stopPropagation(); return; }
         if (localDraft && dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
-        () => { if (!localDraft.disabled) localDraft.submit(); }, () => { if (!localDraft.disabled) localDraft.submit(); },
+        submitDraft, submitDraft,
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); return; }
         if (event.key === "F6" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);
         }
-      }, placeholder: placeholder ?? (localDraft ? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}` : t("Ask CodeAlta to work on this project…")) }}>
-        {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
-        {localDraft && !expanded && <ReferencePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
+      }, placeholder: shellPrompt.editor.placeholder ?? placeholder ?? (localDraft ? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}` : t("Ask CodeAlta to work on this project…")) }}>
+        {/* The pickers of `@` and `#` insert Markdown for the agent: a shell command takes these characters as they are. */}
+        {localDraft && !expanded && !shellPrompt.mode && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
+        {localDraft && !expanded && !shellPrompt.mode && <ReferencePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
         {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
           id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => { if (!localDraft.disabled) localDraft.submit(); }} />}
-        {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
-  </ComposerSurface></>;
+        {shellPrompt.runButton ?? localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
+  </ComposerSurface>
+    {shellPrompt.panel}</>;
 }

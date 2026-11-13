@@ -3357,12 +3357,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }));
   useEffect(() => () => sideQuestions.dispose(), [sideQuestions]);
   // The commands of the prompt (`!`) are held by this window too; closing it ends those that run.
-  const [shellCommands] = useState(() => createShellCommands((sessionId, command, signal) => {
+  const [shellCommands] = useState(() => createShellCommands((target, command, signal) => {
     const epoch = currentHostEpoch.current;
     if (!epoch) throw new Error("Host unavailable");
-    return shellCommandsApi.run({ expectedHostEpoch: epoch, sessionId, command }, { signal });
+    return shellCommandsApi.run({ expectedHostEpoch: epoch, sessionId: target.sessionId ?? null, projectId: target.projectId ?? null, command }, { signal });
   }));
   useEffect(() => () => shellCommands.dispose(), [shellCommands]);
+  // Where the prompt of a session to start shows its shell commands, over the welcome.
+  const [draftShellSlot, setDraftShellSlot] = useState<HTMLDivElement | null>(null);
   // The external editor and the file manager of the system: the host is asked for the editor when an action first names it.
   const [externalOpener] = useState(() => createExternalOpener({
     list: refresh => externalEditorsApi.list({ refresh }, { timeoutMilliseconds: 15_000 }),
@@ -6572,9 +6574,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   onLearnMore={() => openDocumentation("sessions/claude-code.md", "run-in-the-cloud")} />
                   : draftWorktree && preparedProject && status?.hostEpoch ? <WorktreePreparation worktree={draftWorktree}
                   onRetry={() => preparedWorktrees.retry(status.hostEpoch!, preparedProject)} onClose={() => preparedWorktrees.dismiss(preparedProject.id)} /> : undefined}
+                shellSlot={setDraftShellSlot}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators} folder={selectedProject?.path ?? null}
+                  // The commands of a session to start run in the folder of its project, on this computer.
+                  shell={{ store: shellCommands, slot: draftShellSlot,
+                    target: selectedProject && !selectedProject.archived && !draftCloud && !draftMachine ? { projectId: selectedProject.id } : null }}
                   localImages={owned && snapshot?.configured && currentProjectWritable() && !draftCloud && !draftMachine ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   placeholder={draftCloud ? t("Describe the task for the cloud session…") : undefined}
