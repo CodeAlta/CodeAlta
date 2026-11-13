@@ -239,7 +239,10 @@ public sealed class VaultCommandRunner
         }
 
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(chunk);
-        return buffer.ToArray();
+        var all = buffer.ToArray();
+        // The caller zeroes what it is given: the copy the stream holds is not left behind it.
+        if (buffer.TryGetBuffer(out var held)) System.Security.Cryptography.CryptographicOperations.ZeroMemory(held.Array);
+        return all;
     }
 
     private static IEnumerable<string> SearchFolders()

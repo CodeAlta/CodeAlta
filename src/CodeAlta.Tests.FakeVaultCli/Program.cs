@@ -142,6 +142,8 @@ int KeePassXc(string[] arguments)
         {
             case "-a": attribute = arguments[++index]; break;
             case "-k": keyFile = arguments[++index]; break;
+            // The format of an export; for ls, -f takes no value.
+            case "-f" when arguments[0] == "export": index++; break;
             case var option when option.StartsWith('-'): flags.Add(option); break;
             default: positional.Add(arguments[index]); break;
         }
@@ -163,6 +165,11 @@ int KeePassXc(string[] arguments)
             lines.AddRange(entries.Select(entry => entry!["path"]!.GetValue<string>()));
             lines.AddRange((kp["groups"]?.AsArray() ?? []).Select(group => group!.GetValue<string>()));
             return Print(string.Join('\n', lines));
+        case "export":
+            // An older keepassxc-cli has no export.
+            if (kp["exportUnknown"]?.GetValue<bool>() == true) return Fail("Invalid command export.", 1);
+            Console.Out.Write(KeePassExport(kp));
+            return 0;
         case "show" when positional.Count == 2:
         {
             var entry = entries.FirstOrDefault(item => Same(item!["path"], positional[1].TrimStart('/')));
@@ -175,6 +182,67 @@ int KeePassXc(string[] arguments)
         default:
             return Fail("Invalid command", 1);
     }
+}
+
+// What keepassxc-cli 2.8 writes for export -f xml, as its KdbxXmlWriter does: a group holds its entries, then its groups; an entry
+// holds its attributes as String elements in the order of their keys, and its older versions (state "history": [attributes])
+// as entries under History.
+string KeePassExport(JsonObject kp)
+{
+    static string Escape(string text) => text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+    var xml = new System.Text.StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<KeePassFile>\r\n\t<Meta>\r\n\t\t<Generator>KeePassXC</Generator>\r\n\t\t<DatabaseName>Passwords</DatabaseName>\r\n"
+        + "\t\t<MemoryProtection>\r\n\t\t\t<ProtectPassword>True</ProtectPassword>\r\n\t\t</MemoryProtection>\r\n\t\t<CustomData/>\r\n\t</Meta>\r\n\t<Root>\r\n");
+    var all = (kp["entries"]?.AsArray() ?? []).Select(entry => entry!.AsObject()).ToList();
+    var groups = (kp["groups"]?.AsArray() ?? []).Select(group => group!.GetValue<string>().Replace("[empty]", string.Empty)).ToList();
+    void Text(string indent, string name, string? value)
+        => xml.Append(indent).Append(string.IsNullOrEmpty(value) ? $"<{name}/>" : $"<{name}>{Escape(value)}</{name}>").Append("\r\n");
+    void Entry(string indent, JsonObject attributes, JsonArray? history)
+    {
+        xml.Append(indent).Append("<Entry>\r\n");
+        Text(indent + "\t", "UUID", "rTgP719fTnSGwAF0r0D1zg==");
+        xml.Append(indent).Append("\t<Times>\r\n").Append(indent).Append("\t\t<Expires>False</Expires>\r\n").Append(indent).Append("\t</Times>\r\n");
+        foreach (var (key, value) in attributes.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            var text = value?.GetValue<string>();
+            xml.Append(indent).Append("\t<String>\r\n");
+            Text(indent + "\t\t", "Key", key);
+            xml.Append(indent).Append("\t\t").Append(string.IsNullOrEmpty(text) ? "<Value/>" : key == "Password" ? $"<Value ProtectInMemory=\"True\">{Escape(text)}</Value>" : $"<Value>{Escape(text)}</Value>").Append("\r\n");
+            xml.Append(indent).Append("\t</String>\r\n");
+        }
+
+        xml.Append(indent).Append("\t<AutoType>\r\n").Append(indent).Append("\t\t<Enabled>True</Enabled>\r\n").Append(indent).Append("\t\t<DefaultSequence/>\r\n").Append(indent).Append("\t</AutoType>\r\n");
+        if (history is { Count: > 0 })
+        {
+            xml.Append(indent).Append("\t<History>\r\n");
+            foreach (var older in history) Entry(indent + "\t\t", older!.AsObject(), null);
+            xml.Append(indent).Append("\t</History>\r\n");
+        }
+        else if (history is not null)
+        {
+            xml.Append(indent).Append("\t<History/>\r\n");
+        }
+
+        xml.Append(indent).Append("</Entry>\r\n");
+    }
+
+    // A group by its path under the root: "" for the root, "Work/" for a group of it.
+    void Group(string indent, string path, string name)
+    {
+        xml.Append(indent).Append("<Group>\r\n");
+        Text(indent + "\t", "UUID", "56SiJWFMRxCzXoLSViT3mQ==");
+        Text(indent + "\t", "Name", name);
+        Text(indent + "\t", "Notes", null);
+        foreach (var entry in all.Where(entry => entry["path"]!.GetValue<string>() is var full && full.StartsWith(path, StringComparison.Ordinal) && !full[path.Length..].Contains('/')))
+            Entry(indent + "\t", entry["attributes"]!.AsObject(), entry["history"]?.AsArray() ?? []);
+        var children = groups.Concat(all.Select(entry => entry["path"]!.GetValue<string>()))
+            .Where(full => full.StartsWith(path, StringComparison.Ordinal) && full[path.Length..].Contains('/'))
+            .Select(full => full[path.Length..].Split('/')[0]).Distinct(StringComparer.Ordinal);
+        foreach (var child in children) Group(indent + "\t", path + child + "/", child);
+        xml.Append(indent).Append("</Group>\r\n");
+    }
+
+    Group("\t\t", string.Empty, "Passwords");
+    return xml.Append("\t\t<DeletedObjects/>\r\n\t</Root>\r\n</KeePassFile>\r\n").ToString();
 }
 
 // pass and gopass: state "pass" = { entries: { "web/github": "the text of the file" }, store (the PASSWORD_STORE_DIR it requires), hang }.

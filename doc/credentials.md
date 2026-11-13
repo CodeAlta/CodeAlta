@@ -89,8 +89,11 @@ never values. The host owns the rest: bindings, memory, masking, confirmations, 
 
 A read of a vault costs the start of a program and often an exchange with a server, so the broker gives a provider
 that can (`ICredentialBatchReader`) every secret it reads from the vault at once, and the provider answers for each. A
-provider reads several values with one call only when that call reads what is bound and nothing else: never through a
-listing of the vault, which reads every item and, in a vault that keeps an audit log, records a view of each.
+provider reads several values with one call only when that call asks a server for what is bound and nothing else:
+never through a listing of the vault, which reads every item and, in a vault that keeps an audit log, records a view of
+each. A database that is a local file (KeePassXC) is opened whole by every read, so its export is read instead of one
+opening per secret: only the names and the values bound are decoded of it, and a value its program would print
+differently is still read by the program.
 
 A plugin type is `<prefix>/<name>`, shadows no built-in type, and comes only from a built-in plugin or a plugin of the
 user, never from the plugin of a project folder: a cloned repository cannot bring code that reads the vaults.
