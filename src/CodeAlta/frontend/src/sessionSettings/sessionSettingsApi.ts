@@ -18,6 +18,8 @@ export type SessionSettingsApi = Readonly<{
   reviewSetting: (signal: AbortSignal) => Promise<boolean | null>;
   /** The sandbox a session of that provider and model gets from the settings, with the profiles it can choose. */
   sandbox: (providerId: string | null, modelId: string | null, signal: AbortSignal) => Promise<SandboxSessionResponse | null>;
+  /** Whose tiers of models the form offers: those of the space of the session (null for the one its project is in); none without. */
+  tiers?: Readonly<{ epoch: string; spaceId: string | null }> | null;
 }>;
 
 /**
@@ -28,6 +30,7 @@ export function sessionSettingsApi(epoch: string, projectId: string | null, proj
   const options = (signal: AbortSignal) => ({ signal, timeoutMilliseconds: 15000 });
   return {
     key: JSON.stringify([epoch, projectId, projectPath, spaceId]),
+    tiers: { epoch, spaceId },
     models: (providerId, signal) => modelCatalog.models({ expectedEpoch: epoch, providerId }, options(signal))
       .then(reply => reply.status === "ok" ? { models: reply.models, order: reply.modelsOrder ?? null } : { models: [], order: null }),
     prompts: signal => workspace.draftPrompts({ expectedHostEpoch: epoch, projectId, projectPath, spaceId }, options(signal))

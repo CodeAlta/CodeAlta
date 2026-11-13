@@ -32,7 +32,7 @@ You decide on each card:
 | **Backlog** | You keep the task, out of the way, in the **Backlog** of the Work items tab. |
 | **Dismiss** | The task is not worth doing. |
 
-- A new session started from a card uses the provider, model and reasoning effort of the session that shows the card.
+- **Runs with**, above the buttons, is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session, small on the card, and with the same form when you click it. With **Use the defaults** on, the new session runs with the provider, model and reasoning effort of the session that shows the card, and on its [model tier](model-tiers.md) or [Adaptive](model-tiers.md#adaptive) when it runs on one. Turn it off to choose the agent prompt, such as **Orchestrator**, and a model, a tier or Adaptive at a level, as in the list of models of the prompt. **Do it in this session** keeps what the session runs with.
 - When you ask the proposing session to do the task itself, its card says **Task in progress**: **OK** puts it away, and it goes away by itself once the task is done.
 - Agents propose a task only for something concrete they verified, and never start it themselves. A session has at most five proposals waiting.
 
@@ -66,7 +66,7 @@ Once you approve it, the session shows the plan as a card with the same choices 
 Open it with **Work items** in the title bar (in its **…** menu when the window is narrow), with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
 
 - **Inbox** holds what waits for your decision: the tasks proposed to you, and the plans and reviews that wait for you. **Backlog** holds the tasks you keep for later. **In progress** and **Closed** hold what is being done and what is done.
-- **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, the agent prompt, the permission mode, review before commit and the sandbox, before you start. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
+- **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, a [model tier](model-tiers.md) or [Adaptive](model-tiers.md#adaptive) at a level, the agent prompt, the permission mode, review before commit and the sandbox, before you start. On a tier, the session starts on the first ready model of the tier and falls back along it. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 - Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, by [tag](#tags), or by text. **All projects** are those of the [space](spaces.md) the window shows.
 - Items are listed under the day they were created (**Today**, **Yesterday**, **This week**, **Last week**, then each month), each with its date. **Newest first** turns to **Oldest first**, and with **All projects**, **Group by project** lists them under their projects instead. The tab remembers your choice.
 - Select an item to read it, start it, mark it done, open its file, or remove it.

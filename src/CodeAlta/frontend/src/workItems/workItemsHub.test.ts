@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkItemRow, WorkItemsListResponse, WorkItemsProject, WorkItemsSettings } from "#neoastra";
-import { defaultSessionSettings, type SessionStartRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, tieredStartRequest, type SessionStartRequest } from "../sessionSettings/sessionSettings";
 import { startRefusal, startWorkItem, type WorkStartHost } from "./startWorkItem";
 import { defaultWorkSettings, workItems, type WorkItem } from "./workItems";
 import { createWorkItemsHub, readingBatches, type WorkItemsApi } from "./workItemsHub";
@@ -31,7 +31,8 @@ function host(found: Record<string, WorkItemRow[]>) {
     async act(request) {
       acted.push(`${request.action}:${request.id}:${request.sessionId ?? ""}`);
       if (request.action.startsWith("start_")) ranWith.push([request.providerId, request.modelId, request.reasoningEffort,
-        ...request.agentPromptId || request.permissionMode || request.reviewBeforeCommit !== null || request.sandbox ? [request.agentPromptId, request.permissionMode, request.reviewBeforeCommit, request.sandbox] : []]);
+        ...request.agentPromptId || request.permissionMode || request.reviewBeforeCommit !== null || request.sandbox ? [request.agentPromptId, request.permissionMode, request.reviewBeforeCommit, request.sandbox] : [],
+        ...request.tier ? ["tier:" + request.tier] : []]);
       if (request.action === "dismiss") found[request.projectId] = found[request.projectId].filter(item => item.id !== request.id);
       return request.action === "start_here" ? { status: "ok", sessionId: request.sessionId, message: null, reason: null, prompt: "Do it.", agentPromptId: request.kind === "plan" ? "default" : null }
         : request.action === "start_worktree" ? { status: "refused", sessionId: null, message: "git said no", reason: "worktree_not_repository", prompt: null, agentPromptId: null }
@@ -171,6 +172,13 @@ test("work starts in a new session, or through the composer of the session that 
   // So do the agent prompt, the permission mode, the review and the sandbox of its form.
   assert.equal(await startWorkItem(window(false), item, "session", null, chosen({ agentPromptId: "plan", permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off" })), true);
   assert.deepEqual(server.ranWith.at(-1), [null, null, null, "plan", "acceptEdits", false, "off"]);
+  // A tier, or Adaptive, gives the model: the host takes it instead of a model, never with one.
+  assert.equal(await startWorkItem(window(false), plan, "worktree", null, tieredStartRequest({ ...defaultSessionSettings, agentPromptId: "orchestrator", providerId: "codex",
+    modelId: "gpt-a", reasoningEffort: "high" }, { providerId: "codex", modelId: "gpt-a", reasoningEffort: "high" }, "complex")), false);
+  assert.deepEqual(server.ranWith.at(-1), [null, null, null, "orchestrator", null, null, null, "tier:complex"]);
+  assert.equal(await startWorkItem(window(false), item, "session", null, { ...chosen({ providerId: "codex" }), tier: "quick" }), true);
+  assert.deepEqual(server.ranWith.at(-1), ["codex", null, null], "a model chosen by hand is not a tier");
+  refused.splice(0);
   opened.splice(0, opened.length, "new");
 
   assert.equal(await startWorkItem(window(false), item, "here", { id: "s1", workingDirectory: "C:/app" }), true);

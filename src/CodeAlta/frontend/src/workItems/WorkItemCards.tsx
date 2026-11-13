@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Button, Menu, MenuItem, PopoverNext, Tag } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -14,6 +14,22 @@ import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
 import { dockSides, dockTargetAt, dockTargets, type DockPreference, type DockSide, type PaneRect } from "./proposalsDock";
 import type { MessageKey } from "../localization";
 import type { ProposalsOverlayMemory } from "../sessionOverlayMemory";
+import type { TieredStartRequest } from "../sessionSettings/sessionSettings";
+import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
+import type { RunProvider } from "./runsWith";
+import { useWorkRunsWith, WorkRunsWithField, type ShowingSession } from "./WorkRunsWith";
+
+const noProviders: readonly RunProvider[] = Object.freeze([]);
+
+/**
+ * What the cards of a session need to offer what a new session runs with: the providers, the catalogs of a project, and
+ * what the session that shows them runs with, which a new session takes by default (read again when `key` changes).
+ */
+export type WorkCardsRunsWith = Readonly<{
+  providers: readonly RunProvider[];
+  sessionSettings: ((projectId: string) => SessionSettingsApi | null) | null;
+  showing: Readonly<{ key: string; read: (signal: AbortSignal) => Promise<ShowingSession | null> }> | null;
+}>;
 
 const dockIcons: Readonly<Record<DockSide, IconName>> = Object.freeze({ left: "arrowLeft", right: "arrowRight", above: "arrowUp", below: "arrowDown" });
 const dockLabels: Readonly<Record<DockSide, MessageKey>> = Object.freeze({ left: "Left of Notes", right: "Right of Notes", above: "Above Notes", below: "Below Notes" });
@@ -78,7 +94,7 @@ export function WorkItemTags({ item, projectName, shortId, tags }: { item: WorkI
  * few lines, opens its full text, and is decided there: started (in a new worktree, in this session, in a new
  * session), kept for later, or dismissed. A task the session started itself says so, until the user puts it away.
  */
-export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, memory, dockPreference, onStart, onOpenList }: {
+export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, memory, dockPreference, runsWith = null, onStart, onOpenList }: {
   hub: WorkItemsHub;
   /** The items this session shows, in the order of the cards. */
   items: readonly WorkItem[];
@@ -91,7 +107,10 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   memory?: ProposalsOverlayMemory;
   /** The side of Notes the user chose for the cards, owned by the window: the same for every pane. */
   dockPreference: DockPreference;
-  onStart: (item: WorkItem, start: WorkStart) => void;
+  /** What a new session started from a card runs with; without it, the cards offer no choice and the host takes the defaults. */
+  runsWith?: WorkCardsRunsWith | null;
+  /** Starts an item; `request` is what the user chose for a new session, null in this session. */
+  onStart: (item: WorkItem, start: WorkStart, request: TieredStartRequest | null) => void;
   /** Opens the Work items tab on an item. */
   onOpenList: (item: WorkItem) => void;
 }) {
@@ -122,10 +141,30 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     if (arrived) { setSelected(workItemKey(arrived)); setCollapsed(false); }
     if (known || items.length > 0) remembered.known = new Set([...known ?? [], ...items.map(workItemKey)]);
   }, [remembered, items]);
+  // What a new session runs with, for the item shown: what the session that shows it runs with, until the user changes it.
+  const shownItem = items.length > 0 ? items[Math.max(0, items.findIndex(candidate => workItemKey(candidate) === selected))] : null;
+  const runsApi = useMemo(() => shownItem && runsWith?.sessionSettings ? runsWith.sessionSettings(shownItem.projectId) : null,
+    [shownItem?.projectId, runsWith?.sessionSettings]);
+  const [showing, setShowing] = useState<ShowingSession | null>(null);
+  const showingKey = runsWith?.showing?.key ?? null;
+  const readShowing = useRef(runsWith?.showing?.read); readShowing.current = runsWith?.showing?.read;
+  // Read again when a proposal arrives or the details open: the session may have changed its model meanwhile.
+  useEffect(() => {
+    const read = readShowing.current;
+    if (!showingKey || !read || items.length === 0) return;
+    const abort = new AbortController();
+    void read(abort.signal).then(value => { if (!abort.signal.aborted) setShowing(value); }, () => { /* The defaults of the item are shown. */ });
+    return () => abort.abort();
+  }, [showingKey, items.length, detail]);
+  const runs = useWorkRunsWith(shownItem ? workItemKey(shownItem) : "", runsApi, runsApi ? runsWith!.providers : noProviders, showing?.runsWith ?? shownItem?.runsWith);
   if (items.length === 0 || hidden) return null;
   const index = Math.max(0, items.findIndex(item => workItemKey(item) === selected));
   const item = items[index];
   const key = workItemKey(item);
+  // The choice of the user goes to a new session; this session runs with what it runs with.
+  const start = (way: WorkStart) => onStart(item, way, way === "here" ? null : runs.request());
+  const runsField = (compact: boolean) => <WorkRunsWithField id={`card-${item.kind}-${item.id}`} providers={runsWith?.providers ?? noProviders} runs={runs}
+    inheritedTier={showing?.tier ?? null} disabled={working} compact={compact} />;
   const working = busy.has(key);
   const go = (delta: number) => setSelected(workItemKey(items[(index + delta + items.length) % items.length]));
   const plan = item.kind === "plan";
@@ -232,7 +271,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
           {suggestion && <NewTagQuestion proposal={suggestion} count={suggestionTasks.length} onReview={review} onDecline={decline} />}
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
-            : <WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start => onStart(item, start)} />}
+            : <>{runsField(true)}<WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start} /></>}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>
         </section>}
     {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
@@ -249,7 +288,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
         <div className="work-window-text">{item.summary && <p className="work-window-summary">{item.summary}</p>}<WorkItemText hub={hub} item={item} /></div>
         <footer className="work-window-actions">
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
-            : <WorkStartButtons preferred={preferredStart} here disabled={working} onStart={start => { setDetail(false); onStart(item, start); }} />}
+            : <>{runsField(false)}<WorkStartButtons preferred={preferredStart} here disabled={working} onStart={way => { setDetail(false); start(way); }} /></>}
           <span className="work-window-decisions">
             {decisions}
             <Button variant="minimal" size="small" icon={<AppIcon name="list" size={14} />} onClick={() => { setDetail(false); onOpenList(item); }}>{t("Show in Work items")}</Button>

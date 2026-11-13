@@ -1,8 +1,8 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Alert, Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
 import type { RunProvider } from "./runsWith";
-import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
-import { defaultSessionSettings, startRequest, type SessionStartRequest } from "../sessionSettings/sessionSettings";
+import type { TieredStartRequest } from "../sessionSettings/sessionSettings";
+import { useWorkRunsWith, WorkRunsWithField } from "./WorkRunsWith";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { reviews as reviewsApi, type ReviewsOverviewProject, type WorkspaceProject, type WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -46,7 +46,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   onActivate: () => void;
   /** Starts the work of an item in a new session; resolves when the session exists or the start was refused. */
   /** `shown` says whether the user still looks at the item when its session exists: it is then opened, else offered. */
-  onStart: (item: WorkItem, start: WorkStart, request: SessionStartRequest | null, shown: () => boolean) => Promise<boolean>;
+  onStart: (item: WorkItem, start: WorkStart, request: TieredStartRequest | null, shown: () => boolean) => Promise<boolean>;
   /** The enabled providers a new session can run with; none when the window cannot start one. */
   providers?: readonly RunProvider[];
   /** The catalogs of the form of the Agent chip of a new session of a project. */
@@ -119,7 +119,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   // still the one looked at.
   const shownKey = useRef<string | null>(null);
   shownKey.current = visible && current ? workItemKey(current) : null;
-  const start = (item: WorkItem, way: WorkStart, request: SessionStartRequest | null) => void during(item, async () => {
+  const start = (item: WorkItem, way: WorkStart, request: TieredStartRequest | null) => void during(item, async () => {
     await onStart(item, way, request, () => shownKey.current === workItemKey(item)); return true;
   });
 
@@ -387,15 +387,14 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
   providers: readonly RunProvider[]; sessionSettings: ((projectId: string) => SessionSettingsApi | null) | null;
-  onStart: (start: WorkStart, request: SessionStartRequest | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
+  onStart: (start: WorkStart, request: TieredStartRequest | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
 }) {
   const { t } = useShellLanguage();
   const task = item.kind === "task";
   const startable = item.stage === "todo" || item.stage === "later";
   // What the new session runs with: what the item was proposed with, else the defaults, until the user changes it.
-  const [settings, setSettings] = useState(defaultSessionSettings);
   const settingsApi = useMemo(() => startable ? sessionSettings?.(item.projectId) ?? null : null, [startable, sessionSettings, item.projectId]);
-  const choices = useSessionSettingsChoices(settingsApi, startable ? providers : noProviders, item.runsWith, settings);
+  const runs = useWorkRunsWith(workItemKey(item), settingsApi, startable ? providers : noProviders, item.runsWith);
   // A plan that is not done is reviewed here, or in the editor's preview.
   const openReview = useContext(ReviewOpenerContext);
   const reviewable = !task && item.stage !== "closed" && !!epoch;
@@ -414,11 +413,8 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
         {runnerWorking ? <ActivitySpinner size={12} /> : <AppIcon name="chat" size={12} />}<span>{runner.title}</span><AppIcon name="chevronRight" size={12} /></button>}
     </header>
     <div className="work-detail-actions">
-      {startable && choices.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
-        <span className="work-runs-with-label">{t("Runs with")}</span>
-        <SessionSettingsChip id={`work-${item.kind}-${item.id}`} providers={providers} choices={choices} value={settings} disabled={busy} onChange={setSettings} />
-      </div>}
-      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, startRequest(settings, choices.shown))} />}
+      {startable && <WorkRunsWithField id={`work-${item.kind}-${item.id}`} providers={providers} runs={runs} disabled={busy} />}
+      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, runs.request())} />}
       <div className="work-detail-buttons">
         {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Backlog")}</Button>}
         {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to Inbox")}</Button>}

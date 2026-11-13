@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RunModel, RunProvider } from "../workItems/runsWith";
-import { chooseEffort, chooseModel, chooseProvider, defaultSessionSettings, shownModel, startRequest, switchDefaults, usesDefaults, type SessionSettings } from "./sessionSettings";
+import { chooseEffort, chooseModel, chooseProvider, defaultSessionSettings, shownModel, startRequest, switchDefaults, tieredStartRequest, usesDefaults, type SessionSettings } from "./sessionSettings";
 
 const providers: readonly RunProvider[] = [
   { id: "anthropic", name: "Anthropic", isDefault: false, defaultModel: null, defaultReasoning: null },
@@ -67,4 +67,14 @@ test("a start asks nothing of the model with the defaults, and what the form sho
   // The options go with the start, with the defaults or not.
   assert.deepEqual(startRequest(settings({ options: { subSessions: false } }), shown), settings({ options: { subSessions: false } }));
   assert.deepEqual(startRequest(settings({ providerId: "codex", options: { subSessions: false } }), shown).options, { subSessions: false });
+});
+
+test("a start on a tier asks for the tier, which gives the model, with the other choices of the form", () => {
+  const shown = { providerId: "codex", modelId: "gpt-b", reasoningEffort: "low" };
+  const onTier = settings({ agentPromptId: "orchestrator", providerId: "codex", modelId: "gpt-b", reasoningEffort: "low", sandbox: "off" });
+  assert.deepEqual(tieredStartRequest(onTier, shown, "standard"), { ...settings({ agentPromptId: "orchestrator", sandbox: "off" }), tier: "standard" });
+  assert.deepEqual(tieredStartRequest(onTier, shown, "adaptive:high"), { ...settings({ agentPromptId: "orchestrator", sandbox: "off" }), tier: "adaptive:high" });
+  // Without a tier, what a start asks otherwise.
+  assert.deepEqual(tieredStartRequest(onTier, shown, null), { ...startRequest(onTier, shown), tier: null });
+  assert.deepEqual(tieredStartRequest(settings({ agentPromptId: "plan" }), shown, null), { ...settings({ agentPromptId: "plan" }), tier: null });
 });

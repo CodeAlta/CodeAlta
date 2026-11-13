@@ -226,7 +226,8 @@ import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
 import { WorkItemSettings } from "./workItems/WorkItemSettings";
 import type { RunModelsLoader, RunProvider } from "./workItems/runsWith";
-import type { SessionStartRequest } from "./sessionSettings/sessionSettings";
+import type { TieredStartRequest } from "./sessionSettings/sessionSettings";
+import { readShowingSession } from "./workItems/showingSession";
 import { sessionSettingsApi } from "./sessionSettings/sessionSettingsApi";
 import { SessionSettingsChip, useSessionSettingsChoices } from "./sessionSettings/SessionSettingsChip";
 import { machineRunProviders, onMachine } from "./machines/machineProviderNames";
@@ -3061,7 +3062,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   // `shown` says whether the user still looks at what started the work when its session exists: the session is then
   // opened, and offered by a toast otherwise.
-  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, request: SessionStartRequest | null = null, shown?: () => boolean) {
+  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, request: TieredStartRequest | null = null, shown?: () => boolean) {
     const key = workItemKey(item);
     setWorkBusy(value => new Set(value).add(key));
     try {
@@ -6432,7 +6433,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
                 })() : undefined}
                 workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
-                  memory={overlayMemory.proposals(row.id)} dockPreference={proposalsDock} onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
+                  memory={overlayMemory.proposals(row.id)} dockPreference={proposalsDock}
+                  runsWith={{ providers: runProviders, sessionSettings: sessionSettingsFor,
+                    showing: status?.hostEpoch ? { key: `${status.hostEpoch}\n${row.id}`, read: signal => readShowingSession(status.hostEpoch!, row.id, signal) } : null }}
+                  onStart={(item, start, request) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath }, request)}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesHidden={!notesVisible} notesMemory={overlayMemory.notes(row.id)} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}

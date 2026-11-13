@@ -5,6 +5,8 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
+using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
@@ -85,6 +87,59 @@ public sealed class DesktopWorktreeTests
             Assert.AreEqual("not committed", File.ReadAllText(Path.Combine(repository.Root, "notes.txt")));
             Assert.IsNull((await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == started.SessionId).WorktreePath,
                 "The session works in the folder of the project.");
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task WorkStartedOnATier_RunsOnIt_AndASessionOnATierGivesItsTier()
+    {
+        using var repository = await Repository.CreateAsync();
+        File.WriteAllText(repository.Options.ConfigPath, """
+            [models.tiers]
+            quick = ["worktree-fixture:fixture-model@low"]
+
+            [models.adaptive]
+            level = "medium"
+
+            [models.adaptive.high]
+            model = "worktree-fixture:fixture-model@high"
+            """);
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var starter = new CodeAlta.Desktop.WorkItems.SessionStarter(host, null, () => null);
+        var service = new WorkspaceService(host, Epoch);
+        try
+        {
+            // A tier chosen: the session starts on its model and runs on it, as one the composer puts there.
+            var quick = await starter.StartAsync(project, "Quick", _ => "Work on it.", false, null, "workitem", new() { Tier = new(ModelTier.Quick, false, null) });
+            Assert.IsNull(quick.Problem, quick.Problem);
+            Assert.AreEqual(((ModelTier?)ModelTier.Quick, false), await host.RuntimeService.GetSessionModelChoiceAsync(quick.SessionId!));
+
+            // Adaptive at a level.
+            var adaptive = await starter.StartAsync(project, "Adaptive", _ => "Work on it.", false, null, "workitem", new() { Tier = new(null, true, AdaptiveLevel.High) });
+            Assert.IsNull(adaptive.Problem, adaptive.Problem);
+            Assert.AreEqual(((ModelTier?)null, true), await host.RuntimeService.GetSessionModelChoiceAsync(adaptive.SessionId!));
+            Assert.AreEqual(AdaptiveLevel.High, await host.RuntimeService.GetSessionAdaptiveLevelAsync(adaptive.SessionId!));
+
+            // Nothing chosen: the session that shows the work gives its tier with its model.
+            var like = await starter.StartAsync(project, "Like", _ => "Work on it.", false, quick.SessionId, "workitem", null);
+            Assert.IsNull(like.Problem, like.Problem);
+            Assert.AreEqual(((ModelTier?)ModelTier.Quick, false), await host.RuntimeService.GetSessionModelChoiceAsync(like.SessionId!));
+            // A model chosen by hand is not a tier, whatever the showing session runs on.
+            var named = await starter.StartAsync(project, "Named", _ => "Work on it.", false, quick.SessionId, "workitem", new(new WorkItemSelection("worktree-fixture", "fixture-model")));
+            Assert.IsNull(named.Problem, named.Problem);
+            Assert.AreEqual(((ModelTier?)null, false), await host.RuntimeService.GetSessionModelChoiceAsync(named.SessionId!));
+
+            // A tier without a model starts nothing.
+            var sessions = (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Length;
+            var empty = await starter.StartAsync(project, "Complex", _ => "Work on it.", false, null, "workitem", new() { Tier = new(ModelTier.Complex, false, null) });
+            Assert.AreEqual(((string?)null, "The complex tier has no model: set the tiers in Settings > Models."), (empty.SessionId, empty.Problem));
+            Assert.HasCount(sessions, (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions);
         }
         finally
         {
