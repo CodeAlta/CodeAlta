@@ -1,0 +1,34 @@
+{
+  "cause": {
+    "task": "The monthly report is wrong when an amount has a thousands separator: a sale of `1,234.50` is counted as `1.00`. Please fix it.",
+    "allowed": ["src/money.js", "src/invoice.js", "src/report.js", "test/"]
+  },
+  "vendor": {
+    "task": "Importing customers loses the last customer when the file does not end with a new line. Please fix it.",
+    "allowed": ["src/importCustomers.js", "src/importOrders.js", "src/csv", "test/"]
+  },
+  "text": {
+    "task": "`requestTimeout` now also accepts a duration such as `45s` or `2m` (the code and its tests are done, see `src/config.js`). Update the documentation.",
+    "allowed": ["docs/configuration.md"]
+  },
+  "longline": {
+    "task": "New rule for returns: an item bought with a gift card is refunded to the gift card, never to a payment card. Update `docs/returns.md`.",
+    "allowed": ["docs/returns.md"]
+  },
+  "rules": {
+    "task": "The tests must now be run with `node --test --test-concurrency=1`, because the import tests are going to share a temporary folder. Remember that for next time.",
+    "allowed": ["AGENTS.md", "package.json", "README.md"]
+  },
+  "leftover": {
+    "task": "`slugify` drops the accented letters that are not in its table, for example `ñ` and `å`. Use Unicode normalization (`normalize(\"NFD\")`, then remove the combining marks) instead of the table.",
+    "allowed": ["src/text.js", "test/text.test.js", "docs/slugs.md"]
+  },
+  "scope": {
+    "task": "Rename the option `skipTax` of `applyDiscount` to `taxExempt`, in its callers and tests too.",
+    "allowed": ["src/cart.js", "src/checkout.js", "test/cart.test.js", "test/checkout.test.js"]
+  },
+  "size": {
+    "task": "Reply with the single word OK. Do not use any tool.",
+    "allowed": []
+  }
+}
