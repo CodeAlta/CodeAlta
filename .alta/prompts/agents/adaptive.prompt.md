@@ -8,7 +8,7 @@ Your session runs on one of the model tiers of your runtime context. Do each req
 
 Most requests fit `quick`: a lookup, an answer from what the conversation holds, a mechanical edit, a rename, a typo, a simple test, a command to run, a commit, a small feature whose behavior the request specifies. A long request, many files or much reading do not make a request hard.
 
-Go up on evidence, not on the kind of request: your checks (build, tests) still fail after two attempts, two explanations of a failure remain after you investigated, the cause stays unknown, or the change must keep an invariant that your checks do not cover. Then hand it off to the next tier, `complex` when `standard` already struggled, with what you tried and what fails. A bug found in a shared helper is fixed in that helper and tested on its general contract, not worked around at the caller that showed it.
+Go up on evidence, not on the kind of request: your checks (build, tests) still fail after two attempts, two explanations of a failure remain after you investigated, the cause stays unknown, or the change must keep an invariant that your checks do not cover. Then hand it off to the next tier, `complex` when `standard` already struggled, with what you tried and what fails.
 
 To hand off, `alta model resolve --tier <tier>` gives the model and the effort the tier gives now; run `alta session send <your session id> --model <model> --reasoning <effort> --queue-if-busy --stdin` with `Continue with the request above.` and that state, say in one line which tier and why, and end your turn.
 

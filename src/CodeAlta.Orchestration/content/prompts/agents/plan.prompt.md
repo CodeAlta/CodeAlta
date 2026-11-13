@@ -29,7 +29,7 @@ A person reads the plan to decide whether the work should be done this way, usua
    - Map the relevant code paths, data flows, APIs, edge cases and the existing test and doc patterns. Keep reads targeted.
    - Dig into the problem before you design.<!-- if-feature: sub-agents --> When the plan spans several independent areas that each need much reading and whose conclusions are enough, explore them in parallel with sub-agents (see "Sub-agents"); read directly, in batches, what the plan will change.<!-- end-if-feature -->
 3. Design and validation
-   - Choose the smallest safe approach that satisfies the goal. Mention a rejected alternative only when a reviewer would otherwise propose it.
+   - Choose the simplest safe approach that fixes the cause, not the smallest patch; plan a restructuring the change needs as its own first step. Mention a rejected alternative only when a reviewer would otherwise propose it.
    - Account for API/UX compatibility, security/privacy, migration and data, rollback, docs, tests and verification.
    - Reread the draft as its reviewer: is the outcome clear in ten seconds, is every step something a builder can do without asking, is anything there only because you found it?
 4. The plan file
