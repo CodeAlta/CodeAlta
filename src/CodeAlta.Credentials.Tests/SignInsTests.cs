@@ -109,9 +109,15 @@ public sealed class SignInsTests
 
         vault.State["signedIn"] = true;
         vault.Save();
+        var before = vault.Calls().Count;
         using (var values = await broker.ReadSignInAsync("github"))
         {
             Assert.AreEqual(("octocat", "hunter2-github", "123456"), (values.Username, values.Password, values.Totp));
+            // The user name and the password with one call of the vault, then the code, which is the value that expires.
+            var reads = vault.Calls().Skip(before).Where(static call => call == "inject" || call.StartsWith("read", StringComparison.Ordinal)).ToArray();
+            Assert.HasCount(2, reads, string.Join(" | ", reads));
+            Assert.AreEqual("inject", reads[0]);
+            StringAssert.Contains(reads[1], "attribute=otp");
             CollectionAssert.IsSubsetOf(new[] { "octocat", "hunter2-github", "123456" }, masked, "each value is masked before it is given");
             Assert.DoesNotContain("hunter2", values.ToString());
             values.Dispose();

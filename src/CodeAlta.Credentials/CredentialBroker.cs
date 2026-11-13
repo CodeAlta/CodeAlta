@@ -799,8 +799,28 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(40));
-            var username = codeOnly ? null : await ReadFieldAsync(provider, signIn.Username, timeout.Token).ConfigureAwait(false);
-            var password = codeOnly ? null : await ReadFieldAsync(provider, signIn.Password, timeout.Token).ConfigureAwait(false);
+            CredentialValue? username = null, password = null;
+            if (!codeOnly && provider is ICredentialBatchReader reader && !string.Equals(signIn.Username, signIn.Password, StringComparison.Ordinal))
+            {
+                // One call of the vault for both, where its provider reads several values at once.
+                var read = await reader.ReadManyAsync([signIn.Username, signIn.Password], interactive: false, timeout.Token).ConfigureAwait(false);
+                if (read is not { Count: 2 }) throw new CredentialProviderException(CredentialFailure.Failed, "The vault did not answer for the user name and the password.");
+                // Both are masked before a field that could not be read fails the fill.
+                foreach (var field in read)
+                {
+                    if (field.Value is { Value.Length: > 0 } given) _options.Mask(given.Value);
+                }
+
+                username = Field(read[0]);
+                password = Field(read[1]);
+            }
+            else if (!codeOnly)
+            {
+                username = await ReadFieldAsync(provider, signIn.Username, timeout.Token).ConfigureAwait(false);
+                password = await ReadFieldAsync(provider, signIn.Password, timeout.Token).ConfigureAwait(false);
+            }
+
+            // The one-time code last: it is the value that expires.
             var totp = signIn.Totp is null ? null : await ReadFieldAsync(provider, signIn.Totp, timeout.Token).ConfigureAwait(false);
             return new SignInValues(username?.Value ?? string.Empty, password?.Value ?? string.Empty, totp?.Value, totp?.ExpiresAt);
         }
@@ -816,9 +836,14 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
     // Reads one field of a sign-in, never with a prompt, and masks it before anything else gets it.
     private async Task<CredentialValue> ReadFieldAsync(ICredentialProvider provider, string reference, CancellationToken cancellationToken)
+        => Field(new CredentialReadResult(await provider.ReadAsync(reference, interactive: false, cancellationToken).ConfigureAwait(false), null));
+
+    // The value a read gave for one field of a sign-in, masked before anything else gets it; a field the vault could not read
+    // fails the fill with its reason.
+    private CredentialValue Field(CredentialReadResult read)
     {
-        var value = await provider.ReadAsync(reference, interactive: false, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrEmpty(value.Value)) throw new CredentialProviderException(CredentialFailure.NotFound, "The vault gave an empty value.");
+        if (read.Failure is { } failure) throw failure;
+        if (read.Value is not { Value.Length: > 0 } value) throw new CredentialProviderException(CredentialFailure.NotFound, "The vault gave an empty value.");
         _options.Mask(value.Value);
         return value;
     }
