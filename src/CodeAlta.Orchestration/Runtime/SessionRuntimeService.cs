@@ -4927,6 +4927,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var actorChoresCompleted = false;
         Action<HeldRunFailure>? fallback = null;
         HeldRunFailure? heldFailure = null;
+        string? startedQueueItemId = null;
         var publication = new LiveEventPublication(new { Runtime = this, Projector = projector, Use = projectionUse });
         try
         {
@@ -4954,6 +4955,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         mark(envelope);
                     }
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
+                    startedQueueItemId = projector.Entry.TakeQueueItemStartedBy(@event);
                     // A failure the session goes on from with the next model of its tier is not told to the parent,
                     // and its queue waits for the run that continues: both are held until the fallback settles.
                     if (sanitized is AgentErrorEvent failed
@@ -4978,6 +4980,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     effects.Add(() => InvalidateFileSearchCacheAsync(published, workingDirectory).AsTask());
                 foreach (var notification in notifications)
                     effects.Add(() => DeliverParentNotificationAsync(notification));
+                if (startedQueueItemId is not null && @event.RunId is { } startedRunId)
+                    effects.Add(() => MarkQueuedPromptRunStartedAsync(projector.Entry!, startedQueueItemId, startedRunId, @event.Timestamp));
                 if (fallback is not null && heldFailure is not null)
                 {
                     // The fallback runs on its own: it waits for the send of the failed run to be released.
@@ -5204,7 +5208,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     item.LastError = null;
                     CopySessionMetadata(entry.ToDescriptor(), localState);
                     await _sessionViewCatalog.JournalStore.AppendStateAsync(entry.ToDescriptor(), localState, actorCancellationToken).ConfigureAwait(false);
-                    entry.BeginQueueDrain();
+                    entry.BeginQueueDrain(item.QueueItemId);
                     PublishQueueChanged(sessionId, localState, item, timestamp, isEnqueued: false);
                     return new QueuedPromptDrainWork(sessionHandleId, CloneQueuedPrompt(item), entry, use);
                     }
@@ -5250,6 +5254,33 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     entry.MarkActiveRunIfStillInFlight(runId, runStartedAt);
                 })
             .ConfigureAwait(false);
+
+    // The run of a drained prompt started: the prompt is sent, and no longer waits in the queue while that run works. The
+    // drain stays in progress until the send returns, so no other prompt is taken meanwhile; a restart does not send it again.
+    private async Task MarkQueuedPromptRunStartedAsync(RuntimeSessionEntry capturedEntry, string queueItemId, AgentRunId runId, DateTimeOffset timestamp)
+    {
+        var sessionId = capturedEntry.SessionId;
+        await GetActorForWork(sessionId).QueryAsync(
+                async actorCancellationToken =>
+                {
+                    var localState = await ReadLatestLocalStateAsync(sessionId, capturedEntry.CreatedAt, actorCancellationToken).ConfigureAwait(false);
+                    var item = localState?.QueuedPrompts.FirstOrDefault(prompt => string.Equals(prompt.QueueItemId, queueItemId, StringComparison.Ordinal));
+                    // The send may have ended first, and recorded how.
+                    if (item is null || !string.Equals(item.State, "submitting", StringComparison.OrdinalIgnoreCase)) return false;
+
+                    item.State = "submitted";
+                    item.RunId = runId.Value;
+                    item.DrainedAt = timestamp;
+                    item.LastError = null;
+                    if (localState!.PromptProvenance.FirstOrDefault(prompt => string.Equals(prompt.PromptId, queueItemId, StringComparison.Ordinal)) is { } provenance)
+                        provenance.RunId = runId.Value;
+                    await _sessionViewCatalog.JournalStore.AppendStateAsync(capturedEntry.ToDescriptor(), localState, actorCancellationToken).ConfigureAwait(false);
+                    PublishQueueChanged(sessionId, localState, item, timestamp, isEnqueued: false);
+                    return true;
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
+    }
 
     private async Task MarkQueuedPromptFailedAsync(RuntimeSessionEntry capturedEntry, string queueItemId, string error, DateTimeOffset timestamp)
         => await UpdateQueuedPromptStateAsync(
@@ -6788,11 +6819,36 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return activeRunId;
         }
 
-        public void BeginQueueDrain()
-            => QueueDrainInProgress = true;
+        // The queued prompt the drain sends, until the run it starts shows its user message.
+        private string? _drainedQueueItemId;
+
+        public void BeginQueueDrain(string queueItemId)
+        {
+            QueueDrainInProgress = true;
+            _drainedQueueItemId = queueItemId;
+        }
 
         public void CompleteQueueDrain()
-            => QueueDrainInProgress = false;
+        {
+            QueueDrainInProgress = false;
+            _drainedQueueItemId = null;
+        }
+
+        /// <summary>
+        /// The queued prompt whose run this event shows started: the first user message while the drain sends it. The send
+        /// returns only when the run ends, so the item is marked sent here, and not waiting for as long as its run works.
+        /// </summary>
+        public string? TakeQueueItemStartedBy(AgentEvent @event)
+        {
+            if (_drainedQueueItemId is not { } queueItemId
+                || @event is not AgentContentCompletedEvent { Kind: AgentContentKind.User, RunId: not null })
+            {
+                return null;
+            }
+
+            _drainedQueueItemId = null;
+            return queueItemId;
+        }
 
     }
 
