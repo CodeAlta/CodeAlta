@@ -1,8 +1,8 @@
 # Prompt health: does a prompt change make agents leave healthier code and text?
 
-A small benchmark for the built-in prompts of CodeAlta (`src/CodeAlta.Orchestration/content/prompts`). It gives the same tasks to sessions that differ only by their prompts, and scores what each session left in its worktree: a fix at the cause or at the symptom, a workaround removed or copied, a sentence rewritten or a note appended.
+A small benchmark for the built-in prompts of CodeAlta (`src/CodeAlta.Orchestration/content/prompts`). It gives the same tasks to agents that differ only by their prompts, and scores what each one left in its worktree: a fix at the cause or at the symptom, a workaround removed or copied, a sentence rewritten or a note appended.
 
-It runs in a CodeAlta that is already running, with the providers of its user. Results: [2026-11-13](../2026-11-13-prompt-health.md).
+The agents run with `altacli`, with the providers of its user. Results: [2026-11-13](../2026-11-13-prompt-health.md).
 
 ## The project and the probes
 
@@ -27,33 +27,30 @@ It runs in a CodeAlta that is already running, with the providers of its user. R
    node benchmarks/prompt-health/setup.mjs <folder> before=main after=WORKTREE
    ```
 
-   `<folder>` is outside this repository, so that the sessions do not read its `AGENTS.md`. The project gets the agent prompts `bench-before` and `bench-after`, each with its system prompt.
+   `<folder>` is outside this repository, so that the agents do not read its `AGENTS.md`. The project gets the agent prompts `bench-before` and `bench-after`, each with its system prompt. `name=<agent revision>,<system revision>` mixes two versions, to see what each file contributes. Run it again after a change of the prompts or of the fixture.
 
-2. Add `<folder>/shopkit` to CodeAlta: `alta project add <folder>/shopkit`.
+2. Copy a build of `altacli` (`src/CodeAlta.Cli/bin/Release/net10.0`) into `<folder>/altacli`, so that the runs do not lock the files of a build.
 
-3. From a session of this repository, run the matrix with Code Mode:
+3. Run the matrix:
 
-   ```js
-   return await workflow({ scriptPath: "benchmarks/prompt-health/run.js" }, {
-     project: "<folder>/shopkit",
-     kit: "<this repository>/benchmarks/prompt-health",
-     out: "<this repository>/tmp/prompt-bench/results.jsonl",
-     variants: ["before", "after"],
-     probes: ["cause", "vendor", "text", "longline", "rules", "leftover", "scope"],
-     models: [{ ref: "codex:gpt-6.1-sol@low", runs: 3 }],
-     limit: 4,        // sessions at once
-     costLimit: 20,   // optional: stop starting sessions past this reported cost
-   });
+   ```sh
+   node benchmarks/prompt-health/run.mjs --project <folder>/shopkit --altacli <folder>/altacli/altacli \
+     --out tmp/prompt-bench/results.jsonl --variants before,after \
+     --probes cause,vendor,text,longline,rules,leftover,scope \
+     --models codex:gpt-6.1-sol@low=3,anthropic:claude-sonnet-5-5@low=2 --limit 4 --cost-limit 20
    ```
 
-   Each session works in a worktree of its own, on a prompt of the list, and is not a child of the calling session.
+   Each run gets a git worktree under `<folder>/runs` and one `altacli run --isolated --enable all --no-sub-sessions`. `--models` gives the number of runs of each model; `--limit` is how many run at once; `--cost-limit` stops starting runs once the cost they reported passes it. A result is written as soon as its run ends.
 
-4. Summarize: `node benchmarks/prompt-health/report.mjs tmp/prompt-bench/*.jsonl`.
+   The sessions go to the isolated storage of `altacli` (`~/.alta/cli`): CodeAlta Desktop and TUI never list them. `altacli --isolated alta session ...` reads them.
 
-5. Clean up: `alta project remove <folder>/shopkit --delete-sessions`, `git -C <folder>/shopkit worktree prune` after deleting its worktrees, then the folder.
+4. Summarize: `node benchmarks/prompt-health/report.mjs tmp/prompt-bench/results.jsonl`.
+
+5. Clean up: delete `<folder>`.
 
 ## Read the results with care
 
 - Three runs per cell show large effects only. Read counts, not percentages.
+- Compare versions run the same way. A run of `altacli` and a session of CodeAlta Desktop do not get the same tools or the same prompt parts: do not mix them in one table.
 - The scorer reads the files: [`score.mjs`](score.mjs) says how each outcome is decided. Open the worktree of a surprising run before trusting its label.
 - The probes are small. They show whether a rule is followed, not how a large codebase ages.

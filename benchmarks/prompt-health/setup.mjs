@@ -14,7 +14,7 @@ const repository = resolve(kit, "..", "..");
 const prompts = "src/CodeAlta.Orchestration/content/prompts";
 const [folder, ...variants] = process.argv.slice(2);
 if (!folder || variants.length === 0 || variants.some((variant) => !/^[a-z0-9-]+=.+$/.test(variant))) {
-  console.error("usage: node setup.mjs <folder> <name>=<git revision | WORKTREE> ...");
+  console.error("usage: node setup.mjs <folder> <name>=<git revision | WORKTREE>[,<revision of the system prompt>] ...");
   process.exit(2);
 }
 
@@ -46,10 +46,13 @@ const body = (text) => text.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\
 
 const sizes = {};
 for (const variant of variants) {
-  const [name, revision] = variant.split(/=(.*)/s);
-  const system = read(revision, `${prompts}/system/default.system-prompt.md`).replace(/\r\n/g, "\n");
+  // <name>=<revision> takes both prompts there; <name>=<agent revision>,<system revision> mixes two versions.
+  const [name, revisions] = variant.split(/=(.*)/s);
+  const [revision, systemRevision = revision] = revisions.split(",");
+  const system = read(systemRevision, `${prompts}/system/default.system-prompt.md`).replace(/\r\n/g, "\n");
   const agent = body(read(revision, `${prompts}/agents/default.prompt.md`));
-  const at = revision === "WORKTREE" ? "the working tree" : git(repository, "rev-parse", "--short", revision).trim();
+  const short = (value) => (value === "WORKTREE" ? "the working tree" : git(repository, "rev-parse", "--short", value).trim());
+  const at = systemRevision === revision ? short(revision) : `${short(revision)} (system prompt at ${short(systemRevision)})`;
   const root = join(project, ".alta", "prompts");
   mkdirSync(join(root, "system"), { recursive: true });
   mkdirSync(join(root, "agents"), { recursive: true });
