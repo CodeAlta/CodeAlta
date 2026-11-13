@@ -231,6 +231,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     restoredText.current = "";
     draftIndicators.clear(sessionId);
     setDraft({ text: "", editGeneration: null });
+    // The editor is emptied too: when what it held was never drawn (typed and sent in the same moment), the draft is
+    // empty before and after, and the editor, which follows only a change of the draft, would keep the text.
+    promptInput.current?.replaceText("");
   }
   const promptInput = useRef<PromptInput>(null);
   // The dictation of the window. A send asked while this composer dictates waits for the last words: the dictation
@@ -612,8 +615,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const stageLatest = useRef(stagePrompt);
   const editLatest = useRef<(value: string) => void>(() => {});
   // Above the composer and never refused: a queued prompt waits for the session to be idle, a steering prompt
-  // for the running turn. Only the composer's own text takes its images along.
-  function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
+  // for the running turn. Only the composer's own text takes its images along. The composer's text is the one the
+  // editor holds (`latestText`), not the one drawn last: a key can come before the draft it typed is drawn.
+  function stagePrompt(kind: "Queue" | "Steer", value = latestText.current, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
     if (value === latestText.current && (takeShellCommand() || takeSideQuestion())) return true;
     if (!queue.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
@@ -780,9 +784,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!runShellCommand(command)) return true;
     shellCommands.setMode(sessionId, false);
     inputRevision.current++; clearText();
-    // The command may have been typed in the same moment as Enter, before the draft that holds it was drawn: the
-    // draft is then empty before and after, and the editor would keep the command. It is emptied once it is done.
-    window.setTimeout(() => { if (!latestText.current) promptInput.current?.replaceText(""); });
     return true;
   }
   // The outputs of the commands that ended while the prompt took no attachment (a Send on its way): attached once it does.
@@ -887,7 +888,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     }
     const revision = ++inputRevision.current;
     const capturedImages = images;
-    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), sendSelection, references, images);
+    // The text the editor holds: Enter can come before the draft it typed is drawn.
+    const request = retained?.request ?? captureSubmission(epoch, sessionId, latestText.current, crypto.randomUUID(), sendSelection, references, images);
     if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 32768 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) {
       sendDiagnostics.warn("blocked: invalid request or revoked capability"); return;

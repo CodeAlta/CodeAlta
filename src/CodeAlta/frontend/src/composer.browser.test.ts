@@ -30,8 +30,9 @@ const scenarios = [
   { name: "side questions bypass the running session and can be reopened", mac: false, permission: false, outside: false, removed: false, options: false, side: true },
   { name: "files and a folder that the host took from a drop are attached to the composer under the point", mac: false, permission: false, outside: false, removed: false, options: false, hostDrop: true },
   { name: "a prompt that starts with ! runs a shell command whose output goes with the next prompt", mac: false, permission: false, outside: false, removed: false, options: false, shell: true },
+  { name: "text typed and sent in the same moment is the text the prompt sends or queues", mac: false, permission: false, outside: false, removed: false, options: false, burst: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false, shell = false } of scenarios) test(name, { skip: !edge, timeout: testLimit(90_000) }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false, shell = false, burst = false } of scenarios) test(name, { skip: !edge, timeout: testLimit(90_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -123,6 +124,25 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
 
+    if (burst) {
+      // The text and Enter go to the page at once, as a tool that types and submits does: Enter comes before the
+      // composer has drawn the text, and what is sent is the text the editor holds.
+      const typeAndEnter = async (text: string) => {
+        await evaluate("document.querySelector('#session-prompt').focus()");
+        assert.equal(await wait("!!document.activeElement?.closest('#session-prompt')"), true);
+        await Promise.all([command("Input.insertText", { text }), ...["keyDown", "keyUp"].map(type =>
+          command("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }))]);
+      };
+      await typeAndEnter("sent at once");
+      assert.equal(await wait(`fixture.sendCalls.length===1 && ${running} && promptText()===''`), true);
+      assert.deepEqual(await sends(), ["sent at once"]);
+      // While the session works, the prompt waits in the queue with its text.
+      await typeAndEnter("queued at once");
+      assert.equal(await wait("fixture.rows().length===1 && promptText()===''"), true);
+      assert.match((await rows())[0], /:queued at once$/);
+      assert.deepEqual(exceptions, []);
+      return;
+    }
     if (shell) {
       const shellMode = "document.querySelector('#session-prompt')?.hasAttribute('data-shell')";
       const bang = () => key("!", "Digit1", 49);
