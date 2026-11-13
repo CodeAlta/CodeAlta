@@ -59,7 +59,11 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
   server.state.toolOutputs.set("s1/call-3", fileOutput);
   server.state.tools.set("s1/call-3", { name: "Read", phase: "completed", output: fileOutput.slice(0, 2000), outputOffset: 0, outputLength: fileOutput.length, error: null });
   // A prompt queued before this page opened, as after a reload of the phone.
-  server.state.queues.set("s1", [{ id: "queue-old", text: "Queued before the reload", at: now, state: "queued" }]);
+  server.state.queues.set("s1", [
+    { id: "queue-old", text: "Queued before the reload", at: now, state: "queued" },
+    // The next step an agent queued, as a session does before it changes folder.
+    { id: "queue-agent", text: "Continue the review in the slot", at: now, state: "queued", by: "agent", sourceSessionId: "s2" },
+  ]);
   const failures: string[] = [];
   try {
     browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
@@ -369,6 +373,27 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     assert.equal(await evaluate(`${card("Queued before the reload")}.querySelector(".msg-label").firstChild.textContent`), "You · queued");
     await evaluate(`${card("Queued before the reload")}.querySelector(".pending-delete").click()`);
     await waitFor(`!${card("Queued before the reload")}`);
+    assert.deepEqual(server.state.queues.get("s1")?.map(item => item.id), ["queue-agent"], "it left the queue of the session");
+
+    // ---- An agent's queued step is the card of the agent message it becomes: the session that queued it, deleted, not edited ----
+    const step = card("Continue the review in the slot");
+    await waitFor(step);
+    assert.equal(await evaluate(`${step}.querySelector(".host-name").textContent`), "Agent message");
+    assert.equal(await evaluate(`${step}.querySelector(".host-kind").textContent`), "queued");
+    assert.equal(await evaluate(`${step}.querySelector(".host-source").dataset.session`), "s2");
+    assert.match(await evaluate<string>(`${step}.querySelector(".host-source").textContent`), /The review/u);
+    assert.equal(await evaluate(`${step}.querySelector(".msg-label")`), null, "not \"You\"");
+    assert.equal(await evaluate(`${step}.querySelector(".pending-edit")`), null, "the composer would send it as the user's");
+    const nameFits = `(() => { const name = ${step}.querySelector(".host-name"); return name.scrollWidth <= name.clientWidth; })()`;
+    assert.equal(await evaluate(nameFits), true, "its title is not cut");
+    await evaluate(`${step}.scrollIntoView({ block: "center" })`);
+    await shot("pending-agent-step");
+    await evaluate(`${step}.querySelector(".host-head").click()`);
+    await waitFor(`${step}.querySelector(".host-body")?.textContent.includes("Continue the review in the slot")`);
+    assert.equal(await evaluate(`getComputedStyle(${step}.querySelector(".host-kind")).display !== "none"`), true, "open, it still says it waits");
+    await shot("pending-agent-step-open");
+    await evaluate(`${step}.querySelector(".pending-delete").click()`);
+    await waitFor(`!${step}`);
     assert.deepEqual(server.state.queues.get("s1"), [], "it left the queue of the session");
 
     // ---- A steered prompt the run still holds is deleted ----

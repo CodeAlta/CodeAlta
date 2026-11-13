@@ -138,7 +138,7 @@ export function createTimelineView(options: TimelineViewOptions) {
 
   /** A message of the timeline, or a prompt the session took that the journal does not hold yet. */
   function messageBlock(block: MessageBlock, pending?: PendingPrompt): DrawnBlock {
-    if (block.host && !pending) return hostBlock(block, block.host);
+    if (block.host) return hostBlock(block, block.host, pending);
     const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
     item.dataset.key = block.key;
     // What a link of an answer or of a prompt the user sent is read by: the server looks for it in that message.
@@ -186,9 +186,10 @@ export function createTimelineView(options: TimelineViewOptions) {
     }
   }
 
-  // A message nobody typed: one line that says what it is, which opens on its body.
-  function hostBlock(block: MessageBlock, host: HostPrompt): DrawnBlock {
-    const item = make("li", "msg msg-host");
+  // A message nobody typed: one line that says what it is, which opens on its body. One still in the queue (an agent's next
+  // step) says so, and can be deleted; it is not edited, since the composer would send it again as the user's.
+  function hostBlock(block: MessageBlock, host: HostPrompt, pending?: PendingPrompt): DrawnBlock {
+    const item = make("li", `msg msg-host${pending ? " pending" : ""}`);
     item.dataset.key = block.key;
     item.dataset.host = host.kind;
     const head = button("host-head");
@@ -225,7 +226,13 @@ export function createTimelineView(options: TimelineViewOptions) {
     }
     if (host.kind === "workflow") title.prepend(make("span", "host-kind", "Workflow"));
     text.append(title);
-    if (preview) text.append(make("span", "host-preview", preview));
+    if (pending) {
+      // Under the title, where the session and the delete button leave it room; it stays when the card opens.
+      const line = make("span", "host-sub");
+      line.append(make("span", "host-kind", "queued"));
+      if (preview) line.append(make("span", "host-preview", preview));
+      text.append(line);
+    } else if (preview) text.append(make("span", "host-preview", preview));
     head.append(mark, text);
     if (chip) head.append(chip);
     head.append(icon(document, "chevron", "host-chevron"));
@@ -237,6 +244,11 @@ export function createTimelineView(options: TimelineViewOptions) {
       from.dataset.session = host.sourceSessionId;
       from.append(timelineIcon(document, "branch"), make("span", null, options.sessionTitle(host.sourceSessionId) ?? "Session"), timelineIcon(document, "open"));
       row.append(from);
+    }
+    if (pending && canWithdraw(pending)) {
+      const actions = make("span", "pending-actions");
+      actions.append(pendingAction(pending, "delete", "Delete this prompt"));
+      row.append(actions);
     }
     item.append(row);
     if (host.kind === "workflow" && !shownResults.has(block.key)) { shownResults.add(block.key); open.add(block.key); }

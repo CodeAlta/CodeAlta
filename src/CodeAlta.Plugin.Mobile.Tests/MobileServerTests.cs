@@ -223,12 +223,23 @@ public sealed class MobileServerTests
         Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/sessions/a/steer/steer-1/withdraw", new JsonObject())).StatusCode);
         await fixture.SignInAsync();
         fixture.Alta.Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
-            .Answer("session queued a", new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-1", ["kind"] = "queue", ["prompt"] = "Then the docs" })
+            .Answer("session queued a", new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-1", ["kind"] = "queue", ["prompt"] = "Then the docs" },
+                new JsonObject
+                {
+                    ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-2", ["kind"] = "queue", ["prompt"] = "Continue in the slot",
+                    ["submittedBy"] = new JsonObject { ["kind"] = "agent", ["sourceSessionId"] = "a" },
+                },
+                new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-3", ["kind"] = "parent-notify", ["prompt"] = "A child answered" })
             .Answer("session unqueue a queue-1", new JsonObject { ["type"] = "alta.session.unqueued", ["status"] = "removed" })
             .Answer("session unsteer a steer-1", new JsonObject { ["type"] = "alta.session.unsteered", ["withdrawn"] = true })
             .Answer("session tool a call-1", new JsonObject { ["type"] = "alta.session.tool", ["name"] = "Bash", ["command"] = "git status", ["output"] = "a page", ["outputOffset"] = 7 });
 
-        Assert.AreEqual("queue-1", (string?)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/queue"))!["items"]![0]!["id"]);
+        // A person's prompt and an agent's next step, which names the session that queued it; not what agents send each other.
+        var queue = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/queue"))!["items"]!.AsArray();
+        CollectionAssert.AreEqual(new[] { "queue-1", "queue-2" }, queue.Select(static item => (string?)item!["id"]).ToArray());
+        Assert.IsNull((string?)queue[0]!["by"]);
+        Assert.AreEqual("agent", (string?)queue[1]!["by"]);
+        Assert.AreEqual("a", (string?)queue[1]!["sourceSessionId"]);
         Assert.AreEqual("git status", (string?)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/tools/call-1?since=41"))!["command"]);
         CollectionAssert.IsSubsetOf(new[] { "--since", "41" }, fixture.Alta.CallsOf("session tool a call-1").Single());
         Assert.AreEqual(7, (int)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/tools/call-1/output?since=41&offset=7"))!["outputOffset"]!);

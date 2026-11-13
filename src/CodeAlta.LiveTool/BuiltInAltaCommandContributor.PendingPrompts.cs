@@ -93,6 +93,7 @@ internal sealed partial class BuiltInAltaCommandContributor
                 prompt = prompt.Prompt,
                 files = (prompt.Images ?? []).Select(static file => new { title = file.Title ?? Path.GetFileName(file.Path), mediaType = file.MediaType }).ToArray(),
                 createdAt = prompt.CreatedAt,
+                submittedBy = prompt.SubmittedBy,
             });
         }
 

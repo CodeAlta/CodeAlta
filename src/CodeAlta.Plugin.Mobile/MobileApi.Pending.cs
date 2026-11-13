@@ -19,11 +19,15 @@ internal sealed partial class MobileApi
     // Each character of a page may take six in the JSON of its record.
     private const int ToolOutputPageBytes = ToolOutputPage * 6 + 64 * 1024;
 
-    // What a person queued, with `session queue` or a send while the session worked. Messages between agents and what the host
-    // queues are not the phone's to take back.
+    // What was queued with `session queue` or a send while the session worked: by a person, or by an agent (its next step, such
+    // as the one a session queues before it changes folder). Messages between agents and what the host queues are not the
+    // phone's to take back.
     private static readonly string[] QueuedKinds = ["queue", "send"];
 
-    /// <summary>The prompts of a person that wait in the queue of a session, in the order they will be sent.</summary>
+    /// <summary>
+    /// The prompts that wait in the queue of a session, in the order they will be sent; one an agent queued says so (<c>by</c>),
+    /// with the session that queued it.
+    /// </summary>
     /// <returns>The prompts, or null when the phone does not see the session.</returns>
     internal async Task<JsonObject?> QueueAsync(string id, CancellationToken cancellationToken)
     {
@@ -33,10 +37,14 @@ internal sealed partial class MobileApi
         foreach (var item in result.OfType("alta.session.queued.item"))
         {
             if (MobileAlta.Text(item, "queueItemId") is not { } itemId || !QueuedKinds.Contains(MobileAlta.Text(item, "kind"), StringComparer.Ordinal)) continue;
+            var by = item["submittedBy"] as JsonObject;
+            var agent = MobileAlta.Text(by, "kind") == "agent";
             items.Add(new JsonObject
             {
                 ["id"] = itemId, ["text"] = MobileAlta.Text(item, "prompt") ?? "", ["at"] = MobileAlta.Text(item, "createdAt"), ["state"] = MobileAlta.Text(item, "state"),
                 ["files"] = item["files"]?.DeepClone() ?? new JsonArray(),
+                ["by"] = agent ? "agent" : null,
+                ["sourceSessionId"] = agent && MobileAlta.Text(by, "sourceSessionId") is { } source && IsId(source) ? source : null,
             });
         }
 

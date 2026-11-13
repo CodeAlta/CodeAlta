@@ -433,15 +433,17 @@ export function startMobile(window: Window & typeof globalThis) {
     const view = sessions.view(detail.id);
     const busy = isBusy(view?.live?.live);
     const blocks = detail.blocks = foldEvents(detail.events);
-    blocksView.know(blocks);
+    const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
+    pendingPrompts.set(detail.id, pending);
+    const pendingBlocks = pending.map(pendingBlock);
+    // The card of an agent's queued step opens on its text, as the card it becomes.
+    blocksView.know([...blocks, ...pendingBlocks]);
     type Entry = { block: TimelineBlock | DayBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
     const entries: Entry[] = blocks.map((block, index) => {
       const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key) || sessionFind.opens(block, detail.expanded);
       return { block, live, open, key: block.key, version: blockVersion(block, live, open) };
     });
-    const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
-    pendingPrompts.set(detail.id, pending);
-    const held: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key,
+    const held: Entry[] = [...entries, ...pending.map((prompt, index) => ({ block: pendingBlocks[index], live: false, open: false, key: prompt.key,
       version: `${prompt.key}|${prompt.mode}|${prompt.queueId ?? ""}|${prompt.withdrawalId ?? ""}|${prompt.taken ?? false}`, prompt }))];
     const byBlock = new Map(held.map(entry => [entry.block, entry]));
     // A day line says "Today" until midnight: its label is its version, so that it is drawn again after.

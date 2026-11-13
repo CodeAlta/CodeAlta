@@ -5696,6 +5696,126 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionSend_QueuedPromptIsNoLongerWaiting_OnceItsRunStarted_AndTheNextWaitsForThatRunToEnd()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("queue-run-started");
+        var providerRuntime = new StatefulProviderRuntime(providerId) { PublishRunEventOnSend = true };
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(sessionCatalog)
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var queued = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "queued prompt", "--queue-if-busy"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode);
+
+        // The queued prompt starts a long run: its send returns only when the run ends.
+        var runWorks = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        providerRuntime.SendBlocker = runWorks;
+        try
+        {
+            providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
+            SessionViewLocalState state = null!;
+            await WaitUntilAsync(async () =>
+            {
+                state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+                return state.QueuedPrompts.Single().State == "submitted";
+            }).ConfigureAwait(false);
+            Assert.IsFalse(runWorks.Task.IsCompleted);
+            Assert.AreEqual("run-2", state.QueuedPrompts.Single().RunId);
+            Assert.AreEqual("run-2", state.PromptProvenance.Single(static entry => entry.Queued).RunId);
+            // A prompt whose run works no longer waits (the row of the session is written after the journal).
+            await WaitUntilAsync(async () => await ListedQueuedPromptCountAsync().ConfigureAwait(false) == 0).ConfigureAwait(false);
+
+            // The session is still taken by that run: a prompt queued now waits for its end.
+            var next = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "next prompt", "--queue-if-busy"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.IsTrue(ReadJsonLines(next.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.queued").GetProperty("queued").GetBoolean());
+            state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+            Assert.AreEqual("next prompt", state.QueuedPrompts.Single(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)).Prompt);
+            await WaitUntilAsync(async () => await ListedQueuedPromptCountAsync().ConfigureAwait(false) == 1).ConfigureAwait(false);
+            Assert.AreEqual(2, providerRuntime.SentOptions.Count);
+        }
+        finally
+        {
+            providerRuntime.SendBlocker = null;
+            runWorks.TrySetResult();
+        }
+
+        providerRuntime.PublishIdle(sessionId, new AgentRunId("run-2"));
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 3).ConfigureAwait(false);
+        Assert.AreEqual("next prompt", ExtractText(providerRuntime.SentOptions[2].Input));
+
+        async Task<int> ListedQueuedPromptCountAsync()
+        {
+            var list = await dispatcher.InvokeAsync(["session", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            return ReadJsonLines(list.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.item" && line.GetProperty("sessionId").GetString() == sessionId)
+                .GetProperty("queuedPromptCount").GetInt32();
+        }
+    }
+
+    [TestMethod]
+    public async Task SessionSend_QueuedPromptStillWaits_WhileATurnTheProviderStartedRunsBeforeItsOwn()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("queue-provider-turn");
+        var providerRuntime = new StatefulProviderRuntime(providerId) { PublishRunEventOnSend = true };
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(sessionCatalog)
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var queued = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "queued prompt", "--queue-if-busy"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode);
+
+        // The send of the queued prompt is taken, and its run has not shown its message yet.
+        var runWorks = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        providerRuntime.SendBlocker = runWorks;
+        providerRuntime.PublishRunEventOnSend = false;
+        try
+        {
+            providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
+
+            // A turn the provider started by itself (a background command of its CLI ended) shows its message first: it is
+            // not the queued prompt's. The events of a session are taken in their order, so the message of the prompt's own
+            // run, which comes after, finds the prompt already marked if the first one took it.
+            providerRuntime.PublishUserCompleted(sessionId, new AgentRunId("run-provider"), "A background command ended", AgentPromptProvenance.Provider);
+            providerRuntime.PublishUserCompleted(sessionId, new AgentRunId("run-2"), "queued prompt");
+            SessionViewLocalState state = null!;
+            await WaitUntilAsync(async () =>
+            {
+                state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+                return state.QueuedPrompts.Single().State == "submitted";
+            }).ConfigureAwait(false);
+            Assert.IsFalse(runWorks.Task.IsCompleted);
+            Assert.AreEqual("run-2", state.QueuedPrompts.Single().RunId);
+            Assert.AreEqual("run-2", state.PromptProvenance.Single(static entry => entry.Queued).RunId);
+        }
+        finally
+        {
+            providerRuntime.SendBlocker = null;
+            runWorks.TrySetResult();
+        }
+    }
+
+    [TestMethod]
     public async Task SessionSend_QueuedPromptAfterSetAgentRefreshesInstructionsBeforeDrain()
     {
         using var root = TempDirectory.Create();
@@ -7478,11 +7598,11 @@ public sealed partial class AltaLiveToolTests
 
         public Exception? SubscribeException { get; init; }
 
-        public TaskCompletionSource? SendBlocker { get; init; }
+        public TaskCompletionSource? SendBlocker { get; set; }
 
         public TaskCompletionSource? ResumeBlocker { get; init; }
 
-        public bool PublishRunEventOnSend { get; init; }
+        public bool PublishRunEventOnSend { get; set; }
 
         public bool PublishIdleBeforeSendReturns { get; set; }
 
@@ -7568,7 +7688,7 @@ public sealed partial class AltaLiveToolTests
             }
         }
 
-        public void PublishUserCompleted(string sessionId, AgentRunId runId, string content)
+        public void PublishUserCompleted(string sessionId, AgentRunId runId, string content, string? provenance = null)
         {
             var @event = new AgentContentCompletedEvent(
                 ProviderId,
@@ -7578,7 +7698,8 @@ public sealed partial class AltaLiveToolTests
                 AgentContentKind.User,
                 "user-" + Guid.NewGuid().ToString("N"),
                 null,
-                content);
+                content,
+                Provenance: provenance);
             foreach (var handler in _subscriptions.TryGetValue(sessionId, out var handlers) ? handlers.ToArray() : [])
             {
                 handler(@event);

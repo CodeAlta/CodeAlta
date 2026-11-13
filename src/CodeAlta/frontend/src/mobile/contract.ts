@@ -268,8 +268,14 @@ export type ActionResult = Readonly<{
   withdrawalId?: string | null;
 }>;
 
-/** A prompt of a person that waits in the queue of a session. */
-export type QueuedPrompt = Readonly<{ id: string; text: string; at?: string | null; state?: string | null; files?: readonly Readonly<{ title: string; mediaType?: string | null }>[] }>;
+/**
+ * A prompt that waits in the queue of a session. `by` is `agent` for the next step an agent session queued (its own, or
+ * another's), with the session that queued it in `sourceSessionId`; null for a person.
+ */
+export type QueuedPrompt = Readonly<{
+  id: string; text: string; at?: string | null; state?: string | null; files?: readonly Readonly<{ title: string; mediaType?: string | null }>[];
+  by?: "agent" | null; sourceSessionId?: string | null;
+}>;
 
 /** `GET /api/sessions/<id>/queue`: the prompts in the order they will be sent. */
 export type QueuePage = Readonly<{ items: readonly QueuedPrompt[]; error: string | null }>;
