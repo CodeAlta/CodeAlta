@@ -36,6 +36,9 @@ internal sealed record CliHostRequest
 
     public bool Offline { get; init; }
 
+    /// <summary>Gets whether someone is there to answer a vault (<c>--interactive-vault</c>): a run may then ask one to unlock.</summary>
+    public bool InteractiveVault { get; init; }
+
     /// <summary>Gets the mode of Code Mode of the sessions (<c>off</c>, <c>on</c>, <c>only</c>), or null for <c>[code_mode]</c> of the configuration.</summary>
     public string? CodeMode { get; init; }
 
@@ -179,6 +182,10 @@ internal sealed class CliHost : IAsyncDisposable
                 DisabledPromptFeatures = request.DisabledPromptFeatures.ToHashSet(StringComparer.Ordinal),
                 IsHeadless = true,
                 HasInteractiveUi = false,
+                // A provider whose key a vault cannot give is listed waiting, and what uses it says why; a vault is asked only
+                // when the command line says someone is there (CliVaults).
+                CredentialPrompts = request.InteractiveVault,
+                VaultProviderWaiter = broker => CliVaults.Waiter(broker, request.InteractiveVault),
                 OwnsLogging = false,
                 DiscoveryScope = environment.DiscoveryScope,
                 BuiltInSkillRoot = environment.BuiltInSkillRoot,
@@ -201,6 +208,13 @@ internal sealed class CliHost : IAsyncDisposable
                     : request.Offline ? state => CopilotManagedPolicySource.StartOffline(state, storage.GlobalRoot, new CodeAltaConfigStore(catalog))
                     : state => CopilotManagedPolicySource.Start(state, storage.GlobalRoot, new CodeAltaConfigStore(catalog)),
             }, cancellationToken).ConfigureAwait(false);
+            // A vault that opens during the run brings the providers that waited for it, as in CodeAlta Desktop.
+            if (host.Credentials is { } credentials && environment.ConfigureModelProviders is null)
+            {
+                var registry = host.ModelProviderRegistry;
+                credentials.Changed += (_, _) => RegisterWaitingProviders(registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, modelsDev, pluginProviderTypes);
+            }
+
             var runtime = host.RuntimeService;
             browser.WorkFolder = async (sessionId, token) => await runtime.TryGetActiveSessionDescriptorAsync(sessionId, token).ConfigureAwait(false) is { } session
                 ? session.WorktreeDirectory ?? session.WorkingDirectory
@@ -247,6 +261,24 @@ internal sealed class CliHost : IAsyncDisposable
             await modelsDev.DisposeAsync().ConfigureAwait(false);
             await database.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    // Registers again the providers that wait for a secret, now that the vaults changed: the ones that run are left as they are.
+    private static void RegisterWaitingProviders(ModelProviderRegistry registry, CodeAltaConfigStore store, string globalRoot, ModelsDevCatalogService modelsDev, PluginModelProviderTypes pluginTypes)
+    {
+        try
+        {
+            var waiting = registry.ListProviders(includeDisabled: true).Where(static descriptor => descriptor.WaitsFor is not null)
+                .Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (waiting.Count == 0) return;
+            ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry,
+                store.LoadGlobalProviderDefinitions().Where(definition => waiting.Contains(definition.ProviderKey)), globalRoot, modelsDev);
+            pluginTypes.RegisterMissing(registry, store, globalRoot, static _ => true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            LogManager.GetLogger("CodeAlta.Cli").Warn($"The providers that waited for a vault could not be registered: {exception.Message}");
         }
     }
 

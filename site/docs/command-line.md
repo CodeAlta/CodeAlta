@@ -124,6 +124,21 @@ A run that must not go on with less than it was set up with marks what it needs 
 
 The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_AGENT=codealta` in their environment, in the apps too.
 
+### Vault secrets
+
+`altacli` asks no [vault](secrets/vaults.md) by default, because often nobody is there to answer. A provider whose key is a secret kept in a locked vault is then not ready: the run stops with exit code 6, and its message names the secret and the vault. `altacli models` and `altacli auth check` say the same.
+
+With `--interactive-vault`, a run that needs such a provider asks the vault to unlock, then goes on:
+
+- a vault with its own prompt, such as 1Password, shows it. 1Password names the application the command was started from, such as your terminal, not `altacli`;
+- a vault that takes a password asks for it on the terminal. Give the prompt as words or with `-f` then, not on the standard input.
+
+```sh
+altacli run --interactive-vault -m anthropic:claude-sonnet-5-5 "Fix the failing test"
+```
+
+A secret that asks before use cannot be confirmed from `altacli`.
+
 ## Traces (OpenTelemetry)
 
 CodeAlta Desktop, CodeAlta TUI and `altacli` send traces of their runs to an OpenTelemetry collector when the environment names one with `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), as a CI job often does:

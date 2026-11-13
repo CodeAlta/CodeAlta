@@ -12,7 +12,7 @@ public sealed class CliHelpTests
     [
         "--isolated", "--profile=FOLDER", "--ephemeral", "--dev", "CODEALTA_HOME", "sessions/markers", "sessions/leases", "Running in altacli",
         "-c, --config=KEY=VALUE", "--ignore-user-config", "--strict-config", "CODEALTA_CONFIG_CONTENT", "config.toml is never written",
-        "api_key_env", "required = true",
+        "api_key_env", "required = true", "--interactive-vault", "a locked vault keeps is not ready (exit 6)",
     ];
 
     [TestMethod]
@@ -68,7 +68,7 @@ public sealed class CliHelpTests
         Assert.IsTrue(positions.All(static position => position >= 0) && positions.SequenceEqual(positions.Order()), string.Join(", ", positions));
         AssertExitCodes(help, CliExitCodes.Completed, CliExitCodes.Failed, CliExitCodes.InvalidUsage, CliExitCodes.Aborted, CliExitCodes.Timeout,
             CliExitCodes.SessionInUse, CliExitCodes.ProviderNotReady, CliExitCodes.InvalidOutput);
-        AssertConcise(help, maximumLines: 161, maximumCharacters: 10000);
+        AssertConcise(help, maximumLines: 164, maximumCharacters: 10000);
     }
 
     [TestMethod]

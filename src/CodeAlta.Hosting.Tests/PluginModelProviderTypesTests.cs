@@ -240,6 +240,31 @@ env = { OPENAI_API_KEY = "${secret:MISSING_KEY}" }
             CreateRuntime = create,
         };
 
+    // altacli registers its providers from the configuration file: one whose key a vault cannot give yet was left out there,
+    // and the command line said the provider was not configured.
+    [TestMethod]
+    public async Task ProvidersOfTheConfigurationFile_WhoseSecretCannotBeGivenYet_AreRegisteredWaiting_WhereTheRegistryHasAWaiter()
+    {
+        using var root = new TempRoot("[providers.fixture]\ntype = \"anthropic\"\napi_key_secret = \"VAULT_KEY\"\n");
+        await using var plain = new ModelProviderRegistry();
+        Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(plain, root.Store, root.Path, null, null).Count);
+        Assert.IsFalse(plain.TryGetProvider(new ModelProviderId("fixture"), out _), "without a waiter the provider is left out");
+
+        await using var registry = new ModelProviderRegistry { SecretWaiter = new LockedVault() };
+        Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(registry, root.Store, root.Path, null, null).Count, "a waiting provider does not run");
+        Assert.IsTrue(registry.TryGetProvider(new ModelProviderId("fixture"), out var waiting));
+        Assert.AreEqual("The provider fixture waits: its secret VAULT_KEY is kept in a vault, which is locked.", waiting.WaitsFor);
+        var refused = await Assert.ThrowsExactlyAsync<ModelProviderWaitingException>(() => registry.WaitForProviderAsync(new ModelProviderId("fixture"), CancellationToken.None));
+        Assert.AreEqual(waiting.WaitsFor, refused.Message, "what uses the provider is told why it is not ready");
+    }
+
+    private sealed class LockedVault : IProviderSecretWaiter
+    {
+        public string? WaitsFor(IReadOnlyCollection<string> names, string use) => $"its secret {names.First()} is kept in a vault, which is locked.";
+
+        public Task<bool> WaitAsync(IReadOnlyCollection<string> names, string use, CancellationToken cancellationToken) => Task.FromResult(false);
+    }
+
     private sealed class TempRoot : IDisposable
     {
         public TempRoot(string config)

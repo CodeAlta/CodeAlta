@@ -417,6 +417,7 @@ internal static class CliCommandLine
             case "--no-mcp": options.NoMcp = true; return true;
             case "--no-plugins": options.NoPlugins = true; return true;
             case "--no-skills": options.NoSkills = true; return true;
+            case CliVaults.Option: options.InteractiveVault = true; return true;
             case "--verbose": options.Verbose = true; return true;
             case "-q" or "--quiet": options.Quiet = true; return true;
             case "--profile" or "-C" or "--project" or "-c" or "--config":
@@ -515,6 +516,9 @@ internal static class CliCommandLine
         command.Add("c|config=", "Set {KEY=VALUE} over config.toml; repeatable", v => options.Config.Add(v!));
         command.Add("ignore-user-config", "Do not read config.toml: only -c and the variable", v => options.IgnoreUserConfig = v is not null);
         command.Add("strict-config", "Reject the settings CodeAlta does not know (exit 2)", v => options.StrictConfig = v is not null);
+        command.Add(_);
+        command.Add("Vaults: a provider whose key a locked vault keeps is not ready (exit 6), unless:");
+        command.Add("interactive-vault", "Let a vault ask the person there to unlock it", v => options.InteractiveVault = v is not null);
         command.Add(_);
     }
 

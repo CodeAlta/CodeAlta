@@ -41,6 +41,7 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
                 ListsSkills = !options.NoSkills,
                 CodeMode = options.CodeMode,
                 Offline = options.Offline,
+                InteractiveVault = options.InteractiveVault,
                 ChecksRequired = true,
                 DisabledPromptFeatures = disabledFeatures,
                 // A user works in the editor: the sessions are not told that nobody is there.

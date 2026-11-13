@@ -93,19 +93,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         ArgumentNullException.ThrowIfNull(configStore);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
-        var descriptors = new List<ModelProviderDescriptor>();
-        var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
-        foreach (var definition in configStore.LoadGlobalProviderDefinitions())
-        {
-            if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
-                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, ProviderSecretAccess.Of(modelProviderRegistry), modelProviderRegistry.ModelServerTransports,
-                    modelProviderRegistry.CliSignInHint))
-            {
-                modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
-                descriptors.Add(descriptor);
-            }
-        }
+        // The same registration as for a list of definitions: a provider whose key a vault cannot give yet is registered waiting
+        // where the registry has a waiter, in every host that has one.
+        var descriptors = new List<ModelProviderDescriptor>(
+            RegisterOrReplaceConfiguredProviders(modelProviderRegistry, configStore.LoadGlobalProviderDefinitions(), stateRootPath, modelCatalog));
 
         if (pluginTypes is not null)
         {

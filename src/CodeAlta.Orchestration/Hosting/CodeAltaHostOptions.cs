@@ -370,6 +370,14 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public bool WaitForVaultProviders { get; init; }
 
+    /// <summary>
+    /// Gets what makes the waiter of such providers over the credential broker of the host, for a host that words what they
+    /// wait for or asks for a vault in its own way (the command line); null for the waiter of CodeAlta Desktop when
+    /// <see cref="WaitForVaultProviders"/> is set, and for none otherwise. The same condition applies: the host registers the
+    /// provider again once the vault opens.
+    /// </summary>
+    public Func<CodeAlta.Credentials.CredentialBroker, CodeAlta.Agent.Runtime.IProviderSecretWaiter>? VaultProviderWaiter { get; init; }
+
     /// <summary>Gets what verifies the user before a secret that asks before use is given; null where nobody can be asked.</summary>
     public CodeAlta.Credentials.IUserPresenceVerifier? UserPresenceVerifier { get; init; }
 

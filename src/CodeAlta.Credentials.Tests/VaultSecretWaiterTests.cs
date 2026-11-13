@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Plugins.Abstractions;
 
@@ -94,6 +95,79 @@ public sealed class VaultSecretWaiterTests
         Assert.IsTrue(await waiter.WaitAsync(Key, "provider anthropic", CancellationToken.None).WithinAsync(TestTime.Seconds(30)));
         Assert.AreEqual("sk-ant-fake-value-1234", broker.ReadBound("ANTHROPIC_API_KEY", "provider anthropic").Value);
         Assert.HasCount(2, verifier.Messages);
+    }
+
+    // altacli has no window: what a provider waits for says what to run, and a vault that cannot be read at all is said too.
+    [TestMethod]
+    public async Task A_host_without_a_window_says_in_its_own_words_how_to_unlock_and_what_cannot_be_read()
+    {
+        using var vault = new FakeVault();
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\npath = \"{vault.TomlPath}\"\nunlock_at_start = false\n");
+        new LocalSecretStore(vault.Profile).Bind("ANTHROPIC_API_KEY", "personal", "op://Private/Anthropic/credential", "label", "alice");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile });
+        await broker.RefreshAsync();
+        var waiter = new VaultSecretWaiter(broker, new VaultSecretWaiterOptions
+        {
+            WhenLocked = static name => $"Run it again with --interactive-vault to let {name} ask.",
+            SaysWhatCannotBeRead = true,
+        });
+
+        var waitsFor = waiter.WaitsFor(Key, "provider anthropic")!;
+        StringAssert.Contains(waitsFor, "its secret ANTHROPIC_API_KEY is kept in ");
+        StringAssert.Contains(waitsFor, "which is locked. Run it again with --interactive-vault to let ");
+        Assert.IsFalse(waitsFor.Contains("Settings", StringComparison.Ordinal), waitsFor);
+        Assert.IsFalse(await waiter.WaitAsync(Key, "provider anthropic", CancellationToken.None).WithinAsync(TestTime.Seconds(30)), "nobody is asked where the host cannot prompt");
+
+        // The program of the vault is gone: CodeAlta Desktop shows that in Settings, a host without a window says it here.
+        vault.WriteConfig($"[credentials.personal]\ntype = \"1password\"\npath = \"{vault.TomlPath}-gone\"\n");
+        await broker.RefreshAsync();
+        Assert.IsNull(new VaultSecretWaiter(broker).WaitsFor(Key, "provider anthropic"));
+        StringAssert.Contains(waiter.WaitsFor(Key, "provider anthropic"), "its secret ANTHROPIC_API_KEY cannot be read from ");
+    }
+
+    [TestMethod]
+    public async Task A_vault_that_takes_a_password_is_asked_for_it_only_where_the_host_has_a_way_to_type_it()
+    {
+        using var vault = new FakeVault("keepassxc-cli");
+        var database = Path.Combine(vault.Root, "Passwords.kdbx");
+        File.WriteAllText(database, "not a real database");
+        vault.State["keepassxc"] = new JsonObject
+        {
+            ["password"] = "kdbx-password-0001",
+            ["groups"] = new JsonArray("Work/"),
+            ["entries"] = new JsonArray(new JsonObject
+            {
+                ["path"] = "Work/GitHub", ["totp"] = false,
+                ["attributes"] = new JsonObject { ["Title"] = "GitHub", ["Password"] = "kp-password-value-111", ["UserName"] = "kp-user", ["URL"] = "https://kp.example.com", ["Notes"] = "note" },
+            }),
+        };
+        vault.Save();
+        vault.WriteConfig($"[credentials.kp]\ntype = \"keepassxc\"\npath = \"{vault.TomlPath}\"\ndatabase = \"{database.Replace("\\", "\\\\", StringComparison.Ordinal)}\"\n");
+        new LocalSecretStore(vault.Profile).Bind("GITHUB_TOKEN", "kp", "Work/GitHub#Password", "label", "alice");
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = vault.Profile, CanPrompt = true });
+        await broker.RefreshAsync();
+        string[] token = ["GITHUB_TOKEN"];
+
+        Assert.IsFalse(await new VaultSecretWaiter(broker).WaitAsync(token, "provider github", CancellationToken.None).WithinAsync(TestTime.Seconds(30)), "in CodeAlta Desktop its password is typed in Settings");
+
+        var asked = new List<string>();
+        string? typed = null;
+        var waiter = new VaultSecretWaiter(broker, new VaultSecretWaiterOptions
+        {
+            AskPassword = (provider, _) =>
+            {
+                asked.Add(provider.Id);
+                return ValueTask.FromResult(typed);
+            },
+        });
+        Assert.IsFalse(await waiter.WaitAsync(token, "provider github", CancellationToken.None).WithinAsync(TestTime.Seconds(30)), "nobody typed it");
+        typed = "not the password";
+        Assert.IsFalse(await waiter.WaitAsync(token, "provider github", CancellationToken.None).WithinAsync(TestTime.Seconds(30)), "a wrong password leaves the vault locked");
+        typed = "kdbx-password-0001";
+        Assert.IsTrue(await waiter.WaitAsync(token, "provider github", CancellationToken.None).WithinAsync(TestTime.Seconds(30)));
+
+        Assert.AreEqual("kp-password-value-111", broker.ReadBound("GITHUB_TOKEN", "provider github").Value);
+        CollectionAssert.AreEqual(new[] { "kp", "kp", "kp" }, asked);
     }
 
     private sealed class Clock : TimeProvider

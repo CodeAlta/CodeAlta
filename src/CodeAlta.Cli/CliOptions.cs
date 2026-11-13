@@ -37,6 +37,9 @@ internal class CliCommonOptions
 
     public bool NoSkills { get; set; }
 
+    // --interactive-vault: someone is there to answer a vault, which a run may then ask to unlock (CliVaults).
+    public bool InteractiveVault { get; set; }
+
     // --code-mode[=on|only|off]: the mode of Code Mode of every session, whatever the configuration says; null for the configuration (on by default).
     public string? CodeMode { get; set; }
 

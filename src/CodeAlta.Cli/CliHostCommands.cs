@@ -52,6 +52,8 @@ internal sealed class CliHostCommands(CliStreams streams, CliOutput output, CliE
                 IReadOnlyList<AgentModelInfo> models;
                 try
                 {
+                    // A provider whose key a vault cannot give yet says why, or asks the vault with --interactive-vault.
+                    await registry.WaitForProviderAsync(provider.ProviderId, processToken).ConfigureAwait(false);
                     models = await initialization.GetModelsAsync(provider.ProviderId, processToken).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or KeyNotFoundException)
@@ -107,6 +109,7 @@ internal sealed class CliHostCommands(CliStreams streams, CliOutput output, CliE
             var initialization = host.Host.ModelProviderInitializationService;
             try
             {
+                await host.Host.ModelProviderRegistry.WaitForProviderAsync(provider.ProviderId, processToken).ConfigureAwait(false);
                 await initialization.GetModelsAsync(provider.ProviderId, processToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or KeyNotFoundException)
@@ -186,6 +189,7 @@ internal sealed class CliHostCommands(CliStreams streams, CliOutput output, CliE
                 StartMcp = !options.NoMcp,
                 ListsSkills = !options.NoSkills,
                 Offline = options.Offline,
+                InteractiveVault = options.InteractiveVault,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
             return await command(host, folder).ConfigureAwait(false);

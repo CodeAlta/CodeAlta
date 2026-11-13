@@ -63,6 +63,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 ListsSkills = !options.NoSkills,
                 CodeMode = options.CodeMode,
                 Offline = options.Offline,
+                InteractiveVault = options.InteractiveVault,
                 ChecksRequired = true,
                 DisabledPromptFeatures = disabledFeatures,
             }, environment, processToken).ConfigureAwait(false);
