@@ -16,6 +16,10 @@ internal static class Program
         // Started by the system as CodeAlta.app, this process starts again through the user's login shell for
         // the PATH of a terminal; it returns here only when it was started in another way, or has been already.
         if (OperatingSystem.IsMacOS()) DesktopMacBundle.EnterLoginShell(args);
+        // A child command-line tool CodeAlta starts (an ACP agent, the Claude Code CLI, …) shares this process
+        // group, and some send SIGHUP to it when they stop; the default action would end this windowed
+        // application with them, so the hangup is ignored. Children reset it to the default on exec.
+        if (!OperatingSystem.IsWindows()) DesktopProcessSignals.IgnoreHangup();
         // Started by an alta typed in a terminal, this process is the application: it leaves that terminal
         // before anything is written or started.
         var token = DesktopTerminalStart.Adopt();
