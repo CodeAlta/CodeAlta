@@ -315,7 +315,7 @@ const stop = await alta.rpc.subscribe("board.changed", change => refresh());
 - A hidden tab pauses its streams; `useRpc` reads again when the tab is shown or the connection is made again; a call is never replayed by the window.
 - Only the script of a canvas has `alta.rpc`; dialogs, prompt content and cards get `rpc_unavailable`.
 
-`samples/canvas-board` is a complete React canvas (Blueprint tabs and menu, a chart, Markdown, a file link, `alta.host`) whose module is a file of the package and whose board lives in the plugin (a call, a stream, an event, errors, `alta board add --title ...`); `samples/canvas-flow` draws a graph with React Flow: custom nodes, links drawn and removed, positions kept in the plugin; `samples/canvas-checklist` is a canvas without script. Look at the result in the window as described in "Look at the window".
+`samples/canvas-board` is a complete React canvas (Blueprint tabs and menu, a chart, Markdown, a file link, `alta.host`) whose module is a file of the package and whose board lives in the plugin (a call, a stream, an event, errors, `alta board add --title ...`); `samples/canvas-flow` draws a graph with React Flow: custom nodes, links drawn and removed, positions kept in the plugin; `samples/canvas-plot` draws charts of the plugin's data with Observable Plot, in the theme of the window; `samples/canvas-checklist` is a canvas without script. Look at the result in the window as described in "Look at the window".
 
 ## Status items and content around the prompt
 
@@ -707,6 +707,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
 | `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host` |
 | `canvas-flow` | A graph drawn with React Flow (`@xyflow/react`): custom nodes in the colors of the window, links drawn and removed, a minimap and panels, the graph kept in the plugin |
+| `canvas-plot` | Charts of data drawn with Observable Plot (`@observablehq/plot`): lines, boxes and bars in the font and colors of the window, a tip under the pointer, drawn again when the theme or the width changes, the data read from the plugin with `alta.rpc`; and the same data as a Vega-Lite spec with `VegaLite` |
 | `landing-card` | A card pinned on the landing page: a fragment, a status, two commands and a canvas |
 | `report-dialog` | A dialog with Markdown, a Mermaid diagram and highlighted code |
 | `agent-tool` | A tool the model calls |

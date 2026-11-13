@@ -228,6 +228,8 @@ export default function Durations() {
 }
 ```
 
+`samples/canvas-plot` is a complete dashboard: four charts of the plugin's data, a component that draws a chart again when the theme or its width changes, and the same data as a Vega-Lite spec.
+
 `plot` returns an `<svg>` (a `<figure>` when it has a title or a legend): it is the script's own element, never a string for `innerHTML`. Plot draws text in `currentColor`, so `style.color` themes the axes and labels; `theme.series` gives the categorical colors and `theme.ramp` a sequential scheme (`color: { range: theme.ramp }`).
 
 ## Lucide

@@ -24,6 +24,7 @@ public sealed class PluginRuntimeSampleTests
         "canvas-checklist",
         "canvas-board",
         "canvas-flow",
+        "canvas-plot",
         "landing-card",
         "automation-trigger",
     ];
