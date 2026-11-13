@@ -2,6 +2,8 @@ using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
+using CodeAlta.Server.Control;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CodeAlta.Server.Tests;
 
@@ -179,6 +181,46 @@ public sealed class AccessDocumentNodeTests
                     "application/json"),
             };
         }
+    }
+
+    [TestMethod]
+    public async Task ANodeReadsAccessWhenItConnects_OnceTheServerListsItAmongTheDevicesItTells()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var ownerKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "owner"));
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "bea"));
+        using var owner = new FleetServerClient(server.BaseAddress, ownerKey);
+        await owner.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        var enrollment = await owner.CreateEnrollmentTokenAsync(null, "build-box", CancellationToken.None);
+        using (var node = new FleetServerClient(server.BaseAddress, nodeKey)) await node.EnrollAsync(enrollment.Token, "Build box", CancellationToken.None);
+        await owner.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, CancellationToken.None);
+        var invitation = await owner.InvitePersonAsync(new InvitePersonRequest("Bea"));
+        using (var bea = new FleetServerClient(server.BaseAddress, beaKey)) await bea.EnrollAsync(invitation.Token, "Bea laptop", FleetDeviceKinds.Controller, CancellationToken.None);
+        await owner.ApproveAsync(beaKey.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None);
+        var console = new FleetOrganizationAccess(new FleetOrganizationDevices(server.BaseAddress, ownerKey, Path.Combine(root.Path, "owner-link", FleetOrganizationDevices.PinFileName)),
+            Path.Combine(root.Path, "owner-link", FleetOrganizationAccess.PinFileName));
+        await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+
+        // Whether the server would tell the node of a change at the moment the node read the version it has: a version signed
+        // after that read is announced only to the devices the server lists, and a node it does not list yet would keep the old one.
+        var presence = server.Server.Services.GetRequiredService<PresenceRegistry>();
+        var listedWhenRead = new System.Collections.Concurrent.ConcurrentQueue<bool>();
+        await using var connector = new FleetConnector(new FleetConnectorOptions
+        {
+            ServerAddress = server.BaseAddress, Identity = nodeKey, OutboxPath = Path.Combine(root.Path, "node-outbox.json"), Client = new FleetClientInfo("node", "4.0.0", "linux"),
+            AccessPinPath = Path.Combine(root.Path, "node-link", FleetOrganizationAccess.PinFileName), MinimumBackoff = TimeSpan.FromMilliseconds(100),
+            AccessChanged = _ => listedWhenRead.Enqueue(presence.Get(nodeKey.DeviceId) is not null),
+        });
+        connector.Start();
+        await WaitForAsync(() => connector.Access.Current?.Number == 1, "the node reads the document when it connects");
+        Assert.IsTrue(listedWhenRead.TryPeek(out var listed) && listed, "the server lists the node before the node reads what it would be told about");
+
+        await owner.DeprovisionPersonAsync(invitation.Person.Id, new DeprovisionRequest());
+        await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        await WaitForAsync(() => connector.Access.Current?.Number == 2, "access.changed makes the node read the chain again");
+        Assert.IsTrue(connector.Trust.IsRevoked(beaKey.Fingerprint), "her channels are closed");
     }
 
     private static async Task WaitForAsync(Func<bool> condition, string what)

@@ -577,12 +577,16 @@ public sealed partial class FleetConnector : IAsyncDisposable
             if (_options.UpdateReport?.Invoke() is { } report) await SendUpdateReportAsync(connection, report, stop).ConfigureAwait(false);
             // The runs of the automations this server gave, again on each connection: the server may have missed some.
             OnAutomationsOnline(stop);
+            // The server lists a connection among the devices it tells of changes before it reads its first request: once a
+            // request is answered, a version signed after the reads below is announced to this device. Read before that, a
+            // version signed in between would be announced to every device but this one.
+            await SendPresenceAsync(connection, _activeSessions, stop).ConfigureAwait(false);
+            var lastPresence = _options.TimeProvider.GetUtcNow();
             // The access document, again on each connection: a version signed while this device was away applies now.
             RefreshAccess(stop);
             // The policy and its kill switch too.
             RefreshPolicy(stop);
 
-            var lastPresence = DateTimeOffset.MinValue;
             var lastRead = DateTimeOffset.MinValue;
             var dirty = true;
             while (!stop.IsCancellationRequested && connection.State == FleetConnectionState.Open)
