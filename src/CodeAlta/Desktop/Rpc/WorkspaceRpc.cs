@@ -184,13 +184,13 @@ internal sealed partial class WorkspaceService
         }
 
         var displayedProjects = new List<WorkspaceProject>();
-        var displayedSessions = new List<WorkspaceSession>();
         var shortened = false;
         // Conservative JSON bound: six bytes per UTF-16 unit, 512 bytes per row for property names,
         // booleans/timestamps/punctuation, and 2048 reserved for the snapshot/envelope. Each session
         // additionally reserves 64 bytes for createdAt (33 ISO characters, quotes/property/comma,
         // including a possibly escaped '+' offset). Keep the overall cap below 1 MiB RPC default. The projects take
-        // at most a third of it, so that the many sub-projects of a monorepo leave the sessions most of the room.
+        // at most a third of it, so that the many sub-projects of a monorepo leave the sessions most of the room. A project
+        // row has 32 bytes more for the count of the sessions its list leaves out.
         var remaining = 700 * 1024 - 2048;
         var projectsRemaining = 240 * 1024;
         var names = projects.GroupBy(static project => project.Id, StringComparer.Ordinal).ToDictionary(static group => group.Key, static group => group.First().DisplayName, StringComparer.Ordinal);
@@ -206,26 +206,30 @@ internal sealed partial class WorkspaceService
             var parentId = project.ParentId is { Length: <= 256 } parent && subPath is not null ? parent : null;
             var repositoryName = parentId is not null && names.TryGetValue(parentId, out var repository) && !string.IsNullOrWhiteSpace(repository)
                 ? DisplayText(repository, ref shortened) : null;
-            var cost = 192 + 6 * (project.Id.Length + name.Length + project.ProjectPath.Length + (parentId?.Length ?? 0) + (subPath?.Length ?? 0) + (repositoryName?.Length ?? 0));
+            var cost = 224 + 6 * (project.Id.Length + name.Length + project.ProjectPath.Length + (parentId?.Length ?? 0) + (subPath?.Length ?? 0) + (repositoryName?.Length ?? 0));
             if (cost > remaining || cost > projectsRemaining) break;
             remaining -= cost;
             projectsRemaining -= cost;
             displayedProjects.Add(new WorkspaceProject(project.Id, name, project.ProjectPath, project.Archived) { ParentId = parentId, SubPath = subPath, RepositoryName = repositoryName });
         }
-        // The archived sessions come after the others: the rows the lists keep are the ones they show.
-        foreach (var session in sessions.OrderBy(static value => value.ViewState?.Archived == true).ThenByDescending(value => value.UpdatedAt)
-                     .ThenByDescending(value => value.SessionId, StringComparer.Ordinal))
+        // The sessions in the order the lists show them: the archived ones after the others, then the newest first.
+        var ordered = sessions.OrderBy(static value => value.ViewState?.Archived == true).ThenByDescending(value => value.UpdatedAt)
+            .ThenByDescending(value => value.SessionId, StringComparer.Ordinal).ToArray();
+        var scopes = new SessionScope[ordered.Length];
+        for (var position = 0; position < ordered.Length; position++) scopes[position] = ScopeOf(ordered[position], headers, projects);
+        var shownProjects = displayedProjects.Select(static project => project.Id).ToHashSet(StringComparer.Ordinal);
+        // The list a session is in: its project when the window shows it, the chats otherwise.
+        string? ListOf(int position) => scopes[position].ProjectId is { } id && shownProjects.Contains(id) ? id : null;
+        var rows = new List<(int Position, WorkspaceSession Session)>();
+        foreach (var index in FairOrder(ordered, ListOf))
         {
-            if (displayedSessions.Count == 500) break;
+            if (rows.Count == MaximumSessions) break;
+            var session = ordered[index];
+            var (scopeKind, projectId, automationId, recordedSpace) = scopes[index];
             var parent = session.ParentSessionId ?? session.ViewState?.ParentSessionId;
             if (string.IsNullOrWhiteSpace(parent)) parent = null;
             var lineageIssue = parent is not null && !ValidLineageId(parent) ? "invalid_parent" : null;
             if (lineageIssue is not null) parent = null;
-            string? scopeKind = null;
-            string? projectId = null;
-            string? automationId = null;
-            // The space the session records: a value that is no identifier names no space, which is the default one.
-            var recordedSpace = session.SpaceId;
             // The worktree the session works in, as the session records it: it is shown also once its folder is
             // gone, until the session continues in the folder of its project.
             string? worktreePath = null, worktreeRoot = null, worktreeName = null;
@@ -234,22 +238,6 @@ internal sealed partial class WorkspaceService
             {
                 (worktreeRoot, worktreeName, worktreeMissing) = (worktree ?? DescribeWorktree)(recorded);
                 worktreePath = recorded;
-            }
-            if (headers?.TryGetValue(session.SessionId, out var header) == true && header.SessionId == session.SessionId
-                && header.CreatedAt == session.CreatedAt && header.WorkingDirectory == session.WorkspacePath)
-            {
-                // The automation that started the session, as the session itself records it.
-                if (header.CreatedBy is { Kind: AltaActorProvenance.AutomationKind, AutomationId: { Length: 36 } automation }) automationId = automation;
-                recordedSpace = header.SpaceId ?? recordedSpace;
-                if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null)
-                    scopeKind = "global";
-                // The project it records, or the project added since for its folder when it records none of the catalog.
-                else if (header.Kind == SessionViewKind.ProjectSession
-                    && ProjectCatalog.ResolveSessionProject(header.ProjectRef, session.WorkspacePath, projects) is { } project)
-                {
-                    scopeKind = "project";
-                    projectId = project.Id;
-                }
             }
             // A session that was never named keeps the text it was created with as its saved title, while its summary
             // follows the conversation: it is listed by the first line of that summary, as the terminal UI does. The
@@ -278,7 +266,7 @@ internal sealed partial class WorkspaceService
                 + (session.ViewState?.Cloud is null ? 0 : 6 * 900));
             if (cost > remaining) break;
             remaining -= cost;
-            displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
+            rows.Add((index, new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
                 automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing,
@@ -287,10 +275,114 @@ internal sealed partial class WorkspaceService
             {
                 ProviderConversation = (session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is { Length: > 0 } ? true : null,
                 Cloud = WorkspaceSessionCloud.Of(session.ViewState?.Cloud),
-            });
+            }));
+        }
+        // The rows are sent in the order the lists show them, whatever the order they were kept in.
+        rows.Sort(static (left, right) => left.Position.CompareTo(right.Position));
+        var displayedSessions = rows.ConvertAll(static row => row.Session);
+
+        // What each list leaves out, so that the window says it: a list that stops is never taken for sessions that are gone.
+        var kept = rows.Select(static row => row.Position).ToHashSet();
+        var omitted = new Dictionary<string, int>(StringComparer.Ordinal);
+        var omittedChats = 0;
+        for (var position = 0; position < ordered.Length; position++)
+        {
+            if (kept.Contains(position) || ordered[position].ViewState?.Archived == true) continue;
+            if (ListOf(position) is { } id) omitted[id] = omitted.GetValueOrDefault(id) + 1;
+            else omittedChats++;
+        }
+        for (var position = 0; position < displayedProjects.Count; position++)
+        {
+            if (omitted.TryGetValue(displayedProjects[position].Id, out var count)) displayedProjects[position] = displayedProjects[position] with { OmittedSessions = count };
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
-            displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
+            displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened)
+        {
+            OmittedChatSessions = omittedChats > 0 ? omittedChats : null,
+        };
+    }
+
+    /// <summary>The most sessions a snapshot lists.</summary>
+    internal const int MaximumSessions = 500;
+
+    // The newest sessions of the whole workspace that are always listed: what the window shows as recent is exact.
+    private const int NewestAlwaysListed = 50;
+
+    // What a session records of where it belongs: its kind of scope, its project, the automation that started it, its space.
+    private readonly record struct SessionScope(string? ScopeKind, string? ProjectId, string? AutomationId, string? RecordedSpace);
+
+    private static SessionScope ScopeOf(AgentSessionMetadata session, IReadOnlyDictionary<string, SessionViewJournalHeader>? headers, IReadOnlyList<ProjectDescriptor> projects)
+    {
+        string? scopeKind = null;
+        string? projectId = null;
+        string? automationId = null;
+        // The space the session records: a value that is no identifier names no space, which is the default one.
+        var recordedSpace = session.SpaceId;
+        if (headers?.TryGetValue(session.SessionId, out var header) == true && header.SessionId == session.SessionId
+            && header.CreatedAt == session.CreatedAt && header.WorkingDirectory == session.WorkspacePath)
+        {
+            // The automation that started the session, as the session itself records it.
+            if (header.CreatedBy is { Kind: AltaActorProvenance.AutomationKind, AutomationId: { Length: 36 } automation }) automationId = automation;
+            recordedSpace = header.SpaceId ?? recordedSpace;
+            if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null)
+                scopeKind = "global";
+            // The project it records, or the project added since for its folder when it records none of the catalog.
+            else if (header.Kind == SessionViewKind.ProjectSession
+                && ProjectCatalog.ResolveSessionProject(header.ProjectRef, session.WorkspacePath, projects) is { } project)
+            {
+                scopeKind = "project";
+                projectId = project.Id;
+            }
+        }
+        return new SessionScope(scopeKind, projectId, automationId, recordedSpace);
+    }
+
+    /// <summary>
+    /// The order in which the sessions are kept while there is room, as positions in <paramref name="ordered"/> (the archived
+    /// ones last, then the newest first). The newest of the workspace come first, then every list (a project, or the chats)
+    /// gets its next newest session in turn: a project that has many recent sessions takes the room of its own older ones,
+    /// never the sessions of another project. The archived sessions follow, the newest first.
+    /// </summary>
+    internal static IEnumerable<int> FairOrder(IReadOnlyList<AgentSessionMetadata> ordered, Func<int, string?> listOf)
+    {
+        var live = 0;
+        while (live < ordered.Count && ordered[live].ViewState?.Archived != true) live++;
+        var newest = Math.Min(NewestAlwaysListed, live);
+        for (var position = 0; position < newest; position++) yield return position;
+
+        // The lists by their newest session, each with its sessions from the newest.
+        var lists = new List<List<int>>();
+        var byList = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        List<int>? chats = null;
+        for (var position = 0; position < live; position++)
+        {
+            List<int>? list;
+            if (listOf(position) is { } id)
+            {
+                if (!byList.TryGetValue(id, out list)) lists.Add(byList[id] = list = []);
+            }
+            else if ((list = chats) is null)
+            {
+                lists.Add(chats = list = []);
+            }
+
+            list.Add(position);
+        }
+
+        for (var depth = 0; ; depth++)
+        {
+            var any = false;
+            foreach (var list in lists)
+            {
+                if (depth >= list.Count) continue;
+                any = true;
+                if (list[depth] >= newest) yield return list[depth];
+            }
+
+            if (!any) break;
+        }
+
+        for (var position = live; position < ordered.Count; position++) yield return position;
     }
 
     private static void ValidateIdentity(string? value, int maximumLength, bool required)
@@ -343,9 +435,17 @@ internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Pro
     // The project files of the catalog that could not be read, so their projects are not listed; absent when there is none.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? UnreadableProjectFiles { get; init; }
+
+    // How many sessions the chats have that the snapshot has no room for, older than the ones it lists; absent when none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? OmittedChatSessions { get; init; }
 }
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived)
 {
+    // How many sessions the project has that the snapshot has no room for, older than the ones it lists; absent when none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? OmittedSessions { get; init; }
+
     // The machine a project that stands for a paired machine groups the sessions of (its sessions of no project of this
     // catalog); absent for a project of the catalog.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

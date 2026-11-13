@@ -928,6 +928,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .timeline-details-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50dvh; overflow: auto; }
 .ide-shell .session-list-disclosure { display: flex; gap: 6px; }
 .ide-shell .session-list-disclosure button { padding: 3px 6px; font-size: 11px; }
+.ide-shell .session-list-omitted { padding: 2px 6px 8px; font-size: 11px; }
 .ide-shell .file-change-inspection ul { list-style: none; padding: 0; margin: 3px 0; }
 .ide-shell .file-change-inspection li { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ide-shell .file-change-inspection li > button { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 3px; border: 0; background: transparent; }

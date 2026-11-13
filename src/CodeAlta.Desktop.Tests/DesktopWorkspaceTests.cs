@@ -459,6 +459,82 @@ public sealed class DesktopWorkspaceTests
         Assert.IsNull(other.ProjectId);
     }
 
+    // A burst of sessions in one project once filled the snapshot, and every other project showed no session at all.
+    [TestMethod]
+    public void Projection_AProjectWithManyRecentSessions_TakesTheRoomOfItsOwnOlderOnes_NeverTheSessionsOfAnotherProject()
+    {
+        ProjectDescriptor[] projects = [Project("busy"), Project("quiet"), Project("unused")];
+        var (sessions, headers) = (new List<AgentSessionMetadata>(), new Dictionary<string, SessionViewJournalHeader>());
+        // 700 sessions of one project, each newer than the 8 sessions of another project and than the 3 chats.
+        for (var index = 0; index < 700; index++) Add(sessions, headers, $"busy-{index:D3}", "busy", DateTimeOffset.UnixEpoch.AddDays(30).AddMinutes(-index));
+        for (var index = 0; index < 8; index++) Add(sessions, headers, $"quiet-{index}", "quiet", DateTimeOffset.UnixEpoch.AddDays(2).AddMinutes(-index));
+        for (var index = 0; index < 3; index++) Add(sessions, headers, $"chat-{index}", null, DateTimeOffset.UnixEpoch.AddDays(1).AddMinutes(-index));
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, sessions, headers);
+
+        Assert.AreEqual(WorkspaceService.MaximumSessions, snapshot.Sessions.Length);
+        Assert.IsTrue(snapshot.SessionsTruncated);
+        CollectionAssert.AreEqual(Enumerable.Range(0, 8).Select(static index => $"quiet-{index}").ToArray(),
+            snapshot.Sessions.Where(static session => session.ProjectId == "quiet").Select(static session => session.Id).ToArray(), "Every session of the other project is listed.");
+        Assert.AreEqual(3, snapshot.Sessions.Count(static session => session.ScopeKind == "global"), "Every chat is listed.");
+        // The busy project has the rest of the room, for its newest sessions, and says how many older ones are left out.
+        CollectionAssert.AreEqual(Enumerable.Range(0, 489).Select(static index => $"busy-{index:D3}").ToArray(),
+            snapshot.Sessions.Where(static session => session.ProjectId == "busy").Select(static session => session.Id).ToArray());
+        Assert.AreEqual(211, snapshot.Projects.Single(static project => project.Id == "busy").OmittedSessions);
+        Assert.IsNull(snapshot.Projects.Single(static project => project.Id == "quiet").OmittedSessions);
+        Assert.IsNull(snapshot.Projects.Single(static project => project.Id == "unused").OmittedSessions);
+        Assert.IsNull(snapshot.OmittedChatSessions);
+        // The rows keep the order the lists show: the newest first.
+        CollectionAssert.AreEqual(snapshot.Sessions.OrderByDescending(static session => session.UpdatedAt).Select(static session => session.Id).ToArray(),
+            snapshot.Sessions.Select(static session => session.Id).ToArray());
+    }
+
+    [TestMethod]
+    public void Projection_WithMoreSessionsThanRoom_EveryProjectKeepsItsNewest_AndTheNewestOfTheWorkspaceAreAllListed()
+    {
+        var projects = Enumerable.Range(0, 100).Select(static index => Project($"p{index:D3}")).ToArray();
+        var (sessions, headers) = (new List<AgentSessionMetadata>(), new Dictionary<string, SessionViewJournalHeader>());
+        // The 60 newest sessions of the workspace are in one project; every project has 10 older ones; some chats are older still.
+        for (var index = 0; index < 60; index++) Add(sessions, headers, $"new-{index:D2}", "p000", DateTimeOffset.UnixEpoch.AddDays(30).AddMinutes(-index));
+        foreach (var project in projects)
+        {
+            for (var index = 0; index < 10; index++) Add(sessions, headers, $"{project.Id}-{index}", project.Id, DateTimeOffset.UnixEpoch.AddDays(10).AddMinutes(-index));
+        }
+        for (var index = 0; index < 20; index++) Add(sessions, headers, $"chat-{index:D2}", null, DateTimeOffset.UnixEpoch.AddDays(1).AddMinutes(-index));
+        // An archived session is kept after the others: it takes no room from a list of the Explorer.
+        Add(sessions, headers, "archived", "p001", DateTimeOffset.UnixEpoch.AddDays(40));
+        sessions[^1] = sessions[^1] with { ViewState = new AgentSessionViewStateMetadata(Archived: true) };
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, sessions, headers);
+
+        Assert.AreEqual(WorkspaceService.MaximumSessions, snapshot.Sessions.Length);
+        var listed = snapshot.Sessions.Select(static session => session.Id).ToHashSet();
+        for (var index = 0; index < 50; index++) Assert.IsTrue(listed.Contains($"new-{index:D2}"), $"new-{index:D2}");
+        foreach (var project in snapshot.Projects)
+        {
+            var own = snapshot.Sessions.Where(session => session.ProjectId == project.Id).ToArray();
+            Assert.IsTrue(own.Length >= 4, $"{project.Id}: {own.Length}");
+            var all = sessions.Count(session => headers[session.SessionId].ProjectRef == project.Id && session.ViewState?.Archived != true);
+            Assert.AreEqual(all - own.Length, project.OmittedSessions ?? 0, project.Id);
+        }
+        var chats = snapshot.Sessions.Count(static session => session.ScopeKind == "global");
+        Assert.IsTrue(chats >= 4, chats.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.AreEqual(20 - chats, snapshot.OmittedChatSessions ?? 0);
+        Assert.IsFalse(listed.Contains("archived"));
+    }
+
+    private static void Add(List<AgentSessionMetadata> sessions, Dictionary<string, SessionViewJournalHeader> headers, string id, string? project, DateTimeOffset updated)
+    {
+        // A session of a project works in the folder of that project.
+        var session = Session(id) with { UpdatedAt = updated, WorkspacePath = project is null ? "/literal/chats" : "/literal/" + project };
+        sessions.Add(session);
+        headers[id] = new()
+        {
+            SessionId = id, Kind = project is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession, ProjectRef = project,
+            CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath!,
+        };
+    }
+
     private static Dictionary<string, SessionViewJournalHeader> ProjectHeader(AgentSessionMetadata session) => new()
     {
         [session.SessionId] = new() { SessionId = session.SessionId, Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! },

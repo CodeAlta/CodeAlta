@@ -47,7 +47,7 @@ import {
   skills as skillsApi,
 } from "#neoastra";
 import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
-import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
+import { archivedSessions, loadWorkspace, omittedSessions, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { backgroundCalls, runningBackgroundTasks, type BackgroundCallState } from "./backgroundTasks";
@@ -237,7 +237,7 @@ import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { terminalPaste } from "./terminal/shellBlocks";
-import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
+import { ExplorerSessions, OmittedSessionsNote, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
 import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
 import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode, readClaudeCodeConversations, type ClaudeCodeConversations } from "./claudeCodeImport/claudeCodeSessions";
@@ -4270,9 +4270,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     </>;
   }
   // A closed project shows its chevron only when opening it shows something: its sessions, its terminals, or the
-  // Claude Code sessions of its folder. A truncated snapshot does not tell, so every project keeps it then.
+  // Claude Code sessions of its folder. A project whose sessions are all left out of the snapshot keeps it too.
   const projectsWithSessions = new Set(snapshot?.sessions.flatMap(session => session.projectId ? [session.projectId] : []) ?? []);
-  const projectUnfoldable = (id: string) => !snapshot || snapshot.sessionsTruncated || claudeCodeConfigured || projectsWithSessions.has(id)
+  const projectUnfoldable = (id: string) => !snapshot || omittedSessions(snapshot, id) > 0 || claudeCodeConfigured || projectsWithSessions.has(id)
     || terminalsOf(terminalList, id).length > 0;
   // What a label row tells of the projects it holds, with those of the labels under it: the sessions that wait for
   // the user, and how many run, so that a folded label says it without being unfolded.
@@ -4292,7 +4292,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} filtered={!!filterView}
+    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} filtered={!!filterView}
       extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
@@ -6360,11 +6360,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
             </div>;
             })}
-            {snapshot && visibleSessions.length === 0 && !filterView && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
+            {snapshot && visibleSessions.length === 0 && !filterView && omittedSessions(snapshot, projectId) === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
             <div className="session-list-disclosure">
               {selectedList.hidden > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({selectedList.hidden})</span></button>}
               {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
             </div>
+            <OmittedSessionsNote count={snapshot && selectedList.hidden === 0 && !filterView ? omittedSessions(snapshot, projectId) : 0} />
             {withClaudeCodeSessions(selectedList.entries, projectId, claudeCodeConfigured).map(entry => entry.kind === "claude-code"
               && <Fragment key={`claude-code:${entry.projectId}`}>{claudeCodeGroup(entry.projectId)}</Fragment>)}
           </div>

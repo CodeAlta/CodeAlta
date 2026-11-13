@@ -176,6 +176,14 @@ test("the sessions of an open scope are rows that open them, with more on demand
   assert.match(render(all, 0, true), /Show fewer/);
   assert.match(render([], 0, false), /No sessions in this project\./);
   assert.match(render([], 0, false, true), /No chats\./);
+  // A list that has older sessions the window was not given says so after its last row: they are not listed, not gone.
+  const omitted = (rows: typeof all, more: number, count: number) => renderToStaticMarkup(createElement(ExplorerSessions, { entries: list(rows), global: false, projectId: "a", more, omitted: count,
+    extended: false, tree, access: () => ({ rename: true, delete: true }), marks: () => null, onAction: never, onMore: never, onFewer: never }));
+  assert.match(omitted(all, 0, 7), /role="note">Older sessions not listed: 7</);
+  assert.doesNotMatch(omitted(all.slice(0, 1), 2, 7), /Older sessions not listed/, "Show more comes first");
+  assert.match(omitted([], 0, 7), /Older sessions not listed: 7/);
+  assert.doesNotMatch(omitted([], 0, 7), /No sessions in this project/);
+  assert.doesNotMatch(html, /Older sessions not listed/);
 });
 
 test("a session that has sub-agents hides them and shows them, and lists more of them on demand", () => {

@@ -73,6 +73,14 @@ export function unreadableProjectsNotice(snapshot: WorkspaceSnapshot, locale: st
     : translate(locale, "These project files cannot be read, so their projects are not listed: {files}", { files: files.join(", ") });
 }
 
+/**
+ * How many older sessions a list of the Explorer has that the snapshot has no room for: those of a project, or the chats
+ * (null). The list says so after its last row, so that sessions that are not listed are never taken for sessions that are gone.
+ */
+export function omittedSessions(snapshot: WorkspaceSnapshot, projectId: string | null): number {
+  return (projectId === null ? snapshot.omittedChatSessions : snapshot.projects.find(project => project.id === projectId)?.omittedSessions) ?? 0;
+}
+
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {
   if (!snapshot.projectsTruncated && !snapshot.sessionsTruncated && !snapshot.displayTextTruncated) return null;
   return "Display limits applied (up to 200 projects / 500 sessions, with a wire-size limit); some labels may be shortened. This is not paging: the shared loader still reads the whole catalog. Sessions whose projects are omitted appear under Chats.";

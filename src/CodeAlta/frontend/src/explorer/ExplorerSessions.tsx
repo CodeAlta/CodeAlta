@@ -88,6 +88,12 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
   </div>;
 }
 
+/** What a list says after its last row when it has older sessions the window was not given: they exist, and are not listed. */
+export function OmittedSessionsNote({ count }: { count: number }) {
+  const { t } = useShellLanguage();
+  return count > 0 ? <div className="sidebar-empty session-list-omitted" role="note">{t("Older sessions not listed: {count}", { count })}</div> : null;
+}
+
 /**
  * The sessions of an open scope of the Explorer that is not the selected one. A row opens its session, which
  * makes its scope the selected one; renaming and deleting do the same first, as they act on the selected session.
@@ -95,7 +101,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
+export function ExplorerSessions({ entries, global, projectId, more, omitted = 0, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
   /** The sessions listed, what stands for the sub-agents that are not, and the place of the Claude Code sessions started elsewhere. */
   entries: readonly SessionListEntry[];
   /** Whether the sidebar is filtered: a scope with no session found says nothing. */
@@ -106,6 +112,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   projectId: string | null;
   /** How many more sessions the scope has than the ones listed. */
   more: number;
+  /** How many older sessions the scope has that the window was not given: said after the last row. */
+  omitted?: number;
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
@@ -212,11 +220,12 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           ]} />}
       </div>;
     })}
-    {sessionEntries(entries).length === 0 && !filtered && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
+    {sessionEntries(entries).length === 0 && !filtered && omitted === 0 && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
     <div className="session-list-disclosure">
       {more > 0 && <button type="button" className="quiet-button" onClick={onMore}>{t("Show more…")} <span className="muted-text">({more})</span></button>}
       {extended && <button type="button" className="quiet-button" onClick={onFewer}>{t("Show fewer")}</button>}
     </div>
+    <OmittedSessionsNote count={more === 0 && !filtered ? omitted : 0} />
     {entries.map(entry => entry.kind === "claude-code" && <Fragment key={`claude-code:${entry.projectId}`}>{claudeCode?.(entry.projectId)}</Fragment>)}
   </div></div>;
 }

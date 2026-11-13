@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
+import { archivedSessions, loadWorkspace, omittedSessions, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 
 const empty: WorkspaceSnapshot = {
   configured: true, projects: [], sessions: [], projectsTruncated: false,
@@ -81,6 +81,16 @@ test("workspace shows truncation without implying paging", () => {
   assert.match(workspaceNotice({ ...empty, projectsTruncated: true })!, /not paging/i);
   assert.match(workspaceNotice({ ...empty, sessionsTruncated: true })!, /whole catalog/i);
   assert.match(workspaceNotice({ ...empty, displayTextTruncated: true })!, /shortened/i);
+});
+
+test("a list says how many of its older sessions the window was not given, and nothing when it has them all", () => {
+  const snapshot: WorkspaceSnapshot = { ...empty, sessionsTruncated: true, omittedChatSessions: 3,
+    projects: [{ id: "busy", name: "Busy", path: "/busy", archived: false, omittedSessions: 211 }, { id: "quiet", name: "Quiet", path: "/quiet", archived: false }] };
+  assert.equal(omittedSessions(snapshot, "busy"), 211);
+  assert.equal(omittedSessions(snapshot, "quiet"), 0);
+  assert.equal(omittedSessions(snapshot, "unknown"), 0);
+  assert.equal(omittedSessions(snapshot, null), 3);
+  assert.equal(omittedSessions(empty, null), 0);
 });
 
 test("workspace names the project files it could not read", () => {

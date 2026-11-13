@@ -1807,6 +1807,7 @@ export const messages = dictionary({
   "Search sessions": ["Buscar sesiones", "Rechercher des sessions", "Sitzungen suchen", "セッションを検索", "搜索会话"],
   "Show more…": ["Mostrar más…", "Afficher plus…", "Mehr anzeigen…", "さらに表示…", "显示更多…"],
   "Show fewer": ["Mostrar menos", "Afficher moins", "Weniger anzeigen", "表示を減らす", "收起"],
+  "Older sessions not listed: {count}": ["Sesiones anteriores no mostradas: {count}", "Sessions plus anciennes non listées : {count}", "Nicht aufgeführte ältere Sitzungen: {count}", "一覧にない古いセッション: {count}", "未列出的较早会话：{count}"],
   "Close": ["Cerrar", "Fermer", "Schließen", "閉じる", "关闭"],
   "Send": ["Enviar", "Envoyer", "Senden", "送信", "发送"],
   "Retry exact request": ["Reintentar la solicitud exacta", "Réessayer la requête exacte", "Exakte Anfrage erneut versuchen", "元のリクエストを再試行", "重试原始请求"],
