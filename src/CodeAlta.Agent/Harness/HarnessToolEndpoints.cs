@@ -444,15 +444,13 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         using (linked)
         {
             var events = new EventStream(stream);
-            await stream.WriteAsync(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n"u8.ToArray(),
-                    linked.Token)
-                .ConfigureAwait(false);
-            await stream.FlushAsync(linked.Token).ConfigureAwait(false);
             var id = Interlocked.Increment(ref _nextStreamId);
-            registration.Streams[id] = events;
             try
             {
+                // Listed before the harness gets the response: a message the server sends once the harness holds the
+                // stream goes on it, not in the response of its next request.
+                await events.StartAsync(() => registration.Streams[id] = events, linked.Token).ConfigureAwait(false);
+
                 // The harness sends nothing more on it: a read ends when it closes the connection.
                 var buffer = new byte[256];
                 while (await stream.ReadAsync(buffer, linked.Token).ConfigureAwait(false) > 0)
@@ -541,18 +539,39 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         }
     }
 
-    // A stream of events of one harness: its chunks are written one at a time.
+    // A stream of events of one harness: its headers, then its chunks, are written one at a time.
     private sealed class EventStream(Stream stream)
     {
         private readonly SemaphoreSlim _gate = new(1, 1);
+        private bool _started;
         private bool _ended;
+
+        // Lists the stream with register, then writes its headers: a message sent once it is listed waits for them.
+        public async Task StartAsync(Action register, CancellationToken cancellationToken)
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                register();
+                await stream.WriteAsync(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n"u8.ToArray(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                _started = true;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
 
         public async Task WriteAsync(byte[] payload, CancellationToken cancellationToken)
         {
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                ObjectDisposedException.ThrowIf(_ended, this);
+                ObjectDisposedException.ThrowIf(_ended || !_started, this);
                 await stream.WriteAsync(Encoding.ASCII.GetBytes($"{payload.Length:x}\r\n"), cancellationToken).ConfigureAwait(false);
                 await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
                 await stream.WriteAsync("\r\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
@@ -569,7 +588,7 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
             await _gate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (!_ended)
+                if (_started && !_ended)
                 {
                     _ended = true;
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

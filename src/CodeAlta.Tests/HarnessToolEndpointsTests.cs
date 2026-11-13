@@ -71,18 +71,8 @@ public sealed class HarnessToolEndpointsTests
         Assert.AreEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(), Encoding.UTF8);
 
-        // The stream is registered once its header is written: the first message may race it.
-        var sent = false;
-        for (var attempt = 0; attempt < 100 && !sent; attempt++)
-        {
-            sent = await endpoint.NotifyAsync(notification);
-            if (!sent)
-            {
-                await Task.Delay(20);
-            }
-        }
-
-        Assert.IsTrue(sent);
+        // The stream is listed before the harness gets its header: the first message after it goes on it.
+        Assert.IsTrue(await endpoint.NotifyAsync(notification));
         using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         Assert.AreEqual("event: message", await reader.ReadLineAsync(timeout.Token));
         var data = await reader.ReadLineAsync(timeout.Token);
