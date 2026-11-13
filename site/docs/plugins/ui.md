@@ -173,6 +173,13 @@ The `canvas-flow` sample draws a release pipeline with React Flow (`@xyflow/reac
   <figcaption class="small text-secondary mt-2">The pipeline of the <code>canvas-flow</code> sample, drawn with React Flow in the colors of the window.</figcaption>
 </figure>
 
+The `canvas-plot` sample draws thirty days of test runs with Observable Plot (`@observablehq/plot`): a line per suite with a tip under the pointer, a box per suite and the failed tests of each day, in the font and the colors of the window, drawn again when the theme or the width changes. The runs come from the plugin with `alta.rpc`, and the fourth card draws them from a Vega-Lite spec with `VegaLite`.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-canvas-plot.webp" alt="The Test runs tab of the canvas-plot sample in CodeAlta Desktop: the duration of four test suites over thirty days as lines with a tip on one run, a box per suite, the failed tests of each day as bars, all drawn with Observable Plot, and the mean duration by suite drawn from a Vega-Lite spec, every suite in the same color" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The test runs of the <code>canvas-plot</code> sample: three charts drawn with Observable Plot and one from a Vega-Lite spec, in the colors of the window.</figcaption>
+</figure>
+
 ## Status items
 
 Status items and content around the prompt work in both apps:
