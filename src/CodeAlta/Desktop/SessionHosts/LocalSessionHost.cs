@@ -101,7 +101,7 @@ internal sealed class LocalSessionHost : ISessionHost
 
     /// <inheritdoc />
     public Task<SessionRuntimeCurrentState> ReadRuntimeStateAsync(string sessionId, CancellationToken cancellationToken)
-        => Runtime.GetCurrentStateAsync(sessionId, cancellationToken);
+        => Runtime.GetShownStateAsync(sessionId, cancellationToken);
 
     /// <inheritdoc />
     public Task<OwnedRuntimeObservation> ObserveRuntimeStateAsync(string sessionId, DateTimeOffset createdAt, string scope, string? projectId,

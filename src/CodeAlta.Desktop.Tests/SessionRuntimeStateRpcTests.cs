@@ -127,6 +127,41 @@ public sealed class SessionRuntimeStateRpcTests
     }
 
     [TestMethod]
+    public async Task PromptSuggestionNamesItsRun_AndOneOfASessionWithoutEntryIsSentToo()
+    {
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null)
+            { PromptSuggestion = "commit it", PromptSuggestionRunId = "run-1" };
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+        var attached = await service.CurrentAsync(new(Epoch, "session"), default);
+        Assert.AreEqual(("commit it", "run-1"), (attached.Entry!.PromptSuggestion, attached.Entry.PromptSuggestionRunId));
+        Assert.IsNull(attached.PromptSuggestion, "An attached session says it in its entry.");
+
+        // A run that is no identity is left out; the suggestion is still sent.
+        state = state with { Entry = entry with { PromptSuggestionRunId = " padded" } };
+        var unnamed = await service.CurrentAsync(new(Epoch, "session"), default);
+        Assert.AreEqual(("commit it", null), (unnamed.Entry!.PromptSuggestion, unnamed.Entry.PromptSuggestionRunId));
+
+        // A session without an entry sends the suggestion its journal keeps, checked as the one of an entry.
+        state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, null) { PromptSuggestion = "commit it", PromptSuggestionRunId = "run-1" };
+        var detached = await service.CurrentAsync(new(Epoch, "session"), default);
+        Assert.AreEqual("ok", detached.Status);
+        Assert.IsNull(detached.Entry);
+        Assert.AreEqual(("commit it", "run-1"), (detached.PromptSuggestion, detached.PromptSuggestionRunId));
+        foreach (var unfit in new[] { "", new string('x', 257), "half \ud83d" })
+        {
+            state = state with { PromptSuggestion = unfit };
+            var value = await service.CurrentAsync(new(Epoch, "session"), default);
+            Assert.AreEqual("ok", value.Status);
+            Assert.AreEqual((null, null), (value.PromptSuggestion, value.PromptSuggestionRunId));
+        }
+
+        state = state with { PromptSuggestion = null, PromptSuggestionRunId = null };
+        Assert.DoesNotContain("promptSuggestion", JsonSerializer.Serialize(await service.CurrentAsync(new(Epoch, "session"), default),
+            DesktopJsonContext.Default.SessionRuntimeStateResponse), "Nothing is written of a suggestion there is not.");
+    }
+
+    [TestMethod]
     public async Task ReportedFastModeIsSentOnceAResponseSaidIt()
     {
         var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null);
@@ -214,13 +249,16 @@ public sealed class SessionRuntimeStateRpcTests
             return new(Guid.NewGuid(), "session", true, new SessionRuntimeCurrentEntry(long.MaxValue, false, false, Text(256), true,
                 Text(256), Text(256), Text(256), AgentReasoningEffort.High, Text(256), Text(256))
             {
+                PromptSuggestionRunId = Text(256),
                 Activity = new(started, long.MaxValue, long.MaxValue),
                 BackgroundTasks = [.. Enumerable.Range(0, tasks).Select(index => new SessionRuntimeBackgroundTask($"{index:D2}" + Text(62), Text(32), Text(160), "t" + Text(255),
                     started, AgentBackgroundTaskOutcome.Failed) { IsJob = true, ExitCode = int.MinValue, EndedAt = started })],
                 RemoteControl = remote ? new(AgentRemoteControlStatus.Failed, "https://claude.ai/" + new string('x', 494), Text(512)) : AgentRemoteControl.Off,
                 PromptSuggestion = Text(256),
                 ReportedFastMode = true,
-            });
+            })
+            // A state has a stored suggestion only without an entry: both are counted all the same.
+            { PromptSuggestion = Text(256), PromptSuggestionRunId = Text(256) };
         }
         var observed = State('x', 0, false);
         var service = new SessionRuntimeStateService((_, _, _, _, _, _) => Task.FromResult(new OwnedRuntimeObservation("ok", observed)), Epoch);
@@ -263,10 +301,11 @@ public sealed class SessionRuntimeStateRpcTests
         var expected = new Dictionary<Type, string[]>
         {
             [typeof(SessionRuntimeScopedResponse)] = ["HostEpoch", "Observation", "ProjectId", "ProjectPath", "Scope", "SessionId", "Status"],
-            [typeof(SessionRuntimeStateResponse)] = ["CoordinatorTransitionInProgress", "Entry", "HostEpoch", "RuntimeInstanceId", "SessionId", "Status"],
+            [typeof(SessionRuntimeStateResponse)] = ["CoordinatorTransitionInProgress", "Entry", "HostEpoch", "PromptSuggestion", "PromptSuggestionRunId",
+                "RuntimeInstanceId", "SessionId", "Status"],
             [typeof(SessionRuntimeStateEntry)] = ["Activity", "ActiveRunId", "AgentPromptId", "AttachmentGeneration", "BackgroundTasks", "IsRetiring", "IsTerminated",
-                "ModelId", "PendingAgentPromptId", "PromptSuggestion", "ProviderId", "ProviderKey", "QueueDrainInProgress", "ReasoningEffort", "RemoteControl",
-                "ReportedFastMode"],
+                "ModelId", "PendingAgentPromptId", "PromptSuggestion", "PromptSuggestionRunId", "ProviderId", "ProviderKey", "QueueDrainInProgress", "ReasoningEffort",
+                "RemoteControl", "ReportedFastMode"],
             [typeof(SessionRuntimeActivityResponse)] = ["AdmittedEvents", "OmittedEvents", "Source", "Timestamp"],
             [typeof(SessionRuntimeBackgroundTaskResponse)] = ["EndedAt", "ExitCode", "IsJob", "Kind", "StartedAt", "State", "TaskId", "ToolCallId", "Description"],
             [typeof(SessionRemoteControlResponse)] = ["Error", "SessionUrl", "Status"],

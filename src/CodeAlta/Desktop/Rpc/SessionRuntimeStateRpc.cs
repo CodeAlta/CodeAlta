@@ -16,7 +16,7 @@ internal sealed class SessionRuntimeStateService
     private readonly Func<string, DateTimeOffset, string, string?, string?, CancellationToken, Task<OwnedRuntimeObservation>>? _observe;
 
     internal SessionRuntimeStateService(SessionRuntimeService runtime, string hostEpoch)
-        : this(runtime.GetCurrentStateAsync, hostEpoch) { _observe = runtime.ObserveOwnedStateAsync; }
+        : this(runtime.GetShownStateAsync, hostEpoch) { _observe = runtime.ObserveOwnedStateAsync; }
 
     /// <summary>Creates the service over the hosts of the sessions: each read goes to the host of its session.</summary>
     internal SessionRuntimeStateService(SessionHostRegistry hosts, string hostEpoch)
@@ -113,14 +113,25 @@ internal sealed class SessionRuntimeStateService
                 entry.ReasoningEffort?.ToString(), entry.AgentPromptId, entry.PendingAgentPromptId)
             { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)],
               RemoteControl = entry.RemoteControl.Status == CodeAlta.Agent.AgentRemoteControlStatus.Off ? null : SessionRemoteControlResponse.From(entry.RemoteControl),
-              // A suggestion is sent as it is or not at all: one that is cut is not a prompt to send.
-              PromptSuggestion = entry.PromptSuggestion is { Length: > 0 } suggestion && Text(suggestion) ? suggestion : null,
+              PromptSuggestion = Suggestion(entry.PromptSuggestion),
+              PromptSuggestionRunId = SuggestionRun(entry.PromptSuggestion, entry.PromptSuggestionRunId),
               ReportedFastMode = entry.ReportedFastMode };
         }
         // Eight strings <=256 UTF-16 units at six-byte worst-case JSON escaping, fixed GUIDs,
         // ordinal/enums/keys plus 4 KiB framing fit below 32 KiB. No values are truncated.
-        return new("ok", _hostEpoch, state.SessionId, state.RuntimeInstanceId.ToString("D"), state.CoordinatorTransitionInProgress, projected);
+        // The suggestion the journal keeps is the one of a session without an entry: an entry says its own.
+        return new("ok", _hostEpoch, state.SessionId, state.RuntimeInstanceId.ToString("D"), state.CoordinatorTransitionInProgress, projected)
+        {
+            PromptSuggestion = projected is null ? Suggestion(state.PromptSuggestion) : null,
+            PromptSuggestionRunId = projected is null ? SuggestionRun(state.PromptSuggestion, state.PromptSuggestionRunId) : null,
+        };
     }
+
+    // A suggestion is sent as it is or not at all: one that is cut is not a prompt to send.
+    private static string? Suggestion(string? suggestion) => suggestion is { Length: > 0 } && Text(suggestion) ? suggestion : null;
+
+    // The run of a suggestion that is sent, when it is an identity; without it the frontend tells suggestions apart by their text.
+    private static string? SuggestionRun(string? suggestion, string? runId) => Suggestion(suggestion) is not null && Identity(runId) ? runId : null;
 
     // A task is what a provider says of itself: one that does not fit the wire is left out, and what it says of
     // itself is cut, so that the rest of the state is still read. The tool call is named as the timeline names it.
@@ -158,12 +169,14 @@ internal sealed class SessionRuntimeStateService
         Object(7);
         Text(response.Status); Text(response.HostEpoch); Text(response.SessionId); Text(response.Scope); Text(response.ProjectId); Text(response.ProjectPath);
         if (response.Observation is not { } state) return bound;
-        Object(6);
+        Object(8);
         Text(state.Status); Text(state.HostEpoch); Text(state.SessionId); Text(state.RuntimeInstanceId);
+        Text(state.PromptSuggestion); Text(state.PromptSuggestionRunId);
         if (state.Entry is not { } entry) return bound;
-        Object(16);
+        Object(17);
         Text(entry.AttachmentGeneration); Text(entry.ActiveRunId); Text(entry.ProviderId); Text(entry.ProviderKey); Text(entry.ModelId);
         Text(entry.ReasoningEffort); Text(entry.AgentPromptId); Text(entry.PendingAgentPromptId); Text(entry.PromptSuggestion);
+        Text(entry.PromptSuggestionRunId);
         if (entry.Activity is { } activity)
         {
             Object(4);
@@ -200,7 +213,19 @@ internal sealed record SessionRuntimeScopedRequest(string ExpectedHostEpoch, str
 internal sealed record SessionRuntimeScopedResponse(string Status, string HostEpoch, string? SessionId, string? Scope, string? ProjectId,
     string? ProjectPath, SessionRuntimeStateResponse? Observation);
 internal sealed record SessionRuntimeStateResponse(string Status, string HostEpoch, string? SessionId, string? RuntimeInstanceId,
-    bool? CoordinatorTransitionInProgress, SessionRuntimeStateEntry? Entry);
+    bool? CoordinatorTransitionInProgress, SessionRuntimeStateEntry? Entry)
+{
+    /// <summary>
+    /// What the model suggested as the next prompt once the last run of a session without an entry ended, as its journal
+    /// keeps it; absent when there is none, and for a session with an entry, whose own suggestion is the one to show.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PromptSuggestion { get; init; }
+
+    /// <summary>The run whose answer made <see cref="PromptSuggestion"/>; absent when it is not known.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PromptSuggestionRunId { get; init; }
+}
 internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, bool IsTerminated, bool IsRetiring,
     string? ActiveRunId, bool QueueDrainInProgress, string ProviderId, string ProviderKey, string? ModelId,
     string? ReasoningEffort, string? AgentPromptId, string? PendingAgentPromptId)
@@ -217,6 +242,10 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
     /// <summary>What the model suggested as the next prompt once the last turn ended; absent when there is none.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? PromptSuggestion { get; init; }
+
+    /// <summary>The run whose answer made <see cref="PromptSuggestion"/>; absent when it is not known.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PromptSuggestionRunId { get; init; }
 
     /// <summary>Whether the provider reported the last request ran in fast mode; absent until a response says it.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

@@ -204,13 +204,16 @@ public sealed partial class SessionRuntimeService
                     // The summary is written with the turns: what is written of them is written whole, with the preview
                     // they give the session. UpdatedAt follows the written turns: re-ingestion whose preview does not
                     // change (compaction-only or already-seen turns), and never-attached re-reads, keep the session
-                    // where the list ordered it, instead of moving it to the top on every attach or restart.
+                    // where the list ordered it, instead of moving it to the top on every attach or restart. A suggestion
+                    // answered the turn the session ended with: turns written after it, or a conversation that cannot be
+                    // followed (rewound outside), no longer end there, so a summary without it is written even without turns.
                     var nextPreview = prepared.Preview ?? summary.Summary;
                     var nextUpdatedAt = string.Equals(nextPreview, summary.Summary, StringComparison.Ordinal) ? summary.UpdatedAt : prepared.State.UpdatedAt;
-                    IReadOnlyList<AgentEvent> events = prepared.Turns == 0
+                    var forgetsSuggestion = appends && (summary.PromptSuggestion is not null || summary.PromptSuggestionRunId is not null);
+                    IReadOnlyList<AgentEvent> events = prepared.Turns == 0 && !forgetsSuggestion
                         ? prepared.Events
                         : [.. prepared.Events, FileSystemAgentSessionStore.CreateSummarySnapshotEvent(
-                            summary with { Summary = nextPreview, UpdatedAt = nextUpdatedAt })];
+                            summary with { Summary = nextPreview, UpdatedAt = nextUpdatedAt, PromptSuggestion = null, PromptSuggestionRunId = null })];
                     appending = true;
                     await store.AppendEventsAsync(summary.ProtocolFamily, summary.ProviderKey, sessionId, events, token).ConfigureAwait(false);
                 }

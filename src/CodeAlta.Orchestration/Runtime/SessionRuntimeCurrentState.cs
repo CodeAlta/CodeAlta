@@ -45,7 +45,19 @@ public sealed record SessionWorkFolder(string SessionId, string Folder, bool Wor
 /// <param name="CoordinatorTransitionInProgress">Whether coordinator creation/replacement/detachment has a retained transition.</param>
 /// <param name="Entry">The observed runtime entry, or null when none is retained. Absence does not mean idle, completed, or no durable session.</param>
 public sealed record SessionRuntimeCurrentState(Guid RuntimeInstanceId, string SessionId,
-    bool CoordinatorTransitionInProgress, SessionRuntimeCurrentEntry? Entry);
+    bool CoordinatorTransitionInProgress, SessionRuntimeCurrentEntry? Entry)
+{
+    /// <summary>
+    /// What the model of a session without <see cref="Entry"/> suggested as the next prompt once its last run ended, as
+    /// its journal keeps it (<see cref="CodeAlta.Agent.Runtime.AgentSessionSummary.PromptSuggestion"/>); null otherwise,
+    /// and always for a session with an entry, whose <see cref="SessionRuntimeCurrentEntry.PromptSuggestion"/> says it.
+    /// Only the observation of a session the frontend shows reads it (<see cref="SessionRuntimeService.ObserveOwnedStateAsync"/>).
+    /// </summary>
+    public string? PromptSuggestion { get; init; }
+
+    /// <summary>The run whose answer made <see cref="PromptSuggestion"/>, when it is known.</summary>
+    public string? PromptSuggestionRunId { get; init; }
+}
 
 /// <summary>
 /// Immutable captured entry facts. No active run recorded does not prove provider inactivity.
@@ -89,6 +101,12 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     /// started since.
     /// </summary>
     public string? PromptSuggestion { get; init; }
+
+    /// <summary>
+    /// The run whose answer made <see cref="PromptSuggestion"/>, when it is known: a later run that suggests the same
+    /// text is told apart from it by this run.
+    /// </summary>
+    public string? PromptSuggestionRunId { get; init; }
 
     /// <summary>
     /// Whether the provider reported that the last request of the attachment ran in fast mode

@@ -3,8 +3,9 @@ namespace CodeAlta.Agent;
 /// <summary>
 /// The model suggested what the user may write next in a session, once a turn ended: the
 /// <see cref="AgentNextPromptTag"/> that ends its final answer. Like the background tasks, it is told to those who
-/// listen to the session and is never recorded: a suggestion answers the turn that just ended, and says nothing once
-/// another one started.
+/// listen to the session and is not an event of its history: a suggestion answers the turn that just ended, and says
+/// nothing once another one started. The session keeps the last one in its summary
+/// (<see cref="Runtime.AgentSessionSummary.PromptSuggestion"/>) until its next run starts.
 /// </summary>
 /// <param name="ProviderId">The model provider identifier.</param>
 /// <param name="SessionId">The session identifier.</param>
@@ -22,6 +23,12 @@ public sealed record AgentPromptSuggestionEvent(
 {
     /// <summary>The longest suggestion a session tells.</summary>
     public const int MaximumLength = 256;
+
+    /// <summary>
+    /// Gets the run whose answer made the suggestion; null when it is not known. It is not the <see cref="AgentEvent.RunId"/>
+    /// of the event, which stays null: a suggestion comes outside the runs, and is not taken for the start of one.
+    /// </summary>
+    public AgentRunId? AnsweredRunId { get; init; }
 
     /// <summary>
     /// Returns what a model suggested as a session tells it: trimmed, or <see langword="null" /> when it is not

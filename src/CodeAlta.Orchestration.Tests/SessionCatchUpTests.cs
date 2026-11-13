@@ -131,12 +131,19 @@ public sealed class SessionCatchUpTests
         await using var host = await CreateHostAsync(temp, provider);
         var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Rewound elsewhere")).SessionId;
         await SendAsync(host, sessionId, "one");
+        // The suggestion of the turn the session ended with, as the session keeps it.
+        var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var suggested = (await store.GetSessionSummaryAsync(sessionId))!;
+        await store.UpsertSessionAsync(suggested with { PromptSuggestion = "commit it", PromptSuggestionRunId = new AgentRunId("run-1") });
+        Assert.AreEqual("commit it", (await store.GetSessionSummaryAsync(sessionId))!.PromptSuggestion);
 
         provider.External = static _ => new AgentExternalTurns(AgentExternalTurnsStatus.CannotFollow, [],
             static (_, _, _) => JsonDocument.Parse("""{"kind":"fake","leaf":"elsewhere"}""").RootElement.Clone());
         Assert.AreEqual("cannot_follow", await host.Commands.CatchUpExternalTurnsAsync(sessionId));
 
-        var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var after = (await store.GetSessionSummaryAsync(sessionId))!;
+        Assert.AreEqual((null, null), (after.PromptSuggestion, after.PromptSuggestionRunId), "The conversation no longer ends with the turn it answered.");
+        Assert.AreEqual((suggested.Summary, suggested.UpdatedAt), (after.Summary, after.UpdatedAt), "Without turns, the preview and its time stay.");
         Assert.AreEqual("""{"kind":"fake","leaf":"elsewhere"}""", (await store.GetStateAsync(sessionId))!.ProviderState!.Value.GetRawText());
         var history = (await host.RuntimeService.TryReadStoredHistoryAsync(await ListedAsync(host, sessionId)))!;
         var notice = history.OfType<AgentSessionUpdateEvent>().Single(static update => update.Kind == AgentSessionUpdateKind.Warning);

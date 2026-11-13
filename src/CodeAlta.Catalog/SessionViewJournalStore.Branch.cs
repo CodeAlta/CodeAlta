@@ -84,7 +84,9 @@ public sealed partial class SessionViewJournalStore
         try
         {
             var now = DateTimeOffset.UtcNow;
-            var summary = point.Summary with { Usage = point.State.Usage, RewindCount = point.Summary.RewindCount + 1, UpdatedAt = now };
+            // The suggestion answered a turn the session no longer ends with.
+            var summary = point.Summary with { Usage = point.State.Usage, RewindCount = point.Summary.RewindCount + 1, UpdatedAt = now,
+                PromptSuggestion = null, PromptSuggestionRunId = null };
             var state = BranchState(point, point.State, session.SessionId, AgentProviderBranchKind.Rewind, atEnd: false, now);
             var local = await ReadLatestStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false)
                 ?? new SessionViewLocalState();
@@ -163,6 +165,9 @@ public sealed partial class SessionViewJournalStore
             CreatedAt = target.CreatedAt,
             UpdatedAt = now,
             Usage = basis.Usage,
+            // A new session has run nothing yet: what its source was suggested is not its own.
+            PromptSuggestion = null,
+            PromptSuggestionRunId = null,
         };
         // The session that keeps a rewind holds every turn: it continues from the end. A fork continues from its point,
         // which is the end of the conversation only when no turn follows it.

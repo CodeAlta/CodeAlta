@@ -129,6 +129,20 @@ public sealed record AgentSessionSummary
     public AgentSessionUsage? Usage { get; init; }
 
     /// <summary>
+    /// Gets or initializes what the model suggested as the next prompt of the user once the last run ended
+    /// (<see cref="AgentPromptSuggestionEvent"/>), kept so that a host that attaches the session again, or starts again,
+    /// offers it still; null when it suggested nothing, and once another run started. A session that is forked or rewound
+    /// has none: it does not continue the turn the suggestion answered.
+    /// </summary>
+    public string? PromptSuggestion { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the run whose answer suggested <see cref="PromptSuggestion"/>: a later run that suggests the
+    /// same text is told apart from it by this run.
+    /// </summary>
+    public AgentRunId? PromptSuggestionRunId { get; init; }
+
+    /// <summary>
     /// Gets or initializes additional summary metadata.
     /// </summary>
     public JsonElement? Metadata { get; init; }
