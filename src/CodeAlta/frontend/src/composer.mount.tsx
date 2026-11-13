@@ -1,14 +1,16 @@
 // Test-owned mount of the production composer against a scripted backend: no host and no provider.
 // The fixture plays the host's part: it takes or refuses a Send, starts and ends the run, and takes steering.
-import { createElement, StrictMode, useSyncExternalStore, type ComponentProps } from "react";
+import { createElement, StrictMode, useState, useSyncExternalStore, type ComponentProps } from "react";
 import { createSideQuestions } from "./sideQuestion/sideQuestions";
 import { SideQuestionPanel } from "./sideQuestion/SideQuestionPanel";
+import { createShellCommands } from "./shellCommands/shellCommands";
 import { TimelineMessage } from "./TimelineMessage";
 import { liveTextItem } from "./liveTimeline";
 import { entryEmphasisProperties, emphasisProperties, restoreTimelineEmphasis } from "./timelineEmphasis/timelineEmphasis";
 import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis";
 import { createRoot } from "react-dom/client";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
+import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
@@ -33,14 +35,19 @@ let attached = true;
 let background: SessionRuntimeBackgroundTaskResponse[] = [];
 let runs = 0;
 let operations = 0;
-let sendMode: "accept" | "busy" | "refuse" = "accept";
+let sendMode: "accept" | "busy" | "refuse" | "hold" = "accept";
+// The Send the host holds (`hold`) until the test lets it be accepted.
+let heldSend: (() => void) | null = null;
+// The command of the shell (`slow`) that ends when the test says.
+let slowCommand: (() => void) | null = null;
 let steerMode: "accept" | "refuse" | "expired" = "accept";
 const operationId = () => `22222222-2222-4222-8222-${String(++operations).padStart(12, "0")}`;
 
 const queue = createComposerQueue();
 const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.sendCalls.push(request);
-  if (sendMode !== "accept") return { status: sendMode === "busy" ? "busy" : "invalid_request", epoch: request.expectedEpoch, receipt: null };
+  if (sendMode === "hold") await new Promise<void>(resolve => { heldSend = resolve; });
+  else if (sendMode !== "accept") return { status: sendMode === "busy" ? "busy" : "invalid_request", epoch: request.expectedEpoch, receipt: null };
   // An accepted Send is a run: the session works until the test ends it.
   run = `run-${++runs}`;
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "Send", clientRequestId: request.clientRequestId,
@@ -76,8 +83,16 @@ const sideQuestions = createSideQuestions(async (_session, question, signal) => 
   yield { kind: "text", value: "Answer to " + question + "\n\n### Details\n\n- one\n- two\n\n```ts\nconst n = 1;\n```" };
   await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
 })());
+// The host runs a command in the folder of the session: it says where, what it wrote, and its exit code.
+const shellCommands = createShellCommands(async (_session, command) => (async function* () {
+  yield { kind: "started", value: "C:\\fixture" };
+  yield { kind: "output", value: `ran ${command}\n` };
+  if (command === "slow") await new Promise<void>(resolve => { slowCommand = resolve; });
+  yield { kind: "exit", exitCode: 0, omitted: 0 };
+})());
 const fixture = {
   sideQuestions,
+  shellCommands,
   // The actual timeline message, beside the panel, for comparing its rendered content and styles.
   showTimelineReference() {
     const host = document.createElement("div"); host.id = "timeline-reference";
@@ -105,6 +120,10 @@ const fixture = {
   steerCalls: [] as SessionSteerRequest[],
   abortRunCalls: [] as SessionAbortRunRequest[],
   sendMode(value: typeof sendMode) { sendMode = value; },
+  /** Accepts the Send the host holds. */
+  releaseSend() { heldSend?.(); heldSend = null; },
+  /** Ends the command `slow`. */
+  endSlowCommand() { slowCommand?.(); slowCommand = null; },
   steerMode(value: typeof steerMode) { steerMode = value; },
   /** The run a session already has when the composer opens on it. */
   startRun() { run = `run-${++runs}`; return run; },
@@ -170,9 +189,20 @@ function Composer(composer: ComponentProps<typeof OwnedSessionPanel>) {
   return createElement(OwnedSessionPanel, { ...composer, sideQuestionCount: view.entries.length,
     onSideQuestions: () => { if (sideQuestions.isOpen(sessionId)) sideQuestions.close(sessionId); else sideQuestions.list(sessionId); } });
 }
+// The workspace of the session: the panels over its timeline, among them the slot where the composer shows its shell commands.
+function Workspace({ hidden }: { hidden: boolean }) {
+  const [shellSlot, setShellSlot] = useState<HTMLDivElement | null>(null);
+  return createElement("div", { className: "session-workspace" },
+    createElement("div", { className: "session-timeline-area" }, createElement(StrictMode, null, createElement(SideQuestionPanel, { store: sideQuestions, sessionId, active: !hidden })),
+      createElement("div", { className: "shell-command-slot", ref: setShellSlot })),
+    createElement("div", { className: "composer-region" }, createElement(ProjectReferenceContext.Provider, { value: references },
+      createElement(Composer, { ...props, observing: !hidden, active: !hidden,
+        shellCommands, shellSlot, onShellPanel: () => sideQuestions.close(sessionId) } as ComponentProps<typeof OwnedSessionPanel>))));
+}
+// The project of the session, for the `@` picker, in the scenarios that ask for it.
+const references = (window as Window & { fixtureReferences?: boolean }).fixtureReferences
+  ? { expectedEpoch: epoch, sessionId, projectId: "fixture-project", projectPath: "C:\\fixture" } : null;
 const shell = (hidden = false) => createElement(TimelineEmphasisProvider, null, createElement("div", { id: "workspace-shell", className: "ide-shell" },
-  createElement("div", { className: "session-workspace" },
-    createElement("div", { className: "session-timeline-area" }, createElement(StrictMode, null, createElement(SideQuestionPanel, { store: sideQuestions, sessionId, active: !hidden }))),
-    createElement("div", { className: "composer-region" }, createElement(Composer, { ...props, observing: !hidden, active: !hidden } as ComponentProps<typeof OwnedSessionPanel>)))));
+  createElement(Workspace, { hidden })));
 const app = createRoot(document.getElementById("app")!);
 app.render(shell());

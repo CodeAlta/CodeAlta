@@ -29,8 +29,9 @@ const scenarios = [
   { name: "a prompt the shell queued in a busy session is sent after its pane left and came back", mac: false, permission: false, outside: false, removed: false, options: false, remount: true },
   { name: "side questions bypass the running session and can be reopened", mac: false, permission: false, outside: false, removed: false, options: false, side: true },
   { name: "files and a folder that the host took from a drop are attached to the composer under the point", mac: false, permission: false, outside: false, removed: false, options: false, hostDrop: true },
+  { name: "a prompt that starts with ! runs a shell command whose output goes with the next prompt", mac: false, permission: false, outside: false, removed: false, options: false, shell: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false } of scenarios) test(name, { skip: !edge, timeout: testLimit(90_000) }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false, shell = false } of scenarios) test(name, { skip: !edge, timeout: testLimit(90_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -51,7 +52,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
       + readFileSync(new URL("./style.css", import.meta.url), "utf8") + readFileSync(new URL("./sideQuestion/sideQuestion.css", import.meta.url), "utf8")
-      + readFileSync(new URL("./timelineEmphasis/timelineEmphasis.css", import.meta.url), "utf8"));
+      + readFileSync(new URL("./timelineEmphasis/timelineEmphasis.css", import.meta.url), "utf8") + readFileSync(new URL("./shellCommands/shellCommands.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
@@ -115,12 +116,84 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
       ${outside ? "window.fixtureOutsideSpace=true;" : ""}
       ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}
-      ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};window.fixtureSessionOptions={options:{subSessions:true},calls:[]};" : ""}` });
+      ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};window.fixtureSessionOptions={options:{subSessions:true},calls:[]};" : ""}
+      ${shell ? "window.fixtureReferences=true;" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
 
+    if (shell) {
+      const shellMode = "document.querySelector('#session-prompt')?.hasAttribute('data-shell')";
+      const bang = () => key("!", "Digit1", 49);
+      // A `!` that starts an empty prompt turns it into a shell command and is not written; Backspace in the empty prompt gives it back.
+      await evaluate("document.querySelector('#session-prompt').focus()");
+      await bang();
+      assert.equal(await wait(`${shellMode} && promptText()==='' && document.querySelector('.composer-status-line')?.textContent.startsWith('Shell command')`), true);
+      await key("Backspace", "Backspace", 8);
+      assert.equal(await wait(`!${shellMode} && promptText()===''`), true);
+      // Enter runs the command: nothing goes to the session, the panel shows its output, and the output is attached to the prompt.
+      await bang();
+      assert.equal(await wait(shellMode), true);
+      await command("Input.insertText", { text: "git status" });
+      assert.equal(await wait("promptText()==='git status'"), true);
+      await enter();
+      assert.equal(await wait("document.querySelector('.shell-command-output')?.textContent==='ran git status'"), true);
+      assert.equal(await wait(`!${shellMode} && promptText()==='' && document.querySelector('.prompt-image-attachments')?.textContent.includes('$ git status')`), true);
+      assert.equal(await wait("document.querySelector('.composer-shell-count')?.textContent==='1'"), true);
+      assert.deepEqual(await sends(), []);
+      // A `!` in a prompt that holds text is text.
+      await write("Explain!");
+      // The prompt carries the output to the session, and gives the timeline back its place.
+      await enter();
+      assert.equal(await wait("fixture.sendCalls.length===1 && !document.querySelector('.shell-command')"), true);
+      assert.deepEqual(JSON.parse(await evaluate("JSON.stringify({ text: fixture.sendCalls[0].text, files: fixture.sendCalls[0].images?.map(file => [file.title, file.mediaType]) })")),
+        { text: "Explain!", files: [["$ git status", "text/x-shell-output"]] });
+      // In shell mode, Alt+Up brings back the commands run before.
+      await bang();
+      for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38, modifiers: 1 });
+      assert.equal(await wait(`${shellMode} && promptText()==='git status'`), true);
+      // A text that starts with `!` and is pasted in an empty prompt is a command too, without its `!`.
+      await evaluate("fixture.shellCommands.setMode('fixture-session',false)");
+      await key("a", "KeyA", 65, true);
+      await key("Backspace", "Backspace", 8);
+      assert.equal(await wait(`!${shellMode} && promptText()===''`), true);
+      await evaluate(`(() => { const data = new DataTransfer(); data.setData("text/plain", "!dir /b");
+        document.querySelector('#session-prompt .native-edit-context, #session-prompt textarea').dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })); })()`);
+      assert.equal(await wait(`${shellMode} && promptText()==='dir /b'`), true);
+      // So is a `!` typed while the keyboard was elsewhere (in the timeline), which the window gives the prompt to type.
+      await evaluate("fixture.shellCommands.setMode('fixture-session',false)");
+      await key("a", "KeyA", 65, true);
+      await key("Backspace", "Backspace", 8);
+      assert.equal(await wait(`!${shellMode} && promptText()===''`), true);
+      await evaluate("document.activeElement.blur(); document.querySelector('#session-prompt').dispatchEvent(new CustomEvent('codealta:prompt-type', { detail: '!', cancelable: true }))");
+      assert.equal(await wait(`${shellMode} && promptText()===''`), true);
+      // In shell mode, `@` and `#` are characters of the command: no picker opens.
+      for (const [typed, shown] of [["@", "@"], ["(1,2) #", "@(1,2) #"], [" a comment", "@(1,2) # a comment"]]) {
+        await command("Input.insertText", { text: typed });
+        assert.equal(await wait(`promptText()===${JSON.stringify(shown)}`), true);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.equal(await evaluate("!!document.querySelector('.reference-palette')"), false, `a picker opened after ${shown}`);
+      }
+      // A command that ends while a prompt is being sent: its output waits, and goes with the prompt after it.
+      await key("a", "KeyA", 65, true);
+      await command("Input.insertText", { text: "slow" });
+      assert.equal(await wait("promptText()==='slow'"), true);
+      await enter();
+      assert.equal(await wait("document.querySelector('.shell-command-output')?.textContent==='ran slow'"), true);
+      await evaluate("fixture.finishRun(); fixture.sendMode('hold')");
+      assert.equal(await wait(idle), true);
+      await write("While it runs");
+      await enter();
+      assert.equal(await wait("fixture.sendCalls.length===2"), true);
+      await evaluate("fixture.endSlowCommand()");
+      assert.equal(await wait("fixture.shellCommands.view('fixture-session').entries.at(-1).state==='done'"), true);
+      await evaluate("fixture.releaseSend()");
+      assert.equal(await wait("document.querySelector('.prompt-image-attachments')?.textContent.includes('$ slow')"), true);
+      assert.equal(await evaluate("fixture.sendCalls[1].images?.length ?? 0"), 0, "the output was not part of the prompt being sent");
+      assert.deepEqual(exceptions, []);
+      return;
+    }
     if (side) {
       // The fixture has no outer workspace layout; give the timeline real room for the resize check.
       await evaluate("document.querySelector('.session-workspace').style.height='700px'");

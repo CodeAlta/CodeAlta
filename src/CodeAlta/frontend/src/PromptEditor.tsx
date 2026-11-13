@@ -20,22 +20,31 @@ export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "sele
   setInterimText: (text: string) => void;
   /** Opens the equation editor on the formula at the caret, or on the selection, to write it back as LaTeX. */
   editEquation: () => void;
+  /** Replaces the whole text, as one step of undo, with the caret at its end. */
+  replaceText: (text: string) => void;
 };
 
 export function PromptEditor({ ref, value, onChange, disabled = false, expanded = false, id, label, placeholder,
-  suggested = false, onPaste, onKeyDown, onCompositionStart, covered = false }: {
+  suggested = false, onPaste, onKeyDown, onCompositionStart, onType, covered = false, shell = false }: {
   ref?: Ref<PromptInput>; value: string; onChange: (text: string) => void; disabled?: boolean; expanded?: boolean;
   id?: string; label: string; placeholder?: string; onPaste?: ClipboardEventHandler<HTMLElement>;
   /** Whether the placeholder is a prompt suggested to the user, which a key takes, and not the usual hint. */
   suggested?: boolean;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>; onCompositionStart?: () => void;
+  /**
+   * Text typed while the keyboard was elsewhere (`typeIntoPrompt`), before the editor types it: true when the owner took
+   * it, as its keys do for a key pressed in the editor.
+   */
+  onType?: (text: string) => boolean;
   /** Something is shown in its place: the editor is hidden, its text and its size kept. */
   covered?: boolean;
+  /** The text is a command for a shell (a prompt started with `!`): the editor says so. */
+  shell?: boolean;
 }) {
   const { t } = useShellLanguage();
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
-  const latest = useRef({ value, onChange, disabled }); latest.current = { value, onChange, disabled };
+  const latest = useRef({ value, onChange, disabled, onType }); latest.current = { value, onChange, disabled, onType };
   // The formula at the caret (or the one given), or the selection, in the equation editor.
   const equations = useEquationEditing(editor, () => !latest.current.disabled);
   // What a dictation is hearing: a decoration at the caret, which the text of the model never holds.
@@ -115,6 +124,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       if (typeof text !== "string" || !text || latest.current.disabled) return;
       event.preventDefault();
       instance.focus();
+      if (latest.current.onType?.(text)) return;
       selectionIn(page.activeElement);
       instance.trigger("keyboard", "type", { text });
       const caret = instance.getPosition();
@@ -157,6 +167,16 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     },
     setInterimText: text => { interim.current.text = text; showInterim(); },
     editEquation: () => equations.open(),
+    replaceText: text => {
+      const instance = editor.current, model = instance?.getModel();
+      if (!instance || !model || latest.current.disabled || model.getValue() === text) return;
+      instance.pushUndoStop();
+      instance.executeEdits("replace", [{ range: model.getFullModelRange(), text, forceMoveMarkers: true }], () => {
+        const end = model.getFullModelRange().getEndPosition();
+        return [new monaco.Selection(end.lineNumber, end.column, end.lineNumber, end.column)];
+      });
+      instance.pushUndoStop();
+    },
   }), []);
   useLayoutEffect(() => {
     const instance = editor.current;
@@ -170,7 +190,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   return <><div id={id} ref={host} className={`prompt-editor${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
-    aria-label={label} aria-disabled={disabled || undefined} data-empty={!value ? "" : undefined} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
+    aria-label={label} aria-disabled={disabled || undefined} data-shell={shell ? "" : undefined} data-empty={!value ? "" : undefined} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
     // The placeholder is drawn by a style: a suggested prompt is also said to who does not see it.
     aria-description={!value && placeholder && suggested ? placeholder : undefined}><div className="prompt-editor-surface" /></div>
     {equations.window}

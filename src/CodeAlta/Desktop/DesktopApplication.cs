@@ -1412,6 +1412,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSideQuestionService(new SideQuestionService(host.RuntimeService, epoch));
+                    builder.AddShellCommandsService(new ShellCommandsService(host.RuntimeService,
+                        async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false), epoch));
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime, canvases?.Modules));
                     // The code editor also opens on the folder of a skill that the Skills page names, and on the
                     // folder of a file that a link names when no project has it.

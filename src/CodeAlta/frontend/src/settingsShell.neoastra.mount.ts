@@ -336,6 +336,7 @@ export const sessionOperations = { observeReferences: (request: { text: string }
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
 export const sideQuestion = { ask: unavailable };
+export const shellCommands = { run: unavailable };
 export const releaseNotes = { list: unavailable, read: unavailable, picture: unavailable };
 // Outside the observed set below: plugin cards are an optional decoration of a settled timeline.
 export const sessionPluginEvents = { read: unavailable };

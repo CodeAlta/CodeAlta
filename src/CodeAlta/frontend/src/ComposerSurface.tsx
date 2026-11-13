@@ -24,8 +24,10 @@ export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentPro
 // (the MCP servers). Below: the Agent chip, the meters (sub-agents, context, prompt cache), the `⋯` menu and the
 // actions. The surface measures its own width (a split pane is narrower than the window): labels shorten, then
 // become icons, and at last the meters fold into the `⋯` menu, in that order.
-export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles, onDropFolders, attachedBytes = 0 }: {
+export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles, onDropFolders, attachedBytes = 0, place }: {
   status: ReactNode; busy?: boolean; children: ReactNode; className?: string;
+  /** What the composer adds after the Workspace chip, above the editor: the shell commands of a session. */
+  place?: ReactNode;
   /** Takes the files dropped on the composer, from the file manager of the system; null where nothing can be attached. */
   onDropFiles?: ((files: File[], origin: HTMLElement) => void) | null;
   /**
@@ -81,7 +83,7 @@ export function ComposerSurface({ status, busy = false, children, className, edi
     {chrome.footer}
     <div className="prompt-surface-top">
       <div className="composer-status-line" role="status" data-busy={busy}>{status}</div>
-      {(chrome.context || chrome.status) && <div className="prompt-surface-place">{chrome.context}{chrome.status && <span className="composer-status-end">{chrome.status}</span>}</div>}
+      {(chrome.context || place || chrome.status) && <div className="prompt-surface-place">{chrome.context}{place}{chrome.status && <span className="composer-status-end">{chrome.status}</span>}</div>}
     </div>
     {expandedEditor}
     {notice}

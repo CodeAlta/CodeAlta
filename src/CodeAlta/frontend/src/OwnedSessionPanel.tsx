@@ -17,7 +17,7 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { ReferencePicker } from "./ReferencePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionPromptImage, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionContextSize, sessionFastMode, sessionFastModeFellBack, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
@@ -43,6 +43,8 @@ import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft
 import { AppIcon } from "./AppIcon";
 import { equationKey, type PromptInput } from "./PromptEditor";
 import { parseSideQuestion } from "./sideQuestion/sideQuestions";
+import { shellAttachment, shellCommandConcurrency, shellCommandMaxLength, type ShellCommandEntry, type ShellCommands } from "./shellCommands/shellCommands";
+import { ShellCommandPanel, type ShellAttachments } from "./shellCommands/ShellCommandPanel";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
@@ -99,8 +101,9 @@ export function sendFailureMessage(status: string, reason?: string): string {
 }
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
+const noShellSubscription = () => () => {};
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, onOpenDocumentation, onSideQuestion, sideQuestionCount = 0, onSideQuestions, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, onOpenDocumentation, onSideQuestion, sideQuestionCount = 0, onSideQuestions, shellCommands, shellSlot = null, onShellPanel, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
   /** The folder the session works in: the folder dialog of the attach menu opens there, and a folder chosen in it is a project reference. */
   sessionFolder?: string | null;
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
@@ -158,6 +161,15 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   sideQuestionCount?: number;
   /** Shows the side questions of the session, or hides them when they show. */
   onSideQuestions?: () => void;
+  /**
+   * The shell commands of the window: a prompt that starts with `!` takes a command, run in the folder of the session,
+   * whose output goes with the next prompt. Absent where the session runs no command (another machine).
+   */
+  shellCommands?: ShellCommands;
+  /** Where the panel of the shell commands shows, over the timeline. */
+  shellSlot?: HTMLElement | null;
+  /** The panel of the shell commands opens: what else shows there closes. */
+  onShellPanel?: () => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
   /** Opens a page of the user guide at a heading. */
   onOpenDocumentation?: (page: string, anchor: string | null) => void;
@@ -176,6 +188,11 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const hasImages = images.some(isImageAttachment);
   const [imageNotice, setImageNotice] = useState("");
   const [sideQuestionNotice, setSideQuestionNotice] = useState("");
+  // The prompt in shell mode, and the commands of the session: numbers that change seldom, not the output that streams.
+  const subscribeShell = shellCommands?.subscribe ?? noShellSubscription;
+  const shellMode = useSyncExternalStore(subscribeShell, () => shellCommands?.mode(sessionId) ?? false);
+  const shellCount = useSyncExternalStore(subscribeShell, () => shellCommands?.count(sessionId) ?? 0);
+  const shellRunning = useSyncExternalStore(subscribeShell, () => shellCommands?.runningCount(sessionId) ?? 0);
   // Each change opens the issue picker at the caret: Add issues of the attach menu.
   const [issueRequest, setIssueRequest] = useState(0);
   const [providerState, setProviderState] = useState<ActiveProviderState>({ ready: 0, errors: 0, detecting: true });
@@ -193,10 +210,15 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const editGeneration = draftIndicators.edit(sessionId, value, restoredText.current);
     setDraft({ text: value, editGeneration });
   }
+  // A `!` that starts an empty prompt is no part of it: the prompt takes a shell command. The `!` never reaches the editor,
+  // typed (see its keys) or pasted (see pastePrompt), so that its text stays the editor's own.
+  function canStartShell() { return !!shellCommands && !shellCommands.mode(sessionId) && !latestText.current && !pending && !invalidEpoch; }
   const recall = useRef(noPromptRecall);
   function recallSentPrompt(direction: -1 | 1) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted) return false;
-    const next = recallPrompt(promptHistory.list(sessionId), recall.current, direction, latestText.current);
+    // In shell mode, the commands run before; otherwise the prompts sent.
+    const history = shellCommands?.mode(sessionId) ? shellCommands.commands(sessionId) : promptHistory.list(sessionId);
+    const next = recallPrompt(history, recall.current, direction, latestText.current);
     if (!next) return false;
     const state = next.state;
     editText(next.text);
@@ -593,7 +615,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
-    if (value === latestText.current && takeSideQuestion()) return true;
+    if (value === latestText.current && (takeShellCommand() || takeSideQuestion())) return true;
     if (!queue.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
@@ -748,6 +770,69 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
+  // A prompt in shell mode is a command, run at once whatever the session does: it never enters the session or its queue.
+  // The prompt leaves shell mode, and the output of the command goes with the next prompt once it ended.
+  function takeShellCommand(): boolean {
+    if (!shellCommands?.mode(sessionId)) return false;
+    const command = latestText.current.trim();
+    if (!command) return true;
+    if (command.length > shellCommandMaxLength) { setSideQuestionNotice(t("A shell command can have at most 16384 characters.")); return true; }
+    if (!runShellCommand(command)) return true;
+    shellCommands.setMode(sessionId, false);
+    inputRevision.current++; clearText();
+    // The command may have been typed in the same moment as Enter, before the draft that holds it was drawn: the
+    // draft is then empty before and after, and the editor would keep the command. It is emptied once it is done.
+    window.setTimeout(() => { if (!latestText.current) promptInput.current?.replaceText(""); });
+    return true;
+  }
+  // The outputs of the commands that ended while the prompt took no attachment (a Send on its way): attached once it does.
+  const shellWaiting = useRef<ShellCommandEntry[]>([]);
+  const attachShellLatest = useRef<(entry: ShellCommandEntry) => void>(() => {});
+  attachShellLatest.current = entry => {
+    if (scope.current && !scope.current.signal.aborted && entry.state !== "failed" && setShellAttached(entry, true) === "later") shellWaiting.current.push(entry);
+  };
+  useEffect(() => {
+    if (!shellWaiting.current.length || pending || invalidEpoch || submissions.pending(sessionId)) return;
+    const waiting = shellWaiting.current;
+    shellWaiting.current = [];
+    for (const entry of waiting) if (setShellAttached(entry, true) === "later") shellWaiting.current.push(entry);
+  });
+  function runShellCommand(command: string): boolean {
+    if (!shellCommands || invalidEpoch || !canAdmit()) return false;
+    if (shellCommands.runningCount(sessionId) >= shellCommandConcurrency) {
+      setSideQuestionNotice(t("{count} commands of this session still run: stop one first.", { count: shellCommandConcurrency })); return false;
+    }
+    setSideQuestionNotice("");
+    onShellPanel?.();
+    return shellCommands.run(sessionId, command, entry => attachShellLatest.current(entry)) !== null;
+  }
+  // The output of a command among the attachments of the prompt, or not: the same command gives the same attachment.
+  function shellAttached(entry: ShellCommandEntry): boolean {
+    const file = shellAttachment(entry);
+    return images.some(item => item.mediaType === file.mediaType && item.base64 === file.base64);
+  }
+  // "later" while the prompt takes no attachment (a Send on its way), "refused" when it cannot take this one.
+  function setShellAttached(entry: ShellCommandEntry, attached: boolean): "done" | "later" | "refused" {
+    if (pending || invalidEpoch || submissions.pending(sessionId)) return "later";
+    if (!canAdmit() || !capability.canMutate()) return "refused";
+    inputRevision.current++;
+    const file = shellAttachment(entry);
+    const current = imageOwner.get(imageKey);
+    const same = (item: SessionPromptImage) => item.mediaType === file.mediaType && item.base64 === file.base64;
+    if (attached === current.some(same)) return "done";
+    if (attached && attachmentBytes(current) + attachmentBytes([file]) > attachmentLimits.totalBytes) {
+      setImageNotice(t("The attachments of a prompt are limited to {size} MB in all.", { size: attachmentLimits.totalBytes / 1024 / 1024 })); return "refused";
+    }
+    return imageOwner.replace(imageKey, current, attached ? [...current, file] : current.filter(item => !same(item))) ? "done" : "refused";
+  }
+  const shellAttachments: ShellAttachments | null = pending || invalidEpoch ? null
+    : { has: shellAttached, toggle: entry => setShellAttached(entry, !shellAttached(entry)) };
+  // The button of the composer and the command: the commands of the session when it has some, otherwise the prompt in shell mode.
+  function startShellCommand() {
+    if (!shellCommands) return;
+    shellCommands.setMode(sessionId, true);
+    requestAnimationFrame(() => promptInput.current?.focus());
+  }
   // Intercept before queueing, steering, prompt history, or provider selection. Attachments never travel with /ask.
   function takeSideQuestion(question = parseSideQuestion(latestText.current)): boolean {
     if (question === null || !onSideQuestion) return false;
@@ -774,7 +859,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
       inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue: queuePrompt, busy: composerBusy, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
-    if (!pending && takeSideQuestion()) return;
+    if (!pending && (takeShellCommand() || takeSideQuestion())) return;
+    // A prompt goes to the conversation: the panel of the shell commands gives it back the place it covers.
+    shellCommands?.close(sessionId);
     // The provider was taken out of the space of the session: another one is chosen before anything is sent.
     // The status line already says why; it goes once the session has another provider.
     if (spaceProblem) { setSelectionOpenRequest(value => value + 1); return; }
@@ -848,6 +935,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       const command = (event as CustomEvent<string>).detail;
       if (invalidEpoch || !canAdmit()) return;
       if (command === "sideQuestion" && onSideQuestion && !pending) startSideQuestion();
+      if (command === "shellCommand" && shellCommands && !pending) startShellCommand();
       if (command === "nextPrompt") {
         const prompts = activeChoices?.prompts ?? [];
         if (prompts.length > 1 && selected && !selectionDisabled)
@@ -978,7 +1066,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function steerFromComposer() {
     if (pending || invalidEpoch || !canAdmit() || !capability.canMutate()) return;
     if (afterDictation(actions => actions.steerFromComposer())) return;
-    if (takeSideQuestion()) return;
+    if (takeShellCommand() || takeSideQuestion()) return;
     if (!latestText.current.trim() && !images.length) {
       const next = staged.find(item => item.kind === "Queue" && item.state === "waiting" && !queue.isHeld(item));
       if (next && composerBusy) queue.steerNow(next);
@@ -1374,6 +1462,19 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const moreLabel = [activeReminders > 0 && reminderLabel,
     remoteMark && t(remoteMark === "connected" ? "Remote Control: on" : remoteMark === "connecting" ? "Remote Control: connecting" : "Remote Control: failed")].filter(Boolean).join(" · ") || undefined;
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
+  // A text that starts with `!` and comes in an empty prompt at once, pasted or typed while the keyboard was elsewhere,
+  // is a shell command, without its `!`.
+  function takeShellText(text: string): boolean {
+    if (!text.startsWith("!") || !canStartShell()) return false;
+    inputRevision.current++; recall.current = noPromptRecall;
+    shellCommands!.setMode(sessionId, true);
+    promptInput.current?.replaceText(text.slice(1));
+    return true;
+  }
+  function pastePrompt(event: ClipboardEvent<HTMLElement>) {
+    if (!event.clipboardData.files.length && takeShellText(event.clipboardData.getData("text/plain"))) { event.preventDefault(); return; }
+    pasteImages(event);
+  }
   function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
     event.preventDefault();
@@ -1492,8 +1593,21 @@ ${value}` : value);
     {/* A Claude Code provider without a CLI proposes its download where it is chosen. */}
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
-    <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) || !compacting && !invalidEpoch && pluginOutcome?.cancelled ? "danger"
+    <ComposerSurface busy={composerBusy || compacting} place={shellCommands && <button type="button" className="composer-shell-commands" disabled={!!pending || invalidEpoch}
+        data-shell={shellMode || undefined} data-running={shellRunning > 0 || undefined}
+        aria-label={shellCount ? t("{count} shell commands: show them", { count: shellCount }) : t("Run a shell command in the folder of this session (!)")}
+        title={shellCount ? t("{count} shell commands: show them", { count: shellCount }) : t("Run a shell command in the folder of this session (!)")}
+        onClick={() => {
+          if (!shellCount) { startShellCommand(); return; }
+          if (shellCommands.isOpen(sessionId)) shellCommands.close(sessionId);
+          else { onShellPanel?.(); shellCommands.list(sessionId); }
+        }}>
+        {shellRunning > 0 ? <ActivitySpinner size={13} /> : <span className="composer-shell-sigil" aria-hidden="true">!</span>}
+        <AppIcon name="terminal" size={14} />{shellCount > 0 && <span className="composer-shell-count">{shellCount}</span>}</button>} status={<>
+      {shellMode && !pending && !invalidEpoch ? <span className="composer-foreground-status" data-tone="shell">
+        <AppIcon name="terminal" size={14} /><span className="composer-foreground-text">{t("Shell command")}</span>
+        <span className="composer-shell-folder">{t("Enter runs it · Backspace on an empty line returns to the prompt")}</span></span>
+      : <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) || !compacting && !invalidEpoch && pluginOutcome?.cancelled ? "danger"
         : !compacting && !invalidEpoch && pluginOutcome ? "notice" : undefined}>
         {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled ? "error" : pluginOutcome ? "plugin" : "prompt"} size={14} />}
         {/* A steering prompt a plugin answered says so while its turn goes on. */}
@@ -1502,7 +1616,7 @@ ${value}` : value);
           : compacting ? t("Compacting…")
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
           : !invalidEpoch && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
-          : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
+          : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>}
       {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
       {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"
         icon={<AppIcon name="refresh" size={13} />} onClick={() => window.location.reload()}>{t("Reload")}</Button>}
@@ -1512,9 +1626,26 @@ ${value}` : value);
         onClick={() => onOpenCatalog?.("providers")} title={t("Providers")}>{t(providerState.errors === 1 ? "{count} provider error" : "{count} provider errors", { count: providerState.errors })}</Button>}
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
-    editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
-      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: suggestion ?? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}`, suggested: !!suggestion, onKeyDown: event => {
-        if (suggestion && takesPromptSuggestion({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey,
+    editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pastePrompt, onType: takeShellText, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
+      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, shell: shellMode && !pending,
+      placeholder: shellMode && !pending ? t("Type a shell command to run in the folder of this session…")
+        : suggestion ?? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}`, suggested: !shellMode && !!suggestion, onKeyDown: event => {
+        // `!` at the start of an empty prompt turns it into a shell command, and is not written.
+        if (event.key === "!" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.nativeEvent.isComposing && canStartShell()) {
+          event.preventDefault(); event.stopPropagation();
+          inputRevision.current++; recall.current = noPromptRecall;
+          shellCommands!.setMode(sessionId, true);
+          return;
+        }
+        // Backspace in an empty prompt in shell mode gives the prompt back, as it was before the `!`.
+        if (shellMode && event.key === "Backspace" && !latestText.current && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+          && !event.nativeEvent.isComposing) {
+          event.preventDefault(); event.stopPropagation();
+          inputRevision.current++; recall.current = noPromptRecall;
+          shellCommands?.setMode(sessionId, false);
+          return;
+        }
+        if (!shellMode && suggestion && takesPromptSuggestion({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey,
           metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode })) {
           event.preventDefault(); event.stopPropagation();
           editText(suggestion);
@@ -1528,7 +1659,8 @@ ${value}` : value);
           recallSentPrompt(event.key === "ArrowUp" ? -1 : 1);
           return;
         }
-        if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
+        // A command is plain text: `?` and `/` open nothing there.
+        if (!shellMode && dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
         promptInput.current!, onOpenHelp, onOpenCommands)) { event.preventDefault(); event.stopPropagation(); return; }
@@ -1638,9 +1770,10 @@ ${value}` : value);
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices}>{t("Refresh composer choices")}</Button>}
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} providers={activeChoices?.spaceProviders ?? null} />
     </> }}>
-      {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      {!pending && !expanded && !invalidEpoch && <ReferencePicker edit={editText} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
-      {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
+      {/* The pickers of `@` and `#` insert Markdown for the agent: a shell command takes these characters as they are. */}
+      {!pending && !expanded && !invalidEpoch && !shellMode && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
+      {!pending && !expanded && !invalidEpoch && !shellMode && <ReferencePicker edit={editText} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
+      {!pending && !expanded && !invalidEpoch && !shellMode && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
       <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         data-composer-command={active ? "abort" : undefined}
@@ -1657,12 +1790,18 @@ ${value}` : value);
         {sideQuestionCount > 0 && <span className="composer-side-count">{sideQuestionCount}</span>}</Button>}
       <MicButton owner={speechOwner} input={promptInput} disabled={!!pending || invalidEpoch || expanded} visible={observing}
         id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => submit(composerBusy)} />
-      <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
-      <Button data-composer-command={active ? "send" : undefined}
+      <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending || shellMode}>
+      {shellMode && !pending ? <Button data-composer-command={active ? "send" : undefined} className="composer-shell-run" intent="primary"
+        data-unavailable={invalidEpoch ? t("Reload required.") : !text.trim() ? t("Type a command first.") : undefined}
+        aria-label={t("Run the command")} title={t("Run the command (Enter)")} icon={<AppIcon name="play" size={16} />}
+        disabled={invalidEpoch || !text.trim()} onClick={() => submit()} />
+      : <Button data-composer-command={active ? "send" : undefined}
         data-unavailable={invalidEpoch ? t("Reload required.") : !pending && !text.trim() && !images.length ? t("Type a prompt first.") : undefined}
-        aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (hasImages && imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || !sendAvailable(epoch, sessionId, text, images.length ? selected : null, images))} onClick={() => submit()} />
+        aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (hasImages && imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || !sendAvailable(epoch, sessionId, text, images.length ? selected : null, images))} onClick={() => submit()} />}
       </SendSplitButton>
     </ComposerSurface>
+    {shellCommands && shellSlot && createPortal(<ShellCommandPanel store={shellCommands} sessionId={sessionId} active={active && observing}
+      onRun={runShellCommand} attachments={shellAttachments} />, shellSlot)}
     {timelineNotices && createPortal(<>
     {heldReviewer && <ConversationHeldPanel reviewer={heldReviewer} epoch={epoch} sessionId={sessionId} running={composerBusy}
       wait={liveConnected ? currentLive.snapshot?.session?.conversationWait ?? null : null}

@@ -20,11 +20,11 @@ The prompt is where you write to a session; the timeline above it shows what the
 | `F10` | Clear the queue |
 | `Alt+=` (`Ctrl+Alt+=` on macOS) | Write or edit an [equation](#equations) (CodeAlta Desktop) |
 
-An empty prompt names the keys that are its own: `?` opens the help and `/` the commands, and at the start of a word `@` inserts a link to a file of the project and `#` an issue, a task, a plan or a session (see [Insert a reference](#insert-a-reference)).
+An empty prompt names the keys that are its own: `?` opens the help, `/` the commands and `!` takes a [shell command](#shell-commands), and at the start of a word `@` inserts a link to a file of the project and `#` an issue, a task, a plan or a session (see [Insert a reference](#insert-a-reference)).
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-prompt-hints.webp" alt="An empty prompt of CodeAlta Desktop: Ask CodeAlta to work on this project, then Type ? for help, / for commands, @ to insert a link to a project file, # to insert an issue, a task, a plan or a session" loading="lazy">
-  <figcaption class="small text-secondary mt-2">An empty prompt says what ?, /, @ and # do.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-prompt-hints.webp" alt="An empty prompt of CodeAlta Desktop: Ask CodeAlta to work on this project, then Type ? for help, / for commands, ! to run a shell command, @ to insert a link to a project file, # to insert an issue, a task, a plan or a session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An empty prompt says what ?, /, !, @ and # do.</figcaption>
 </figure>
 
 Queued prompts can be edited, repeated, sent at once to steer, or deleted. When a provider cannot steer a running turn, the prompt waits for the next turn. See [Busy sessions and queues](../sessions/readme.md#busy-sessions-and-queues).
@@ -38,6 +38,28 @@ In CodeAlta Desktop, a side question asks the model of the session about it whil
 - The number on the speech bubbles counts the questions of the session: click them, or send `/ask` alone, for the list of recent questions, with when each was asked and the start of its answer.
 
 These answers stay in the window until it closes. Every provider answers them, those that run their own agent included (Claude Code, Codex CLI, ACP agents): the question goes to the model of the session without tools, and the provider keeps no trace of it.
+
+### Shell commands
+
+In CodeAlta Desktop, a prompt that starts with `!` runs a command in the folder of the session, as in a terminal, and gives its output to the agent with your next message.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-shell-mode.webp" alt="The prompt of a session in shell mode: an orange frame with ! before the command git log --oneline -5, the status line Shell command, Enter runs it, Backspace on an empty line returns to the prompt, and an orange Run button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Typed at the start of the prompt, <code>!</code> turns it into a shell command.</figcaption>
+</figure>
+
+- Type `!` at the start of an empty prompt: the `!` goes, and the prompt, framed in orange, takes a command. Press `Enter` to run it. `Backspace` in the empty prompt gives the normal prompt back. The **!** button after the Workspace chip, above the prompt, or **Shell command** (`/shell`) in the commands, does the same.
+- The command runs in the shell of the agent's commands (PowerShell on Windows, your shell elsewhere), in the folder or worktree of the session, with the variables of its commands. It is yours: no permission is asked, and the [sandbox](../sessions/sandbox.md) of the session does not apply.
+- A panel above the prompt shows the output as it comes, then the exit code and the time it took. **Stop** ends a command; closing the panel (`Esc`) does not, and the tab of a session whose command runs stays in its window.
+- Once the command ended, its output is attached to the prompt (`$ git status`), for the agent to read with your next message: remove the attachment, or click **In the prompt** in the panel, to keep it out. The agent gets at most the first 10,000 and the last 20,000 characters.
+- The number on the **!** button counts the commands of the session, and a spinner shows one that runs: click it for the list, with how each ended. Copy a command or its output, paste it in a [terminal](code.md#terminals), run it again or remove it. In shell mode, `Alt+↑` brings back the commands run before.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-shell-command.webp" alt="The panel of a shell command over the timeline: git log --oneline -5 with its output in a terminal, Exit code 0, In the prompt and the buttons to paste it in a terminal, run it again and remove it; below, the prompt with the attachment $ git log --oneline -5 and the ! button with the count of the commands" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The output of a command, attached to the next prompt once it ended.</figcaption>
+</figure>
+
+The commands stay in the window until it closes.
 
 ## Above the editor
 

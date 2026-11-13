@@ -1,0 +1,96 @@
+/* The color of what runs in a shell: the prompt in shell mode, the `!` of a command, and its panel. */
+:root { --shell-accent: var(--bp-palette-orange-4); }
+:root[data-theme="light"] { --shell-accent: var(--bp-palette-orange-2); }
+
+/* The prompt in shell mode: framed and tinted in the color of the shell, with `!` before the command, as typed. */
+.prompt-surface .prompt-editor[data-shell] { padding-left: 30px; border-color: color-mix(in srgb, var(--shell-accent) 70%, var(--line));
+  background: color-mix(in srgb, var(--shell-accent) 7%, var(--prompt-editor-background));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--shell-accent) 30%, transparent); }
+.prompt-surface .prompt-editor[data-shell]:focus-within { border-color: var(--shell-accent); }
+.prompt-surface .prompt-editor[data-shell] .monaco-editor, .prompt-surface .prompt-editor[data-shell] .monaco-editor-background,
+.prompt-surface .prompt-editor[data-shell] .monaco-editor .margin { background-color: transparent; }
+.prompt-editor[data-shell]::before { content: "!"; position: absolute; z-index: 1; top: 12px; left: 13px; color: var(--shell-accent); font-family: var(--code-font);
+  font-size: var(--code-font-size); font-weight: 800; line-height: var(--code-line-height); pointer-events: none; }
+.prompt-surface .prompt-editor[data-shell][data-placeholder]::after { left: 30px; }
+.composer-foreground-status[data-tone="shell"] { color: var(--shell-accent); font-weight: 600; }
+.composer-foreground-status[data-tone="shell"] kbd { padding: 0 4px; border: 1px solid color-mix(in srgb, var(--shell-accent) 45%, transparent); border-radius: 4px;
+  font: 600 11px var(--code-font); color: var(--shell-accent); background: color-mix(in srgb, var(--shell-accent) 10%, transparent); }
+.composer-shell-folder { min-width: 0; overflow: hidden; color: var(--muted); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The button of the shell commands, after the Workspace chip above the prompt: how many the session has, and a spinner while one runs. */
+.prompt-surface button.composer-shell-commands { flex: none; display: inline-flex; align-items: center; gap: 5px; height: var(--prompt-chip-height); margin: 0; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.prompt-surface button.composer-shell-commands:hover, .prompt-surface button.composer-shell-commands:focus-visible { background: var(--panel-3); color: var(--text); outline: none; }
+.prompt-surface button.composer-shell-commands:disabled { opacity: .5; cursor: default; }
+.prompt-surface button.composer-shell-commands[data-shell] { border-color: color-mix(in srgb, var(--shell-accent) 60%, var(--line)); color: var(--shell-accent); }
+.composer-shell-sigil { color: var(--shell-accent); font: 800 12px var(--code-font); }
+.composer-shell-count { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--shell-accent); color: #fff;
+  font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* The panel over the timeline, where the side questions show; the composer puts it in its slot, which lays out nothing itself. */
+.shell-command-slot { display: contents; }
+.shell-command { position: absolute; inset: auto calc(8px + var(--session-inset, 0px)) 4px; z-index: 5; display: flex; flex-direction: column; min-width: 0;
+  max-height: min(60%, calc(100% - 8px)); border: 1px solid color-mix(in srgb, var(--shell-accent) 45%, var(--line)); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+.shell-command > header { display: flex; flex: none; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.shell-command > header > .bp6-tag { flex: none; }
+.shell-command-icon { flex: none; color: var(--shell-accent); }
+.shell-command > header > .shell-command-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font: 12px var(--code-font); text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: start; }
+.shell-command-recent .bp6-tag { margin-left: 6px; min-height: 16px; padding: 0 6px; }
+.shell-command-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding: 10px 12px; }
+.shell-command-sigil { color: var(--shell-accent); font-family: var(--code-font); font-weight: 800; }
+.shell-command-line { display: flex; flex: none; align-items: center; gap: 8px; min-height: 26px; padding-right: 15px; font: 600 var(--code-font-size)/var(--code-line-height) var(--code-font); }
+.shell-command-line > code { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--text); background: none; padding: 0; }
+/* The copy buttons of the command and of the output show over what they copy, at the end of the line, under the pointer. */
+.shell-command-line > .bp6-button { flex: none; margin-left: auto; opacity: 0; }
+.shell-command-line:hover > .bp6-button, .shell-command-line > .bp6-button:focus-visible { opacity: 1; }
+/* The output, as tall as its lines up to sixteen, then scrolled; its copy button at its corner, as on a code block. */
+/* A command shown keeps its line and its footer in sight: its output takes what is left of the panel, and scrolls. */
+.shell-command-body[data-view="command"] { overflow: hidden; }
+.shell-command-body[data-view="command"] > * { flex: none; }
+.shell-command-body[data-view="command"] > .shell-command-output-frame { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 0; }
+.shell-command-output-frame { position: relative; min-width: 0; }
+.shell-command-output { flex: 0 1 auto; min-height: calc(var(--code-line-height) + 18px); max-height: calc(16 * var(--code-line-height) + 16px); margin: 0; padding: 8px 40px 8px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: var(--code-font-size)/var(--code-line-height) var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+.shell-command-output:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: -2px; }
+.shell-command-output-copy { position: absolute; top: 4px; right: 14px; z-index: 1; border-radius: 4px; background: var(--bg); opacity: 0; }
+.shell-command-output-frame:hover .shell-command-output-copy, .shell-command-output-copy:focus-within { opacity: 1; }
+.shell-command-quiet { margin: 0; color: var(--muted); font-size: 12.5px; font-style: italic; }
+.shell-command-failure { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--red); }
+.shell-command-failure > svg { flex: none; margin-top: 3px; }
+.shell-command-footer { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; }
+.shell-command-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: auto; }
+.shell-command-attach.bp6-active { color: var(--green); }
+.shell-command-outcome { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shell-command-outcome[data-state="ok"] { color: var(--green); }
+.shell-command-outcome[data-state="error"], .shell-command-outcome[data-state="failed"] { color: var(--red); }
+.shell-command-outcome[data-state="running"] { color: var(--shell-accent); }
+
+/* The commands of the session, the latest first: the command, when, how it ended and its last line. */
+.shell-command-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.shell-command-list > li { position: relative; display: flex; align-items: center; border-radius: 6px; }
+.shell-command-list > li:hover, .shell-command-list > li:focus-within { background: var(--panel-2); }
+.shell-command-row { display: grid; flex: 1; gap: 3px; min-width: 0; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.shell-command-row:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: -2px; }
+.shell-command-row-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.shell-command-row-head > code { flex: 1; min-width: 0; overflow: hidden; padding: 0; background: none; color: var(--text); font: 600 var(--code-font-size) var(--code-font); text-overflow: ellipsis; white-space: nowrap; }
+.shell-command-row-head > code > .shell-command-sigil { margin-right: 6px; }
+.shell-command-row-head > time { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.shell-command-row-foot { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.shell-command-row-last { min-width: 0; overflow: hidden; color: var(--muted); font: 12px var(--code-font); text-overflow: ellipsis; white-space: nowrap; }
+/* The buttons of a row cover its end, where its time is, under the pointer or the focus. */
+.shell-command-row-actions { position: absolute; top: 50%; right: 6px; display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--panel-2);
+  box-shadow: -12px 0 12px var(--panel-2); opacity: 0; pointer-events: none; transform: translateY(-50%); }
+.shell-command-list > li:hover .shell-command-row-actions, .shell-command-list > li:focus-within .shell-command-row-actions { opacity: 1; pointer-events: auto; }
+.shell-command-empty { display: grid; justify-items: center; gap: 4px; padding: 18px 12px; color: var(--muted); text-align: center; }
+.shell-command-empty > svg { color: var(--shell-accent); }
+.shell-command-empty > strong { color: var(--text); }
+
+/* Another command, at the foot of the panel. */
+.shell-command-run { display: flex; flex: none; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.shell-command-run > .bp6-input-group { flex: 1; min-width: 0; }
+.shell-command-run .bp6-input { font-family: var(--code-font); }
+.shell-command-field-sigil { display: inline-flex; align-items: center; height: 100%; padding: 0 2px 0 10px; }
+.shell-command .shell-command-run .bp6-button.bp6-intent-primary, .prompt-surface .composer-send-group .bp6-button.bp6-intent-primary.composer-shell-run,
+.prompt-surface .composer-send-group:has(.composer-shell-run) .bp6-button.bp6-intent-primary.composer-send-options { background-color: var(--shell-accent); color: #fff; }
+.shell-command .shell-command-run .bp6-button.bp6-intent-primary:disabled, .prompt-surface .composer-send-group .bp6-button.bp6-intent-primary.composer-shell-run:disabled,
+.prompt-surface .composer-send-group:has(.composer-shell-run) .bp6-button.bp6-intent-primary.composer-send-options:disabled { background-color: color-mix(in srgb, var(--shell-accent) 45%, var(--panel-2)); color: color-mix(in srgb, #fff 70%, transparent); }

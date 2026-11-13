@@ -175,7 +175,7 @@ export function stripPngMetadata(bytes: Uint8Array): Uint8Array {
 }
 
 // Not String.fromCharCode(...bytes): the arguments of a multi-megabyte image overflow the stack.
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   return btoa(binary);

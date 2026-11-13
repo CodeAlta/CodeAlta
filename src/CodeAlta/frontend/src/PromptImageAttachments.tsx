@@ -3,6 +3,7 @@ import { Button, FormGroup, InputGroup, Menu, MenuItem, PopoverNext } from "@blu
 import type { SessionPromptImage } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { attachmentBytes, attachmentLink, isImageAttachment, isLinkAttachment, linkMediaTypes } from "./promptImages";
+import { shellOutputMediaType } from "./shellCommands/shellCommands";
 import { formatAttachmentSize } from "./timelineAttachments";
 import { useShellLanguage } from "./shellLanguage";
 import { useSurfaceDensity } from "./promptSurface/PromptSurfaceParts";
@@ -124,8 +125,9 @@ export function AttachedFileChips({ attachments }: { attachments: ReadonlyArray<
 }
 
 /** The icon of an attachment, from its media type: a link of the attach menu has the icon of what it names. */
-export function fileIcon(mediaType: string | null | undefined): "fileText" | "fileImage" | "fileGeneric" | "issueOpen" | "folder" {
+export function fileIcon(mediaType: string | null | undefined): "fileText" | "fileImage" | "fileGeneric" | "issueOpen" | "folder" | "terminal" {
   return !mediaType ? "fileGeneric" : mediaType === linkMediaTypes.issue ? "issueOpen" : mediaType === linkMediaTypes.folder ? "folder"
+    : mediaType === shellOutputMediaType ? "terminal"
     : mediaType.startsWith("image/") ? "fileImage"
     : mediaType.startsWith("text/") || mediaType === "application/pdf" || mediaType === "application/json" ? "fileText" : "fileGeneric";
 }

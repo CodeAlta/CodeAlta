@@ -35,7 +35,8 @@ type SessionOptionsFixture = { options: { subSessions: boolean; fastMode?: boole
 const sessionOptions = () => (window as Window & { fixtureSessionOptions?: SessionOptionsFixture }).fixtureSessionOptions;
 // The provider of the session: the removed one until the host switched it.
 const provider = () => removed()?.switched.at(-1) ?? (removed() ? "fixture-removed" : "fixture-provider");
-export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "unavailable" }), setReviewBeforeCommit: async () => ({ status: "unavailable" }),
+export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "unavailable" }),
+  searchReferences: async ({ expectedEpoch }: { expectedEpoch: string }) => ({ status: "ok", epoch: expectedEpoch, items: [], total: 0 }), setReviewBeforeCommit: async () => ({ status: "unavailable" }),
   options: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => sessionOptions()
     ? { status: "ok", epoch: expectedEpoch, sessionId, options: sessionOptions()!.options } : { status: "unavailable" },
   setOptions: async ({ expectedEpoch, sessionId, options }: { expectedEpoch: string; sessionId: string; options: SessionOptionsFixture["options"] }) => {
