@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CodeAlta.Plugins.Abstractions;
 
@@ -8,7 +10,7 @@ namespace CodeAlta.Credentials.Providers;
 /// asks Windows Hello, Touch ID or the system password once, or with a service account token, which needs nobody. CodeAlta
 /// never asks a master password.
 /// </summary>
-internal sealed class OnePasswordProvider : ICredentialProvider
+internal sealed class OnePasswordProvider : ICredentialProvider, ICredentialBatchReader, ICredentialVaultApplication
 {
     internal const string TypeName = "1password";
     private static readonly TimeSpan StatusReuse = TimeSpan.FromSeconds(30);
@@ -73,21 +75,41 @@ internal sealed class OnePasswordProvider : ICredentialProvider
 
     // The state, never with a prompt. A service account, or an op signed in by itself, answers whoami. With the 1Password app,
     // whoami says "not signed in" even to a process the app authorized: the accounts the app gives say whether it is on and
-    // which account is read, and an authorization is known from the commands that went through since it was given.
+    // which account is read, and an authorization is known from the commands that went through since it was given. Each
+    // command is a start of op and its exchange with the app: whoami is not asked when the accounts and that memory answer.
     private async Task<CredentialProviderStatus> CheckAsync(string program, CancellationToken cancellationToken)
+    {
+        if (_serviceAccountToken is not null) return await WhoAmIAsync(program, null, cancellationToken).ConfigureAwait(false);
+        var accounts = await RunAsync(program, ["account", "list", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        var shown = accounts.ExitCode == 0 ? AccountOf(accounts.Output).Shown : null;
+        if (shown is not null && Authorized()) return CredentialProviderStatus.Ready() with { Account = shown, ProgramPath = program };
+        return await WhoAmIAsync(program, accounts, cancellationToken).ConfigureAwait(false);
+    }
+
+    // What whoami says, then, when it knows no signed-in account, what the accounts the app gives say (null with a service account).
+    private async Task<CredentialProviderStatus> WhoAmIAsync(string program, VaultCommandResult? accounts, CancellationToken cancellationToken)
     {
         var whoami = await RunAsync(program, ["whoami", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
         if (whoami.ExitCode == 0) return Ready(program, whoami);
-        if (_serviceAccountToken is not null) return Classify(program, whoami);
-        var accounts = await RunAsync(program, ["account", "list", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        if (accounts is null) return Classify(program, whoami);
         if (accounts.ExitCode != 0) return Classify(program, accounts);
         var (any, shown) = AccountOf(accounts.Output);
         if (!any || shown is null) return NoAccount(program);
-        bool authorized;
-        lock (_gate) authorized = DateTimeOffset.UtcNow < _authorizedUntil;
-        return authorized
-            ? CredentialProviderStatus.Ready() with { Account = shown, ProgramPath = program }
-            : CredentialProviderStatus.Locked("Unlock to let the 1Password app authorize CodeAlta.") with { Account = shown, ProgramPath = program };
+        return CredentialProviderStatus.Locked("Unlock to let the 1Password app authorize CodeAlta.") with { Account = shown, ProgramPath = program };
+    }
+
+    // Whether a command went through recently enough for the app to still authorize this process.
+    private bool Authorized()
+    {
+        lock (_gate) return DateTimeOffset.UtcNow < _authorizedUntil;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> IsApplicationReadyAsync(CancellationToken cancellationToken)
+    {
+        if (Program is not { } program || _serviceAccountToken is not null) return true;
+        var accounts = await RunAsync(program, ["account", "list", "--format", "json"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        return accounts.ExitCode == 0 && AccountOf(accounts.Output).Shown is not null;
     }
 
     // Whether the app gives op an account, and the one this provider reads: the one set, or the first; null when the one set is not given.
@@ -133,6 +155,17 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         var result = await RunAsync(program, ["vault", "list", "--format", "json"], TimeSpan.FromMinutes(2), cancellationToken).ConfigureAwait(false);
         CryptographicZero(result.Output);
         if (result.ExitCode != 0) return Classify(program, result);
+        // The app authorized this process: the account the last check showed is the one it reads, without asking op again.
+        lock (_gate)
+        {
+            if (_lastStatus is { Status: { Account: not null } known } && known.ProgramPath == program)
+            {
+                var ready = CredentialProviderStatus.Ready() with { Account = known.Account, ProgramPath = program };
+                _lastStatus = (DateTimeOffset.UtcNow, ready);
+                return ready;
+            }
+        }
+
         return await GetStatusAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -161,6 +194,108 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         CryptographicZero(result.Output);
         var otp = reference.Contains("attribute=otp", StringComparison.OrdinalIgnoreCase) || reference.Contains("one-time password", StringComparison.OrdinalIgnoreCase);
         return new CredentialValue(value) { ExpiresAt = otp ? NextTotpWindow() : null };
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<CredentialReadResult>> ReadManyAsync(IReadOnlyList<string> references, bool interactive, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+        var results = new CredentialReadResult[references.Count];
+        var batch = new List<int>();
+        for (var index = 0; index < references.Count; index++)
+        {
+            if (IsTemplateReference(references[index])) batch.Add(index);
+        }
+
+        // Each start of op costs its exchange with the app and the server: the references a template can hold are read with one.
+        var refused = batch.Count > 1 && Program is { } program
+            ? await InjectAsync(program, references, batch, results, interactive, cancellationToken).ConfigureAwait(false)
+            : null;
+        for (var index = 0; index < references.Count; index++)
+        {
+            if (results[index] != default) continue;
+            if (refused is not null)
+            {
+                results[index] = new CredentialReadResult(null, refused);
+                continue;
+            }
+
+            try
+            {
+                results[index] = new CredentialReadResult(await ReadAsync(references[index], interactive, cancellationToken).ConfigureAwait(false), null);
+            }
+            catch (CredentialProviderException exception)
+            {
+                results[index] = new CredentialReadResult(null, exception);
+                // The app no longer authorizes this process: a read of each of the others would show its prompt again, or fail the same.
+                if (exception.Failure == CredentialFailure.Locked && _serviceAccountToken is null && !Authorized()) refused = exception;
+            }
+        }
+
+        return results;
+    }
+
+    // Reads several references with one `op inject`: a template that holds each between two lines of a marker no value holds,
+    // which op writes back with the values in their place. It fills the results it read, and returns why the vault refused when it
+    // no longer authorizes this process. Any other failure leaves the results empty: one reference that cannot be read fails the
+    // whole template, and a read of each alone says which.
+    private async Task<CredentialProviderException?> InjectAsync(string program, IReadOnlyList<string> references, List<int> batch, CredentialReadResult[] results, bool interactive,
+        CancellationToken cancellationToken)
+    {
+        if (!interactive)
+        {
+            var status = await RecentStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (status.State != CredentialProviderState.Ready)
+                return new CredentialProviderException(status.State == CredentialProviderState.Locked ? CredentialFailure.Locked : CredentialFailure.SignInNeeded,
+                    status.Message ?? "1Password is locked.");
+        }
+
+        var marker = "codealta-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+        var template = new StringBuilder();
+        foreach (var index in batch) template.Append(marker).Append('\n').Append("{{ ").Append(references[index]).Append(" }}").Append('\n');
+        template.Append(marker).Append('\n');
+        var timeout = interactive ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(Math.Min(20 + 2 * batch.Count, 90));
+        var result = await RunAsync(program, ["inject"], timeout, cancellationToken, template.ToString()).ConfigureAwait(false);
+        try
+        {
+            if (result.ExitCode != 0) return _serviceAccountToken is null && !Authorized() ? Failed(program, result) : null;
+            if (OnePasswordTemplate.Split(result.Output, marker, batch.Count) is not { } values) return null;
+            for (var position = 0; position < batch.Count; position++) results[batch[position]] = new CredentialReadResult(new CredentialValue(values[position]), null);
+            return null;
+        }
+        finally
+        {
+            CryptographicZero(result.Output);
+        }
+    }
+
+    // Whether a template of op can hold a reference: op://vault/item/field or op://vault/item/section/field whose names are
+    // letters, digits, - _ and . only. A template ends a reference at any other character (a space), expands $NAME, and a
+    // one-time code (?attribute=otp) is read when it is needed: those are read one at a time.
+    internal static bool IsTemplateReference(string reference)
+    {
+        if (!reference.StartsWith("op://", StringComparison.Ordinal)) return false;
+        var parts = 1;
+        var length = 0;
+        foreach (var character in reference.AsSpan("op://".Length))
+        {
+            if (character == '/')
+            {
+                if (length == 0) return false;
+                parts++;
+                length = 0;
+            }
+            else if (char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.')
+            {
+                length++;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return length > 0 && parts is 3 or 4;
     }
 
     public async ValueTask<CredentialBrowsePage> BrowseAsync(CredentialBrowseRequest request, CancellationToken cancellationToken)
@@ -239,22 +374,37 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         }
     }
 
-    private async Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<VaultCommandResult> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken, string? input = null)
     {
         var all = new List<string>(arguments);
         // The list of the accounts filters nothing: the account set is looked for in it.
         if (_account is not null && _serviceAccountToken is null && arguments[0] != "account") all.AddRange(["--account", _account]);
         Dictionary<string, string>? environment = null;
         if (_serviceAccountToken is not null) environment = new(StringComparer.Ordinal) { ["OP_SERVICE_ACCOUNT_TOKEN"] = _serviceAccountToken };
-        var result = await _runner.RunAsync(program, all, new VaultCommandOptions { Timeout = timeout, Environment = environment }, cancellationToken).ConfigureAwait(false);
+        var result = await _runner.RunAsync(program, all, new VaultCommandOptions { Timeout = timeout, Environment = environment, Input = input }, cancellationToken).ConfigureAwait(false);
         // A command of an account that went through: the app authorized this process, for a while after each one.
         if (result.ExitCode == 0 && arguments[0] != "account")
         {
             lock (_gate) _authorizedUntil = DateTimeOffset.UtcNow + AuthorizationLasts;
         }
+        else if (result.ExitCode != 0 && arguments[0] is not ("account" or "whoami") && (result.TimedOut || NotAuthorized(result.Error)))
+        {
+            // The app no longer authorizes this process (it locked, the prompt was dismissed or not answered): the next read waits
+            // for an unlock rather than show the prompt again. whoami says "not signed in" to an authorized process too.
+            lock (_gate)
+            {
+                _authorizedUntil = default;
+                _lastStatus = null;
+            }
+        }
 
         return result;
     }
+
+    private static bool NotAuthorized(string error)
+        => error.Contains("not currently signed in", StringComparison.OrdinalIgnoreCase) || error.Contains("not signed in", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("authorization", StringComparison.OrdinalIgnoreCase) || error.Contains("locked", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("dismissed", StringComparison.OrdinalIgnoreCase);
 
     private CredentialProviderStatus Ready(string program, VaultCommandResult result)
     {
@@ -297,9 +447,7 @@ internal sealed class OnePasswordProvider : ICredentialProvider
         if (error.Contains("LostConnectionToApp", StringComparison.OrdinalIgnoreCase) || error.Contains("connecting to desktop app", StringComparison.OrdinalIgnoreCase)
             || error.Contains("cannot connect", StringComparison.OrdinalIgnoreCase))
             return CredentialProviderStatus.Locked("Open the 1Password app, then unlock.") with { ProgramPath = program };
-        if (error.Contains("not currently signed in", StringComparison.OrdinalIgnoreCase) || error.Contains("not signed in", StringComparison.OrdinalIgnoreCase)
-            || error.Contains("authorization", StringComparison.OrdinalIgnoreCase) || error.Contains("locked", StringComparison.OrdinalIgnoreCase)
-            || error.Contains("dismissed", StringComparison.OrdinalIgnoreCase))
+        if (NotAuthorized(error))
             return CredentialProviderStatus.Locked("Unlock to let the 1Password app authorize CodeAlta.") with { ProgramPath = program };
         if (_serviceAccountToken is not null && (error.Contains("token", StringComparison.OrdinalIgnoreCase) || error.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)))
             return CredentialProviderStatus.Unavailable("The service account token was refused.") with { ProgramPath = program };
@@ -334,6 +482,44 @@ internal sealed class OnePasswordProvider : ICredentialProvider
     }
 
     private static void CryptographicZero(byte[] bytes) => System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes);
+}
+
+// Reads the values `op inject` wrote for a template that holds each reference on a line of its own between two lines of a marker.
+internal static class OnePasswordTemplate
+{
+    /// <summary>Splits what op wrote into the values of the references, in their order.</summary>
+    /// <param name="output">What op wrote.</param>
+    /// <param name="marker">The marker of the template.</param>
+    /// <param name="count">The number of references.</param>
+    /// <returns>The values; null when the output is not the template with its values, so that nothing of it is taken for one.</returns>
+    public static string[]? Split(ReadOnlySpan<byte> output, string marker, int count)
+    {
+        Span<byte> mark = stackalloc byte[Encoding.UTF8.GetByteCount(marker)];
+        Encoding.UTF8.GetBytes(marker, mark);
+        var at = output.IndexOf(mark);
+        if (at < 0) return null;
+        var values = new string[count];
+        for (var index = 0; index < count; index++)
+        {
+            var rest = output[(at + mark.Length)..];
+            var next = rest.IndexOf(mark);
+            if (next < 0) return null;
+            // The line of the marker ends before the value, and the line of the value before the next marker.
+            var value = rest[..next];
+            if (value.StartsWith("\r\n"u8)) value = value[2..];
+            else if (value.StartsWith("\n"u8)) value = value[1..];
+            else return null;
+            if (value.EndsWith("\r\n"u8)) value = value[..^2];
+            else if (value.EndsWith("\n"u8)) value = value[..^1];
+            else return null;
+            // A reference op left as it was is not a value.
+            if (value.StartsWith("{{"u8) && value.EndsWith("}}"u8) && value.IndexOf("op://"u8) >= 0) return null;
+            values[index] = Encoding.UTF8.GetString(value);
+            at += mark.Length + next;
+        }
+
+        return output[(at + mark.Length)..].IndexOf(mark) < 0 ? values : null;
+    }
 }
 
 // Reads the fields of an item of 1Password from what `op item get --format json` writes, without making a text of a value.

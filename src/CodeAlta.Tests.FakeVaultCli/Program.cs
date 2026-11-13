@@ -242,6 +242,7 @@ int Op(string[] arguments)
         case ["signin", ..]:
         case ["vault", "list", ..]:
         case ["read", ..]:
+        case ["inject", ..]:
         case ["item", ..]:
             if (!signedIn)
             {
@@ -287,22 +288,46 @@ int Op(string[] arguments)
         }
         case ["read", .., var reference]:
         {
-            var path = reference["op://".Length..];
-            var query = path.IndexOf('?');
-            var otp = query >= 0 && path[query..].Contains("attribute=otp");
-            if (query >= 0) path = path[..query];
-            var parts = path.Split('/');
-            if (parts.Length < 3) return Fail("[ERROR] invalid secret reference", 1);
-            var vault = Vault(parts[0]);
-            var item = vault?["items"]!.AsArray().FirstOrDefault(entry => Same(entry!["id"], parts[1]) || Same(entry["title"], parts[1]));
-            var field = item?["fields"]!.AsArray().FirstOrDefault(entry => Same(entry!["id"], parts[^1]) || Same(entry["label"], parts[^1]));
-            if (field is null) return Fail($"[ERROR] could not read secret '{reference}': isn't an item or does not have a field", 1);
-            Console.Out.Write(otp ? "123456" : field["value"]!.GetValue<string>());
+            if (reference["op://".Length..].Split('?')[0].Split('/').Length < 3) return Fail("[ERROR] invalid secret reference", 1);
+            if (SecretOf(reference) is not { } value) return Fail($"[ERROR] could not read secret '{reference}': isn't an item or does not have a field", 1);
+            Console.Out.Write(value);
+            return 0;
+        }
+        // A template on the standard input, written back with the values in place of its enclosed references. As op does, a
+        // reference ends at a character that is not a letter, a digit, - _ . / or ?, and one that cannot be read fails them all.
+        case ["inject", ..]:
+        {
+            if (state["injectUnknown"]?.GetValue<bool>() == true) return Fail("[ERROR] unknown command \"inject\" for \"op\"", 1);
+            var template = Console.In.ReadToEnd();
+            string? missing = null;
+            var written = System.Text.RegularExpressions.Regex.Replace(template, @"\{\{ *(op://[A-Za-z0-9_.?/=-]+) *\}\}", match =>
+            {
+                var value = SecretOf(match.Groups[1].Value);
+                if (value is null) missing ??= match.Groups[1].Value;
+                return value ?? string.Empty;
+            });
+            if (missing is not null) return Fail($"[ERROR] 2026/11/13 10:00:00 could not read secret '{missing}': isn't an item or does not have a field", 1);
+            Console.Out.Write(written);
             return 0;
         }
         default:
             return Fail("[ERROR] unknown command", 1);
     }
+}
+
+// The value a secret reference of 1Password names; null when the vault has no such item or field.
+string? SecretOf(string reference)
+{
+    var path = reference["op://".Length..];
+    var query = path.IndexOf('?');
+    var otp = query >= 0 && path[query..].Contains("attribute=otp");
+    if (query >= 0) path = path[..query];
+    var parts = path.Split('/');
+    if (parts.Length < 3) return null;
+    var vault = Vault(parts[0]);
+    var item = vault?["items"]!.AsArray().FirstOrDefault(entry => Same(entry!["id"], parts[1]) || Same(entry["title"], parts[1]));
+    var field = item?["fields"]!.AsArray().FirstOrDefault(entry => Same(entry!["id"], parts[^1]) || Same(entry["label"], parts[^1]));
+    return field is null ? null : otp ? "123456" : field["value"]!.GetValue<string>();
 }
 
 JsonNode? Vault(string? name) => (state["vaults"]?.AsArray() ?? []).FirstOrDefault(vault => Same(vault!["id"], name) || Same(vault["name"], name));

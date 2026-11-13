@@ -63,7 +63,10 @@ flowchart LR
   `altanode` read only what a vault gives without a prompt. So does the developer instance, unless the user lets it unlock
   (`developer_instance = "unlock"` under `[secrets]`, read each time it is needed): then it asks on a click, never at
   start, since agents start developer instances. A vault such as 1Password authorizes each process on its own, so values
-  never pass from one instance to the other.
+  never pass from one instance to the other. A prompt belongs to its vault: an unlock without a password is one task
+  per provider, which the start, a click and a session share, and a caller that stops waiting does not end it. At
+  start, a vault whose application does not answer yet (`ICredentialVaultApplication`) is asked again once it does,
+  for a few minutes: a prompt the user dismissed is never shown again by itself.
 - **Changes**: `Changed` names the secrets that became readable or not. CodeAlta Desktop then registers the model
   providers that were left out or waiting for one of them (and only those, so that no runtime in use is replaced); an MCP
   server that did not start for a missing secret is not remembered as failed, and starts at its next use.
@@ -83,6 +86,11 @@ flowchart LR
 every kind of vault, the built-in ones included (`Providers/`). A provider answers its status without a prompt, unlocks
 with the user present, reads one value (with `interactive` false it never prompts) and lists names for the picker,
 never values. The host owns the rest: bindings, memory, masking, confirmations, the states shown, the settings form.
+
+A read of a vault costs the start of a program and often an exchange with a server, so the broker gives a provider
+that can (`ICredentialBatchReader`) every secret it reads from the vault at once, and the provider answers for each. A
+provider reads several values with one call only when that call reads what is bound and nothing else: never through a
+listing of the vault, which reads every item and, in a vault that keeps an audit log, records a view of each.
 
 A plugin type is `<prefix>/<name>`, shadows no built-in type, and comes only from a built-in plugin or a plugin of the
 user, never from the plugin of a project folder: a cloned repository cannot bring code that reads the vaults.

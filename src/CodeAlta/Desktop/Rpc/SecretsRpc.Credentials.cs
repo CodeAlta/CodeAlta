@@ -439,6 +439,7 @@ internal sealed partial class SecretsService
         Secrets = view.Secrets,
         Held = view.Held,
         Unlocked = view.Unlocked,
+        Unlocking = view.Unlocking,
         Settings = [.. view.Settings.Select(static pair => pair.Value switch
         {
             bool flag => new CredentialSettingValue(pair.Key) { Flag = flag },
@@ -554,6 +555,9 @@ internal sealed record CredentialProviderRpcView(string Id, string Type, string 
 
     /// <summary>Whether CodeAlta unlocked it since it was last locked: it may hold what opens its vault, and the page offers to lock it.</summary>
     public bool Unlocked { get; init; }
+
+    /// <summary>Whether its vault is being asked to unlock now, which can wait for the user to answer its prompt.</summary>
+    public bool Unlocking { get; init; }
 
     /// <summary>Its settings as written: a secret setting holds its reference.</summary>
     public CredentialSettingValue[] Settings { get; init; } = [];

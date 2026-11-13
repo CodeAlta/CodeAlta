@@ -83,6 +83,12 @@ public sealed record CredentialProviderView(string Id, string Type, string Displ
 
     /// <summary>Gets whether the user locked it in CodeAlta: nothing is read from it until it is unlocked again.</summary>
     public bool LockedByUser { get; init; }
+
+    /// <summary>
+    /// Gets whether its vault is being asked to unlock now (at start, on a click, for a session), which can wait for the user to
+    /// answer its prompt: the window shows it rather than offer to unlock again.
+    /// </summary>
+    public bool Unlocking { get; init; }
 }
 
 /// <summary>A use of a secret, as the recent uses list it: never a value.</summary>
@@ -167,6 +173,12 @@ public sealed class CredentialBrokerOptions
 
     /// <summary>Gets the logger; null for none. It never gets a value.</summary>
     public Logger? Logger { get; init; }
+
+    // How long, after the start, a vault whose application does not answer yet is still asked to unlock once it does.
+    internal TimeSpan StartWait { get; init; } = TimeSpan.FromMinutes(5);
+
+    // How long the first check of that application waits; the next ones wait longer, up to five times that.
+    internal TimeSpan StartWaitStep { get; init; } = TimeSpan.FromSeconds(2);
 }
 
 /// <summary>
@@ -368,16 +380,82 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
 
         // One vault at a time: two prompts at once would hide each other.
+        List<ProviderEntry> waiting = [];
         foreach (var entry in entries)
         {
-            try
+            if (!await UnlockAtStartAsync(entry, cancellationToken).ConfigureAwait(false) && entry.Provider is ICredentialVaultApplication application
+                && !await IsApplicationReadyAsync(application, cancellationToken).ConfigureAwait(false))
+                waiting.Add(entry);
+        }
+
+        // A vault whose application does not answer yet (CodeAlta started before it, as when both start with the system) could show
+        // no prompt: it is asked again, once, when its application answers.
+        var step = _options.StartWaitStep;
+        var end = _options.Time.GetUtcNow() + _options.StartWait;
+        while (waiting.Count > 0 && _options.Time.GetUtcNow() < end)
+        {
+            await Task.Delay(step, _options.Time, cancellationToken).ConfigureAwait(false);
+            if (step < _options.StartWaitStep * 5) step += _options.StartWaitStep;
+            foreach (var entry in waiting.ToArray())
             {
-                await UnlockAsync(entry.Definition.Id, null, cancellationToken).ConfigureAwait(false);
+                bool asked;
+                lock (_gate)
+                {
+                    // Still the provider of the configuration, still locked, and not by the user: an unlock elsewhere ends the wait.
+                    asked = !_disposed && _providers.GetValueOrDefault(entry.Definition.Id) == entry && entry.Definition.UnlockAtStart && !entry.LockedByUser
+                        && entry.Status.State == CredentialProviderState.Locked;
+                }
+
+                if (!asked)
+                {
+                    waiting.Remove(entry);
+                }
+                else if (await IsApplicationReadyAsync((ICredentialVaultApplication)entry.Provider!, cancellationToken).ConfigureAwait(false))
+                {
+                    waiting.Remove(entry);
+                    await UnlockAtStartAsync(entry, cancellationToken).ConfigureAwait(false);
+                }
             }
-            catch (Exception exception) when (exception is CredentialProviderException or InvalidOperationException)
+        }
+
+        foreach (var entry in waiting)
+            _options.Logger?.Info($"The application of the credential provider {entry.Definition.Id} did not answer after the start: its vault is unlocked from Settings, or by the session that needs it.");
+    }
+
+    // Asks one vault to unlock at start, and says in the log how it went: nothing else tells why a vault stayed locked.
+    private async Task<bool> UnlockAtStartAsync(ProviderEntry entry, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var view = await UnlockAsync(entry.Definition.Id, null, cancellationToken).ConfigureAwait(false);
+            if (view.Status.State == CredentialProviderState.Ready)
             {
-                _options.Logger?.Info($"The credential provider {entry.Definition.Id} was not unlocked at start: {exception.Message}");
+                _options.Logger?.Info($"The credential provider {entry.Definition.Id} was unlocked at start.");
+                return true;
             }
+
+            _options.Logger?.Info($"The credential provider {entry.Definition.Id} was not unlocked at start: {view.Status.Message ?? "its vault stays locked."}");
+        }
+        catch (Exception exception) when (exception is CredentialProviderException or InvalidOperationException or KeyNotFoundException)
+        {
+            _options.Logger?.Info($"The credential provider {entry.Definition.Id} was not unlocked at start: {exception.Message}");
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> IsApplicationReadyAsync(ICredentialVaultApplication application, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(StatusTimeout);
+        try
+        {
+            return await application.IsApplicationReadyAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is CredentialProviderException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return false;
         }
     }
 
@@ -388,6 +466,11 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     /// <returns>The provider after it.</returns>
     /// <exception cref="KeyNotFoundException">The configuration names no such provider.</exception>
     /// <exception cref="InvalidOperationException">This host cannot show the prompt of a vault.</exception>
+    /// <remarks>
+    /// An unlock without a password shows the prompt of the vault, which belongs to the vault: what asks for one while it is shown
+    /// (the start, a click, a session) waits for that same prompt instead of asking again after it, and a caller that stops
+    /// waiting does not take it away from the others.
+    /// </remarks>
     public async Task<CredentialProviderView> UnlockAsync(string id, string? password, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
@@ -399,8 +482,62 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         }
 
         if (entry.Provider is not { } provider) return GetProvider(id)!;
+        if (!string.IsNullOrEmpty(password)) return await UnlockOnceAsync(entry, provider, password, cancellationToken).ConfigureAwait(false);
+        Task<CredentialProviderView> shared;
+        TaskCompletionSource<CredentialProviderView>? mine = null;
+        lock (_gate)
+        {
+            if (entry.SharedUnlock is { } running)
+            {
+                shared = running;
+            }
+            else
+            {
+                mine = new TaskCompletionSource<CredentialProviderView>(TaskCreationOptions.RunContinuationsAsynchronously);
+                entry.SharedUnlock = shared = mine.Task;
+            }
+        }
+
+        if (mine is not null) _ = ShareUnlockAsync(entry, provider, mine);
+        return await shared.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ShareUnlockAsync(ProviderEntry entry, ICredentialProvider provider, TaskCompletionSource<CredentialProviderView> outcome)
+    {
+        try
+        {
+            var view = await UnlockOnceAsync(entry, provider, null, CancellationToken.None).ConfigureAwait(false);
+            lock (_gate) entry.SharedUnlock = null;
+            outcome.SetResult(view);
+        }
+        catch (Exception exception)
+        {
+            lock (_gate) entry.SharedUnlock = null;
+            outcome.SetException(exception);
+            // Every caller may have stopped waiting: the failure is theirs when they did not.
+            _ = outcome.Task.Exception;
+        }
+    }
+
+    private async Task<CredentialProviderView> UnlockOnceAsync(ProviderEntry entry, ICredentialProvider provider, string? password, CancellationToken cancellationToken)
+    {
         // Masked before the program of the vault gets it: it could write it back in an error.
         if (!string.IsNullOrEmpty(password)) _options.Mask(password);
+        lock (_gate) entry.Unlocking++;
+        try
+        {
+            await UnlockAndReadAsync(entry, provider, password, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_gate) entry.Unlocking--;
+        }
+
+        return GetProvider(entry.Definition.Id)!;
+    }
+
+    private async Task UnlockAndReadAsync(ProviderEntry entry, ICredentialProvider provider, string? password, CancellationToken cancellationToken)
+    {
         await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var generation = 0;
         try
@@ -438,7 +575,6 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         var changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await RefreshProviderAsync(entry, interactive: true, changed, cancellationToken, statusKnown: true).ConfigureAwait(false);
         Raise(changed, always: true);
-        return GetProvider(id)!;
     }
 
     /// <summary>
@@ -1331,6 +1467,7 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             Held = bound.Count(binding => Fresh(binding) is not null),
             Unlocked = entry.Unlocked && entry.Status.State == CredentialProviderState.Ready,
             LockedByUser = entry.LockedByUser,
+            Unlocking = entry.Unlocking > 0,
         };
     }
 
@@ -1601,21 +1738,21 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             CredentialProviderStatus now;
             lock (_gate) now = entry.Status;
             var bindings = SafeBindings().Where(binding => binding.Provider == entry.Definition.Id).ToArray();
-            foreach (var binding in bindings)
+            if (now.State != CredentialProviderState.Ready)
             {
-                if (now.State != CredentialProviderState.Ready)
+                lock (_gate)
                 {
-                    lock (_gate)
+                    foreach (var binding in bindings)
                     {
                         _problems.Remove(binding.Name);
                         changed.Add(binding.Name);
                     }
-
-                    continue;
                 }
 
-                await ReadBindingAsync(entry, binding, interactive, changed, generation, cancellationToken).ConfigureAwait(false);
+                return;
             }
+
+            await ReadBindingsAsync(entry, provider, bindings, interactive, changed, generation, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -1623,6 +1760,77 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
             entry.Gate.Release();
         }
     }
+
+    // Under the gate of the provider: reads the bindings whose values are not held, with one call of the vault where its provider
+    // reads several at once, and says in the log how long the vault took: a number of secrets, never a name nor a value.
+    private async Task ReadBindingsAsync(ProviderEntry entry, ICredentialProvider provider, SecretBinding[] bindings, bool interactive, HashSet<string> changed, int generation,
+        CancellationToken cancellationToken)
+    {
+        SecretBinding[] wanted;
+        lock (_gate)
+        {
+            if (entry.LockedByUser || entry.Generation != generation) return;
+            wanted = [.. bindings.Where(binding => Fresh(binding) is null)];
+        }
+
+        if (wanted.Length == 0) return;
+        var started = _options.Time.GetTimestamp();
+        var atOnce = wanted.Length > 1 && provider is ICredentialBatchReader;
+        if (atOnce)
+        {
+            await ReadManyAsync(entry, (ICredentialBatchReader)provider, wanted, interactive, changed, generation, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            foreach (var binding in wanted) await ReadBindingAsync(entry, binding, interactive, changed, generation, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (_options.Logger is not { } logger) return;
+        int read;
+        lock (_gate) read = wanted.Count(binding => _held.TryGetValue(binding.Name, out var held) && held.Provider == binding.Provider && held.Reference == binding.Reference);
+        var seconds = _options.Time.GetElapsedTime(started).TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+        logger.Info($"{DisplayName(entry)}: {read} of {wanted.Length} secrets read in {seconds} s{(atOnce ? ", asked at once" : string.Empty)}.");
+    }
+
+    // Under the gate of the provider: reads several bindings with one call of the provider, which answers for each of them.
+    private async Task ReadManyAsync(ProviderEntry entry, ICredentialBatchReader reader, SecretBinding[] bindings, bool interactive, HashSet<string> changed, int generation,
+        CancellationToken cancellationToken)
+    {
+        var references = bindings.Select(static binding => binding.Reference).Distinct(StringComparer.Ordinal).ToArray();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // The time of one read, and some for each more: a vault that cannot answer for all at once reads them one by one behind this call.
+        timeout.CancelAfter(interactive ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(Math.Min(40 + 5 * references.Length, 180)));
+        IReadOnlyList<CredentialReadResult> results = [];
+        Exception? failure = null;
+        try
+        {
+            results = await reader.ReadManyAsync(references, interactive, timeout.Token).ConfigureAwait(false);
+            if (results is null || results.Count != references.Length) failure = new InvalidOperationException("its provider did not answer for each secret it was asked.");
+        }
+        catch (Exception exception) when (IsReadFailure(exception, cancellationToken))
+        {
+            failure = exception;
+        }
+
+        foreach (var binding in bindings)
+        {
+            if (failure is not null || results is null)
+            {
+                Settle(entry, binding, null, failure, changed, generation);
+                continue;
+            }
+
+            var result = results[Array.IndexOf(references, binding.Reference)];
+            Exception? unread = result.Failure;
+            if (unread is null && result.Value is null) unread = new InvalidOperationException("its provider gave no value.");
+            Settle(entry, binding, result.Value, unread, changed, generation);
+        }
+    }
+
+    // What a read can fail with, which is said beside the secret; a read the caller stopped is not one.
+    private static bool IsReadFailure(Exception exception, CancellationToken cancellationToken)
+        => exception is CredentialProviderException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested;
 
     // Under the gate of the provider: reads one binding, unless its value is held already. What it read is kept only when the
     // provider was not locked (nor created again) since the generation the caller started with.
@@ -1638,10 +1846,23 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         timeout.CancelAfter(interactive ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(40));
         try
         {
-            var value = await provider.ReadAsync(binding.Reference, interactive, timeout.Token).ConfigureAwait(false);
-            if (string.IsNullOrEmpty(value.Value)) throw new CredentialProviderException(CredentialFailure.NotFound, "The vault gave an empty value.");
+            Settle(entry, binding, await provider.ReadAsync(binding.Reference, interactive, timeout.Token).ConfigureAwait(false), null, changed, generation);
+        }
+        catch (Exception exception) when (IsReadFailure(exception, cancellationToken))
+        {
+            Settle(entry, binding, null, exception, changed, generation);
+        }
+    }
+
+    // Keeps the value a read gave for a binding, or says why it gave none. What was read is kept only when the provider was not
+    // locked (nor created again) since the generation the caller started with.
+    private void Settle(ProviderEntry entry, SecretBinding binding, CredentialValue? value, Exception? failure, HashSet<string> changed, int generation)
+    {
+        if (failure is null && string.IsNullOrEmpty(value?.Value)) failure = new CredentialProviderException(CredentialFailure.NotFound, "The vault gave an empty value.");
+        if (failure is null)
+        {
             // Masked before anything gets it, for as long as the host runs.
-            _options.Mask(value.Value);
+            _options.Mask(value!.Value);
             var now = _options.Time.GetUtcNow();
             var memory = CredentialCacheDurations.TimeOf(entry.Definition.Cache);
             var expires = value.ExpiresAt;
@@ -1654,51 +1875,45 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
                 _problems.Remove(binding.Name);
                 changed.Add(binding.Name);
             }
-        }
-        catch (CredentialProviderException exception)
-        {
-            var state = exception.Failure switch
-            {
-                CredentialFailure.Locked => SecretAvailabilityState.Locked,
-                CredentialFailure.SignInNeeded => SecretAvailabilityState.SignInNeeded,
-                CredentialFailure.NotInstalled => SecretAvailabilityState.NotInstalled,
-                CredentialFailure.NotFound => SecretAvailabilityState.NotFound,
-                _ => SecretAvailabilityState.Unavailable,
-            };
-            lock (_gate)
-            {
-                if (entry.Generation != generation) return;
-                if (exception.Failure == CredentialFailure.Locked && entry.Status.State == CredentialProviderState.Ready)
-                {
-                    entry.Status = CredentialProviderStatus.Locked(exception.Message) with { Account = entry.Status.Account, ProgramPath = entry.Status.ProgramPath, Detail = exception.Detail };
-                    entry.Unlocked = false;
-                }
 
-                _problems[binding.Name] = new SecretAvailability(binding.Name, state,
-                    state == SecretAvailabilityState.NotFound ? $"{binding.Name} is not found in {DisplayName(entry)}: {exception.Message}" : $"{binding.Name}: {exception.Message}", binding.Provider)
-                {
-                    Detail = exception.Detail,
-                };
-                changed.Add(binding.Name);
-            }
+            return;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+
+        lock (_gate)
         {
-            lock (_gate)
+            if (entry.Generation != generation) return;
+            switch (failure)
             {
-                if (entry.Generation != generation) return;
-                _problems[binding.Name] = new SecretAvailability(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name}: {DisplayName(entry)} did not answer in time.", binding.Provider);
-                changed.Add(binding.Name);
+                case CredentialProviderException exception:
+                    var state = exception.Failure switch
+                    {
+                        CredentialFailure.Locked => SecretAvailabilityState.Locked,
+                        CredentialFailure.SignInNeeded => SecretAvailabilityState.SignInNeeded,
+                        CredentialFailure.NotInstalled => SecretAvailabilityState.NotInstalled,
+                        CredentialFailure.NotFound => SecretAvailabilityState.NotFound,
+                        _ => SecretAvailabilityState.Unavailable,
+                    };
+                    if (exception.Failure == CredentialFailure.Locked && entry.Status.State == CredentialProviderState.Ready)
+                    {
+                        entry.Status = CredentialProviderStatus.Locked(exception.Message) with { Account = entry.Status.Account, ProgramPath = entry.Status.ProgramPath, Detail = exception.Detail };
+                        entry.Unlocked = false;
+                    }
+
+                    _problems[binding.Name] = new SecretAvailability(binding.Name, state,
+                        state == SecretAvailabilityState.NotFound ? $"{binding.Name} is not found in {DisplayName(entry)}: {exception.Message}" : $"{binding.Name}: {exception.Message}", binding.Provider)
+                    {
+                        Detail = exception.Detail,
+                    };
+                    break;
+                case OperationCanceledException:
+                    _problems[binding.Name] = new SecretAvailability(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name}: {DisplayName(entry)} did not answer in time.", binding.Provider);
+                    break;
+                default:
+                    _problems[binding.Name] = new SecretAvailability(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name}: {failure.Message}", binding.Provider);
+                    break;
             }
-        }
-        catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException)
-        {
-            lock (_gate)
-            {
-                if (entry.Generation != generation) return;
-                _problems[binding.Name] = new SecretAvailability(binding.Name, SecretAvailabilityState.Unavailable, $"{binding.Name}: {exception.Message}", binding.Provider);
-                changed.Add(binding.Name);
-            }
+
+            changed.Add(binding.Name);
         }
     }
 
@@ -1807,5 +2022,11 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
 
         // The use of a local secret its creation waits the confirmation of; null when it waits for none.
         public (string Name, string Use)? WaitsFor { get; set; }
+
+        // The unlock without a password that runs on it now, which those who ask meanwhile wait for; null when none runs.
+        public Task<CredentialProviderView>? SharedUnlock { get; set; }
+
+        // How many unlocks run on it now.
+        public int Unlocking { get; set; }
     }
 }

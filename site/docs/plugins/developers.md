@@ -242,6 +242,11 @@ The `ICredentialProvider` it creates only says whether it can answer and reads:
 - `ReadAsync(reference, interactive)` reads one value. With `interactive` false it never shows a prompt, and throws a `CredentialProviderException` with `CredentialFailure.Locked` instead. A one-time code gives its `ExpiresAt`.
 - `BrowseAsync`, optional, lists vaults, items and fields by name for the picker, never a value. `Lock` forgets what it holds, such as a session key.
 
+Two more interfaces are optional, on the same class:
+
+- `ICredentialBatchReader.ReadManyAsync` reads several values with one call of the vault, and answers for each reference with a value or its failure. CodeAlta then gives it every secret it reads from the vault at once, at start and after an unlock. Implement it where each read starts a program or asks a server, and read only what is asked: a listing of the whole vault reads every item, and can record a view of each in its audit log.
+- `ICredentialVaultApplication.IsApplicationReadyAsync` says, without a prompt, whether the application that opens the vault answers. At start, CodeAlta waits for it before it asks the vault to unlock, instead of asking once too early.
+
 CodeAlta does the rest: the secrets kept in the vault, the memory of what was read and its duration, the masking, Ask before use and the states shown. Run a program through the full path of its file and an array of arguments, never a shell, and give a password on its standard input or in its own environment, never in an argument. A value a provider reads in another way, such as a session key, goes through `context.Mask` before anything else gets it.
 
 Only built-in plugins and the plugins of `~/.alta/plugins` add credential providers; the plugin of a project folder does not.

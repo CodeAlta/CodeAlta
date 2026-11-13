@@ -89,7 +89,10 @@ function ProviderRow({ provider, busy, run, actions, canPrompt }: {
       <strong title={provider.id}>{provider.displayName}</strong>
       <span className="credential-provider-detail" title={provider.programPath ?? undefined}>{detail}
         {provider.secrets > 0 && <>{" · "}{secretCount(provider.secrets, t)}</>}</span>
-      {provider.message && provider.state !== "ready" && <span className="credential-provider-message">{provider.message}</span>}
+      {/* A vault that is being asked shows its own prompt, which can be behind this window. */}
+      {provider.unlocking && !provider.unlockAsksPassword
+        ? <span className="credential-provider-message">{t("Waiting for {name}: answer its prompt.", { name: provider.typeName ?? provider.displayName })}</span>
+        : provider.message && provider.state !== "ready" && <span className="credential-provider-message">{provider.message}</span>}
       {provider.state === "not_installed" && <InstallHint provider={provider} runInTerminal={actions.runInTerminal} />}
     </span>
     <Tag minimal intent={state.intent}>{t(state.label)}</Tag>
@@ -124,7 +127,7 @@ function UnlockButton({ provider, busy, onUnlock }: { provider: CredentialProvid
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
   if (!provider.unlockAsksPassword) {
-    return <Button size="small" intent="primary" icon={<AppIcon name="secret" size={14} />} text={t("Unlock")} disabled={busy} onClick={() => void onUnlock(null)} />;
+    return <Button size="small" intent="primary" icon={<AppIcon name="secret" size={14} />} text={t("Unlock")} loading={provider.unlocking} disabled={busy} onClick={() => void onUnlock(null)} />;
   }
 
   const submit = async () => {
@@ -143,7 +146,7 @@ function UnlockButton({ provider, busy, onUnlock }: { provider: CredentialProvid
         <Button type="submit" intent="primary" size="small" text={t("Unlock")} disabled={busy || !password} />
       </div>
     </form>}>
-    <Button size="small" intent="primary" icon={<AppIcon name="secret" size={14} />} text={t("Unlock…")} disabled={busy} onClick={() => setOpen(true)} />
+    <Button size="small" intent="primary" icon={<AppIcon name="secret" size={14} />} text={t("Unlock…")} loading={provider.unlocking && !open} disabled={busy} onClick={() => setOpen(true)} />
   </PopoverNext>;
 }
 

@@ -227,6 +227,42 @@ public interface ICredentialProvider
     }
 }
 
+/// <summary>What a credential provider read for one reference of several: its value, or why it has none.</summary>
+/// <param name="Value">The value; null when it was not read.</param>
+/// <param name="Failure">Why it was not read; null when it was.</param>
+public readonly record struct CredentialReadResult(CredentialValue? Value, CredentialProviderException? Failure);
+
+/// <summary>
+/// A credential provider that reads several values with one call of its vault. Implement it beside
+/// <see cref="ICredentialProvider"/> where each read costs the start of a program or an exchange with a server: the host then
+/// gives it every secret it reads from the vault at once (at start, after an unlock), instead of one read per secret.
+/// </summary>
+public interface ICredentialBatchReader
+{
+    /// <summary>Reads several values.</summary>
+    /// <param name="references">What to read, each as the picker gave it, without a duplicate.</param>
+    /// <param name="interactive">Whether the vault may show its own prompt; false never does.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>
+    /// What was read for each reference, in their order: a value, or the failure <see cref="ICredentialProvider.ReadAsync"/> would
+    /// throw for it. A reference that cannot be read never fails the others.
+    /// </returns>
+    ValueTask<IReadOnlyList<CredentialReadResult>> ReadManyAsync(IReadOnlyList<string> references, bool interactive, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// A credential provider whose vault is opened by an application of the user (the desktop application of a password manager),
+/// which may not run yet when the host starts. Implement it beside <see cref="ICredentialProvider"/>: a host that asks the vault
+/// to unlock when it starts then waits for the application, instead of asking once too early.
+/// </summary>
+public interface ICredentialVaultApplication
+{
+    /// <summary>Says whether the application answers now, so that an unlock would reach it. It never shows a prompt.</summary>
+    /// <param name="cancellationToken">A token to cancel the check.</param>
+    /// <returns>True when it answers, or when the provider needs no application as it is set.</returns>
+    ValueTask<bool> IsApplicationReadyAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>What a setting of a credential provider holds, which decides how its form draws it.</summary>
 public enum PluginCredentialProviderSettingKind
 {

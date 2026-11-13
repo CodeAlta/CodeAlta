@@ -75,7 +75,8 @@ The row of the secret then shows its vault and its item, and the state of that v
 
 ## When a vault is asked
 
-- **At start**, CodeAlta reads, without a prompt, what each vault gives as it is. Then CodeAlta Desktop asks each locked vault that has its own prompt, such as 1Password, to unlock, once, after the window shows. A prompt you dismiss is not shown again until you click **Unlock**.
+- **At start**, CodeAlta reads, without a prompt, what each vault gives as it is. Then CodeAlta Desktop asks each locked vault that has its own prompt, such as 1Password, to unlock, once, after the window shows. When the application of the vault is not running yet, as when both start with your computer, CodeAlta waits for it for up to five minutes and asks then. A prompt you dismiss is not shown again until you click **Unlock**.
+- **While a vault is asked**, its row in **Settings > Secrets** says that it waits for the vault: answer the prompt of the vault, which can be behind the window. A click on **Unlock**, or a session that needs the vault, waits for that same prompt.
 - **While CodeAlta runs**, a value read stays in memory for the time its provider keeps it. Nothing prompts again, and an automation that runs at night still has its values.
 - **`altacli` and `altanode` never ask a vault to unlock, nor does the developer instance by default.** What is locked stays locked, and what needs it says which vault to unlock. To test a vault in the developer instance, turn on **Let the developer instance unlock the vaults** under **Vaults**, in either instance: the developer instance then shows **Unlock**, and its click asks your vault for that run, as 1Password asks Windows Hello. It never asks at start, so a developer instance an agent starts shows no prompt by itself.
 
@@ -92,6 +93,8 @@ CodeAlta reads 1Password through its command line tool, `op`, unlocked by the 1P
 3. Add a vault of the kind **1Password**. With several accounts in the app, set **Account** to the sign-in address (`my.1password.com`) or the id of the account.
 
 When the row of the provider asks you to turn on **Integrate with 1Password CLI**, do it in the app, keep the app unlocked, then click **Unlock**: the app asks you to authorize CodeAlta. A sign-in typed in a terminal (`op signin`) only authorizes that terminal.
+
+The app authorizes each run of CodeAlta on its own, so it asks once after every start. Its authorization ends after ten minutes without a read, or when the app locks. The values already read stay in memory, so nothing asks again until a new secret is read: the row then shows **Locked**, and **Unlock** asks the app again.
 
 A reference is the secret reference of 1Password, `op://<vault>/<item>/<field>`, such as `op://Private/Anthropic/credential`; the item list writes it for you. The Developer page of the 1Password app lists the reads of CodeAlta.
 

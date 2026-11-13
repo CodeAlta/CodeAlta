@@ -202,6 +202,8 @@ export const credentialMessages = {
   "Unlock…": ["Desbloquear…", "Déverrouiller…", "Entsperren…", "ロック解除…", "解锁…"],
   "Until CodeAlta closes": ["Hasta que CodeAlta se cierre", "Jusqu’à la fermeture de CodeAlta", "Bis CodeAlta geschlossen wird", "CodeAlta を閉じるまで", "直到 CodeAlta 关闭"],
   "Vault": ["Bóveda", "Coffre", "Tresor", "保管庫", "保管库"],
+  "Waiting for {name}: answer its prompt.": ["Esperando a {name}: responde a su solicitud.", "En attente de {name} : répondez à sa demande.", "Warten auf {name}: Beantworte die Abfrage.",
+    "{name} を待っています。表示された確認に応答してください。", "正在等待 {name}：请回应它的提示。"],
   "Waits for your confirmation": ["Espera tu confirmación", "Attend votre confirmation", "Wartet auf deine Bestätigung", "確認を待っています", "等待你的确认"],
   "Windows Hello or Touch ID verifies you before CodeAlta gives {name} to what asks for it.": [
     "Windows Hello o Touch ID te verifica antes de que CodeAlta dé {name} a lo que lo pide.",

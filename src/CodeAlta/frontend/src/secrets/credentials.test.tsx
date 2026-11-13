@@ -23,7 +23,7 @@ const commandType: CredentialTypeView = {
 const provider = (extra: Partial<CredentialProviderRpcView>): CredentialProviderRpcView => ({
   id: "personal", type: "1password", displayName: "1Password", state: "ready", message: null, typeName: "1Password", icon: "1password", account: "alice@example.com",
   programPath: "C:\\op.exe", signInCommand: null, installCommand: null, installPage: null, cache: "session", unlockAtStart: true, unlockAsksPassword: false, secrets: 1, held: 1,
-  unlocked: false, settings: [], ...extra,
+  unlocked: false, unlocking: false, settings: [], ...extra,
 });
 const listing = (providers: CredentialProviderRpcView[], extra: Partial<SecretsList> = {}): SecretsList => ({
   status: "ok", protection: "dpapi", secrets: [], variables: [], ...noCredentials, providers, canPrompt: true, ...extra,
@@ -86,6 +86,21 @@ test("the developer instance offers no unlock, and a vault that takes its master
   const bitwarden = render(createElement(CredentialProviders, { listing: listing([provider({ state: "locked", held: 0, unlockAsksPassword: true })]), busy: false, run: never, onAdd: never,
     actions: { unlock: never, lock: never, test: never, remove: never, edit: never } }));
   assert.match(bitwarden, />Unlock…</);
+});
+
+test("a vault that is being asked to unlock says so instead of offering to ask again", () => {
+  const actions = { unlock: never, lock: never, test: never, remove: never, edit: never };
+  const html = (extra: Partial<CredentialProviderRpcView>) => render(createElement(CredentialProviders,
+    { listing: listing([provider({ state: "locked", held: 0, message: "Unlock to let the 1Password app authorize CodeAlta.", ...extra })]), busy: false, run: never, onAdd: never, actions }));
+  const asked = html({ unlocking: true });
+  assert.match(asked, /Waiting for 1Password: answer its prompt\./);
+  assert.doesNotMatch(asked, /Unlock to let the 1Password app authorize CodeAlta/);
+  assert.match(asked, /bp6-loading[^>]*>(?:(?!<\/button>).)*Unlock/s, "the button waits with it");
+  const idle = html({ unlocking: false });
+  assert.match(idle, /Unlock to let the 1Password app authorize CodeAlta\./);
+  assert.doesNotMatch(idle, /bp6-loading/);
+  // A vault that takes its master password in the page shows no prompt of its own.
+  assert.doesNotMatch(html({ unlocking: true, unlockAsksPassword: true }), /answer its prompt/);
 });
 
 test("a vault CodeAlta unlocked offers Lock even when it holds no value, such as one used only for sign-ins", () => {
