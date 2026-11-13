@@ -1443,13 +1443,22 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     });
                     // A link of the Markdown that the window shows: an address of the web for the system browser, a
                     // file for the code editor. A relative path starts from the folder the session works in.
+                    // An address opens in the browser and the profile the space of the session or the project sets.
+                    var linkBrowsers = new Browser.Links.LinkBrowsers();
+                    var linkConfig = new CodeAltaConfigStore(host.CatalogOptions);
+                    var linkOpener = new DesktopLinkOpener(host.SpaceCatalog, (folder, _) => Task.FromResult(linkConfig.LoadProjectLinks(folder)),
+                        (sessionId, projectId, token) => LinkOriginAsync(host, sessionId, projectId, token), linkBrowsers.Plan);
+                    builder.AddSpaceLinksService(new SpaceLinksService(host.SpaceCatalog, linkBrowsers.Find, epoch));
                     builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open, new DesktopFileLinks(host.ProjectCatalog, diskFolders, editorView,
                         (sessionId, token) => SessionFolderAsync(host, sessionId, token), projectFiles.RootAsync, DesktopLinks.Open,
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
                     {
                         GuidePage = (file, anchor) => documentation.FindPage(file) is { } page && documentationView.Show(page, anchor),
                         ExternalEditors = externalEditors,
-                    }));
+                    })
+                    {
+                        OpenFrom = linkOpener.OpenAsync,
+                    });
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch,
@@ -1659,6 +1668,26 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     }
 
     // The folder a session works in: its git worktree while that folder is there, the folder of its project otherwise.
+    // Where a link was followed: the space of the session, else of the project, and the folder whose configuration may set
+    // where its links open.
+    private static async Task<DesktopLinkOrigin?> LinkOriginAsync(CodeAltaHost host, string? sessionId, string? projectId, CancellationToken cancellationToken)
+    {
+        string? spaceId = null, folder = null;
+        if (sessionId is not null)
+        {
+            if (await host.RuntimeService.GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is not { } record) return null;
+            (spaceId, projectId) = (record.SpaceId, record.ProjectId);
+            folder = await SessionFolderAsync(host, sessionId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (projectId is null && spaceId is null) return null;
+        folder ??= projectId is null ? null
+            : (await host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(project => string.Equals(project.Id, projectId, StringComparison.OrdinalIgnoreCase))?.ProjectPath;
+        var space = await host.SpaceCatalog.ResolveSessionSpaceAsync(spaceId, projectId, cancellationToken).ConfigureAwait(false);
+        return new DesktopLinkOrigin(space.Id, folder);
+    }
+
     private static async ValueTask<string?> SessionFolderAsync(CodeAltaHost host, string sessionId, CancellationToken cancellationToken)
         => (await host.WorkspaceReads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false)).Sessions
             .FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal)) is { } session
@@ -1809,6 +1838,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddLabelsService(new LabelsService());
             builder.AddSubProjectsService(new SubProjectsService());
             builder.AddSpaceIdentityService(new SpaceIdentityService());
+            builder.AddSpaceLinksService(new SpaceLinksService());
             builder.AddSecretsService(new SecretsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());

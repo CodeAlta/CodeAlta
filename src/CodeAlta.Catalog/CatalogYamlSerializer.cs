@@ -149,6 +149,21 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("fleet")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SpaceFleetFrontMatter? Fleet { get; set; }
+
+        [JsonPropertyName("links")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceLinksFrontMatter? Links { get; set; }
+    }
+
+    private sealed class SpaceLinksFrontMatter
+    {
+        [JsonPropertyName("browser")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Browser { get; set; }
+
+        [JsonPropertyName("profile")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Profile { get; set; }
     }
 
     private sealed class SpaceFleetFrontMatter
@@ -501,7 +516,8 @@ public sealed class CatalogYamlSerializer
                     : null),
             frontMatter.Tools is { } tools ? new SpaceTools([.. (tools.Disabled ?? []).Select(static name => name?.Trim() ?? string.Empty)]) : null,
             frontMatter.Skills is { } skills ? new SpaceSkills([.. (skills.Folders ?? []).Select(static folder => folder?.Trim() ?? string.Empty)]) : null,
-            frontMatter.Fleet is { } fleet && Text(fleet.Server) is { } server ? new SpaceFleet(server, Text(fleet.Organization)) : null);
+            frontMatter.Fleet is { } fleet && Text(fleet.Server) is { } server ? new SpaceFleet(server, Text(fleet.Organization)) : null,
+            frontMatter.Links is { } links ? new SpaceLinks(Text(links.Browser), Text(links.Profile)) : null);
     }
 
     // What the file writes of the settings: nothing for what is not set.
@@ -568,6 +584,11 @@ public sealed class CatalogYamlSerializer
         if (settings.Fleet is { IsEmpty: false } fleet)
         {
             frontMatter.Fleet = new SpaceFleetFrontMatter { Server = fleet.Server, Organization = fleet.Organization };
+        }
+
+        if (settings.Links is { IsEmpty: false } links)
+        {
+            frontMatter.Links = new SpaceLinksFrontMatter { Browser = links.Browser, Profile = links.Profile };
         }
     }
 

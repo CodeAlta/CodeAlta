@@ -27,6 +27,12 @@ internal sealed class MarkdownLinksService
     }
 
     /// <summary>
+    /// Gets the opener of an address of the web that knows where it was followed from, the session or the project of its
+    /// document, whose space can choose the browser (<see cref="DesktopLinkOpener"/>); null for the opener of the constructor.
+    /// </summary>
+    internal Func<string, string?, string?, CancellationToken, Task<bool>>? OpenFrom { get; init; }
+
+    /// <summary>
     /// Opens a bounded, credential-free absolute HTTP(S) address in the system browser, and any other target as
     /// a link to a file of the disk, from the current host document.
     /// </summary>
@@ -52,8 +58,14 @@ internal sealed class MarkdownLinksService
         if (WebAddress(request.Address) is { } address)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            try { return Reply(_open(address) ? "ok" : "failed"); }
-            catch (Exception) { return Reply("failed"); } // Never send OS/browser diagnostics to the page.
+            try
+            {
+                var opened = OpenFrom is { } openFrom
+                    ? await openFrom(address, request.SessionId, request.ProjectId, cancellationToken).ConfigureAwait(false)
+                    : _open(address);
+                return Reply(opened ? "ok" : "failed");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); } // Never send OS/browser diagnostics to the page.
         }
 
         if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");

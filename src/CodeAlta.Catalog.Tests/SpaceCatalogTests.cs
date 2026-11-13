@@ -315,6 +315,44 @@ public sealed class SpaceCatalogTests
     }
 
     [TestMethod]
+    public async Task WhereTheLinksOfASpaceOpen_IsWrittenInItsFile_AndAValueThatIsNotValidIsLeftOut()
+    {
+        using var fixture = new Fixture();
+        await fixture.Spaces.CreateAsync("Work");
+        var path = Path.Combine(fixture.Options.SpacesRoot, "work.md");
+        var plain = await File.ReadAllTextAsync(path);
+
+        var chosen = await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Links = new SpaceLinks("chrome", "Work") });
+        Assert.IsTrue(chosen.Succeeded, chosen.Message);
+        StringAssert.Contains(await File.ReadAllTextAsync(path), "links:\n  browser: chrome\n  profile: Work\n");
+        Assert.AreEqual(new SpaceLinks("chrome", "Work"), (await fixture.Spaces.GetAsync("work"))!.Settings.Links);
+
+        // The default browser in one of its profiles: the browser is left out.
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Links = new SpaceLinks(null, "Privat") })).Succeeded);
+        Assert.AreEqual(new SpaceLinks(null, "Privat"), (await fixture.Spaces.GetAsync("work"))!.Settings.Links);
+
+        Assert.AreEqual(SpaceChangeStatus.Invalid, (await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Links = new SpaceLinks("not a browser") })).Status);
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Links = null })).Succeeded);
+        Assert.AreEqual(plain, await File.ReadAllTextAsync(path), "back to the default browser, the file is as it was");
+
+        // A value written by hand that is not valid is left out, and the rest is kept.
+        Assert.IsTrue(plain.StartsWith("---\n", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(path, "---\nlinks:\n  browser: \"not a browser\"\n  profile: Work\n" + plain[4..]);
+        Assert.AreEqual(new SpaceLinks(null, "Work"), (await fixture.Spaces.GetAsync("work"))!.Settings.Links);
+    }
+
+    [TestMethod]
+    public void TheLinksOfAProject_ReplaceWhatTheySetOfTheSpace()
+    {
+        var space = new SpaceLinks("chrome", "Work");
+        Assert.AreEqual(space, space.WithProject(null));
+        Assert.AreEqual(new SpaceLinks("chrome", "Contoso"), space.WithProject(new SpaceLinks(null, "Contoso")));
+        Assert.AreEqual(new SpaceLinks("safari", "Work"), space.WithProject(new SpaceLinks("safari")));
+        Assert.AreEqual(new SpaceLinks("edge"), new SpaceLinks(" Edge ").Sanitized(), "An id is kept trimmed and in lower case.");
+        Assert.IsNull(new SpaceLinks("not a browser", " ").Sanitized());
+    }
+
+    [TestMethod]
     public async Task TheFallbackOfASpace_IsWrittenWhole_AndReadBack()
     {
         using var fixture = new Fixture();

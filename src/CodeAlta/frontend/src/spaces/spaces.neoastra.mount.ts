@@ -1,6 +1,7 @@
 // Isolated bridge for mounting the actual main.tsx with spaces: the catalog of the project fixture, and a host
 // that keeps two spaces in memory. No native bridge or user data is touched.
-import type { SpaceAssignRequest, SpaceCreateRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
+import type { SpaceAssignRequest, SpaceCreateRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceLinksItem, SpaceLinksUpdateRequest,
+  SpaceShownRequest, SpacesEvent } from "#neoastra";
 export * from "../projectFocus.neoastra.mount";
 import { mcpServers as fixtureServers, skills as fixtureSkills } from "../projectFocus.neoastra.mount";
 // The real editor can open an in-memory file; disk and git operations remain unavailable.
@@ -54,6 +55,26 @@ export const spaceIdentity = {
     return { status: "ok", lines: [{ kind: "ok", text: request.part === "cli" ? `Checked ${request.profile?.name}` : `Commits as A. Mutel <${request.git?.email ?? "usual@example.com"}>` }] };
   },
   session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [] }),
+};
+
+// Where the links of the spaces open, kept in memory, and the browsers of the computer: Chrome by default, with two
+// profiles, Firefox with one, and Safari, which takes none.
+const linksFixture: { links: SpaceLinksItem | null; updates: SpaceLinksUpdateRequest[] } = { links: null, updates: [] };
+Object.assign(window, { linksFixture });
+const linkBrowsers = [
+  { id: "chrome", name: "Google Chrome", supportsProfiles: true, profiles: ["Privat", "Work"], isDefault: true },
+  { id: "firefox", name: "Firefox", supportsProfiles: true, profiles: ["default-release"], isDefault: false },
+  { id: "safari", name: "Safari", supportsProfiles: false, profiles: [], isDefault: false },
+];
+export const spaceLinks = {
+  // A test can hide the profiles, as macOS does when it keeps the folders of the browsers out of reach.
+  get: async () => ({ status: "ok", message: null, links: linksFixture.links,
+    browsers: localStorage.getItem("linksFixtureHidden") === "true" ? linkBrowsers.map(browser => ({ ...browser, profiles: [] })) : linkBrowsers }),
+  update: async (request: SpaceLinksUpdateRequest) => {
+    linksFixture.updates.push(request);
+    linksFixture.links = request.browser || request.profile ? { browser: request.browser, profile: request.profile } : null;
+    return { status: "ok", message: null, links: linksFixture.links, browsers: [] };
+  },
 };
 
 export const spaces = {

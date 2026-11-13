@@ -247,6 +247,14 @@ body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !i
 .space-identity-waiting { margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
 .space-identity-hint { margin: 0; color: var(--muted); font-size: 12px; }
 .space-identity-add.bp6-html-select select { height: 26px; font-size: 12.5px; }
+/* The steps that find the folder of a profile, when the system keeps the list of the profiles of a browser out of reach. */
+.space-links-guide { grid-column: 1 / -1; display: grid; list-style: decimal; gap: 4px; margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.space-links-guide li { display: list-item; }
+.space-links-guide li > span:first-child { display: block; margin-bottom: 3px; }
+.space-links .space-links-problem { color: var(--red); }
+.space-links .settings-field-control .bp6-input-group { min-width: 220px; }
+.space-links-address { display: flex; align-items: center; gap: 4px; }
+.space-links-guide code { padding: 2px 6px; border-radius: 5px; background: var(--panel-3); font-family: var(--bp-typography-family-mono); font-size: 11.5px; user-select: all; }
 
 @media (max-width: 900px) {
   .space-board { grid-template-columns: minmax(0, 1fr); }

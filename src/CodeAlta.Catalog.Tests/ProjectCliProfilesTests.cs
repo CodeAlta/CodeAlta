@@ -4,6 +4,36 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class ProjectCliProfilesTests
 {
     [TestMethod]
+    public void AProjectFile_SaysWhereItsLinksOpen_AndKeepsOnlyWhatIsValid()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-project-links-" + Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".alta"));
+        try
+        {
+            var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = Path.Combine(root, "global") });
+            Assert.IsNull(store.LoadProjectLinks(project), "A project without file sets nothing.");
+            Assert.IsNull(store.LoadProjectLinks(null));
+
+            File.WriteAllText(Path.Combine(project, ".alta", "config.toml"), "[links]\nbrowser = \"Firefox\"\nprofile = \"Contoso\"\n");
+            Assert.AreEqual(new SpaceLinks("firefox", "Contoso"), store.LoadProjectLinks(project));
+
+            // A value of another type, or that is not valid, is left out, and the rest of the file is still read.
+            File.WriteAllText(Path.Combine(project, ".alta", "config.toml"), "[search]\nenabled = false\n\n[links]\nbrowser = 3\nprofile = \"Work\"\n");
+            Assert.AreEqual(new SpaceLinks(null, "Work"), store.LoadProjectLinks(project));
+            Assert.IsTrue(store.IsProjectExcludedFromSearch(project));
+            File.WriteAllText(Path.Combine(project, ".alta", "config.toml"), "[links]\nbrowser = \"not a browser\"\n");
+            Assert.IsNull(store.LoadProjectLinks(project));
+            File.WriteAllText(Path.Combine(project, ".alta", "config.toml"), "links = 3\n");
+            Assert.IsNull(store.LoadProjectLinks(project));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void AProjectFile_GivesCliProfiles_AndKeepsOnlyWhatIsValid()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-project-cli-" + Guid.NewGuid().ToString("N"));

@@ -256,6 +256,8 @@ export const markdownLinks = Object.freeze({ open: async () => ({ status: "unava
 export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavailable", message: null, identity: null, usual: null }),
   update: async () => ({ status: "unavailable", message: null, identity: null, usual: null }), check: async () => ({ status: "unavailable", lines: [] }),
   session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [] }) });
+export const spaceLinks = Object.freeze({ get: async () => ({ status: "unavailable", message: null, links: null, browsers: [] }),
+  update: async () => ({ status: "unavailable", message: null, links: null, browsers: [] }) });
 // The spaces need a host that keeps them: the demo has the default one alone.
 export const spaces = Object.freeze({ list: async () => ({ status: "unavailable", spaces: [] }), activity: async () => ({ status: "unavailable", sessions: [], truncated: false }),
   create: unavailable, update: unavailable, delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable,

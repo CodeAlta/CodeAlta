@@ -88,7 +88,7 @@ Click a card to open the page of its space. Each tab of the page says what its s
 {.table}
 | Section | What you set there | What its tab says |
 |---|---|---|
-| **General** | Name, icon, color and **What it is for** | |
+| **General** | Name, icon, color, **What it is for**, and where its links open (see [Links](#links)) | |
 | **Projects** | The projects of the space | How many |
 | **Resources** | The providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has)) | What it has, or **All shared** |
 | **New sessions** | The agent prompt, model tiers and fallback of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
@@ -247,6 +247,23 @@ A profile separates logins; it is not a sandbox: an agent can still set another 
 - the HTTPS accounts of Git Credential Manager;
 - the issues and pull requests an [automation](automations.md) trigger watches, read with your usual GitHub profile;
 - the Atlassian CLI, which keeps one login for your computer: two spaces with two Jira accounts take turns.
+
+## Links
+
+**Links open in** and **Browser profile**, in the **General** section of the page of a space, choose where the web links you click in the sessions and the project documents of the space open: for example Chrome in its *Work* profile for Work, and Safari for Personal.
+
+- **Links open in**: **Default browser**, the default, opens them as the system does; or one of the browsers of this computer.
+- **Browser profile**: one of the profiles of that browser, by the name it shows. Chrome, Edge and the other Chromium browsers, and Firefox, open the link in it, in the window they already have; Safari takes no profile.
+- A browser or a profile the space names that this computer does not have is shown with a warning, and links then open as the system opens them.
+- When macOS keeps the list of the profiles of a browser out of reach, type the profile: its name for Firefox; for a Chromium browser, its folder, which is always `Default`, `Profile 1`, `Profile 2`… To find it, open that profile in the browser, go to `chrome://version`, and take the last part of **Profile Path**. The page shows these steps. An empty field opens links without a profile.
+
+In the file of the space, `links: { browser: chrome, profile: Work }`. A project can choose otherwise in its `.alta/config.toml`; what it sets replaces the value of its space:
+
+```toml
+[links]
+browser = "chrome"
+profile = "Contoso"
+```
 
 ## The shown space
 

@@ -18,20 +18,21 @@ namespace CodeAlta.Catalog;
 /// <param name="Tools">The tools the sessions of the space do without; <see langword="null"/> for none.</param>
 /// <param name="Skills">The folders of skills the sessions of the space read besides the others; <see langword="null"/> for none.</param>
 /// <param name="Fleet">The CodeAlta Server the space is linked to; <see langword="null"/> for none.</param>
+/// <param name="Links">The browser and the profile the links of the space open in; <see langword="null"/> for the default browser.</param>
 public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null, SpaceSkills? Skills = null,
-    SpaceFleet? Fleet = null)
+    SpaceFleet? Fleet = null, SpaceLinks? Links = null)
 {
     /// <summary>Gets settings that set nothing.</summary>
     public static SpaceSettings Empty { get; } = new();
 
     /// <summary>Gets whether nothing is set.</summary>
     public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true) && (Skills?.IsEmpty ?? true)
-        && (Fleet?.IsEmpty ?? true);
+        && (Fleet?.IsEmpty ?? true) && (Links?.IsEmpty ?? true);
 
     /// <summary>Tells what is wrong with the settings.</summary>
     /// <returns>The first problem found, or <see langword="null"/> when they are valid.</returns>
     public string? Problem()
-        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem() ?? Fleet?.Problem();
+        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem() ?? Fleet?.Problem() ?? Links?.Problem();
 
     /// <summary>
     /// Keeps what is valid of settings read from a file: a value that is not valid is left out, so that one wrong
@@ -39,11 +40,66 @@ public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceId
     /// </summary>
     /// <returns>The settings without their invalid values.</returns>
     public SpaceSettings Sanitized()
-        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized(), Fleet?.Sanitized());
+        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized(), Fleet?.Sanitized(), Links?.Sanitized());
 
     // Text on one line, without control characters, of at most the length given.
     internal static bool IsLine([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, int maximum)
         => value is { Length: > 0 } && value.Length <= maximum && value == value.Trim() && !value.Any(char.IsControl);
+}
+
+/// <summary>
+/// Where the links the user follows in CodeAlta open, for the sessions and the projects of a space: a browser, and a
+/// profile of it. A project can give its own (<see cref="WithProject"/>). What is left out is the default: the default
+/// browser of the system, in the profile it opens.
+/// </summary>
+/// <param name="Browser">
+/// The id of the browser, such as <c>chrome</c>, <c>edge</c>, <c>firefox</c> or <c>safari</c>; <see langword="null"/> for the
+/// default browser of the system.
+/// </param>
+/// <param name="Profile">
+/// The name of the profile, as the browser shows it (such as <c>Work</c>); <see langword="null"/> for the profile the browser
+/// opens. Kept by its name, so that it still names the profile of another browser that has one of that name.
+/// </param>
+public sealed record SpaceLinks(string? Browser = null, string? Profile = null)
+{
+    /// <summary>The longest id of a browser.</summary>
+    public const int MaximumBrowserLength = 64;
+
+    /// <summary>The longest name of a profile.</summary>
+    public const int MaximumProfileLength = 256;
+
+    /// <summary>Gets whether nothing is set: the default browser, in the profile it opens.</summary>
+    public bool IsEmpty => Browser is null && Profile is null;
+
+    /// <summary>Tells what is wrong with the setting.</summary>
+    /// <returns>The first problem found, or <see langword="null"/>.</returns>
+    public string? Problem()
+        => Browser is not null && !IsBrowserId(Browser)
+            ? $"'{Browser}' is not the id of a browser, such as chrome, edge, firefox or safari."
+            : Profile is not null && !SpaceSettings.IsLine(Profile, MaximumProfileLength)
+                ? $"The profile of the links is one line of at most {MaximumProfileLength} characters."
+                : null;
+
+    /// <summary>Keeps what is valid.</summary>
+    /// <returns>The setting without its invalid values; <see langword="null"/> when nothing is left.</returns>
+    public SpaceLinks? Sanitized()
+    {
+        var kept = new SpaceLinks(IsBrowserId(Browser?.Trim()) ? Browser!.Trim().ToLowerInvariant() : null,
+            SpaceSettings.IsLine(Profile?.Trim(), MaximumProfileLength) ? Profile!.Trim() : null);
+        return kept.IsEmpty ? null : kept;
+    }
+
+    /// <summary>Gives this setting with the one of a project over it: what the project sets replaces the value of the space.</summary>
+    /// <param name="project">The setting of the project; <see langword="null"/> for none.</param>
+    /// <returns>The setting the links of the project open with.</returns>
+    public SpaceLinks WithProject(SpaceLinks? project)
+        => project is null ? this : new SpaceLinks(project.Browser ?? Browser, project.Profile ?? Profile);
+
+    /// <summary>Tells whether a text can be the id of a browser.</summary>
+    /// <param name="value">The text.</param>
+    /// <returns><see langword="true"/> for 1 to 64 letters, digits, <c>-</c> and <c>_</c>.</returns>
+    public static bool IsBrowserId([NotNullWhen(true)] string? value)
+        => value is { Length: > 0 and <= MaximumBrowserLength } && value.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_');
 }
 
 /// <summary>

@@ -188,6 +188,32 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads where a project's own configuration opens the links of its sessions, over the setting of their space
+    /// (<c>[links]</c>, with <c>browser</c> and <c>profile</c>). What is not valid is left out, and a file that cannot be read
+    /// gives none.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>The setting of the project; <see langword="null"/> when it sets nothing.</returns>
+    public SpaceLinks? LoadProjectLinks(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return null;
+        TomlTable? links;
+        try
+        {
+            links = ReadEffectiveProjectDocument(projectRoot).Links;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return null;
+        }
+
+        if (links is null) return null;
+        static string? Text(TomlTable table, string key)
+            => table.TryGetValue(key, out var value) && value is string text && !string.IsNullOrWhiteSpace(text) ? text.Trim() : null;
+        return new SpaceLinks(Text(links, "browser"), Text(links, "profile")).Sanitized();
+    }
+
+    /// <summary>
     /// Reads the profiles of command line tools a project's own configuration gives its sessions over the ones of
     /// their space (<c>[identity.cli.&lt;name&gt;]</c>). What is not valid is left out, and a file that cannot be read
     /// gives none.
