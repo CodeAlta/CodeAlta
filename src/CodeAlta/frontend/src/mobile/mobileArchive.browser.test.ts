@@ -20,6 +20,14 @@ test("archiving asks about descendants even outside the loaded page and restores
       { ...session("old", "Previously archived", "p1", 31), parentId: "parent" }];
   }, "");
   const { server, click, waitFor, evaluate } = phone;
+  // The archive requests of a session once the server got the `count`-th: the phone shows its toast as it sends a request, so the
+  // toast says nothing of what the server received (and the toast of an archive undone keeps its text while hidden).
+  const archivesOf = async (id: string, count: number) => {
+    const archives = () => server.requests.filter(r => r.path === `/api/sessions/${id}/archive`);
+    for (const deadline = Date.now() + testLimit(8000); archives().length < count && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(archives().length, count, `archive request ${count} of ${id}`);
+    return archives();
+  };
   try {
     await phone.signIn();
     await evaluate(`fetch('/api/sessions/old/archive', { method: 'POST' })`);
@@ -41,7 +49,7 @@ test("archiving asks about descendants even outside the loaded page and restores
     await waitFor('!document.getElementById("archive-sheet").hidden', "archive question again");
     await click("#archive-no");
     await waitFor('document.querySelector("#toast .toast-text").textContent.startsWith("Archived")', "archived parent");
-    assert.equal(server.requests.find(r => r.path === "/api/sessions/parent/archive")?.query, "");
+    assert.equal((await archivesOf("parent", 1))[0].query, "");
     // The toast comes before the row leaves: the row that comes back is the restored one.
     await waitFor(`!document.querySelector('.row[data-id="parent"]')`, "parent out of the list");
     await click("#toast button");
@@ -49,11 +57,7 @@ test("archiving asks about descendants even outside the loaded page and restores
     await click('.row[data-id="parent"] .card-archive');
     await waitFor('!document.getElementById("archive-sheet").hidden', "archive question third time");
     await click("#archive-yes");
-    // The request itself: the toast of the archive before, hidden by the restore, still says "Archived".
-    const archives = () => server.requests.filter(r => r.path === "/api/sessions/parent/archive");
-    for (const deadline = Date.now() + testLimit(8000); archives().length < 2 && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 50));
-    assert.equal(archives().length, 2, "the family is archived");
-    assert.equal(archives().at(-1)?.query, "?withChildren=true");
+    assert.equal((await archivesOf("parent", 2))[1].query, "?withChildren=true");
     await waitFor('!document.getElementById("toast").hidden && document.querySelector("#toast .toast-text").textContent.startsWith("Archived")', "archived family");
     await waitFor(`!document.querySelector('.row[data-id="parent"]') && !document.querySelector('.row[data-id="child"]')`, "family out of the list");
     await click("#toast button");
@@ -70,7 +74,7 @@ test("archiving asks about descendants even outside the loaded page and restores
     await click("#archive-cancel");
     assert.match(String(await evaluate(swipeAway("other0"))), /translateX/);
     await waitFor('document.querySelector("#toast .toast-text").textContent.startsWith("Archived “Other")', "swiped session archived");
-    assert.equal(server.requests.filter(r => r.path === "/api/sessions/other0/archive").at(-1)?.query, "");
+    assert.equal((await archivesOf("other0", 1))[0].query, "");
     assert.deepEqual(phone.failures, []);
   } finally { await phone.close(); }
 });

@@ -149,7 +149,10 @@ test("the top bar holds the commands of each page, its menu the others, and a se
     await waitFor(`location.hash === "#/" && document.getElementById("toast").textContent.startsWith("Archived")`, "archived");
     assert.match(await evaluate<string>(`document.getElementById("toast").textContent`), /Restore$/u);
     await waitFor(`!document.querySelector('.row[data-id="s1"]') || document.querySelector('.row[data-id="s1"]').classList.contains("collapsing")`, "its card goes");
-    assert.ok(server.requests.some(request => request.method === "POST" && request.path === "/api/sessions/s1/archive"), "the session archived");
+    // The card goes as the phone sends the archive, not once the server has it: the request is waited for.
+    const archived = () => server.requests.some(request => request.method === "POST" && request.path === "/api/sessions/s1/archive");
+    for (const deadline = Date.now() + testLimit(8000); !archived() && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.ok(archived(), "the session archived");
     assert.deepEqual(phone.failures, []);
   } finally {
     await phone.close();
