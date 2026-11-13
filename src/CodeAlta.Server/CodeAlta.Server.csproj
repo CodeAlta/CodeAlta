@@ -55,6 +55,8 @@
     <PackageReference Include="OpenTelemetry" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="XenoAtom.CommandLine" />
+    <!-- The file of its log (logs/altaserver.log), rolled and bounded as the node's. -->
+    <PackageReference Include="XenoAtom.Logging" />
   </ItemGroup>
 
   <ItemGroup>

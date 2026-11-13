@@ -74,6 +74,12 @@ public sealed partial class ServerApplication
     /// <summary>Gets what a test is told once <c>run</c> started its server, with what stops it; null for nothing.</summary>
     internal Action<CoordinatorServer, Action>? Started { get; init; }
 
+    /// <summary>
+    /// Gets whether <c>run</c> keeps the log of its server in the file of the data root and in the log of the system, as
+    /// the process of <c>altaserver</c> does; tests leave the logging of their process alone.
+    /// </summary>
+    internal bool KeepsLog { get; init; }
+
     /// <summary>Gets what changes the options of the server <c>run</c> starts, for tests; null for none.</summary>
     internal Func<CoordinatorServerOptions, CoordinatorServerOptions>? ConfigureServer { get; init; }
 
@@ -389,6 +395,8 @@ public sealed partial class ServerApplication
             if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(paths, store, lease).ConfigureAwait(false);
         }
 
+        // Open while this process runs a server: a version it starts next (the launcher hop below) opens the file itself.
+        using var logFile = KeepsLog ? ServerLogFile.Open(paths, _error) : null;
         CoordinatorServer server;
         ServerUpdates? updates = null;
         try
@@ -396,6 +404,13 @@ public sealed partial class ServerApplication
             var serverOptions = new CoordinatorServerOptions
             {
                 DataRoot = paths.DataRoot,
+                AddLogging = KeepsLog
+                    ? logging =>
+                    {
+                        if (logFile is not null) logging.AddProvider(logFile.Provider);
+                        ServerLogging.AddSystemLog(logging, Environment.GetEnvironmentVariable);
+                    }
+                    : null,
                 Urls = urls,
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
@@ -494,6 +509,7 @@ public sealed partial class ServerApplication
         if (updates?.RestartRequested != true) return ServerExitCodes.Success;
         // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
         if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;
+        logFile?.Dispose();
         return await RunLauncherAsync(paths, store, lease).ConfigureAwait(false);
     }
 

@@ -281,7 +281,8 @@ public static partial class ServiceDefinition
     /// <summary>
     /// Writes the systemd unit of a node or a server: a <c>systemd --user</c> unit of the user, or a system unit with
     /// <c>User=</c>. Restarted on failure (not after an invalid command line, which never fixes itself), stopped with
-    /// SIGTERM to the main process alone so that it drains its work, its log kept by the process.
+    /// SIGTERM to the main process alone so that it drains its work. The process keeps its log in a file of its own, so
+    /// standard output is dropped; standard error goes to the journal, where the server writes its log too.
     /// </summary>
     /// <param name="spec">The service.</param>
     /// <returns>The unit.</returns>

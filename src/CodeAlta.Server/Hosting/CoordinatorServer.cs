@@ -73,6 +73,12 @@ public sealed class CoordinatorServerOptions
     public Action<ILoggingBuilder>? ConfigureLogging { get; init; }
 
     /// <summary>
+    /// Gets what adds to the console where the log is kept (the file and the log of the system of <c>altaserver run</c>),
+    /// or <see langword="null"/> for the console alone. A log <see cref="ConfigureLogging"/> configures does not take it.
+    /// </summary>
+    public Action<ILoggingBuilder>? AddLogging { get; init; }
+
+    /// <summary>
     /// Gets what gives the value of a variable of the environment, for the standard <c>OTEL_*</c> variables of the
     /// telemetry; the environment of the process by default (tests give their own).
     /// </summary>
@@ -426,6 +432,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         {
             // The start and the stop, not a line per request: a request log would name every device's calls.
             builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+            options.AddLogging?.Invoke(builder.Logging);
         }
 
         // The records of the log also go to the collector, when the telemetry sends logs.

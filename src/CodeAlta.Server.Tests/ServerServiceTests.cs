@@ -39,6 +39,7 @@ public sealed class ServerServiceTests
             + " --urls http://0.0.0.0:2690 --allow-insecure-http\n");
         StringAssert.Contains(unit, "Environment=DOTNET_ROOT=/home/alice/.dotnet\n");
         StringAssert.Contains(unit, "RestartPreventExitStatus=2\n");
+        StringAssert.Contains(unit, "StandardError=journal\n", "where the server writes its log for the journal");
         CollectionAssert.AreEqual(new[]
         {
             "systemctl --user daemon-reload", $"systemctl --user enable {name}.service", $"systemctl --user restart {name}.service", "loginctl enable-linger alice",

@@ -117,6 +117,9 @@ which the hosts name at three levels; the first that names one wins:
 
 - Each node keeps its log as today. Its owner's devices can read it remotely (**Show log** on the machine), over the
   session channel.
+- The server keeps its log the same way, a bounded file of its data root, and writes it to the log of its service
+  manager too: the journal of systemd (a line per record on standard error, with its syslog priority) and the
+  Application event log of Windows (warnings and errors).
 - **To the collector, when asked**: logs are CodeAlta's own records; they hold no prompt, message or tool content, but
   they may hold paths and errors. So they go to the collector only when the level that names it turns logs on (the
   `logs` signal of a setting or of the machine's file, `OTEL_LOGS_EXPORTER=otlp` for the environment), with their

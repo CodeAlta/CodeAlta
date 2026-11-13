@@ -47,6 +47,9 @@ public sealed class ServerPaths
     /// <summary>Gets the settings of the updates of the server: the feed and the allowed feeds.</summary>
     public string UpdatePolicyPath => Path.Combine(DataRoot, "update.json");
 
+    /// <summary>Gets the log a running server keeps, rolled daily beside it (<c>logs/altaserver.log</c>).</summary>
+    public string LogPath => Path.Combine(DataRoot, "logs", "altaserver.log");
+
     /// <summary>Gets the folder of the backups of the database taken before each update.</summary>
     public string BackupsRoot => Path.Combine(DataRoot, "backups");
 
