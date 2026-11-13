@@ -173,6 +173,30 @@ public sealed class CodeModeRunStoreTests
     }
 
     [TestMethod]
+    public async Task ARunCodeAltaClosesDuring_HasWhatItWroteOnDisk_OnceTheRegistryIsDisposed()
+    {
+        // The sleep is a call that is recorded here (no IsIdempotent): stopped, it ends as cancelled. That end must be on disk when
+        // the registry is disposed, or the next start reads a call in flight and will not resume the run by itself.
+        using var folder = new TemporaryFolder();
+        const string Code = """await sleep("1h"); return 1;""";
+        string runId;
+        await using (var before = new CodeModeRunRegistry(null))
+        {
+            await before.UseStoreAsync(new CodeModeRunStore(folder.Path));
+            var run = before.TryStart("session-1", "Poll", 1000, "call-3", new CodeModeRunStart(Code), (observer, token) =>
+                new CodeModeHost(CodeModeApi.Empty, new CodeModeScriptCache()).RunAsync(CodeModeSource.Prepare(Code), new NoCalls(), null, observer, token), out var refusal);
+            Assert.IsNotNull(run, refusal);
+            runId = run.Id;
+            await WaitForAsync(() => new CodeModeRunStore(folder.Path).TryLoad(runId)?.SleepingUntil is not null);
+            // A busy machine: the writes of the run wait behind one that takes a while, as the end of its stopped call will.
+            run.Writer!.Enqueue(static () => Thread.Sleep(500));
+        }
+
+        var kept = new CodeModeRunStore(folder.Path).TryLoad(runId)!;
+        Assert.IsEmpty(kept.InFlightCalls, "the end of the stopped call is written before the registry is gone");
+    }
+
+    [TestMethod]
     public async Task ARunCodeAltaClosesWhileItSleeps_IsInterrupted_AndResumesByItselfOnceItWakes_Once()
     {
         using var folder = new TemporaryFolder();

@@ -858,6 +858,9 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
 
         await Task.WhenAll(runs.Select(static run => run.Completion.ContinueWith(static _ => { }, TaskScheduler.Default))).ConfigureAwait(false);
+        // What the stopped runs wrote last (the end of a call they were in) is on disk before CodeAlta goes: the next start reads
+        // it to tell a run it resumes by itself from one stopped in a call that may not run twice.
+        await Task.WhenAll(runs.Select(static run => run.Writer?.FlushAsync() ?? Task.CompletedTask)).ConfigureAwait(false);
         // A result held for a turn has nowhere to go any more.
         foreach (var run in _heldForTurn.Values)
         {
