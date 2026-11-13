@@ -268,10 +268,21 @@ internal sealed partial class RemoteSessionHost
         var state = await RequireClient().GetSessionStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
         var summary = Listing.Sessions.FirstOrDefault(session => string.Equals(session.Id, sessionId, StringComparison.OrdinalIgnoreCase));
         var provider = summary?.ProviderKey ?? "fleet";
-        return new SessionRuntimeCurrentState(state.RuntimeInstanceId, sessionId, false, state.AttachmentGeneration is { } generation and > 0
-            ? new SessionRuntimeCurrentEntry(generation, false, false, state.ActiveRunId, state.QueueDrainInProgress, provider, provider, summary?.ModelId,
-                null, null, null)
-            : null);
+        // The suggestion the machine shows, unless the user of this computer turned suggestions off.
+        var suggestion = _options.ShowsPromptSuggestions?.Invoke() == true ? AgentPromptSuggestionEvent.Normalize(state.PromptSuggestion) : null;
+        var suggestionRunId = suggestion is null ? null : state.PromptSuggestionRunId;
+        if (state.AttachmentGeneration is { } generation and > 0)
+        {
+            return new SessionRuntimeCurrentState(state.RuntimeInstanceId, sessionId, false,
+                new SessionRuntimeCurrentEntry(generation, false, false, state.ActiveRunId, state.QueueDrainInProgress, provider, provider, summary?.ModelId,
+                    null, null, null) { PromptSuggestion = suggestion, PromptSuggestionRunId = suggestionRunId });
+        }
+
+        return new SessionRuntimeCurrentState(state.RuntimeInstanceId, sessionId, false, null)
+        {
+            PromptSuggestion = suggestion,
+            PromptSuggestionRunId = suggestionRunId,
+        };
     }
 
     /// <inheritdoc />

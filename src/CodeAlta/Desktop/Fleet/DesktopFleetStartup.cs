@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Hosting;
 
@@ -50,7 +51,11 @@ internal sealed class DesktopFleetStartup
         ArgumentNullException.ThrowIfNull(sessionHosts);
         ArgumentNullException.ThrowIfNull(machineName);
         ArgumentNullException.ThrowIfNull(version);
-        var fleet = new DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), machineName);
+        // The sessions of its machines show their suggestions as the local ones do: while this desktop shows them and its user wants them.
+        var configStore = new CodeAltaConfigStore(host.CatalogOptions);
+        var showsPromptSuggestions = host.RuntimeService.ShowsPromptSuggestions;
+        var fleet = new DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), machineName, null,
+            new RemoteSessionHostOptions { ShowsPromptSuggestions = () => showsPromptSuggestions && configStore.LoadGlobalPromptSuggestions() });
         fleet.Moves = new DesktopMoves(host, fleet, machineName, host.CatalogOptions.FleetRoot);
         // The sessions agents of this computer start on its machines, and the answers they send back.
         var remoteChildren = new DesktopRemoteChildren(host, fleet, machineName);

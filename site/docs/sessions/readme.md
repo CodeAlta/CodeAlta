@@ -275,6 +275,7 @@ After a turn, the model suggests what you may write next, such as `go ahead` or 
 - Press `Tab` or `→` to put it in the prompt. Nothing is sent until you press `Enter`.
 - Type something else and the suggestion goes away; empty the prompt and it comes back. Each turn brings a new one, or none.
 - On the phone, the [Mobile plugin](../plugins/mobile.md#on-the-phone) shows it as a chip above the prompt: tap it to put it in the prompt.
+- For a [session on another machine](../fleet/sessions.md), suggestions appear when both desktops have them enabled and the machine running the session supports sending them. A headless CodeAlta Node does not generate suggestions.
 
 The model writes the suggestion at the end of its answer, so it costs no extra request, and CodeAlta removes it from the answer you read. It works with every provider.
 

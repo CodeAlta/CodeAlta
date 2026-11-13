@@ -160,6 +160,92 @@ public sealed class FleetNodeApiTests
     }
 
     [TestMethod]
+    [DataRow(true, true, DisplayName = "shown")]
+    [DataRow(true, false, DisplayName = "setting off")]
+    [DataRow(false, true, DisplayName = "node shows none")]
+    public async Task SessionsState_CarriesTheSuggestionTheSessionKeeps_AsTheNodeShowsIt(bool showsPromptSuggestions, bool setting)
+    {
+        await using var fixture = await NodeFixture.StartAsync(showsPromptSuggestions, TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var machine = await fixture.PairViewerAsync(token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Suggesting session"), "create-suggesting", token);
+        // The suggestion of the turn the session ended with, as its journal keeps it once it has no entry.
+        var store = fixture.Node.Host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var summary = await store.GetSessionSummaryAsync(created.SessionId, token);
+        Assert.IsNotNull(summary, "A created session has a summary.");
+        await store.UpsertSessionAsync(summary with { PromptSuggestion = "  commit it  ", PromptSuggestionRunId = new CodeAlta.Agent.AgentRunId("run-1") }, token);
+        Assert.IsTrue(await fixture.Node.Host.RuntimeService.DetachRuntimeSessionAsync(created.SessionId, token), "Detached, as a session nobody shows is once idle.");
+        if (!setting) new CodeAlta.Catalog.CodeAltaConfigStore(fixture.Node.Host.CatalogOptions).SaveGlobalPromptSuggestions(false);
+
+        var state = await client.GetSessionStateAsync(created.SessionId, token);
+
+        Assert.IsNull(state.AttachmentGeneration, "The session has no entry: the suggestion comes from its journal.");
+        if (showsPromptSuggestions && setting)
+            Assert.AreEqual(("commit it", "run-1"), (state.PromptSuggestion, state.PromptSuggestionRunId), "The node carries the bounded text and its run.");
+        else
+            Assert.AreEqual((null, null), (state.PromptSuggestion, state.PromptSuggestionRunId), "A node that shows none, or whose user turned them off, carries none.");
+    }
+
+    [TestMethod]
+    public async Task SessionsState_OfAnAttachedSession_FollowsTheSettingOfTheNode_AndKeepsItsIdentities()
+    {
+        await using var fixture = await NodeFixture.StartAsync(showsPromptSuggestions: true, TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var machine = await fixture.PairViewerAsync(token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Suggesting session"), "create-attached", token);
+        fixture.Provider.Turns.Enqueue(static (_, _) => Task.FromResult(ScriptedNodeProvider.Answer(
+            $"Done.\n{CodeAlta.Agent.AgentNextPromptTag.Opening}run the tests{CodeAlta.Agent.AgentNextPromptTag.Closing}")));
+        Assert.AreEqual("accepted", (await client.SendAsync(created.SessionId, "Do it", retryKey: "send-attached", cancellationToken: token)).Status);
+        var shown = await WaitForAsync(async () =>
+        {
+            var state = await client.GetSessionStateAsync(created.SessionId, token);
+            return state.PromptSuggestion is not null && state.ActiveRunId is null ? state : null;
+        }, token);
+        Assert.IsNotNull(shown.AttachmentGeneration, "The session stays attached.");
+        Assert.IsNotNull(shown.PromptSuggestionRunId);
+        var settings = new CodeAlta.Catalog.CodeAltaConfigStore(fixture.Node.Host.CatalogOptions);
+
+        settings.SaveGlobalPromptSuggestions(false);
+        var off = await client.GetSessionStateAsync(created.SessionId, token);
+
+        Assert.AreEqual((null, null), (off.PromptSuggestion, off.PromptSuggestionRunId), "The user of the node turned suggestions off: none is carried.");
+        Assert.AreEqual(shown with { PromptSuggestion = null, PromptSuggestionRunId = null }, off, "The identities the commands are bound to are the same.");
+
+        settings.SaveGlobalPromptSuggestions(true);
+        Assert.AreEqual(shown, await client.GetSessionStateAsync(created.SessionId, token), "Turned on again, the kept suggestion is carried again.");
+    }
+
+    [TestMethod]
+    [DataRow(257, null, DisplayName = "longer than 256")]
+    [DataRow(4096, null, DisplayName = "far too long")]
+    [DataRow(256, null, DisplayName = "256 kept")]
+    [DataRow(0, " run-1", DisplayName = "leading space")]
+    [DataRow(0, "run-1 ", DisplayName = "trailing space")]
+    [DataRow(0, "   ", DisplayName = "blank")]
+    [DataRow(0, "run\u0001x", DisplayName = "control")]
+    public async Task SessionsState_LeavesOutARunIdThatIsNoIdentity_AndKeepsTheSuggestion(int length, string? runId)
+    {
+        await using var fixture = await NodeFixture.StartAsync(showsPromptSuggestions: true, TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var machine = await fixture.PairViewerAsync(token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Suggesting session"), "create-run-id", token);
+        var stored = runId ?? new string('r', length);
+        var store = fixture.Node.Host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var summary = await store.GetSessionSummaryAsync(created.SessionId, token);
+        Assert.IsNotNull(summary);
+        await store.UpsertSessionAsync(summary with { PromptSuggestion = "commit it", PromptSuggestionRunId = new CodeAlta.Agent.AgentRunId(stored) }, token);
+        Assert.IsTrue(await fixture.Node.Host.RuntimeService.DetachRuntimeSessionAsync(created.SessionId, token));
+
+        var state = await client.GetSessionStateAsync(created.SessionId, token);
+
+        Assert.AreEqual("commit it", state.PromptSuggestion, "The suggestion is carried whatever its run id.");
+        Assert.AreEqual(length == 256 ? stored : null, state.PromptSuggestionRunId, "Only a run id that is an identity of at most 256 characters is carried, never cut.");
+    }
+
+    [TestMethod]
     public async Task NodeInfoAndSessionsList_LeaveOutAProjectFileTheNodeCannotRead_AndSayWhich()
     {
         await using var fixture = await NodeFixture.StartAsync(TestContext.CancellationToken);
@@ -336,13 +422,17 @@ internal sealed class NodeFixture : IAsyncDisposable
 
     public PairedMachineStore ViewerMachines { get; }
 
-    public static async Task<NodeFixture> StartAsync(CancellationToken cancellationToken)
+    public static Task<NodeFixture> StartAsync(CancellationToken cancellationToken) => StartAsync(showsPromptSuggestions: false, cancellationToken);
+
+    /// <summary>Starts a node whose host shows the next prompt a session suggests, as a desktop does, or none, as a node does.</summary>
+    public static async Task<NodeFixture> StartAsync(bool showsPromptSuggestions, CancellationToken cancellationToken)
     {
         var root = new NodeTestRoot();
         var provider = new ScriptedNodeProvider();
         try
         {
-            var node = await NodeHost.StartAsync(root.Options() with { ConfigureModelProviders = provider.Register }, cancellationToken);
+            var node = await NodeHost.StartAsync(root.Options() with { ConfigureModelProviders = provider.Register, ShowsPromptSuggestions = showsPromptSuggestions },
+                cancellationToken);
             var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
             return new NodeFixture(root, node, fleet, provider);
         }

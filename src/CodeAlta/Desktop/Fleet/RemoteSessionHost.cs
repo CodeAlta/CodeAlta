@@ -38,6 +38,12 @@ internal sealed record RemoteSessionHostOptions
 
     /// <summary>Gets the most sessions the list reads.</summary>
     public int ListLimit { get; init; } = 200;
+
+    /// <summary>
+    /// Gets whether this computer shows the next prompt a session of the machine suggests, asked at each read of the state
+    /// of a session (the user of this computer may turn suggestions off at any time); null shows none.
+    /// </summary>
+    public Func<bool>? ShowsPromptSuggestions { get; init; }
 }
 
 /// <summary>What the host last read of its machine: what it is and its sessions, kept while the machine is offline.</summary>
