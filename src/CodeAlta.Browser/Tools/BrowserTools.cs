@@ -742,7 +742,7 @@ internal static class BrowserTools
                         call.CarriesPageContent = true;
                     }
 
-                    if (outcome.NavigatedTo is { } url) call.Lines.Add($"Page navigated to {url}.");
+                    AppendNavigation(call, outcome);
                     call.Page = state;
                 }));
         }
@@ -877,7 +877,13 @@ internal static class BrowserTools
 
         call.Lines.Add(succeeded);
         if (outcome.Note is not null) call.Lines.Add(outcome.Note);
+        AppendNavigation(call, outcome);
+    }
+
+    private static void AppendNavigation(BrowserToolCall call, BrowserSession.ActionOutcome outcome)
+    {
         if (outcome.NavigatedTo is { } url) call.Lines.Add($"Page navigated to {url}.");
+        else if (outcome.StillLoading) call.Lines.Add("A navigation started and its page is still loading: wait_for a text of that page before acting on it.");
     }
 
     private static async Task MaybeSnapshotAsync(BrowserToolCall call, BrowserPageState state)

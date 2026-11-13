@@ -47,7 +47,13 @@ internal sealed class TestSite : IAsyncDisposable
         var app = builder.Build();
         TestSite? site = null;
         foreach (var (path, html) in Pages) app.MapGet(path, () => Results.Content(html.Replace("OTHER/", $"http://localhost:{port}/", StringComparison.Ordinal), "text/html; charset=utf-8"));
-        app.MapGet("/api/data", () => Results.Json(new Dictionary<string, object> { ["answer"] = 42, ["items"] = new[] { "a", "b" } }));
+        // A page that takes longer to answer than an action waits for the navigation it starts.
+        app.MapGet("/slow", async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            return Results.Content("<!doctype html><html><head><title>Slow page</title></head><body><h1>The slow page</h1></body></html>", "text/html; charset=utf-8");
+        });
+        app.MapGet("/api/data",() => Results.Json(new Dictionary<string, object> { ["answer"] = 42, ["items"] = new[] { "a", "b" } }));
         app.MapGet("/site.css", () => Results.Content(".record-btn {\n  color: rgb(200, 0, 0);\n  padding: 4px;\n}\n", "text/css"));
         app.MapGet("/app.js", () => Results.Content("function addItem(text) {\n  const item = document.createElement('p');\n  item.className = 'item';\n  item.textContent = text;\n  document.getElementById('list').appendChild(item);\n}\naddItem('Created by script');\n", "text/javascript"));
         app.MapPost("/api/echo", async (HttpRequest request) =>
@@ -182,6 +188,9 @@ internal sealed class TestSite : IAsyncDisposable
             """),
         ("/second", """
             <!doctype html><html><head><title>Second page</title></head><body><h1>The second page</h1><p>Welcome.</p></body></html>
+            """),
+        ("/to-slow", """
+            <!doctype html><html><head><title>Before the slow page</title></head><body><a href="/slow">Go to the slow page</a></body></html>
             """),
         ("/frames", """
             <!doctype html><html><head><title>Frames</title></head><body>

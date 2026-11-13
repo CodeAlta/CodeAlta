@@ -579,8 +579,11 @@ internal sealed class BrowserSession : IAsyncDisposable
     // Actions
     // -------------------------------------------------------------------------------------------------------------
 
-    /// <summary>What an action did beyond what it was asked: a navigation, a dialog, a note.</summary>
-    public sealed record ActionOutcome(string? NavigatedTo, bool OpenedDialog, string? Note);
+    /// <summary>
+    /// What an action did beyond what it was asked: a navigation and the page it loaded, or one whose page was still
+    /// loading when the wait ended, a dialog, a note.
+    /// </summary>
+    public sealed record ActionOutcome(string? NavigatedTo, bool StillLoading, bool OpenedDialog, string? Note);
 
     /// <summary>
     /// Runs an action and waits for what it caused, as Chrome DevTools MCP does: a navigation that starts within
@@ -601,6 +604,7 @@ internal sealed class BrowserSession : IAsyncDisposable
         if (running.IsCompleted) note = await running.ConfigureAwait(false);
         else _ = running.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
         string? navigatedTo = null;
+        var stillLoading = false;
         try
         {
             var start = TimeSpan.FromMilliseconds(100 * state.CpuMultiplier);
@@ -609,7 +613,8 @@ internal sealed class BrowserSession : IAsyncDisposable
         }
         catch (BrowserToolException exception) when (exception.Code == "timeout")
         {
-            navigatedTo = page.Url;
+            // The URL of the page is still the one of the document it shows, often the page the action left.
+            stillLoading = true;
         }
 
         var openedDialog = !hadDialog && page.Dialog is not null;
@@ -629,7 +634,7 @@ internal sealed class BrowserSession : IAsyncDisposable
 
         // The document the action led to shows it too, until the agent has not acted for a while.
         if (!page.IsClosed) await ShowActivityAsync(page, cancellationToken).ConfigureAwait(false);
-        return new ActionOutcome(navigatedTo, openedDialog, note);
+        return new ActionOutcome(navigatedTo, stillLoading, openedDialog, note);
     }
 
     // Shows the user that the agent acts in a tab, in a browser that has a window; it never fails the action.

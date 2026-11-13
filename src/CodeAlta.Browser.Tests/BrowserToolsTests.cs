@@ -198,11 +198,13 @@ public abstract class BrowserToolsTests
         var popup = await WaitForPopupAsync(session, await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Open in a new tab\"")}}"}"""));
         StringAssert.Contains(popup, "## Opened pages");
 
-        var link = await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Go to the second page\"")}}"}""");
-        StringAssert.Contains(link, "Page navigated to");
-        StringAssert.Contains(link, "/second");
+        await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Go to the second page\"")}}"}""");
+        // A loaded machine can take longer to load the page than the click waits for it: its answer then says the
+        // page is still loading (see ALinkToASlowPage_SaysItsPageIsStillLoading).
+        await session.OkAsync("wait_for", $$"""{"text":["The second page"],"timeout":{{(int)BrowserToolTesting.Deadline.TotalMilliseconds}}}""");
 
         var pages = await session.OkAsync("list_pages");
+        StringAssert.Contains(pages, Host.Site.Url("/second"));
         StringAssert.Contains(pages, "2: ");
         StringAssert.Contains(await session.OkAsync("select_page", """{"pageId":2}"""), "[selected]");
         StringAssert.Contains(await session.OkAsync("close_page", """{"pageId":2}"""), "## Pages");
@@ -211,6 +213,23 @@ public abstract class BrowserToolsTests
         StringAssert.Contains(await session.OkAsync("navigate_page", """{"type":"back"}"""), "Successfully navigated back to");
         StringAssert.Contains(await session.OkAsync("navigate_page", """{"type":"reload"}"""), "Successfully reloaded the page.");
         StringAssert.Contains(await session.OkAsync("new_page", $$"""{"url":"{{Host.Site.Url("/second")}}"}"""), "Second page");
+    }
+
+    [TestMethod]
+    public async Task ALinkToASlowPage_SaysItsPageIsStillLoading()
+    {
+        await using var session = Host.NewSession();
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/to-slow")}}"}""");
+        var snapshot = await session.OkAsync("take_snapshot");
+
+        // The slow page answers after 5 s, longer than the 3 s a click waits for the page it leads to.
+        var answer = await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Go to the slow page\"")}}"}""");
+
+        // It says the page is still loading when it saw the navigation start, which a loaded machine may show later
+        // than the click looks for it; it never names a page it did not load, such as the one it left.
+        Assert.IsFalse(answer.Contains("Page navigated to", StringComparison.Ordinal), answer);
+        await session.OkAsync("wait_for", $$"""{"text":["The slow page"],"timeout":{{(int)BrowserToolTesting.Deadline.TotalMilliseconds}}}""");
+        StringAssert.Contains(await session.OkAsync("list_pages"), Host.Site.Url("/slow"));
     }
 
     [TestMethod]
