@@ -143,6 +143,17 @@
 .work-detail-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .work-runs-with { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .work-runs-with-label { display: inline-flex; align-items: center; gap: 5px; margin-right: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+/* In a card: the label over a smaller chip, which opens the whole form. As in a narrow prompt, the effort and the name of the
+   provider are left to the title and the form: the agent and the model, with its tier, keep the room. */
+.work-runs-with[data-compact] { flex-direction: column; align-items: flex-start; gap: 2px; }
+.work-runs-with[data-compact] > :last-child { max-width: 100%; min-width: 0; }
+.work-runs-with[data-compact] .composer-selection { min-width: 0; max-width: 100%; min-height: 24px; padding-block: 1px; font-size: 12px; }
+.work-runs-with[data-compact] :is(.composer-selection-reasoning, .composer-selection-provider) { display: none; }
+.work-runs-with[data-compact] .composer-selection-part { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.work-runs-with[data-compact] .composer-selection-agent { max-width: 45%; }
+.work-runs-with[data-compact] .composer-selection-model { flex-shrink: 1000; }
+.work-runs-with[data-compact] .composer-selection-permission { flex: none; }
+.work-runs-with[data-compact] .composer-selection-part > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-settings-default { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; font-size: 12.5px; }
 .work-settings-default > span { overflow-wrap: anywhere; text-align: right; }
 .work-detail-spacer { flex: 1; }

@@ -73,6 +73,18 @@ export function chooseEffort(settings: SessionSettings, effort: string, shown: S
 }
 
 /**
+ * What a start asks of a host that takes a tier of models: the tier (`complex`, `standard`, `quick`), or Adaptive
+ * (`adaptive`, `adaptive:<level>`), gives the model, which the request then leaves to the host; null for a model.
+ */
+export type TieredStartRequest = SessionStartRequest & Readonly<{ tier?: string | null }>;
+
+/** What a start asks of a host that takes a tier: the tier chosen, with the other choices of the form, else what {@link startRequest} asks. */
+export function tieredStartRequest(settings: SessionSettings, shown: ShownModel, tier: string | null): TieredStartRequest {
+  if (!tier) return { ...startRequest(settings, shown), tier: null };
+  return { ...settings, providerId: null, modelId: null, reasoningEffort: null, tier };
+}
+
+/**
  * What a start asks of the host: nothing of the model with the defaults, which the host resolves as the form shows
  * them; otherwise the provider, the model and the effort the form shows.
  */

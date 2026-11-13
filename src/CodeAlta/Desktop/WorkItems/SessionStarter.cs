@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Orchestration.Hosting;
@@ -66,11 +67,14 @@ internal sealed class SessionStarter : ISessionStarter
 
             // What the user chose comes first, then the session that shows the item, then the session that proposed
             // it; without any of them, the default provider of the configuration, as for a new session.
+            // A session that shows the work and runs on a tier, or on Adaptive, gives it to the new session with its model.
             WorkItemSelection? like = null;
-            if (model?.Asked is null && !string.IsNullOrWhiteSpace(likeSessionId)
+            SessionStartTier? likeTier = null;
+            if (model?.Asked is null && model?.Tier is null && !string.IsNullOrWhiteSpace(likeSessionId)
                 && (await _host.Commands.GetObservedSelectionChoicesAsync(likeSessionId, CancellationToken.None).ConfigureAwait(false))?.Current is { } current)
             {
                 like = new(current.ProviderKey, current.ModelId, current.ModelId is null ? null : current.ReasoningEffort?.ToString().ToLowerInvariant());
+                likeTier = await TierOfAsync(likeSessionId).ConfigureAwait(false);
             }
 
             // The session is in the space the window shows: it starts with a provider of that space. One the user
@@ -80,15 +84,26 @@ internal sealed class SessionStarter : ISessionStarter
             var inSpace = new SpaceFilter(new CachedSpaceAssignments(new CodeAltaConfigStore(_host.CatalogOptions)).Current(), spaceId);
             if (model?.Asked is { ProviderKey: { Length: > 0 } askedKey } && !inSpace.Allows(SpaceResourceKind.Provider, askedKey))
                 return Refuse($"The provider '{askedKey}' is not available in the space '{spaceId}'.");
+            // A tier the user chose gives the model, as the tiers of the space give it now.
+            var asked = model?.Asked;
+            if (model?.Tier is { } askedTier && asked is null)
+            {
+                var resolved = await TierModelAsync(askedTier, spaceId, project.Id).ConfigureAwait(false);
+                if (resolved.Problem is { } problem) return Refuse(problem);
+                asked = resolved.Selection;
+            }
+
             var choice = await SessionStartChoice.ChooseAsync(
                     [.. _host.ModelProviderRegistry.ListProviders().Where(candidate => inSpace.Allows(SpaceResourceKind.Provider, candidate.ProviderId.Value))],
                     new CodeAltaConfigStore(_host.CatalogOptions).GetEffectiveDefaultProvider(project.ProjectPath),
-                    model?.Asked,
+                    asked,
                     like,
                     model?.Recorded,
                     providerId => _host.ModelProviderInitializationService.GetModelsAsync(providerId, CancellationToken.None))
                 .ConfigureAwait(false);
             if (choice.Provider is not { } provider) return Refuse(choice.Problem ?? "No model provider is enabled.");
+            // The tier of that session goes with its model only: a session that starts on another provider has none.
+            if (likeTier is not null && !string.Equals(like?.ProviderKey, provider.ProviderId.Value, StringComparison.OrdinalIgnoreCase)) likeTier = null;
 
             // The agent the space of the session starts its new sessions with, else the default one.
             var drafts = await _host.Commands.GetDraftPromptsAsync(new(project.Id, project.ProjectPath), space, CancellationToken.None).ConfigureAwait(false);
@@ -126,6 +141,10 @@ internal sealed class SessionStarter : ISessionStarter
             if (model?.Sandbox is { } sandbox
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, CancellationToken.None).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The session was created, but its sandbox '{sandbox}' could not be chosen ({sandboxed}).");
+            // The tier, or Adaptive, before the first prompt, which then runs on it: a tier the user chose is required, the one
+            // of the session that shows the work is taken when it can be.
+            if ((model?.Tier ?? likeTier) is { } tier && await PutOnTierAsync(sessionId, tier).ConfigureAwait(false) is { } notOnTier && model?.Tier is not null)
+                return new(sessionId, $"The session was created, but it could not be put on {tier.Name} ({notOnTier}).");
             // A script of the library runs through exec, which the session then has whatever the setting of Code Mode says.
             if (model?.CodeMode == true) _host.CodeModeRuns.RequireCodeMode(sessionId);
             // The host completes what the choice leaves to the provider and to the model.
@@ -153,6 +172,47 @@ internal sealed class SessionStarter : ISessionStarter
         }
 
         static SessionStartResult Refuse(string problem) => new(null, problem);
+    }
+
+    // The tier, or Adaptive with its level, a session runs on; null for a model chosen by hand or a session that is gone.
+    private async Task<SessionStartTier?> TierOfAsync(string sessionId)
+    {
+        var (tier, adaptive) = await _host.RuntimeService.GetSessionModelChoiceAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        if (adaptive) return new(null, true, await _host.RuntimeService.GetSessionAdaptiveLevelAsync(sessionId, CancellationToken.None).ConfigureAwait(false));
+        return tier is { } chosen ? new(chosen, false, null) : null;
+    }
+
+    // The model a new session on a tier starts with: the first ready one of the tier, or the one of the level of Adaptive, in
+    // the tiers of the space, as `alta session create --tier` and the composer take it.
+    private async Task<(WorkItemSelection? Selection, string? Problem)> TierModelAsync(SessionStartTier tier, string? spaceId, string projectId)
+    {
+        var scope = await _host.RuntimeService.LoadModelTierScopeAsync(spaceId, projectId, CancellationToken.None).ConfigureAwait(false);
+        if (tier.Adaptive)
+        {
+            return scope.IsAdaptiveReady && scope.Adaptive!.Resolve(tier.Level) is { } level
+                ? (Selection(level.Model.ProviderKey, level.Model.ModelId, level.Model.PreferredReasoning), null)
+                : (null, "Adaptive is not set up: give its levels a model in Settings > Models.");
+        }
+
+        var name = ModelTiers.NameOf(tier.Tier!.Value);
+        var targets = scope.Tiers.Get(tier.Tier.Value);
+        if (targets.Count == 0) return (null, $"The {name} tier has no model: set the tiers in Settings > Models.");
+        return ModelTierSelection.SelectForNewSession(scope, tier.Tier.Value, _host.ModelProviderInitializationService.CurrentStates,
+                key => _host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(key), out var descriptor) ? descriptor : null, requestedReasoning: null) is { } choice
+            ? (Selection(choice.ProviderKey, choice.ModelId, choice.Reasoning), null)
+            : (null, $"No model of the {name} tier is ready ({string.Join(", ", targets.Select(static target => target.Format()))}).");
+
+        static WorkItemSelection Selection(string providerKey, string modelId, AgentReasoningEffort? effort)
+            => new(providerKey, modelId, effort?.ToString().ToLowerInvariant());
+    }
+
+    // Puts a new session on its tier, or on Adaptive: null when it is there, else what the host answered.
+    private async Task<string?> PutOnTierAsync(string sessionId, SessionStartTier tier)
+    {
+        var status = tier.Adaptive
+            ? (await _host.Commands.SetSessionAdaptiveAsync(sessionId, tier.Level, CancellationToken.None).ConfigureAwait(false)).Status
+            : await _host.Commands.SetSessionTierAsync(sessionId, tier.Tier, CancellationToken.None).ConfigureAwait(false);
+        return status == "ok" ? null : status;
     }
 
     // Moves the checkout of the project to a new branch for the work, or says why not: never under a session at work in

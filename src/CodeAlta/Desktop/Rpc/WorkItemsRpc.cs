@@ -129,7 +129,9 @@ internal sealed class WorkItemsService
             || request.ModelId is not null && (request.ProviderId is null || !Identifier(request.ModelId))
             || request.ReasoningEffort is not null && (request.ModelId is null || !Identifier(request.ReasoningEffort))
             || request.PermissionMode is not null && !Identifier(request.PermissionMode) || request.Sandbox is not null && !Identifier(request.Sandbox)
-            || request.AgentPromptId is not null && !Identifier(request.AgentPromptId)) return new("invalid_request");
+            || request.AgentPromptId is not null && !Identifier(request.AgentPromptId)
+            // A tier gives the model: the request names one or the other.
+            || request.Tier is not null && (request.ProviderId is not null || SessionStartTier.Parse(request.Tier) is null)) return new("invalid_request");
         if (await ProjectAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
         var task = request.Kind == WorkItemKinds.Task;
         var exists = task ? _items!.GetTask(project, request.Id) is not null : _items!.GetPlan(project, request.Id) is not null;
@@ -162,7 +164,7 @@ internal sealed class WorkItemsService
                 // The session is created whether or not the page still waits: it is told when it lists again.
                 var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
                 var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox,
-                    SessionOptionsChoice.Record(request.Options));
+                    SessionOptionsChoice.Record(request.Options), SessionStartTier.Parse(request.Tier));
                 var started = await _runner!.StartAsync(project, request.Kind, request.Id, request.Action == "start_worktree", request.SessionId, asked, settings).ConfigureAwait(false);
                 return started.Problem is null ? new("ok") { SessionId = started.SessionId }
                     : new("refused") { SessionId = started.SessionId, Message = started.Problem, Reason = started.Reason };
@@ -404,9 +406,14 @@ internal sealed record WorkItemReadResponse(string Status, string? Markdown, boo
 /// <param name="ReviewBeforeCommit">Whether the user reviews the changes of a new session before a commit; null follows the setting.</param>
 /// <param name="Sandbox">The sandbox of a new session, a profile or <c>off</c>; null for what the settings give.</param>
 /// <param name="Options">The options of a new session, such as whether it can start sessions of its own; null for the defaults.</param>
+/// <param name="Tier">
+/// The tier of models a new session starts and runs on (<c>complex</c>, <c>standard</c>, <c>quick</c>), or Adaptive (<c>adaptive</c>,
+/// <c>adaptive:&lt;level&gt;</c>), which gives its model; null for the model of <paramref name="ProviderId"/>, else the tier and the model of the showing session.
+/// </param>
 internal sealed record WorkItemActionRequest(string? ExpectedEpoch, string ProjectId, string Kind, string Id, string Action, string? Value = null,
     string? SessionId = null, string? WorkingDirectory = null, string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null,
-    string? AgentPromptId = null, string? PermissionMode = null, bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null);
+    string? AgentPromptId = null, string? PermissionMode = null, bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null,
+    string? Tier = null);
 
 /// <param name="Status"><c>ok</c>, <c>refused</c> (with a message), <c>not_found</c>, <c>write_failed</c>, <c>invalid_request</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>
 internal sealed record WorkItemActionResponse(string Status)

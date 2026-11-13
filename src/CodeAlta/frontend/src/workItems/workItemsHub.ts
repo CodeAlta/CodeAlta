@@ -1,7 +1,7 @@
 // The page's link to the work items of the application: what they are now, and the calls that change them.
 import type { workItems, WorkItemActionResponse, WorkItemsProject, WorkItemsSettings } from "#neoastra";
 import { storedSessionOptions } from "../sessionSettings/sessionOptions";
-import type { SessionStartRequest } from "../sessionSettings/sessionSettings";
+import type { TieredStartRequest } from "../sessionSettings/sessionSettings";
 import { defaultWorkSettings, type WorkKind } from "./workItems";
 
 export type WorkItemsApi = Pick<typeof workItems, "list" | "read" | "act" | "tag" | "saveSettings" | "watch">;
@@ -105,7 +105,7 @@ export function createWorkItemsHub(api: WorkItemsApi, timers: Timers = { set: (r
     try { await ask(host, [projectId], () => true); } catch { /* Read again at the next reading. */ }
   }
 
-  async function act(target: WorkItemTarget, action: string, more: Readonly<{ value?: string; sessionId?: string | null; workingDirectory?: string | null; start?: SessionStartRequest | null }> = {}): Promise<WorkItemOutcome> {
+  async function act(target: WorkItemTarget, action: string, more: Readonly<{ value?: string; sessionId?: string | null; workingDirectory?: string | null; start?: TieredStartRequest | null }> = {}): Promise<WorkItemOutcome> {
     const host = epoch;
     if (!host) return failed;
     const start = more.start;
@@ -116,7 +116,8 @@ export function createWorkItemsHub(api: WorkItemsApi, timers: Timers = { set: (r
         providerId: start?.providerId ?? null, modelId: start?.providerId ? start.modelId : null,
         reasoningEffort: start?.providerId && start.modelId ? start.reasoningEffort : null, agentPromptId: start?.agentPromptId ?? null,
         permissionMode: start?.permissionMode ?? null, reviewBeforeCommit: start?.reviewBeforeCommit ?? null, sandbox: start?.sandbox ?? null,
-        options: storedSessionOptions(start?.options) }, { timeoutMilliseconds: 600_000 });
+        // A tier gives the model: the request names one or the other.
+        options: storedSessionOptions(start?.options), tier: start?.providerId ? null : start?.tier ?? null }, { timeoutMilliseconds: 600_000 });
       await readProject(target.projectId);
       return { ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, reason: reply.reason ?? null, sessionId: reply.sessionId ?? null,
         prompt: reply.prompt ?? null, agentPromptId: reply.agentPromptId ?? null };

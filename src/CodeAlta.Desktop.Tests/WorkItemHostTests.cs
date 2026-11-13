@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.WorkItems;
@@ -339,6 +340,19 @@ public sealed class WorkItemHostTests
             ReviewBeforeCommit: true, Sandbox: "off"), default)).Status);
         Assert.AreEqual(new SessionStartSettings("plan", "acceptEdits", true, "off"), fixture.Runner.Settings[^1]);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", Sandbox: "of\nf"), default)).Status);
+
+        // A tier, or Adaptive at a level, gives the model, with the agent the user chose.
+        Assert.AreEqual("ok", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_worktree", AgentPromptId: "orchestrator", Tier: "complex"), default)).Status);
+        Assert.AreEqual(new SessionStartSettings("orchestrator", null, null, null) { Tier = new(ModelTier.Complex, false, null) }, fixture.Runner.Settings[^1]);
+        Assert.IsNull(fixture.Runner.Asked[^1]);
+        Assert.AreEqual("ok", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", Tier: "adaptive:high"), default)).Status);
+        Assert.AreEqual(new SessionStartSettings(null, null, null, null) { Tier = new(null, true, AdaptiveLevel.High) }, fixture.Runner.Settings[^1]);
+        Assert.AreEqual("ok", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", Tier: "Adaptive"), default)).Status);
+        Assert.AreEqual(new SessionStartTier(null, true, null), fixture.Runner.Settings[^1]!.Tier);
+        // A tier is not a model, and not something else.
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", ProviderId: "anthropic", Tier: "quick"), default)).Status);
+        foreach (var invalid in new[] { "fast", "adaptive:extreme", "adaptive:", "" })
+            Assert.AreEqual("invalid_request", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", Tier: invalid), default)).Status, invalid);
     }
 
     [TestMethod]
@@ -357,6 +371,12 @@ public sealed class WorkItemHostTests
         await runner.StartAsync(fixture.Project, "task", id, worktree: true, likeSessionId: null, asked: new("anthropic", "claude"), settings: new("reviewer", "plan", false, "strict"));
         Assert.AreEqual((null, new WorkItemSelection("anthropic", "claude"), new WorkItemSelection("codex", "gpt-a", "high")), (starter.Like, starter.Model!.Asked, starter.Model.Recorded));
         Assert.AreEqual(("reviewer", "plan", (bool?)false, "strict"), (starter.Model.AgentPromptId, starter.Model.PermissionMode, starter.Model.ReviewBeforeCommit, starter.Model.Sandbox));
+        Assert.IsNull(starter.Model.Tier);
+
+        // A tier the user chose goes to the starter, which takes the model from it.
+        await runner.StartAsync(fixture.Project, "task", id, worktree: true, likeSessionId: "session-1", asked: null,
+            settings: new("orchestrator", null, null, null) { Tier = new(ModelTier.Quick, false, null) });
+        Assert.AreEqual(("orchestrator", new SessionStartTier(ModelTier.Quick, false, null)), (starter.Model!.AgentPromptId, starter.Model.Tier));
     }
 
     private sealed class RecordingStarter : ISessionStarter

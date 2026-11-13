@@ -34,7 +34,11 @@ test("mounted production Notes and proposal overlays cooperate without replacing
   const root = await mkdtemp(join(tmpdir(), "codealta-session-overlays-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
-    await build({ entryPoints: [fileURLToPath(new URL("./sessionOverlays.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
+    // The cards read the tiers of models through the host: the fixture has the inert services of the demo.
+    await build({ entryPoints: [fileURLToPath(new URL("./sessionOverlays.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
+      plugins: [{ name: "inert-host", setup(bundle) {
+        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./demo-api.ts", import.meta.url)) }));
+      } }] });
     const styles = await Promise.all(["../node_modules/@blueprintjs/core/lib/css/blueprint.css", "./style.css", "./workItems/workItems.css"].map(path => readFile(new URL(path, import.meta.url), "utf8")));
     await writeFile(join(root, "style.css"), styles.join("\n"));
     await writeFile(join(root, "fixture.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
