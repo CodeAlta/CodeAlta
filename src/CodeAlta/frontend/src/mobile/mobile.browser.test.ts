@@ -287,7 +287,8 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     // Stop: one tap, "Stopping…" until the session is idle.
     await click("#abort");
     await waitFor(`document.querySelector('#abort span').textContent === "Stopping…"`, "Stopping…");
-    assert.equal(count("POST", "/api/sessions/s1/abort"), 1);
+    // The button says so before its request goes out.
+    await waitUntil(() => count("POST", "/api/sessions/s1/abort") === 1, "the stop request");
     server.push({ id: "s1", projectId: "p1", live: "idle", kind: "assistant", line: "Stopped.", at: new Date().toISOString(), activity: null, canSteer: false });
     await waitFor(`!(${shown("#abort")})`, "Stop leaves with the turn");
 
