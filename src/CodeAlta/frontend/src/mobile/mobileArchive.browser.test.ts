@@ -49,8 +49,12 @@ test("archiving asks about descendants even outside the loaded page and restores
     await click('.row[data-id="parent"] .card-archive');
     await waitFor('!document.getElementById("archive-sheet").hidden', "archive question third time");
     await click("#archive-yes");
-    await waitFor('document.querySelector("#toast .toast-text").textContent.startsWith("Archived")', "archived family");
-    assert.equal(server.requests.filter(r => r.path === "/api/sessions/parent/archive").at(-1)?.query, "?withChildren=true");
+    // The request itself: the toast of the archive before, hidden by the restore, still says "Archived".
+    const archives = () => server.requests.filter(r => r.path === "/api/sessions/parent/archive");
+    for (const deadline = Date.now() + testLimit(8000); archives().length < 2 && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(archives().length, 2, "the family is archived");
+    assert.equal(archives().at(-1)?.query, "?withChildren=true");
+    await waitFor('!document.getElementById("toast").hidden && document.querySelector("#toast .toast-text").textContent.startsWith("Archived")', "archived family");
     await waitFor(`!document.querySelector('.row[data-id="parent"]') && !document.querySelector('.row[data-id="child"]')`, "family out of the list");
     await click("#toast button");
     await waitFor(`document.querySelector('.row[data-id="parent"]')`, "restored family");
