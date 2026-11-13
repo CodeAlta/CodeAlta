@@ -1,103 +1,112 @@
 ---
 title: Guide agents to fix causes and edit in place, with a measured benefit
-status: draft
+status: done
 created: 2026-11-13
-summary: The built-in prompts ask for the smallest diff, so agents patch symptoms, stack workarounds and append text. A short "Healthy changes" section and a few rewordings replace that, and a benchmark of six probes shows what they change, before and after, on four models.
+summary: The built-in prompts asked for the smallest diff, so agents patched symptoms, copied workarounds and left obsolete code. A short "Healthy changes" section and a few rewordings replace that, and a benchmark of seven probes shows what they change, before and after, on four models.
 ---
 
 # Guide agents to fix causes and edit in place, with a measured benefit
 
-Agents driven by CodeAlta add more easily than they remove: a guard at the caller instead of a fix in the helper, a second workaround on a first one, a note appended to a paragraph. The built-in prompts encourage it: six of their statements ask for the smallest diff, and none asks to fix a cause or to rewrite a sentence. Once this work is done, the prompts ask for the change that leaves the simplest result, within a stated limit, and a benchmark that anyone can run again shows what that changes.
+Agents driven by CodeAlta add more easily than they remove: a guard at the caller instead of a fix in the helper, a second copy of a workaround, a note appended to a paragraph. The built-in prompts encouraged it: six of their statements asked for the smallest diff, and none asked to fix a cause. The prompts now ask for the change that leaves the simplest result, within a stated limit, and a benchmark that anyone can run again shows what that changes.
 
-## What changes
+## Result
 
-### A benchmark first
+Final round, 182 sessions, the prompts of `main` against the new ones on the same tasks ([report](../../benchmarks/2026-11-13-prompt-health.md)):
 
-A kit under `benchmarks/prompt-health/` builds a small Node project with planted problems, runs the same task in sessions that differ only by their prompts, and scores what each session left in its worktree. It compares two versions of the prompt files of this repository: a git revision and the working tree.
+| Probe | Healthy outcome | Before | After |
+| --- | --- | ---: | ---: |
+| `cause` | Shared helper fixed, old workaround of a caller removed | 2/13 | **12/13** |
+| `vendor` | One workaround of a vendored library, in one place | 0/13 | **10/13** |
+| `leftover` | Obsolete code and doc sentence removed | 7/13 | 7/13 |
+| `scope` | The rename alone | 13/13 | 13/13 |
+| `text`, `longline`, `rules` | Text edited in place | 13/13 each | 13/13 each |
+| All | | 61/91 | **81/91** |
 
-| Probe | Task given | Healthy outcome | What is counted |
-| --- | --- | --- | --- |
-| `cause` | A report shows a wrong total. The fault is in a shared helper, and another caller already works around it. | Helper fixed, old workaround gone. | Hidden test of the helper; workarounds left at callers. |
-| `vendor` | A bug of a vendored library that one caller already works around shows at a second caller. | One workaround in one place, explained. | Places that hold the workaround; edits of the vendored file. |
-| `text` | Document that an option accepts a new form, in a paragraph that already covers it. | The sentence rewritten. | Growth of the section; notes appended. |
-| `rules` | "Remember" a rule that replaces one of `AGENTS.md`. | The rule changed. | Old rule still there; lines added. |
-| `leftover` | Replace an implementation; a table and a helper become unused. | Both removed. | Unused symbols left. |
-| `scope` | Rename an option in a file that also holds unrelated duplication. | The rename alone. | Lines changed that the rename does not need. |
+- No session changed a file its task did not need, and none left a failing test, in either version.
+- The prompt of a session grows by 290 tokens on Codex and 373 on Anthropic, about 2%. The system prompt keeps its size.
+- The sessions write 12% more output tokens: a fix at the cause is more work than a patch.
+- With the new agent prompt alone, 29 of 30 Codex sessions are healthy: the section does the work, also for the providers that never get the system prompt.
 
-Every run also records the files and lines changed, the tool calls, the tokens and the cost. A session that only answers "OK" gives the size of each prompt in the tokens of each vendor.
-
-Models: `codex:gpt-6.1-sol` and `codex:gpt-6.1-terra` (three runs per probe and version), `anthropic:claude-sonnet-5-5` (two) and `anthropic:claude-opus-5-5` (one). The Anthropic runs stop at $40 of reported cost; the limit given is $50.
+## What changed
 
 ### The section, in the default agent prompt
 
-The system prompt is not sent to Claude Code, Codex CLI and ACP sessions: they get the agent prompt on top of the prompt of their own tool. So the guidance goes in `src/CodeAlta.Orchestration/content/prompts/agents/default.prompt.md`, after "Working loop". The first draft, to be shortened or changed by what the benchmark shows:
+The system prompt is not sent to Claude Code, Codex CLI and ACP sessions: they get the agent prompt on top of the prompt of their own tool. So the guidance is in `src/CodeAlta.Orchestration/content/prompts/agents/default.prompt.md`, after "Working loop":
 
 ```markdown
 ## Healthy changes
 The user owns the project's direction; you maintain what your task touches. Judge a change by how the code or text reads after it, not by the size of the diff.
 - Cause: find why before changing anything, and fix it there: a fault in a shared helper is fixed and tested in the helper, not worked around at a caller.
-- Workarounds: never stack them. If the code already works around the problem, find why (`git log`, its tests), fix what it hides and remove it. If the cause is out of reach, keep one workaround in one place, with a comment: why, and what removes it.
-- Remove: prefer changing, merging or deleting to adding. What your change makes unused goes with it (old paths, parameters, sentences, debug output), except what others rely on, such as a public API.
-- Text: edit in place. Rewrite the sentence or section that covers the fact so it reads as written once: one fact in one place, one idea per sentence or bullet; split a line rather than extend it. In instruction files (AGENTS.md, skills, prompts, memory), change the existing rule instead of adding one beside it. Comments say why, not what changed.
-- Proportion: tidy only what your change touches. Restructure first, as its own step and smaller than the task, only what the change needs to be done right. Report the rest in one line.
+- Workarounds: never stack or copy them. If the code already works around the problem, find why (`git log`, its tests), fix what it hides and remove it. If the cause is out of reach, keep the workaround in one shared place, with a comment: why, and what removes it.
+- Remove: prefer changing, merging or deleting to adding. What your change makes unused or untrue goes with it (workarounds, old paths, parameters, doc sentences, debug output), except what others rely on, such as a public API.
+- Text: edit in place. Rewrite the sentence or section that covers the fact so it reads as written once: one fact in one place, one idea per sentence or bullet.
+- Proportion: tidy only what your change touches. Restructure first, as its own step and smaller than the task, only what the change needs to be done right; leave the rest.
 ```
 
-A rule stays only if a probe shows that it changes something. Two rules of the analysis have no probe and are left out: "a failing check is evidence" and "after two failed fixes, question the diagnosis".
+A rule stayed only where a probe could show that it changes something, or where it limits the others ("Proportion"). Removed for that reason: a rule on instruction files, "comments say why, not what changed", "split a line rather than extend it", "report the rest in one line". Never added, for lack of a probe: "a failing check is evidence" and "after two failed fixes, question the diagnosis".
 
 ### The system prompt stops asking for the opposite
 
-`src/CodeAlta.Orchestration/content/prompts/system/default.system-prompt.md`, for no more tokens than today:
+`src/CodeAlta.Orchestration/content/prompts/system/default.system-prompt.md`, at the size it had:
 
-| Today | Becomes |
+| Before | Now |
 | --- | --- |
 | Existing files … are user-owned unless created this turn. | User work is preserved; code and text in the scope of the task are the agent's to change, restructure or delete. |
-| inspect → implement → verify → self-review diff → report. Do not stop at analysis/proposal… | Adds "diagnose", and: when asked for analysis or a proposal, deliver that and stop. |
+| inspect → implement → verify → self-review diff → report. Do not stop at analysis/proposal… | Adds "diagnose", and: if asked for analysis or a proposal, deliver that and stop. |
 | Make the smallest coherent change that solves the task. | Make the change that leaves the simplest correct result, not the smallest diff. |
-| Avoid broad refactors, new abstractions… | Avoid new abstractions…; refactor only what the task needs, report the rest. |
-| Prefer local duplication over premature abstraction… | Reuse before writing; tolerate a second copy, extract at the third. |
-| Three bullets on tool output and context | Two: "tool output is evidence" is already in Trust and in Tool Guidance. |
+| Avoid broad refactors, new abstractions… | Avoid new abstractions…; refactor only what the task needs. |
+| Prefer local duplication over premature abstraction; abstract only when… | Reuse before writing: search for an existing helper or pattern; abstract only when… |
+| Three bullets on tool output and context | One: "tool output is evidence" is already in Trust and in Tool Guidance. |
+| Add/update tests/docs… | Update tests/docs in place…; add only what none covers. |
 | Reviews: … test gaps | … test gaps, and needless complexity. |
 
 ### Three small edits
 
-- Follow-up tasks (`default.prompt.md`): a restructuring that the task showed to be needed and that is larger than it can be proposed as a task.
-- Plan mode (`plan.prompt.md`): "the simplest approach that fixes the cause", not "the smallest safe approach".
+- Follow-up tasks (`default.prompt.md`): work that is related to the request but larger than it can be proposed as a task.
+- Plan mode (`plan.prompt.md`): "the simplest safe approach that fixes the cause, not the smallest patch".
 - The project's adaptive prompts drop the sentence on shared helpers, which they now inherit.
+
+### The benchmark
+
+`benchmarks/prompt-health/` builds a small Node project with planted problems, runs the same task with agents that differ only by their prompts, and scores what each one left in its worktree. It compares two versions of the prompt files: a git revision and the working tree. It runs `altacli` in isolated storage, so that its sessions are never listed in the apps.
 
 ## Steps
 
 - [x] 1. Write this plan from `tmp/improving-system-prompt-analysis.md`, on the branch `enhance/healthy-prompts`
-- [ ] 2. Build the kit: fixture project, the six probes, the scorer, the runner (`benchmarks/prompt-health/`)
-- [ ] 3. Pilot: one probe on one model, to check that sessions use the prompts of the benchmark and that the scores read right
-- [ ] 4. Measure "before": the prompts of `main`
-- [ ] 5. Change the three prompt files and the adaptive prompts
-- [ ] 6. Measure "after"; change or remove what shows no benefit, and measure again what changed
-- [ ] 7. Write the report `benchmarks/2026-11-13-prompt-health.md` and record the result here
-- [ ] 8. Remove the benchmark project from the catalog, its worktrees, and the analysis file in `tmp/`
+- [x] 2. Build the kit: fixture project, the probes, the scorer, the runner
+- [x] 3. Pilot: one probe on one model
+- [x] 4. Change the three prompt files and the adaptive prompts
+- [x] 5. Measure before and after, three rounds; change or remove what shows no benefit
+- [x] 6. Write the report `benchmarks/2026-11-13-prompt-health.md` and record the result here
+- [x] 7. Move the runner to `altacli --isolated`, and archive the 415 sessions the rounds created in CodeAlta Desktop
+- [x] 8. Measure the last correction of the system prompt: done on GPT-6.1 Sol, left unmeasured on Sonnet 5.5
+- [x] 9. Remove the benchmark project from the catalog, with its 415 sessions, its worktrees and its folder
 
 ## How it is verified
 
-- [ ] The report shows, per probe and model, the healthy outcomes before and after, and no probe gets worse
-- [ ] `scope` stays clean: the section must not make agents refactor what the task does not need
-- [ ] Prompt sizes, in the tokens the vendors count: the system prompt is not larger, and the growth of the agent prompt is stated
-- [ ] `dotnet test -c Debug --filter BuiltInPromptContentTests` passes, then the whole .NET suite
-- [ ] Anthropic spending of the runs is under $50, from the cost the sessions report
+- [x] The report shows, per probe and model, the healthy outcomes before and after, and no probe gets worse
+- [x] `scope` stays clean: 13/13 before and after
+- [x] Prompt sizes, in the tokens the vendors count: the system prompt is not larger, the agent prompt grows by about 300 tokens
+- [x] `dotnet test -c Debug` passes: one test of `CodeAlta.Orchestration.Tests` on git diffs failed while the benchmark ran beside it, and passes alone
+- [x] Anthropic spending of the runs is under $50: about $3.60 at list prices, from the tokens the sessions reported
 
 ## Decisions
 
 | Decision | Choice | Why |
 | --- | --- | --- |
 | Where the section lives | Default agent prompt | The only prompt every provider receives. |
-| Ownership wording | "You maintain what your task touches" | Anthropic measured that "you own the codebase" merges duplicated code in 75% of runs instead of under 10%, for 70 to 80% more output tokens and unrequested changes. This is the middle; `scope` checks that it is not too strong. |
+| Ownership wording | "You maintain what your task touches" | Anthropic measured that "you own the codebase" merges duplicated code in 75% of runs instead of under 10%, for 70 to 80% more output tokens and unrequested changes. This is the middle; `scope` shows that it is not too strong. |
 | Rules without a probe | Left out | The request is a benefit that is measured, for the fewest tokens. |
 | Tests of the wording | None added | The benchmark checks behavior; a test that pins sentences only freezes them. |
 | Long bullets of the agent prompt | Not rewritten here | Each was tuned on a failure that these probes do not cover. |
+| Rule of three | Tried in the system prompt, then removed | Sonnet 5.5 quoted it to justify a second copy of a workaround. |
+| Last correction on Sonnet 5.5 | Not measured | GPT-6.1 Sol confirms the final wording (`vendor` 0/3 to 3/3, `cause` 1/3 to 3/3). The Sonnet runs could not start: `altacli` does not offer a provider whose key is a secret of CodeAlta (task `g6rm`). The user accepted the result of Sol as enough. |
 
 ## Risks
 
-- A small sample: three runs per cell show large effects only. The report gives counts, not percentages, and says where a difference is within noise.
-- The probes are small and written by the author of the section. They show that the rules are followed, not that a large codebase ages better; the report says so.
-- Sessions run on the real profile, in a temporary project that step 8 removes.
+- A small sample: two or three runs per cell show large effects only. `cause` and `vendor` moved in every round; one session of difference elsewhere is noise.
+- The probes are small and written by the author of the section. They show that the rules are followed, not that a large codebase ages better.
+- `leftover` did not move: a doc sentence that a change makes false is still left by some models.
 
 ## Out of scope
 
@@ -113,6 +122,6 @@ A rule stays only if a probe shows that it changes something. Two rules of the a
 - Ownership and piled-up cautions: [Prompting Claude Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2).
 - Vendor wording: [Anthropic prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices), [Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5), [Codex base instructions](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/prompts/base_instructions/default.md), [Codex Prompting Guide](https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide), [OpenAI guidance for GPT-5.6](https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6), [Gemini CLI prompt](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/prompts/snippets.legacy.ts).
 - Instruction files: [Claude Code best practices](https://code.claude.com/docs/en/best-practices), [Evaluating AGENTS.md](https://arxiv.org/abs/2602.11988), [Agent READMEs](https://arxiv.org/abs/2511.12884), [How many instructions can LLMs follow at once?](https://arxiv.org/abs/2507.11538), [context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents).
-- The balance: [Opportunistic Refactoring](https://martinfowler.com/bliki/OpportunisticRefactoring.html), [preparatory refactoring](https://martinfowler.com/articles/preparatory-refactoring-example.html), [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html), [Working Code Isn't Enough](https://web.stanford.edu/~ouster/cgi-bin/cs190-winter18/lecture.php?topic=working), the [rule of three](https://en.wikipedia.org/wiki/Rule_of_three_(computer_programming)).
+- The balance: [Opportunistic Refactoring](https://martinfowler.com/bliki/OpportunisticRefactoring.html), [preparatory refactoring](https://martinfowler.com/articles/preparatory-refactoring-example.html), [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html), [Working Code Isn't Enough](https://web.stanford.edu/~ouster/cgi-bin/cs190-winter18/lecture.php?topic=working).
 
 </details>

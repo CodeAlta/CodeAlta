@@ -44,6 +44,8 @@ The agents run with `altacli`, with the providers of its user. Results: [2026-11
 
    The sessions go to the isolated storage of `altacli` (`~/.alta/cli`): CodeAlta Desktop and TUI never list them. `altacli --isolated alta session ...` reads them.
 
+   Check the providers first with `altacli models --isolated`: a provider whose key is a secret of CodeAlta (`api_key_secret`) is not offered, and its runs end at once with `provider_not_ready`.
+
 4. Summarize: `node benchmarks/prompt-health/report.mjs tmp/prompt-bench/results.jsonl`.
 
 5. Clean up: delete `<folder>`.

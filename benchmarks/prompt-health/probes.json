@@ -5,7 +5,7 @@
   },
   "vendor": {
     "task": "Importing customers loses the last customer when the file does not end with a new line. Please fix it.",
-    "allowed": ["src/importCustomers.js", "src/importOrders.js", "src/csv", "test/"]
+    "allowed": ["src/", "test/"]
   },
   "text": {
     "task": "`requestTimeout` now also accepts a duration such as `45s` or `2m` (the code and its tests are done, see `src/config.js`). Update the documentation.",
