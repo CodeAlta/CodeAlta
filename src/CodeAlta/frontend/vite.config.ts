@@ -7,6 +7,7 @@ import { scaledTextSizes } from "./src/fonts/textScale";
 import { appModuleFile, appModules } from "./src/lent/appModules";
 import { importMapText, lentLibraries } from "./src/lent/libraries";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
+import { thirdPartyNotices } from "./src/thirdPartyNotices";
 import { workletFile } from "./src/speech/workletFile";
 import { chartWorkerFile } from "./src/vegaLite/chartWorkerFile";
 
@@ -57,6 +58,20 @@ const terminalFontLicense = (): Plugin => ({
   generateBundle() {
     this.emitFile({ type: "asset", fileName: "assets/CaskaydiaCoveNerdFont-LICENSE.txt",
       source: readFileSync(fileURLToPath(new URL("./src/terminal/fonts/LICENSE.txt", import.meta.url)), "utf8") });
+  },
+});
+
+// The notices of the npm packages the bundle holds (src/thirdPartyNotices.ts), from every chunk of it (the window, the phone page, the
+// chart worker, the lent libraries) and the files it copies from packages (fonts): their licenses go where their code goes.
+const thirdPartyNoticesFile = (): Plugin => ({
+  name: "codealta:third-party-notices",
+  generateBundle(_options, bundle) {
+    const modules: string[] = [];
+    for (const output of Object.values(bundle)) {
+      if (output.type === "chunk") modules.push(...output.moduleIds);
+      else modules.push(...(output.originalFileNames ?? []));
+    }
+    this.emitFile({ type: "asset", fileName: "assets/THIRD-PARTY-NOTICES.txt", source: thirdPartyNotices(modules) });
   },
 });
 
@@ -130,7 +145,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), chartWorker(), lentModules()],
+  plugins: [blueprintPalette(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), thirdPartyNoticesFile(), speechWorklet(), chartWorker(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   // The phone page is a second document, built to dist/mobile.html; its files (manifest, icons, service worker, the script
   // that applies its theme before it paints) are in public/mobile and land in dist/mobile.
