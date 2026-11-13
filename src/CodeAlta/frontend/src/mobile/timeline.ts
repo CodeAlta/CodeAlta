@@ -238,11 +238,11 @@ export const liveBlock = (blocks: readonly TimelineBlock[], index: number, busy:
 /**
  * A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. While it
  * waits it can be taken back, by the id that names it in the queue of the session or in its run; a steered prompt `taken`
- * was found to be with the agent, and can no longer be.
+ * was found to be with the agent, and can no longer be. One an agent queued has `fromAgent`, with the session that queued it.
  */
 export type PendingPrompt = Readonly<{
   key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number; attachments?: readonly MessageAttachment[];
-  queueId?: string; withdrawalId?: string; taken?: boolean;
+  queueId?: string; withdrawalId?: string; taken?: boolean; fromAgent?: Readonly<{ sessionId: string | null }>;
 }>;
 
 /** Whether a pending prompt can still be taken back. */
@@ -265,6 +265,7 @@ export function withQueue(pending: readonly PendingPrompt[], items: readonly Que
   });
   return [...kept, ...fresh.map((item): PendingPrompt => ({
     key: `q${item.id}`, text: item.text, mode: "queue", sentAt: Date.parse(item.at ?? "") || Date.now(), after, queueId: item.id,
+    ...(item.by === "agent" ? { fromAgent: { sessionId: item.sourceSessionId ?? null } } : {}),
     ...(item.files?.length ? { attachments: item.files.map(file => ({ title: file.title, mediaType: file.mediaType ?? "application/octet-stream" })) } : {}),
   }))];
 }
@@ -286,9 +287,13 @@ export function stillPending(pending: readonly PendingPrompt[], events: readonly
   });
 }
 
-/** The message a pending prompt shows as, after the blocks of the timeline. */
+/**
+ * The message a pending prompt shows as, after the blocks of the timeline. One an agent queued is the card of the agent
+ * message it becomes once sent.
+ */
 export const pendingBlock = (prompt: PendingPrompt): MessageBlock => ({
   kind: "message", key: prompt.key, role: "user", text: prompt.text, at: new Date(prompt.sentAt).toISOString(), ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}),
+  ...(prompt.fromAgent ? { host: { kind: "agent", title: "Agent message", icon: "branch", sourceSessionId: prompt.fromAgent.sessionId, label: null, body: prompt.text } as const } : {}),
 });
 
 /** The line that says which day the blocks after it are of. */

@@ -224,6 +224,17 @@ test("a queued prompt waits as long as the queue holds it, and the queue names w
   assert.equal(withQueue([queued], [{ id: "queue-1", text: "Then the docs" }], new Set(), 5)[0], queued);
 });
 
+test("the next step an agent queued shows as the agent message it becomes, with the session that queued it", () => {
+  const [step] = withQueue([], [{ id: "queue-4", text: "Continue in the slot", by: "agent", sourceSessionId: "s1" }], new Set(), 5);
+  assert.deepEqual(step.fromAgent, { sessionId: "s1" });
+  assert.equal(canWithdraw(step), true, "it can be deleted");
+  assert.deepEqual(pendingBlock(step).host, { kind: "agent", title: "Agent message", icon: "branch", sourceSessionId: "s1", label: null, body: "Continue in the slot" });
+  // A person's queued prompt stays theirs.
+  const [own] = withQueue([], [{ id: "queue-5", text: "Then the docs", by: null }], new Set(), 5);
+  assert.equal(own.fromAgent, undefined);
+  assert.equal(pendingBlock(own).host, undefined);
+});
+
 test("a tool call says what it works on, from the first of its events that does, and the running one says it on the folded line", () => {
   seq = 0;
   const blocks = foldEvents([

@@ -673,6 +673,7 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .host-code { font: 600 .8125rem var(--code-font); }
 .host-preview { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: .8125rem; }
 .msg-host[data-open="true"] .host-preview { display: none; }
+.host-sub { display: flex; align-items: baseline; gap: .375rem; min-width: 0; }
 .host-chevron { color: var(--muted); font-size: .875rem; transition: transform .15s; } .msg-host[data-open="true"] .host-chevron { transform: rotate(90deg); }
 .chip { display: inline-flex; flex: none; align-items: center; gap: 4px; max-width: 9rem; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600;
   font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--card-color); background: color-mix(in srgb, var(--card-color) 14%, transparent); }
@@ -683,6 +684,8 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   border-radius: 0 8px 8px 0; background: transparent; color: var(--accent); font: inherit; font-size: .8125rem; cursor: pointer; }
 .host-source > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-source .ico:first-child { flex: none; }
+/* The delete button of an agent's queued step, at the end of its card. */
+.host-row > .pending-actions { flex: none; align-items: center; margin-left: 0; padding: 0 .25rem; }
 .host-body { padding: .125rem .75rem .5rem; border-top: 1px solid var(--line); }
 .host-result { color: var(--muted); font-size: .8125rem; }
 
