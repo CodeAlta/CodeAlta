@@ -2484,7 +2484,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.TitleMode = ownTitleMode is { } ownMode ? AgentSessionTitles.NameOf(ownMode) : null;
         session.TitleSource = titleSource;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
-        await UpsertSessionMetadataAsync(session, options, title, titleSource, cancellationToken).ConfigureAwait(false);
+        var recordedSummary = await UpsertSessionMetadataAsync(session, options, title, titleSource, cancellationToken).ConfigureAwait(false);
         var actor = GetActorForWork(session.SessionId);
         // Queue mutations share this mailbox. Keep the durable read/modify/append indivisible
         // with respect to them, without joining setup or retirement from inside the actor.
@@ -2561,6 +2561,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ComposedAgentPromptId = composedAgentPromptId,
         };
 
+        // A session attached again offers what its last run suggested, before the attachment observes anything, when it
+        // would be asked for one now.
+        if (!startNewSession && RestoresPromptSuggestions(NormalizeOptionalText(session.ParentSessionId) ?? recordedSummary?.ParentSessionId))
+            entry.SeedPromptSuggestion(recordedSummary?.PromptSuggestion, recordedSummary?.PromptSuggestionRunId?.Value);
         projector.Entry = entry;
         var subscription = await _agentHub.SubscribeSessionEventsAsync(
                 sessionHandleId,
@@ -3617,7 +3621,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
             { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId),
-              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion, ReportedFastMode = entry.ReportedFastMode };
+              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion, PromptSuggestionRunId = entry.PromptSuggestionRunId,
+              ReportedFastMode = entry.ReportedFastMode };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -5621,7 +5626,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
     }
 
-    private async Task UpsertSessionMetadataAsync(
+    // Returns the summary the journal had before this write; null for none.
+    private async Task<AgentSessionSummary?> UpsertSessionMetadataAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
         string? title,
@@ -5630,7 +5636,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(session.SessionId) || session.CreatedAt == default)
         {
-            return;
+            return null;
         }
 
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
@@ -5663,6 +5669,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             RewindCount = session.RewindCount,
             CreatedAt = session.CreatedAt,
             UpdatedAt = DateTimeOffset.UtcNow,
+            // An attachment is no run: what the last run suggested is still to be offered.
+            PromptSuggestion = recorded?.PromptSuggestion,
+            PromptSuggestionRunId = recorded?.PromptSuggestionRunId,
         };
         // Only metadata of the session changed (provider, model, title, working directory, worktree, parent, lineage):
         // the preview and the rewind count of the recorded summary are the same. Keep its UpdatedAt so that the
@@ -5674,6 +5683,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         await store.UpsertSessionAsync(next, cancellationToken).ConfigureAwait(false);
+        return recorded;
     }
 
     // Whether the next summary represents a metadata-only change compared to the recorded one. The preview (Summary)
@@ -6635,7 +6645,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 // A run that goes on after a failed one makes that failure a thing of the past.
                 if (ActiveRunId is null && @event is not AgentErrorEvent) LastRunFailed = false;
                 // What was suggested answered the turn before the run that starts.
-                if (ActiveRunId is null) PromptSuggestion = null;
+                if (ActiveRunId is null) ForgetPromptSuggestion();
                 ActiveRunId = runId;
                 LastRunId = runId;
             }
@@ -6657,6 +6667,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             if (@event is AgentPromptSuggestionEvent suggested && ActiveRunId is null)
             {
                 PromptSuggestion = suggested.Suggestion;
+                PromptSuggestionRunId = suggested.AnsweredRunId?.Value;
             }
 
             if (@event is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown })
@@ -6670,8 +6681,25 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 IsTerminated = true;
                 BackgroundTasks = [];
                 RemoteControl = AgentRemoteControl.Off;
-                PromptSuggestion = null;
+                ForgetPromptSuggestion();
             }
+        }
+
+        /// <summary>
+        /// Gives a new attachment the suggestion its session keeps from its last run, before any event of the attachment
+        /// is observed: a run that starts then makes it say nothing, as it does for one told to this attachment.
+        /// </summary>
+        public void SeedPromptSuggestion(string? suggestion, string? runId)
+        {
+            if (AgentPromptSuggestionEvent.Normalize(suggestion) is not { } text || ActiveRunId is not null || IsTerminated) return;
+            PromptSuggestion = text;
+            PromptSuggestionRunId = string.IsNullOrWhiteSpace(runId) ? null : runId;
+        }
+
+        private void ForgetPromptSuggestion()
+        {
+            PromptSuggestion = null;
+            PromptSuggestionRunId = null;
         }
 
         /// <summary>The background tasks of the provider: those that go on, then the last that failed or were stopped.</summary>
@@ -6682,6 +6710,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>What the provider suggested as the next prompt once the last turn ended; null once a run started since.</summary>
         public string? PromptSuggestion { get; private set; }
+
+        /// <summary>The run whose answer made <see cref="PromptSuggestion"/>, when it is known.</summary>
+        public string? PromptSuggestionRunId { get; private set; }
 
         // The tasks that go on are the ones the event lists, all of them. A task that failed or was stopped is
         // kept after them for the call that started it, which otherwise only says that it returned; a task that

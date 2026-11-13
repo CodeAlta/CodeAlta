@@ -612,15 +612,34 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
     }
 
-    // A suggestion answers the turn that just ended: told once the run said it is idle, never recorded. The next
-    // run makes it say nothing any more.
-    private void PublishPromptSuggestion(string? suggestion)
+    // A suggestion answers the turn that just ended: told once the run said it is idle, never an event of the history.
+    // The summary keeps it, as it was told, for a host that attaches the session again; the next run makes it say
+    // nothing any more (ForgetPromptSuggestionAsync). The run is over: an abort that comes now does not stop the write.
+    private async Task PublishPromptSuggestionAsync(string? suggestion, AgentRunId runId)
     {
-        if (!_disposed && AgentPromptSuggestionEvent.Normalize(suggestion) is { } text)
+        if (_disposed || AgentPromptSuggestionEvent.Normalize(suggestion) is not { } text) return;
+        var told = Masked(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text) { AnsweredRunId = runId });
+        Publish(told);
+        try
         {
-            Publish(Masked(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text)));
+            var kept = (told as AgentPromptSuggestionEvent)?.Suggestion ?? text;
+            await UpdateSummaryAsync(summary => summary with { PromptSuggestion = kept, PromptSuggestionRunId = runId }, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or AgentSessionCacheLockedException)
+        {
+            // The run ended: a suggestion that cannot be kept is still offered while the session stays attached.
         }
     }
+
+    // A run that starts answers what was suggested: the summary no longer keeps it, whether the run ends well or not.
+    // Not cancelable: an abort of the run that comes meanwhile must not leave the suggestion for a later attachment.
+    // Writes only when the summary keeps one.
+    private Task ForgetPromptSuggestionAsync()
+        => UpdateSummaryAsync(
+            static summary => summary.PromptSuggestion is null && summary.PromptSuggestionRunId is null
+                ? summary
+                : summary with { PromptSuggestion = null, PromptSuggestionRunId = null },
+            CancellationToken.None);
 
     private void PublishBackgroundTasks(IReadOnlyList<AgentBackgroundTask> tasks, IReadOnlyList<AgentBackgroundTaskEnd> ended)
     {
@@ -770,6 +789,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         try
         {
+            // First, before anything of the run can fail or be aborted: an admitted run answers the suggestion, however it ends.
+            await ForgetPromptSuggestionAsync().ConfigureAwait(false);
             if (options.RunLifecycle is { } lifecycle)
             {
                 await run.Start.RunAsync(lifecycle, runId, linkedCts.Token).ConfigureAwait(false);
@@ -930,7 +951,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         Usage: _state.Usage);
                     await AppendEventsAsync([idleEvent], linkedCts.Token).ConfigureAwait(false);
                     // After the idle event: those who listen take a suggestion only between the runs.
-                    if (suggestsNextPrompt) PublishPromptSuggestion(nextPrompt);
+                    if (suggestsNextPrompt) await PublishPromptSuggestionAsync(nextPrompt, runId).ConfigureAwait(false);
                     return runId;
                 }
 

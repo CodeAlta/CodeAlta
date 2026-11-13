@@ -38,7 +38,7 @@ import { RemoteControlButton } from "./RemoteControlButton";
 import { MicButton } from "./speech/MicButton";
 import { SpeechContext } from "./speech/speech";
 import { entryRemoteControl, remoteControlView, sameRemoteControl, type RemoteControlOpenRequest, type RemoteControlView } from "./remoteControl";
-import { entryPromptSuggestion, shownPromptSuggestion, takesPromptSuggestion } from "./promptSuggestion";
+import { createAnsweredSuggestions, observedPromptSuggestion, shownPromptSuggestion, takesPromptSuggestion, type PromptSuggestion } from "./promptSuggestion";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { equationKey, type PromptInput } from "./PromptEditor";
@@ -533,15 +533,21 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // What the provider suggests as the next prompt (Claude Code), in place of the placeholder of an empty prompt.
   // It comes back whenever the prompt is empty again. A prompt the host accepted ends it, before the host says so:
   // the turn that follows brings another one, or none. It is ended where a prompt is accepted and not by the busy
-  // state, which lags the runtime state: a session shown again after its run ended would lose its suggestion.
-  const observedSuggestion = invalidEpoch || runtimeState?.kind !== "ready" ? null : entryPromptSuggestion(runtimeState.snapshot.entry);
+  // state, which lags the runtime state: a session shown again after its run ended would lose its suggestion. A session
+  // without an entry offers the one its journal keeps. The one a prompt was sent after is remembered with its run, so
+  // that the same text suggested by a later run is shown, also when this panel did not watch that run.
+  const observedSuggestion = invalidEpoch || runtimeState?.kind !== "ready" ? null : observedPromptSuggestion(runtimeState.snapshot);
   const latestSuggestion = useRef(observedSuggestion); latestSuggestion.current = observedSuggestion;
-  const [answeredSuggestion, setAnsweredSuggestion] = useState<string | null>(null);
+  const [answeredSuggestion, setAnsweredSuggestion] = useState<PromptSuggestion | null>(null);
   // Only a state that was read ends it: a reading that failed says nothing of the suggestion.
   const suggestionRead = runtimeState?.kind === "ready";
-  useEffect(() => { if (suggestionRead && !observedSuggestion) setAnsweredSuggestion(null); }, [suggestionRead, observedSuggestion]);
-  const promptAccepted = useRef(() => {}); promptAccepted.current = () => {
-    if (latestSuggestion.current) setAnsweredSuggestion(latestSuggestion.current);
+  const suggestionObserved = !!observedSuggestion;
+  useEffect(() => { if (suggestionRead && !suggestionObserved) setAnsweredSuggestion(null); }, [suggestionRead, suggestionObserved]);
+  // What a prompt was sent after is the suggestion observed when its submission was made, not the one observed when the
+  // host accepts it: a fast run may have suggested something new meanwhile.
+  const [answeredSuggestions] = useState(() => createAnsweredSuggestions());
+  const promptAccepted = useRef((_answered: PromptSuggestion | null) => {}); promptAccepted.current = answered => {
+    if (answered) setAnsweredSuggestion(answered);
     void runtimeScope.current?.refresh(true);
   };
   const suggestion = shownPromptSuggestion(observedSuggestion,
@@ -611,14 +617,16 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   // The outcome of a queued prompt's Send. Its request does not belong to this panel: the row is settled even
   // when the tab was closed meanwhile.
-  function settleQueued(id: string, request: Readonly<{ clientRequestId: string; selection?: SessionSelection | null }>) {
+  // A retry (a retained request) captures nothing: what is shown now may have come after the first attempt.
+  function settleQueued(id: string, request: Readonly<{ clientRequestId: string; selection?: SessionSelection | null }>, fresh = false) {
     const key = request.clientRequestId;
+    if (fresh) answeredSuggestions.capture(key, latestSuggestion.current);
     return (result: SubmissionResult) => {
       observeEpoch(result);
       const accepted = result.status === "accepted" || result.status === "replay";
       if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
       if (accepted) {
-        selections.sent(epoch, sessionId, request.selection); queue.sent(id); promptAccepted.current();
+        selections.sent(epoch, sessionId, request.selection); queue.sent(id); promptAccepted.current(answeredSuggestions.accepted(key));
         if (result.receipt) settlePluginOutcome(result.receipt);
       }
       else if (result.status === "uncertain" || result.status === "stale_epoch") queue.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
@@ -722,7 +730,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     promptHistory.add(sessionId, request.text);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setPluginOutcome(null);
-    void submissions.submit(request, queue.signal, capability, settleQueued(claimed.id, request), "whenAccepted");
+    void submissions.submit(request, queue.signal, capability, settleQueued(claimed.id, request, true), "whenAccepted");
   }, [stagedRevision, steeringRevision, runtimeState, invalidEpoch, !!retainedSend, composerBusy, epoch, sessionId, liveTexts, loadingChoices, retryTick, selection, choices]);
   // A steering prompt a plugin answered itself never shows in the timeline: its settled receipt says so, and its row
   // leaves the list without waiting for the turn to end.
@@ -804,6 +812,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSendFailure("");
     setPluginOutcome(null);
     setCompactFailure(null);
+    // Only a new request: a retained one may be retried after the run it started already suggested something new.
+    if (!retained) answeredSuggestions.capture(request.clientRequestId, latestSuggestion.current);
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (["accepted", "replay"].includes(result.status) && result.receipt) settlePluginOutcome(result.receipt);
@@ -821,7 +831,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       setMessage(failure ?? "Ready to send to this owned session.");
       // The prompt stays in the composer and the status line says why: a prompt is never answered with a toast.
       setSendFailure(failure ?? "");
-      if (result.status === "accepted" || result.status === "replay") { selections.sent(epoch, sessionId, request.selection); promptAccepted.current(); }
+      if (result.status === "accepted" || result.status === "replay") {
+        selections.sent(epoch, sessionId, request.selection); promptAccepted.current(answeredSuggestions.accepted(request.clientRequestId));
+      }
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && canAdmit()
         // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
         && (inputRevision.current === revision || latestText.current === request.text)
@@ -855,11 +867,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const queued = request.signal ?? queue.signal;
     const value = request.text ?? "";
     let result: boolean | null = null;
+    // What was shown when the plugin asked: the reply may come after a run that suggested something new.
+    const shownWhenAsked = latestSuggestion.current;
     const received = (reply: SubmissionResult) => {
       observeEpoch(reply);
       result = reply.status === "accepted" || reply.status === "replay" ? true
         : reply.status === "uncertain" || reply.status === "stale_epoch" ? null : false;
-      if (result) promptAccepted.current();
+      if (result) promptAccepted.current(shownWhenAsked);
     };
     // Do not acknowledge a React state update or a page-local queue as downstream ownership. These
     // helpers latch before dispatch and settle the original command's receipt. An aborted transport is

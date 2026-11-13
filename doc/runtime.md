@@ -259,6 +259,16 @@ suggestion. Both tags are removed wherever assistant text leaves the session (ti
 notifications, plugins); the raw assistant message keeps them. The guidance paragraphs are per run, so a change of mode
 needs no new attachment.
 
+A suggestion is told after the Idle event (`AgentPromptSuggestionEvent`, not history) and kept in the summary with the
+run it answers (`AgentSessionSummary.PromptSuggestion`, `PromptSuggestionRunId`), so it outlives the attachment: idle
+detach and a restart keep it. The admission of the next run clears it, before anything can fail or be aborted, as do a
+fork, a rewind, turns brought in by catch-up or from the cloud, and a catch-up that cannot follow a conversation rewound
+outside: the session no longer ends with the turn it answered. A new runtime entry is seeded from it; a session without
+an entry reports it through `GetShownStateAsync` and `ObserveOwnedStateAsync`, read from the projection cache, never from
+the history. Both restore it only as the session would be asked for one now: in a host that shows suggestions, while the
+setting is on, never for a session with a parent. The run tells apart the same text suggested by a later run, for a
+frontend that hides the suggestion a prompt was sent after.
+
 ## Compaction
 
 Compaction (`AgentSession`, `CodeAlta.Agent.Runtime.Compaction`) summarizes the history with the session's own model

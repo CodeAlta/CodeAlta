@@ -1,4 +1,6 @@
 using System.Text;
+using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -14,7 +16,8 @@ public sealed partial class SessionRuntimeService
     private readonly ObservedProjectOwnership _observedOwnership = new();
 
     /// <summary>Verifies a saved session's exact header/project scope, then observes its existing actor without activation.</summary>
-    /// <remarks>Reads one bounded header, never history. Archived projects refuse. Catalog/header reads and actor observations
+    /// <remarks>Reads one bounded header, never history; for a session without an entry, also its summary (from the projection
+    /// cache) for the prompt suggestion it keeps (<see cref="SessionRuntimeCurrentState.PromptSuggestion"/>). Archived projects refuse. Catalog/header reads and actor observations
     /// are not atomic against external writers or other actors. Absence is unknown/not attached, never idle/completed.
     /// The project catalog check gives the answer of <see cref="ProjectCatalog.ReadBoundedOwnershipAsync"/>, which is
     /// scanned again only when the catalog files it reads changed (see <c>ObservedProjectOwnership</c>).</remarks>
@@ -54,8 +57,9 @@ public sealed partial class SessionRuntimeService
         }
         token.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_sessionActors.TryGet(id, out var actor)) return new("ok", new(_runtimeInstanceId, id, false, null));
-        return await actor.QueryAsync(_ =>
+        if (!_sessionActors.TryGet(id, out var actor))
+            return new("ok", await WithStoredPromptSuggestionAsync(new(_runtimeInstanceId, id, false, null), token).ConfigureAwait(false));
+        var observation = await actor.QueryAsync(_ =>
         {
             lock (_identityGate)
             {
@@ -70,7 +74,61 @@ public sealed partial class SessionRuntimeService
                 return ValueTask.FromResult(new OwnedRuntimeObservation("ok", CaptureCurrentState(id)));
             }
         }, CancellationToken.None).ConfigureAwait(false);
+        return observation.State is { Entry: null } detached
+            ? observation with { State = await WithStoredPromptSuggestionAsync(detached, token).ConfigureAwait(false) }
+            : observation;
     }
+
+    /// <summary>
+    /// Captures the current-runtime facts of a session as <see cref="GetCurrentStateAsync"/> does and, for a session without
+    /// an entry, the prompt suggestion its journal keeps (<see cref="SessionRuntimeCurrentState.PromptSuggestion"/>): the
+    /// state a frontend shows of a session it shows.
+    /// </summary>
+    /// <param name="sessionId">The nonblank durable session identifier.</param>
+    /// <param name="cancellationToken">Cancels admission, the read of the summary, or the caller's wait.</param>
+    /// <returns>A point-in-time observation; a missing entry is explicitly absent, not idle or completed.</returns>
+    /// <remarks>Never creates an actor, coordinator or provider. The summary is read from the projection cache, never from
+    /// the history of the session, and only while the session has no entry and the host shows suggestions.</remarks>
+    /// <exception cref="ArgumentNullException">The session identifier is null.</exception>
+    /// <exception cref="ArgumentException">The session identifier is empty or whitespace.</exception>
+    /// <exception cref="OperationCanceledException">Admission, the read or the caller's wait was canceled.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime or session actor no longer admits queries.</exception>
+    public async Task<SessionRuntimeCurrentState> GetShownStateAsync(string sessionId, CancellationToken cancellationToken = default)
+        => await AdmitAsync(async () =>
+        {
+            var state = await GetCurrentStateOwnedBodyAsync(sessionId).ConfigureAwait(false);
+            return state.Entry is null ? await WithStoredPromptSuggestionAsync(state, cancellationToken).ConfigureAwait(false) : state;
+        }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+
+    // A session without an entry (detached once idle, or not attached since the host started) offers what its last run
+    // suggested, as its journal keeps it: read from the summary the projection cache holds, never from its history. A
+    // host that shows no suggestion, or whose user turned them off, reads nothing; a session an agent drives offers none.
+    // A summary that cannot be read now (the cache busy) gives none: the rest is still observed.
+    private async Task<SessionRuntimeCurrentState> WithStoredPromptSuggestionAsync(SessionRuntimeCurrentState state, CancellationToken token)
+    {
+        if (!RestoresPromptSuggestions(parentSessionId: null)) return state;
+        AgentSessionSummary? summary;
+        try
+        {
+            summary = await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionSummaryAsync(state.SessionId, token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
+            or AgentSessionCacheLockedException)
+        {
+            return state;
+        }
+
+        return summary is not null && RestoresPromptSuggestions(summary.ParentSessionId)
+            && AgentPromptSuggestionEvent.Normalize(summary.PromptSuggestion) is { } text
+            ? state with { PromptSuggestion = text, PromptSuggestionRunId = summary.PromptSuggestionRunId?.Value }
+            : state;
+    }
+
+    // Whether a suggestion a session keeps is offered again: as the session would be asked for one now (see the
+    // PromptSuggestions options of an attachment), in a host that shows them, for a session without parent, while the
+    // user wants them.
+    private bool RestoresPromptSuggestions(string? parentSessionId)
+        => ShowsPromptSuggestions && string.IsNullOrWhiteSpace(parentSessionId) && _configStore.LoadGlobalPromptSuggestions();
 
     // The project the header of a project session names, as the runtime binds the session (by its folder) and the lists
     // show it: the one it records, or, when that is no project of the catalog, the project of the catalog in its folder

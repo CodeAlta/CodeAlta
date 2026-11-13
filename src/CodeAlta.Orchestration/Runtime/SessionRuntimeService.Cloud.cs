@@ -530,7 +530,8 @@ public sealed partial class SessionRuntimeService
                 cloud.ContinuedAt = DateTimeOffset.UtcNow;
                 local.Cloud = cloud;
                 IReadOnlyList<AgentEvent> events = [.. prepared.Events, FileSystemAgentSessionStore.CreateSummarySnapshotEvent(
-                    summary with { Summary = prepared.Preview ?? summary.Summary, UpdatedAt = DateTimeOffset.UtcNow }),
+                    // The turns of the cloud come after the one a suggestion answered.
+                    summary with { Summary = prepared.Preview ?? summary.Summary, UpdatedAt = DateTimeOffset.UtcNow, PromptSuggestion = null, PromptSuggestionRunId = null }),
                     SessionViewJournalStore.CreateLocalStateRecord(session, local)];
                 await store.AppendEventsAsync(summary.ProtocolFamily, summary.ProviderKey, sessionId, events, token).ConfigureAwait(false);
                 session.Cloud = cloud.ToListing();
