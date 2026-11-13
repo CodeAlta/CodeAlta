@@ -16,10 +16,12 @@ test("provider default-model picker lists, searches and selects without saving a
     await page.key('Enter', 13);
     await page.until(`document.querySelector('#provider-model').value === 'first-reasoning'`, "keyboard selection");
     assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0, "choosing changes only the draft");
+    // The picker keeps the focus during its closing transition: keys typed in the field before it is gone are lost (seen
+    // on CI: 'first-reasoning-custo', and the field left as it was).
+    await page.until(`!document.querySelector('.provider-model-picker')`, "closed picker");
     await page.click('#provider-model');
     await page.key('End', 35);
     await page.type('-custom');
-    // The last key can still be on its way to the field when typing returns (seen on CI: 'first-reasoning-custo').
     await page.until(`document.querySelector('#provider-model').value === 'first-reasoning-custom'`, "typed custom model");
     await page.click('#provider-model + .bp6-input-action button');
     assert.equal(await page.evaluate(`document.querySelector('#provider-model').value`), '', "reset preserves the provider default");
