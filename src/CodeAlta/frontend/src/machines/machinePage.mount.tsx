@@ -126,7 +126,8 @@ const api: MachinePageApi = {
     return { status: "ok", message: null, url: "https://github.com/login/device", userCode: "WDJB-MJHT", expiresAt: null };
   },
   providerSignInWait: async request => {
-    if (++signInWaits < 2) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null }; }
+    // It stays waiting until the page opened the sign-in page: a fixed delay lets a loaded machine miss the link.
+    if (++signInWaits < 2 || !calls.some(call => call.includes('"openPage"'))) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null }; }
     providerList = providerList.map(provider => provider.key === request.key ? { ...provider, state: "ready", reason: null } : provider);
     return { status: "completed", account: "octocat", code: null };
   },
