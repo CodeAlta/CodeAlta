@@ -24,17 +24,25 @@ internal sealed record AdaptiveCriticAnswer(string? Answer, string? Failure);
 
 /// <summary>
 /// Runs the turns of the sessions on Adaptive (<c>[models.adaptive]</c>), as the evaluation of November 2026 found best: a
-/// turn the user starts runs on the model of the level of the session; when it changed code, the critics of the level,
-/// models of another family, review the change read-only, each in a session of its own given the request and the diff,
-/// and the session revises it once with what they found. A level without critics, or whose critics could not review,
-/// has the model of the turn recheck its change against the request instead.
+/// turn the user starts runs on the model of the level of the session, and the critics of the level, models of another
+/// family, review the code it changes, read-only, each in a session of its own given the request and the diff; the
+/// session revises its change once with what they found.
 /// </summary>
 /// <remarks>
-/// It follows the events the runtime publishes, never in their way: what a run did is counted as it goes, and the end
-/// of a run is decided on its own, once the send of the run has released the session. Whether a turn changed code is
-/// read from git, a tree of the working folder taken before the turn and after it, so that a turn that commits what was
-/// there changes nothing; a folder without git falls back on the files the tool calls say they changed. The session
-/// keeps its own cache: the critics get only the request and the diff, as Copilot Fusion's critics do.
+/// <para>
+/// The session starts the review, not the host: it knows when its change is complete and what comes next (a push, a
+/// merge), and is told so with its prompt (<see cref="SessionRuntimeService.AdaptiveNoteText"/>). The host gives it the
+/// verdict as a prompt, and reminds it once when a run ends with code nobody reviewed. A level without critics has the
+/// model of the turn recheck its change against the request at that point instead.
+/// </para>
+/// <para>
+/// A request is followed over all its runs, from the prompt of the user to the next one: the answer of a sub-agent or
+/// the end of a job continues it. It follows the events the runtime publishes, never in their way: the end of a run is
+/// decided on its own, once the send of the run has released the session. What code is not reviewed yet is read from
+/// git, a tree of the working folder taken at the start of the request, at each review and now, so that a run that
+/// commits what was there changes nothing; a folder without git falls back on the files the tool calls say they changed.
+/// The session keeps its own cache: the critics get only the request and the diff, as Copilot Fusion's critics do.
+/// </para>
 /// </remarks>
 internal sealed partial class AdaptiveTurnCoordinator
 {
@@ -44,6 +52,10 @@ internal sealed partial class AdaptiveTurnCoordinator
     private const int MaximumDiff = 60_000;
     private const int MaximumFindings = 8_000;
     private const int MaximumRequest = 20_000;
+    private const int MaximumNotes = 4_000;
+    // The files a receipt or a status lists, and the ones a prompt names.
+    private const int MaximumFiles = 50;
+    private const int ListedFiles = 10;
     private static readonly TimeSpan ReleaseWait = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan ReleasePoll = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(30);
@@ -79,6 +91,10 @@ internal sealed partial class AdaptiveTurnCoordinator
         Snapshot = GitSnapshotAsync;
         Changes = GitChangesAsync;
         Diff = GitDiffAsync;
+        TreeOf = GitTreeOfAsync;
+        OwnWorkPending = runtime.HasOwnWorkPending;
+        runtime.AdaptiveReviewHandler = RequestReviewAsync;
+        runtime.AdaptiveStatusHandler = GetStatusAsync;
     }
 
     /// <summary>Gets or sets the clock; the system clock unless a test sets another.</summary>
@@ -92,6 +108,15 @@ internal sealed partial class AdaptiveTurnCoordinator
 
     /// <summary>Gets or sets what writes the diff between two trees of a folder; null when it cannot.</summary>
     internal Func<string, string, string, CancellationToken, Task<string?>> Diff { get; set; }
+
+    /// <summary>
+    /// Gets or sets what tells whether work a session started itself still goes on (a background job, a sub-agent): the
+    /// runtime, unless a test sets another.
+    /// </summary>
+    internal Func<string, bool> OwnWorkPending { get; set; }
+
+    /// <summary>Gets or sets what gives the tree of a commit of a folder (a commit, a branch, a tag); null when it names none.</summary>
+    internal Func<string, string, CancellationToken, Task<string?>> TreeOf { get; set; }
 
     /// <summary>
     /// Gets or sets what runs a review by a critic, in a read-only child session of the reviewed one; the host sets it.
@@ -207,33 +232,35 @@ internal sealed partial class AdaptiveTurnCoordinator
             return;
         }
 
-        if (turn is not null && provenance is AgentPromptProvenance.AdaptiveRecheck or AgentPromptProvenance.AdaptiveReview
-                or AgentPromptProvenance.AdaptiveEscalation or AgentPromptProvenance.ModelFallback)
+        // A prompt that does not come from the user continues the request: the answer of a sub-agent, the end of a job, a
+        // reminder, a verdict of the critics. An automation starts a request of its own, as the user does.
+        if (turn is not null && provenance is not (null or AgentPromptProvenance.Automation))
         {
-            turn.StartRun(runId, provenance == AgentPromptProvenance.ModelFallback ? turn.Phase : provenance);
+            turn.StartRun(runId);
             return;
-        }
-
-        if (turn is null && _turns.Count >= MaximumSessions)
-        {
-            // Bounded: the oldest turn is forgotten, which only ends the follow-up of that turn.
-            var oldest = _turns.MinBy(static pair => pair.Value.StartedAt).Key;
-            _turns.Remove(oldest);
         }
 
         var fresh = new Turn(runId, Time.GetUtcNow()) { Request = Bounded(text, MaximumRequest) };
         if (_snapshots.Remove(sessionId, out var snapshot) && Time.GetUtcNow() - snapshot.At < SnapshotLife) fresh.Before = snapshot;
-        _turns[sessionId] = fresh;
+        Keep(sessionId, fresh);
     }
 
-    // Under _gate: the turn of a session while its current run is the one of an event (any run when the event or the turn
-    // names none; the first event that names it gives the turn its run).
+    // Under _gate. Bounded: the oldest request is forgotten, which only ends its follow-up.
+    private void Keep(string sessionId, Turn turn)
+    {
+        if (!_turns.ContainsKey(sessionId) && _turns.Count >= MaximumSessions) _turns.Remove(_turns.MinBy(static pair => pair.Value.StartedAt).Key);
+        _turns[sessionId] = turn;
+    }
+
+    // Under _gate: the request of a session while its current run is the one of an event (any run when the event or the
+    // request names none; the first event that names it gives the request its run). A run that starts once the last one
+    // ended continues the request: a provider that runs its own loop does not tell the prompt of such a run.
     private Turn? CurrentTurn(string sessionId, AgentRunId? runId)
     {
         if (!_turns.TryGetValue(sessionId, out var turn)) return null;
         if (runId is not { } named || turn.RunId == named.Value) return turn;
-        if (turn.RunId is not null || !turn.Active) return null;
-        turn.RunId = named.Value;
+        if (turn.RunId is not null && turn.Active) return null;
+        turn.StartRun(named.Value);
         return turn;
     }
 
@@ -297,13 +324,29 @@ internal sealed partial class AdaptiveTurnCoordinator
 
             Facts facts;
             lock (_gate) facts = turn.Read();
-            // A failed run is the fallback's; a recheck or a revision ends the turn. A prompt that waits starts the next
-            // turn: the user, or another session, said what comes next.
-            var ended = facts.Failed ? "the run failed" : facts.Phase is { } phase ? $"the run was a {phase}" : facts.Checked ? "the turn was checked"
+            // A failed run is the fallback's. While a review runs, a prompt waits or work of its own goes on (a job, a
+            // sub-agent), the session is not done: what comes back to it starts the run that is decided next.
+            var waits = facts.Failed ? "the run failed" : facts.ReviewRunning ? "a review runs" : facts.VerdictWaits ? "a verdict waits"
                 : notice.HasQueuedPrompts ? "a prompt waits" : null;
-            if (ended is not null)
+            if (waits is not null)
             {
-                Tell(sessionId, runId, ended);
+                Tell(sessionId, runId, waits);
+                return;
+            }
+
+            if (OwnWorkPending(sessionId))
+            {
+                Tell(sessionId, runId, "work of the session goes on");
+                return;
+            }
+
+            // The run that took a verdict or a recheck revised the change, by itself or through a sub-agent it waited for:
+            // the files as they are now are the reviewed ones.
+            if (facts.Revising)
+            {
+                var now = facts.Folder is null ? null : await Snapshot(facts.Folder, _closing.Token).ConfigureAwait(false);
+                lock (_gate) turn.Accept(now);
+                Tell(sessionId, runId, "the change was revised");
                 return;
             }
 
@@ -314,12 +357,20 @@ internal sealed partial class AdaptiveTurnCoordinator
                 return;
             }
 
-            lock (_gate) turn.Checked = true;
-            var level = settings.Resolve(notice.Level);
-            if (level is { Critics.Count: > 0 } && Critic is { } critic
-                && await ReviewAsync(notice, level, critic, facts, change, runId).ConfigureAwait(false))
+            if (change.After is { } tree && string.Equals(tree, facts.Told, StringComparison.Ordinal))
             {
-                Tell(sessionId, runId, "the change was reviewed");
+                Tell(sessionId, runId, "the session was already reminded");
+                return;
+            }
+
+            // The session starts the reviews: the host only reminds it, once for these files. A level without critics has
+            // the model of the turn recheck its change instead, and what it changes then is the recheck.
+            var reviewed = settings.Resolve(notice.Level) is { Critics.Count: > 0 } && Critic is not null;
+            lock (_gate) turn.Remind(change.After, revising: !reviewed);
+            if (reviewed)
+            {
+                await RemindAsync(notice, change, runId).ConfigureAwait(false);
+                Tell(sessionId, runId, "the session was reminded of the review");
                 return;
             }
 
@@ -342,28 +393,28 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
     }
 
-    // The code a turn changed: the paths, the diff when git gives it, and the tree after the turn; else why it changed no
-    // code (documentation only, nothing, or a folder whose trees were not read).
+    // The code of a request that is not reviewed yet: the paths, the diff when git gives it, and the tree of the files now;
+    // else why there is none (documentation only, nothing, or a folder whose trees were not read).
     private async Task<(TurnChange? Change, string? Unchanged)> ChangeOfTurnAsync(Facts facts)
     {
         var unread = "the tree of the folder before the turn was not read";
-        if (facts.Before is { } before)
+        if (facts is { Folder: { } folder, From: { } from })
         {
-            var after = await Snapshot(before.Folder, _closing.Token).ConfigureAwait(false);
+            var after = await Snapshot(folder, _closing.Token).ConfigureAwait(false);
             if (after is not null)
             {
-                if (string.Equals(after, before.Tree, StringComparison.Ordinal)) return (null, "the files did not change");
-                var changed = await Changes(before.Folder, before.Tree, after, _closing.Token).ConfigureAwait(false);
+                if (string.Equals(after, from, StringComparison.Ordinal)) return (null, "the files did not change");
+                var changed = await Changes(folder, from, after, _closing.Token).ConfigureAwait(false);
                 if (changed is not null && !changed.Any(IsCode)) return (null, "the turn changed no code");
-                var diff = await Diff(before.Folder, before.Tree, after, _closing.Token).ConfigureAwait(false);
-                return (new TurnChange(changed ?? facts.ChangedFiles, diff, before.Folder, after), null);
+                var diff = await Diff(folder, from, after, _closing.Token).ConfigureAwait(false);
+                return (new TurnChange(changed ?? facts.ChangedFiles, diff, folder, after), null);
             }
 
             unread = "the tree of the folder after the turn was not read";
         }
 
         // Without the trees, what the tools of the turn say they changed.
-        if (facts.ChangedFiles.Any(IsCode)) return (new TurnChange(facts.ChangedFiles, null, facts.Before?.Folder, null), null);
+        if (facts.ChangedFiles.Any(IsCode)) return (new TurnChange(facts.ChangedFiles, null, facts.Folder, null), null);
         return (null, facts.ChangedFiles.Count > 0 ? "the turn changed no code" : $"its tools changed no file, and {unread}");
     }
 
@@ -391,72 +442,209 @@ internal sealed partial class AdaptiveTurnCoordinator
         }).ConfigureAwait(false);
     }
 
-    // The critics of the level review the change at the same time; the session revises it once with what they found.
-    // False when no critic could review: the change is then rechecked.
-    private async Task<bool> ReviewAsync(AdaptiveSessionNotice notice, AdaptiveLevelSettings level, Func<AdaptiveCriticRequest, CancellationToken, Task<AdaptiveCriticAnswer>> critic,
-        Facts facts, TurnChange change, string runId)
+    private async Task RemindAsync(AdaptiveSessionNotice notice, TurnChange change, string runId)
     {
-        var prompt = CriticPrompt(facts.Request, change);
-        var reviews = await Task.WhenAll(level.Critics.Select(async model =>
+        if (!await WaitForReleaseAsync(notice.SessionId).ConfigureAwait(false)) return;
+        // The prompt is the card: the timeline titles it Adaptive reminder.
+        await AdmitAsync(new OwnedTextSendRequest($"adaptive-reminder:{notice.SessionId}:{runId}", notice.SessionId, ReminderPrompt(change.Paths))
         {
-            try { return (Model: model, Answer: await critic(new AdaptiveCriticRequest(notice.SessionId, model, prompt, ReviewTime), _closing.Token).ConfigureAwait(false)); }
-            catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
-            {
-                Log?.Error(exception, $"Adaptive could not run the review by {model.Format()} of session {notice.SessionId}.");
-                return (Model: model, Answer: new AdaptiveCriticAnswer(null, exception.Message));
-            }
-        })).ConfigureAwait(false);
-
-        // A critic is read-only: what changed in the files while it reviewed is said, never undone behind the user's back.
-        if (change is { Folder: { } folder, After: { } after } && await Snapshot(folder, _closing.Token).ConfigureAwait(false) is { } now
-            && !string.Equals(now, after, StringComparison.Ordinal))
-        {
-            var touched = await Changes(folder, after, now, _closing.Token).ConfigureAwait(false) ?? [];
-            await WriteCardAsync(notice.SessionId, $"The review of Adaptive changed files it should only have read: {string.Join(", ", touched.Take(10))}.", "review").ConfigureAwait(false);
-        }
-
-        var findings = new List<(ModelTierTarget Model, string Text)>();
-        var approved = new List<ModelTierTarget>();
-        var silent = new List<(ModelTierTarget Model, string Why)>();
-        foreach (var (model, answer) in reviews)
-        {
-            var (verdict, text) = ParseVerdict(answer.Answer);
-            switch (verdict)
-            {
-                case "REVISE" when text.Length > 0: findings.Add((model, text)); break;
-                case "APPROVE": approved.Add(model); break;
-                default: silent.Add((model, answer.Failure ?? (answer.Answer is null ? "no answer" : "no verdict"))); break;
-            }
-        }
-
-        if (silent.Count > 0)
-            await WriteCardAsync(notice.SessionId, "Adaptive could not get a review from " + string.Join(", ", silent.Select(static item => $"{item.Model.Format()} ({item.Why})")) + ".",
-                "review").ConfigureAwait(false);
-        if (findings.Count == 0 && approved.Count == 0) return false;
-        if (findings.Count == 0)
-        {
-            await WriteCardAsync(notice.SessionId, "Adaptive review: the change was approved by " + string.Join(", ", approved.Select(static model => model.Format())) + ".",
-                "review", AgentSessionUpdateKind.Info).ConfigureAwait(false);
-            return true;
-        }
-
-        if (!await WaitForReleaseAsync(notice.SessionId).ConfigureAwait(false)) return true;
-        // The prompt is the card: the timeline titles it Adaptive review, with what each critic found.
-        await AdmitAsync(new OwnedTextSendRequest($"adaptive-review:{notice.SessionId}:{runId}", notice.SessionId, RevisionPrompt(findings))
-        {
-            Provenance = AgentPromptProvenance.AdaptiveReview,
+            Provenance = AgentPromptProvenance.AdaptiveReminder,
         }).ConfigureAwait(false);
-        return true;
     }
 
-    /// <summary>The prompt of a critic: the request, the change of the turn, what to check and the verdict to end with.</summary>
-    internal static string CriticPrompt(string? request, TurnChange change)
+    /// <summary>
+    /// Starts the review a session asks for: the critics of its level review, each in a read-only session of its own, what
+    /// changed since the last review of its request (or since the commit it names), and their verdict comes back to the
+    /// session as a prompt. It returns once the review started, or with why it did not.
+    /// </summary>
+    /// <param name="request">The session, and what it says of its change.</param>
+    /// <param name="cancellationToken">Stops the request, not a review that started.</param>
+    /// <returns>How the request was taken, with what the session is told.</returns>
+    internal async Task<AdaptiveReviewReceipt> RequestReviewAsync(AdaptiveReviewRequest request, CancellationToken cancellationToken)
+    {
+        var sessionId = request.SessionId;
+        var notice = await _runtime.ReadAdaptiveNoticeAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (notice is not { Adaptive: true, Scope.Adaptive: { } settings } || settings.Resolve(notice.Level) is not { } level)
+            return new("not_adaptive", "This session is not on Adaptive: no critics review its changes. If a parent session asked you to have your change reviewed, report the change to it: the session on Adaptive starts the review. Otherwise go on without it.", null, [], []);
+        var name = AdaptiveLevels.NameOf(level.Level);
+        if (level.Critics.Count == 0 || Critic is not { } critic)
+            return new("no_critics", $"Level `{name}` of Adaptive has no critics. Check your change yourself against each requirement of the request, one by one, with a test or a run for each rule it states, and fix what is missing or wrong.",
+                name, [], []);
+        var critics = level.Critics.Select(static model => model.Format()).ToArray();
+
+        Turn turn;
+        Facts facts;
+        lock (_gate)
+        {
+            if (_closing.IsCancellationRequested) return new("unavailable", "CodeAlta is closing.", name, critics, []);
+            // A session CodeAlta did not see the request of (it started again since) is reviewed from its last commit.
+            if (!_turns.TryGetValue(sessionId, out turn!)) Keep(sessionId, turn = new Turn(null, Time.GetUtcNow()) { Active = false });
+            if (turn.Review is not null) return Running(name, critics);
+            facts = turn.Read();
+        }
+
+        var folder = facts.Folder ?? await _commands.WorkFolderOfAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (folder is null) return new("unavailable", "This session has no project folder: there is no change to give the critics.", name, critics, []);
+        var after = await Snapshot(folder, cancellationToken).ConfigureAwait(false);
+        TurnChange change;
+        string since;
+        if (after is null)
+        {
+            // Without git, the files the tools of the request say they changed.
+            if (!string.IsNullOrWhiteSpace(request.Base)) return new("invalid_base", $"`--base` needs a git folder, and `{folder}` is not one.", name, critics, []);
+            if (!facts.ChangedFiles.Any(IsCode))
+                return new("no_change", $"`{folder}` is not a git folder and the tools of this request changed no code file CodeAlta saw: there is nothing to give the critics.", name, critics, []);
+            change = new TurnChange(facts.ChangedFiles, null, folder, null);
+            since = "the start of the request";
+        }
+        else
+        {
+            string? from;
+            if (request.Base?.Trim() is { Length: > 0 } named)
+            {
+                from = await TreeOf(folder, named, cancellationToken).ConfigureAwait(false);
+                if (from is null) return new("invalid_base", $"`{named}` is not a commit of `{folder}`.", name, critics, []);
+                since = $"`{named}`";
+            }
+            else if (facts.From is not null)
+            {
+                from = facts.From;
+                since = facts.Reviewed ? "the last review" : "the start of the request";
+            }
+            else
+            {
+                from = await TreeOf(folder, "HEAD", cancellationToken).ConfigureAwait(false);
+                if (from is null) return new("unavailable", $"`{folder}` has no commit to compare with: give one with `--base <commit>`.", name, critics, []);
+                since = "the last commit";
+            }
+
+            var changed = string.Equals(from, after, StringComparison.Ordinal) ? [] : await Changes(folder, from, after, cancellationToken).ConfigureAwait(false);
+            if (changed is null) return new("unavailable", "git could not list what changed.", name, critics, []);
+            if (!changed.Any(IsCode))
+                return new("no_change", $"No code changed since {since}: there is nothing to review. If your change is committed on another base, name the commit it starts from with `--base <commit>`.", name, critics, []);
+            change = new TurnChange(changed, await Diff(folder, from, after, cancellationToken).ConfigureAwait(false), folder, after);
+        }
+
+        var prompt = CriticPrompt(facts.Request, change, request.Notes);
+        lock (_gate)
+        {
+            if (turn.Review is not null) return Running(name, critics);
+            if (_closing.IsCancellationRequested) return new("unavailable", "CodeAlta is closing.", name, critics, []);
+            turn.StartReview(Time.GetUtcNow(), folder, after);
+        }
+
+        Track(sessionId, () => RunReviewAsync(sessionId, turn, level.Critics, critic, prompt, change));
+        var files = change.Paths.Where(IsCode).ToArray();
+        return new(AdaptiveReviewReceipt.Started,
+            $"The critics ({string.Join(", ", critics)}) review the {files.Length} code file(s) that changed since {since}: {Listed(files)}. "
+            + "Their verdict comes back to you as a prompt that starts with `[CodeAlta Adaptive]`. Until then, do not push, merge or publish this change and do not edit these files; "
+            + "when nothing else is left to do, end your turn saying that you wait for the review.",
+            name, critics, [.. files.Take(MaximumFiles)]);
+
+        static AdaptiveReviewReceipt Running(string name, string[] critics)
+            => new("running", "A review of this session already runs: wait for its verdict, which comes back to you as a prompt, before you ask for another one.", name, critics, []);
+    }
+
+    /// <summary>Reads where a session stands with Adaptive: its level, its critics, the review that runs and the code not reviewed yet.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops the reading.</param>
+    internal async Task<AdaptiveSessionStatus> GetStatusAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var notice = await _runtime.ReadAdaptiveNoticeAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (notice is not { Adaptive: true, Scope.Adaptive: { } settings } || settings.Resolve(notice.Level) is not { } level) return new(false, null, [], null, []);
+        Facts? facts = null;
+        DateTimeOffset? started = null;
+        lock (_gate)
+        {
+            if (_turns.TryGetValue(sessionId, out var turn))
+            {
+                facts = turn.Read();
+                started = turn.Review;
+            }
+        }
+
+        var change = facts is null ? null : (await ChangeOfTurnAsync(facts).ConfigureAwait(false)).Change;
+        return new(true, AdaptiveLevels.NameOf(level.Level), [.. level.Critics.Select(static model => model.Format())], started,
+            [.. (change?.Paths ?? []).Where(IsCode).Take(MaximumFiles)]);
+    }
+
+    // The critics review the change at the same time; their verdict is one prompt of the host, which a running turn of the
+    // session takes or which starts its next one.
+    private async Task RunReviewAsync(string sessionId, Turn turn, IReadOnlyList<ModelTierTarget> critics,
+        Func<AdaptiveCriticRequest, CancellationToken, Task<AdaptiveCriticAnswer>> critic, string prompt, TurnChange change)
+    {
+        string verdict;
+        string outcome;
+        var revising = true;
+        try
+        {
+            var reviews = await Task.WhenAll(critics.Select(async model =>
+            {
+                try { return (Model: model, Answer: await critic(new AdaptiveCriticRequest(sessionId, model, prompt, ReviewTime), _closing.Token).ConfigureAwait(false)); }
+                catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
+                {
+                    Log?.Error(exception, "Adaptive could not run the review by " + model.Format() + " of session " + sessionId + ".");
+                    return (Model: model, Answer: new AdaptiveCriticAnswer(null, exception.Message));
+                }
+            })).ConfigureAwait(false);
+
+            var findings = new List<(ModelTierTarget Model, string Text)>();
+            var approved = new List<ModelTierTarget>();
+            var silent = new List<(ModelTierTarget Model, string Why)>();
+            foreach (var (model, answer) in reviews)
+            {
+                var (line, text) = ParseVerdict(answer.Answer);
+                switch (line)
+                {
+                    case "REVISE" when text.Length > 0: findings.Add((model, text)); break;
+                    case "APPROVE": approved.Add(model); break;
+                    default: silent.Add((model, answer.Failure ?? (answer.Answer is null ? "no answer" : "no verdict"))); break;
+                }
+            }
+
+            verdict = VerdictPrompt(findings, approved, silent);
+            outcome = findings.Count > 0 ? "the review asked for a revision" : approved.Count > 0 ? "the review approved the change" : "the review gave no verdict";
+            revising = findings.Count > 0 || approved.Count == 0;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (exception is OperationCanceledException or ObjectDisposedException && _closing.IsCancellationRequested) return;
+            Log?.Error(exception, "Adaptive could not review the change of session " + sessionId + ".");
+            verdict = VerdictPrompt([], [], [.. critics.Select(model => (model, exception.Message))]);
+            outcome = "the review failed: " + exception.Message;
+        }
+
+        try
+        {
+            lock (_gate) turn.EndReview(revising);
+            var given = await _runtime.DeliverHostPromptAsync(sessionId, verdict, AgentPromptProvenance.AdaptiveReview, _closing.Token).ConfigureAwait(false);
+            if (given == "missing_session") outcome = "the session of the review is gone";
+            // A turn that runs took the verdict; one it starts takes it when it starts.
+            else if (given == "steered") lock (_gate) turn.TakeVerdict();
+            Decided?.Invoke(sessionId, outcome);
+            Log?.Debug("Adaptive, for session " + sessionId + ": " + outcome + ".");
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (exception is OperationCanceledException or ObjectDisposedException && _closing.IsCancellationRequested) return;
+            Log?.Error(exception, "Adaptive could not give session " + sessionId + " the verdict of its review.");
+            Decided?.Invoke(sessionId, "the verdict could not be given: " + exception.Message);
+        }
+    }
+
+    /// <summary>The prompt of a critic: the request, the change, what to check and the verdict to end with.</summary>
+    internal static string CriticPrompt(string? request, TurnChange change, string? notes = null)
     {
         var text = new StringBuilder();
         text.Append("[CodeAlta Adaptive]\nYou review a change that another engineer, another AI model, made to answer the request below. ");
         text.Append("You are read-only: do not modify, create or delete any file of the project; a scratch copy outside it is fine. ");
-        text.Append("Read the code, and run the tests or the commands you need to check the change.\n\n## The request\n\n");
+        text.Append("Read the code, and run the tests or the commands you need to check the change. ");
+        // The session asks for the review before it finishes: a critic told nothing reports the rest of the request as missing.
+        text.Append("The author asked for this review before finishing: what the request asks to do with the change afterwards (commit it, push it, merge it, report it) is still to come, and is not a problem to report.");
+        text.Append("\n\n## The request\n\n");
         text.Append(string.IsNullOrWhiteSpace(request) ? "(The request is in the session that made the change; judge the change on its own.)" : request.Trim());
+        if (!string.IsNullOrWhiteSpace(notes))
+            text.Append("\n\n## What the author says of the change\n\n").Append(Bounded(notes.Trim(), MaximumNotes));
         text.Append("\n\n## The change\n\n");
         if (change.Diff is { Length: > 0 } diff)
         {
@@ -483,15 +671,53 @@ internal sealed partial class AdaptiveTurnCoordinator
         return text.ToString();
     }
 
-    /// <summary>The prompt that gives the session what the critics found, for it to check and fix.</summary>
-    internal static string RevisionPrompt(IReadOnlyList<(ModelTierTarget Model, string Text)> findings)
+    /// <summary>
+    /// The prompt that gives a session the verdict of the review it asked for: what the critics found, for it to check and
+    /// fix; their approval; or that none could review, for it to recheck its change itself.
+    /// </summary>
+    internal static string VerdictPrompt(IReadOnlyList<(ModelTierTarget Model, string Text)> findings, IReadOnlyList<ModelTierTarget> approved,
+        IReadOnlyList<(ModelTierTarget Model, string Why)> silent)
     {
-        var text = new StringBuilder("[CodeAlta Adaptive]\nReviewers of other models checked your change against the request, read-only. What they found:\n");
-        foreach (var (model, found) in findings) text.Append("\n### ").Append(model.Format()).Append("\n\n").Append(Bounded(found, MaximumFindings)).Append('\n');
-        text.Append("\nCheck each finding yourself. Fix the ones that are real and keep the tests passing; leave the ones that are wrong. Then answer as you would have.\n");
-        text.Append("This message comes from CodeAlta, not from the user.");
-        return text.ToString();
+        const string Then = "Then do what waited for this review, and answer as you would have.";
+        var text = new StringBuilder("[CodeAlta Adaptive]\n");
+        var others = new StringBuilder();
+        if (approved.Count > 0) others.Append("Approved by ").Append(string.Join(", ", approved.Select(static model => model.Format()))).Append(". ");
+        if (silent.Count > 0) others.Append("No verdict from ").Append(string.Join(", ", silent.Select(static item => $"{item.Model.Format()} ({item.Why})"))).Append(". ");
+        if (findings.Count > 0)
+        {
+            text.Append("The review you asked for is done. The critics checked your change against the request, read-only. What they found:\n");
+            foreach (var (model, found) in findings) text.Append("\n### ").Append(model.Format()).Append("\n\n").Append(Bounded(found, MaximumFindings)).Append('\n');
+            text.Append('\n').Append(others);
+            text.Append("Check each finding yourself. Fix the ones that are real and keep the tests passing; leave the ones that are wrong. These fixes need no second review. ").Append(Then);
+        }
+        else if (approved.Count > 0)
+        {
+            text.Append("The review you asked for is done: the critics found nothing to fix. ").Append(others).Append("Do what waited for this review, and answer as you would have.");
+        }
+        else
+        {
+            text.Append("The review you asked for could not be done. ").Append(others);
+            text.Append("Check your change yourself against each requirement of the request, one by one, with a test or a run for each rule it states; fix what is missing or wrong and keep the tests passing. ").Append(Then);
+        }
+
+        return text.Append("\nThis message comes from CodeAlta, not from the user.").ToString();
     }
+
+    /// <summary>The prompt that reminds a session that its turn ended with code its critics did not review.</summary>
+    internal static string ReminderPrompt(IReadOnlyList<string> paths)
+    {
+        var files = paths.Where(IsCode).ToArray();
+        return "[CodeAlta Adaptive]\n"
+            + $"Your turn ended with code that the critics of this session did not review: {Listed(files)}.\n"
+            + "If it is your change and it is complete, run `alta adaptive review` now, then end your turn: the verdict comes back to you as a prompt. Do not push, merge or publish it before.\n"
+            + "If part of it is not yours (a branch you checked out, a pull, generated files), name the commit your change starts from: `alta adaptive review --base <commit>`. "
+            + "If nothing of it needs a review, or your work on it is not finished, say so in one line and go on.\n"
+            + "This message comes from CodeAlta, not from the user.";
+    }
+
+    // The first files of a list, in code, and how many more there are.
+    private static string Listed(IReadOnlyList<string> files)
+        => string.Join(", ", files.Take(ListedFiles).Select(static file => "`" + file + "`")) + (files.Count > ListedFiles ? $" and {files.Count - ListedFiles} more" : "");
 
     /// <summary>The last verdict line of a review, upper case, and the findings around it; (null, answer) without a verdict.</summary>
     internal static (string? Verdict, string Findings) ParseVerdict(string? answer)
@@ -532,24 +758,6 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
 
         return true;
-    }
-
-    // A card of the timeline; its details name what Adaptive did, which the timeline titles it by.
-    private async Task WriteCardAsync(string sessionId, string message, string what, AgentSessionUpdateKind kind = AgentSessionUpdateKind.Warning)
-    {
-        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
-        if (session is null) return;
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("adaptive", what);
-            writer.WriteEndObject();
-        }
-
-        var details = JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
-        await _runtime.AppendSessionEventAsync(session, new AgentSessionUpdateEvent(
-            new ModelProviderId(session.ResolvedProviderKey), sessionId, Time.GetUtcNow(), null, kind, message, details), CancellationToken.None).ConfigureAwait(false);
     }
 
     // Runs the decision of a session on its own, which the settlement of the session waits for and the closing awaits.
@@ -616,6 +824,11 @@ internal sealed partial class AdaptiveTurnCoordinator
     private static Task<string?> GitDiffAsync(string folder, string before, string after, CancellationToken cancellationToken)
         => GitAsync(folder, null, cancellationToken, "diff", "--no-color", "--no-ext-diff", before, after);
 
+    // A name that starts with a dash would be read as an option of git.
+    private static async Task<string?> GitTreeOfAsync(string folder, string commit, CancellationToken cancellationToken)
+        => commit.StartsWith('-') ? null
+            : (await GitAsync(folder, null, cancellationToken, "rev-parse", "--verify", "--quiet", commit + "^{tree}").ConfigureAwait(false))?.Trim() is { Length: > 0 } tree ? tree : null;
+
     // The output of a git command, or null when it failed, took too long or git is not there.
     private static async Task<string?> GitAsync(string folder, IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken, params string[] arguments)
     {
@@ -678,20 +891,28 @@ internal sealed partial class AdaptiveTurnCoordinator
     // The tree of a working folder before a turn.
     private sealed record TreeSnapshot(string Folder, string Tree, DateTimeOffset At);
 
-    /// <summary>The code a turn changed.</summary>
-    /// <param name="Paths">The paths it changed.</param>
-    /// <param name="Diff">The diff of the turn, when git gives it.</param>
+    /// <summary>Code of a request that is to be reviewed.</summary>
+    /// <param name="Paths">The paths that changed.</param>
+    /// <param name="Diff">The diff, when git gives it.</param>
     /// <param name="Folder">The working folder, when git tells the change.</param>
-    /// <param name="After">The tree after the turn, when git tells the change.</param>
+    /// <param name="After">The tree of the files as they are, when git tells the change.</param>
     internal sealed record TurnChange(IReadOnlyList<string> Paths, string? Diff, string? Folder, string? After);
 
-    // What the decision reads of a turn, copied under the gate.
-    private sealed record Facts(string? Phase, bool Failed, bool Checked, string? Request, TreeSnapshot? Before, IReadOnlyList<string> ChangedFiles);
+    // What a decision reads of a request, copied under the gate. From is the tree the code not reviewed yet is compared
+    // with: the last reviewed one (Reviewed is then true), else the one the request started on.
+    private sealed record Facts(bool Failed, bool ReviewRunning, bool VerdictWaits, bool Revising, string? Request, string? Folder, string? From, bool Reviewed, string? Told,
+        IReadOnlyList<string> ChangedFiles);
 
-    // A turn the user started, with the recheck or the revision that continues it. Read and written under the gate.
+    // A request of the user, over all its runs: the one its prompt started, and those that continue it (the answer of a
+    // sub-agent, the end of a job, a verdict of the critics, a recheck). Read and written under the gate.
     private sealed class Turn(string? runId, DateTimeOffset startedAt)
     {
         private readonly HashSet<string> _changedFiles = new(StringComparer.OrdinalIgnoreCase);
+        private string? _folder;
+        private string? _reviewed;
+        private string? _told;
+        private bool _revising;
+        private bool _verdictWaits;
 
         public string? RunId { get; set; } = runId;
 
@@ -700,9 +921,6 @@ internal sealed partial class AdaptiveTurnCoordinator
 
         public DateTimeOffset StartedAt { get; } = startedAt;
 
-        // Null for the run the user started; the provenance of a recheck or a revision.
-        public string? Phase { get; private set; }
-
         public string? DecidedRun { get; set; }
 
         public TreeSnapshot? Before { get; set; }
@@ -710,20 +928,67 @@ internal sealed partial class AdaptiveTurnCoordinator
         // The request of the user, which the critics check the change against.
         public string? Request { get; set; }
 
-        // Whether the change of the turn was rechecked or reviewed: a turn is checked once.
-        public bool Checked { get; set; }
-
         public bool Failed { get; set; }
 
-        public void StartRun(string? runId, string? phase)
+        // When the review that runs started; null when none runs.
+        public DateTimeOffset? Review { get; private set; }
+
+        public void StartRun(string? runId)
         {
             RunId = runId;
             Active = true;
-            Phase = phase;
             Failed = false;
+            TakeVerdict();
         }
 
-        public Facts Read() => new(Phase, Failed, Checked, Request, Before, [.. _changedFiles]);
+        // A run has the verdict that waited: a running one that was given it, or the one it starts. That run revises the change.
+        public void TakeVerdict()
+        {
+            if (!_verdictWaits) return;
+            _verdictWaits = false;
+            _revising = true;
+        }
+
+        public Facts Read() => new(Failed, Review is not null, _verdictWaits, _revising, Request, _folder ?? Before?.Folder, _reviewed ?? Before?.Tree, _reviewed is not null, _told, [.. _changedFiles]);
+
+        // A review of the files as they are (their tree, or null without git) starts: they are the reviewed ones.
+        public void StartReview(DateTimeOffset at, string folder, string? tree)
+        {
+            Review = at;
+            _folder = folder;
+            Cover(tree);
+        }
+
+        // The review ended. Its verdict waits for a run when the session is to fix what was found, or to recheck its
+        // change itself: what that run changes is the revision, which is not reviewed again.
+        public void EndReview(bool revising)
+        {
+            Review = null;
+            _verdictWaits = revising;
+        }
+
+        // The session was told of the files as they are, once: reminded of their review, or asked to recheck them.
+        public void Remind(string? tree, bool revising)
+        {
+            _told = tree;
+            _revising = revising;
+            if (tree is null) _changedFiles.Clear();
+        }
+
+        // The run that revised the change ended: the files as they are now are the reviewed ones.
+        public void Accept(string? tree)
+        {
+            _revising = false;
+            Cover(tree);
+        }
+
+        private void Cover(string? tree)
+        {
+            if (tree is not null) _reviewed = tree;
+            _told = null;
+            // Without git, the files the tools report from now on are the ones not reviewed.
+            _changedFiles.Clear();
+        }
 
         public void Note(JsonElement? details)
         {

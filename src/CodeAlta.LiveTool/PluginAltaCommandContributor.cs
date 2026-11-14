@@ -40,6 +40,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "note",
         "reminder",
         "job",
+        "adaptive",
         "task",
         "plan",
         "tag",

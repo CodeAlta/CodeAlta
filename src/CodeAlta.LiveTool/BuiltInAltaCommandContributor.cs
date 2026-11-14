@@ -111,6 +111,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("job status"),
         Read("job output"),
         Disruptive("job cancel"),
+        Mutating("adaptive review"),
+        Read("adaptive status"),
         Read("workflow list"),
         Read("workflow show"),
         Read("workflow result"),
@@ -183,6 +185,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         yield return CreateSandboxCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
         yield return CreateJobCommand(context.Invocation);
+        yield return CreateAdaptiveCommand(context.Invocation);
         // The runs of the scripts of Code Mode, in a host that runs them.
         if (context.Invocation.Services.Get<Orchestration.Runtime.Scripts.CodeModeRunRegistry>() is not null)
         {

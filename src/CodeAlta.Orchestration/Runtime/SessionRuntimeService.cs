@@ -2555,6 +2555,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
             ReviewNoted = startNewSession ? null : savedLocalState?.ReviewNoted,
             SandboxNoted = startNewSession ? null : savedLocalState?.SandboxNoted,
+            AdaptiveNoted = startNewSession ? null : savedLocalState?.AdaptiveNoted,
             DisabledTools = instructions.PromptBundle?.DisabledTools ?? System.Collections.Frozen.FrozenSet<string>.Empty,
             DisabledToolPatterns = toolPatterns,
             PublishedBy = ticket,
@@ -2790,6 +2791,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     sendOptions = sendOptions.WithInput(new AgentInput([.. sendOptions.Input.Items, new AgentInputItem.HostContext("sandbox", sandboxTold.Text)]));
                 }
 
+                // And Adaptive, the same way: that critics review its changes, and that it starts their review itself.
+                var adaptiveNote = await AdaptiveNoteForAsync(session, candidate, execution.Token).ConfigureAwait(false);
+                if (adaptiveNote is { } adaptiveTold)
+                {
+                    sendOptions = sendOptions.WithInput(new AgentInput([.. sendOptions.Input.Items, new AgentInputItem.HostContext("adaptive", adaptiveTold.Text)]));
+                }
+
                 // And the folder it works in, once it changed: what it read and ran before names the old one.
                 sendOptions = WithWorkFolderNote(session.SessionId, sendOptions, out var workFolderNoted);
 
@@ -2807,6 +2815,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 if (sandboxNote is { } sandboxNoted)
                 {
                     await RecordSandboxNotedAsync(session, candidate, sandboxNoted.Noted).ConfigureAwait(false);
+                }
+
+                if (adaptiveNote is { } adaptiveNoted)
+                {
+                    await RecordAdaptiveNotedAsync(session, candidate, adaptiveNoted.Noted).ConfigureAwait(false);
                 }
             }
             catch (Exception failure)
@@ -6496,6 +6509,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             set => Volatile.Write(ref _sandboxNoted, value);
         }
 
+        private string? _adaptiveNoted;
+
+        /// <summary>
+        /// What the agent was last told of Adaptive (the value of the note of its runs); null when nothing, or when a
+        /// compaction may have dropped it. Read and written on the actor of the session.
+        /// </summary>
+        public string? AdaptiveNoted
+        {
+            get => Volatile.Read(ref _adaptiveNoted);
+            set => Volatile.Write(ref _adaptiveNoted, value);
+        }
+
         public string? Model { get; }
 
         public AgentReasoningEffort? ReasoningEffort { get; }
@@ -6638,6 +6663,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 ReviewNoted = null;
                 SandboxNoted = null;
+                AdaptiveNoted = null;
             }
 
             if (@event.RunId is { } runId && ShouldTrackRunId(@event))

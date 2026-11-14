@@ -4153,6 +4153,48 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task AdaptiveReview_AsksTheRuntimeForTheCallingSession_AndTellsWhatIsReviewedAndWhatComesNext()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(new ModelProviderId("adaptive-session")));
+        await using var _ = runtime.ConfigureAwait(false);
+        var asked = new List<AdaptiveReviewRequest>();
+        runtime.AdaptiveReviewHandler = (request, _) =>
+        {
+            asked.Add(request);
+            return Task.FromResult(request.Base == "nowhere"
+                ? new AdaptiveReviewReceipt("invalid_base", "`nowhere` is not a commit.", "high", ["claude:sonnet@high"], [])
+                : new AdaptiveReviewReceipt(AdaptiveReviewReceipt.Started, "The critics review 1 code file(s). Do not push before their verdict.", "high", ["claude:sonnet@high"], ["src/app.cs"]));
+        };
+        runtime.AdaptiveStatusHandler = static (_, _) => Task.FromResult(new AdaptiveSessionStatus(true, "high", ["claude:sonnet@high"], DateTimeOffset.UnixEpoch, ["src/app.cs"]));
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime));
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "the-session" };
+        JsonElement Record(AltaCommandResult result, string type) => ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == type);
+
+        var review = await dispatcher.InvokeAsync(["adaptive", "review", "--base", "origin/main", "--message", "Fixes of the pull request"], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, review.ExitCode, review.Stderr);
+        Assert.AreEqual(new AdaptiveReviewRequest("the-session", "origin/main", "Fixes of the pull request"), asked.Single());
+        var record = Record(review, "alta.adaptive.review");
+        Assert.AreEqual("started", record.GetProperty("status").GetString());
+        Assert.AreEqual("high", record.GetProperty("level").GetString());
+        Assert.AreEqual("claude:sonnet@high", record.GetProperty("critics")[0].GetString());
+        Assert.AreEqual("src/app.cs", record.GetProperty("files")[0].GetString());
+        StringAssert.Contains(record.GetProperty("nextStep").GetString(), "Do not push before their verdict.");
+
+        // The notes of several lines come from stdin; a commit that is none is a usage error; nobody asks for another session.
+        await dispatcher.InvokeAsync(["adaptive", "review", "--stdin"], stdin: "Two fixes:\n- the parser", caller: caller).ConfigureAwait(false);
+        Assert.AreEqual("Two fixes:\n- the parser", asked[1].Notes);
+        Assert.AreEqual(AltaExitCodes.Usage, (await dispatcher.InvokeAsync(["adaptive", "review", "--base", "nowhere"], caller: caller).ConfigureAwait(false)).ExitCode);
+        Assert.AreEqual(AltaExitCodes.Usage, (await dispatcher.InvokeAsync(["adaptive", "review"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).ExitCode);
+
+        var status = Record(await dispatcher.InvokeAsync(["adaptive", "status"], caller: caller).ConfigureAwait(false), "alta.adaptive.status");
+        Assert.IsTrue(status.GetProperty("adaptive").GetBoolean());
+        Assert.IsTrue(status.GetProperty("reviewRunning").GetBoolean());
+        Assert.AreEqual("src/app.cs", status.GetProperty("unreviewedFiles")[0].GetString());
+    }
+
+    [TestMethod]
     public async Task Job_RunsInTheBackground_IsReadAndCancelled_AndItsEndIsGivenToItsSession()
     {
         using var root = TempDirectory.Create();

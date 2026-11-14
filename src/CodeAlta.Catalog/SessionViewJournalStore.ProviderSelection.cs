@@ -88,6 +88,7 @@ public sealed partial class SessionViewJournalStore
         // The agent of the new provider is told of the review before commit again at its first prompt.
         local.ReviewNoted = null;
         local.SandboxNoted = null;
+        local.AdaptiveNoted = null;
         var selected = SessionViewJournalHeader.FromDescriptor(session).ToDescriptor();
         selected.ProviderId = target.ProviderId.Value;
         selected.ProviderKey = target.ProviderId.Value;

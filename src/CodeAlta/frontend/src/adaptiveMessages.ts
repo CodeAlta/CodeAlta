@@ -70,6 +70,7 @@ export const adaptiveMessages = {
   // The titles of the messages Adaptive sends to a session, and of its cards, in its timeline.
   "Adaptive recheck": ["Revisión de Adaptativo", "Vérification d’Adaptatif", "Nachprüfung von Adaptiv", "アダプティブの再確認", "自适应复查"],
   "Adaptive review": ["Revisión crítica de Adaptativo", "Revue d’Adaptatif", "Review von Adaptiv", "アダプティブのレビュー", "自适应审查"],
+  "Adaptive reminder": ["Recordatorio de Adaptativo", "Rappel d’Adaptatif", "Erinnerung von Adaptiv", "アダプティブのリマインダー", "自适应提醒"],
   // Sessions of the first Adaptive recorded it.
   "Adaptive escalation": ["Escalado de Adaptativo", "Escalade d’Adaptatif", "Eskalation von Adaptiv", "アダプティブのエスカレーション", "自适应升级"],
 } as const;

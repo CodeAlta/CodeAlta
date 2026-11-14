@@ -714,6 +714,7 @@ public sealed partial class SessionViewJournalStore
             ReviewNoted = state.ReviewNoted,
             Options = state.Options,
             SandboxNoted = state.SandboxNoted,
+            AdaptiveNoted = state.AdaptiveNoted,
             Tier = state.Tier,
             Adaptive = state.Adaptive,
             AdaptiveLevel = state.AdaptiveLevel,

@@ -55,10 +55,14 @@ public static class AgentPromptProvenance
     public const string AdaptiveEscalation = "adaptive-escalation";
 
     /// <summary>
-    /// The prompt that gives a session on Adaptive what the critics of its level found in the change of its turn, for it
-    /// to revise; also the prompt of each critic, in the read-only session that reviews the change.
+    /// The prompt that gives a session on Adaptive the verdict of the critics of its level on the change it had them
+    /// review: what they found, for it to revise, or their approval; also the prompt of each critic, in the read-only
+    /// session that reviews the change.
     /// </summary>
     public const string AdaptiveReview = "adaptive-review";
+
+    /// <summary>The prompt that reminds a session on Adaptive, when a turn ends, that it changed code its critics did not review.</summary>
+    public const string AdaptiveReminder = "adaptive-reminder";
 
     /// <summary>The longest identifier, in characters.</summary>
     public const int MaxLength = 64;
@@ -78,6 +82,7 @@ public static class AgentPromptProvenance
         [AdaptiveRecheck] = "Adaptive Recheck",
         [AdaptiveEscalation] = "Adaptive Escalation",
         [AdaptiveReview] = "Adaptive Review",
+        [AdaptiveReminder] = "Adaptive Reminder",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>Gets the identifiers this version knows, with a display name of their own.</summary>

@@ -35,6 +35,8 @@ public static class SessionPromptProvenance
         SessionRuntimeService.JobPromptKind => AgentPromptProvenance.BackgroundJob,
         ReminderPromptKind => AgentPromptProvenance.Reminder,
         ParentNotifyKind => AgentPromptProvenance.AgentSession,
+        // The verdict of the critics of Adaptive is dispatched under its own provenance.
+        AgentPromptProvenance.AdaptiveReview => AgentPromptProvenance.AdaptiveReview,
         _ => null,
     };
 

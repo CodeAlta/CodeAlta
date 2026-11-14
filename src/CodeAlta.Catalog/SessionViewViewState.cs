@@ -330,6 +330,13 @@ public sealed class SessionViewLocalState
     public string? SandboxNoted { get; set; }
 
     /// <summary>
+    /// Gets or sets what the agent of the session was last told of Adaptive (<c>off</c>, or its level and its critics), or
+    /// <see langword="null"/> when it was told nothing yet: the host tells it again only when this differs.
+    /// </summary>
+    [JsonPropertyName("adaptive_noted")]
+    public string? AdaptiveNoted { get; set; }
+
+    /// <summary>
     /// Gets or sets the tier of models the session runs on (<c>complex</c>, <c>standard</c> or <c>quick</c>), or
     /// <see langword="null"/> for a model chosen by hand. A fallback goes on with the next target of that tier.
     /// </summary>

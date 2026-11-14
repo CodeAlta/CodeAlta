@@ -39,9 +39,11 @@ Once tiers are set:
 With **Adaptive**, CodeAlta runs each turn you send on the models of a level, which can come from different providers:
 
 - the turn runs on the model of the level of the session: **Low**, **Medium**, **High** or **Max**;
-- when the turn changed code, the critics of the level review the change, each in a session of its own: they get the request and the diff, read the code and run the tests, and never edit. The timeline shows each review as a child session;
-- when a critic finds a problem, the session gets one more message from CodeAlta with what the critics found, shown as **Adaptive review**: it checks each finding, fixes the real ones and answers. When they all approve, a card says so;
-- a level without critics, or whose critics could not answer, has the model of the turn recheck its change against each requirement of the request instead, shown as **Adaptive recheck**.
+- the session is told that critics review the code it changes, and asks for that review itself once a change is complete: before it reports it, and before it pushes or merges it;
+- the critics of the level review the change, each in a session of its own: they get the request and the diff, read the code and run the tests, and never edit. The timeline shows each review as a child session;
+- their verdict comes back to the session as a message from CodeAlta, shown as **Adaptive review**: what they found, which it checks and fixes, or their approval. It waits for that verdict before a push or a merge;
+- when a turn ends with code nobody reviewed, CodeAlta reminds the session once, shown as **Adaptive reminder**. CodeAlta never starts a review by itself;
+- a level without critics has the model of the turn recheck its change against each requirement of the request instead, shown as **Adaptive recheck**.
 
 Critics of another family of models see other mistakes: in November 2026, GPT-6.1 Sol for the turns with Claude Sonnet 5.5 as the critic solved as many hard tasks of real repositories as Claude Opus 5.5 alone, for about a quarter of its cost, and more Terminal-Bench tasks than any model alone.
 
@@ -64,9 +66,11 @@ To choose the models yourself: for the turns, a strong model that is inexpensive
 
 In the model list of the **Agent** chip, Adaptive comes after the tiers, with its levels and what each runs. Choose a level: the session moves to the model of that level, of another provider when it needs to, and its next turns run on it. While Adaptive is not set up, choosing it says so and offers **Open Settings**. Choosing a model or a tier yourself takes the session off Adaptive.
 
-- Whether a turn changed code is read from git: CodeAlta compares the files of the project before and after the turn, so a turn that only edits documentation or commits what was there is not reviewed. Without git, it goes by the files the tool calls say they changed, which not every provider reports.
-- Adaptive reviews the turns you send. A prompt that comes from elsewhere (a reminder, a background job, another agent) runs on the model the session has, unreviewed.
-- A critic is read-only: it has no tool that writes files. If it changed files anyway (through a command), a warning card names them; CodeAlta never undoes changes behind your back.
+- What is reviewed is read from git: the files that changed since the last review of your request, or since its start. Documentation alone, or a commit of what was there, is not reviewed. Without git, it goes by the files the tool calls say they changed, which not every provider reports.
+- When the folder also holds changes that are not the session's (a branch it checked out, a pull), the session names the commit its change starts from.
+- A request is followed until your next prompt: what the session does after a sub-agent answers or a background job ends is part of it.
+- A critic is read-only: it has no tool that writes files.
+- The agent starts the review with `alta adaptive review`, and `alta adaptive status` says where a session stands.
 - CodeAlta CLI runs a session on Adaptive with `--tier adaptive`, or `--tier adaptive:high` for a level (see [CodeAlta CLI](command-line.md)).
 
 ## Tiers of a space

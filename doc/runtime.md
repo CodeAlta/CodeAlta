@@ -472,18 +472,27 @@ not by its agent. `AdaptiveTurnCoordinator` (owned by `OwnedSessionCommandServic
   level; the session then has no tier. A send the user started takes the model of its level on the session's provider,
   at preparation. The command service starts the run of each send it makes (`BeginRun`, with the text of the request):
   a provider that runs its own loop publishes no prompt.
-- What a run does is followed on the actor of the session (`SessionRuntimeService.RunEventObserver`), so in order: the
-  request, the files the tools report, the answer. Its idle event starts the decision, beside the events, which the
-  settlement of the session waits for.
-- A user turn that changed code (a git tree of the working folder before and after, docs and `.alta` left out; the
-  reported files without git) is reviewed by the critics of its level, in parallel: each is a child session of its own
-  (`AdaptiveCritics` in the host, through a headless driver), on its model, without the tools that write files nor
-  sessions of its own, created as a workflow child so that its answer comes back to the coordinator and never to the
-  session as a prompt. It gets the request and the diff of the turn only, so that the session keeps its cache; it ends
-  with a verdict. Findings become one revision prompt on the model of the turn; approvals a card; a change of the files
-  during the reviews a warning card, never an undo. A level without critics, or whose critics gave no verdict, gets one
-  recheck prompt instead. The prompts are host prompts with their own provenance: they are the cards of Adaptive in the
-  timeline.
+- The session starts the review of its changes, not the host: it knows when a change is complete and what comes next (a
+  push, a merge), which the host can only guess. It is told so with its prompt, in a note (`<codealta-context>`, as the
+  review before commit is): its level, its critics, and to have its code reviewed before it reports it or takes it out
+  of the folder. The note is told again only when the level or the critics change, or after a compaction.
+- `alta adaptive review` asks the coordinator (`SessionRuntimeService.RequestAdaptiveReviewAsync`). The change is what
+  differs between two git trees of the working folder (docs and `.alta` left out; the files the tools report without
+  git): from the last reviewed state of the request, else its start, else the commit the session names, to the files as
+  they are. The critics of the level review it in parallel: each is a child session of its own (`AdaptiveCritics` in
+  the host, through a headless driver), on its model, without the tools that write files nor sessions of its own,
+  created as a workflow child so that its answer comes back to the coordinator. It gets the request and the diff only,
+  so that the session keeps its cache; it ends with a verdict.
+- The verdict is one host prompt (`DeliverHostPromptAsync`: a running turn takes it, else it starts the next one):
+  what each critic found, their approval, or that none could review. What the run that takes it changes is the
+  revision, which is not reviewed again.
+- A request is followed over all its runs, from the prompt of the user to the next one: a prompt of the host (the
+  answer of a sub-agent, the end of a job, a verdict) continues it. What a run does is followed on the actor of the
+  session (`SessionRuntimeService.RunEventObserver`), so in order. Its idle event starts a decision, beside the events,
+  which the settlement of the session waits for: nothing while a review runs, a prompt waits or work of the session goes
+  on (a job, a sub-agent); else, when code changed since the last review, one reminder prompt for that state of the
+  files. The host never starts a review. A level without critics gets one recheck prompt at that point instead. The
+  prompts are host prompts with their own provenance: they are the cards of Adaptive in the timeline.
 - Choosing a model or a tier takes the session off Adaptive; a run that fails is the fallback's.
 
 ## Session retention

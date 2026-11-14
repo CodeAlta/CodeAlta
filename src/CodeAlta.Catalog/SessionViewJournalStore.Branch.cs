@@ -193,6 +193,8 @@ public sealed partial class SessionViewJournalStore
             Tier = sourceLocal?.Tier,
             Adaptive = sourceLocal?.Adaptive,
             AdaptiveLevel = sourceLocal?.AdaptiveLevel,
+            // What its agent was told of Adaptive is in the conversation it continues.
+            AdaptiveNoted = sourceLocal?.AdaptiveNoted,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,

@@ -138,6 +138,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private static string WorkFolder(SessionViewDescriptor session, ProjectDescriptor project)
         => SessionRuntimeService.ExistingWorktree(session.WorktreeDirectory) ?? project.ProjectPath;
 
+    // The folder a session works in: its worktree, else the folder of its project; null for a chat or a session that is not known.
+    internal async Task<string?> WorkFolderOfAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (session is null || string.IsNullOrWhiteSpace(session.ProjectRef)) return null;
+        return await _projects.GetByIdAsync(session.ProjectRef, cancellationToken).ConfigureAwait(false) is { } project ? WorkFolder(session, project) : null;
+    }
+
     private static bool ReferenceScopeMatches(OwnedProjectReferenceScope scope, ProjectDescriptor? project)
         => project is { Archived: false } && project.Id == scope.ProjectId && project.ProjectPath == scope.ProjectPath;
 

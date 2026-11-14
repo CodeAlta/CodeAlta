@@ -14,9 +14,10 @@ using CodeAlta.Orchestration.Runtime;
 namespace CodeAlta.Orchestration.Tests;
 
 /// <summary>
-/// A session on Adaptive: CodeAlta runs the turns of the user on the model of the level of the session, has the critics
-/// of the level review a turn that changed code and the session revise it with what they found, or has it rechecked on a
-/// level without critics. The real host, runtime and command owner, with a scripted provider whose runs say what they did.
+/// A session on Adaptive: CodeAlta runs the turns of the user on the model of the level of the session and tells it that
+/// critics review its changes; the session asks for that review, the critics of the level review the change and their
+/// verdict comes back to it as a prompt; a turn that ends with code nobody reviewed is reminded, or rechecked on a level
+/// without critics. The real host, runtime and command owner, with a scripted provider whose runs say what they did.
 /// </summary>
 [TestClass]
 public sealed class AdaptiveTurnTests
@@ -91,7 +92,7 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
-    public async Task TheCriticsOfTheLevel_ReviewTheChange_AndTheSessionRevisesItOnceWithWhatTheyFound()
+    public async Task TheSessionAsksForTheReview_TheCriticsReviewItsChange_AndTheirFindingsComeBackAsAPrompt()
     {
         await using var f = await Fixture.CreateAsync(Config);
         var asked = new ConcurrentQueue<AdaptiveCriticRequest>();
@@ -100,81 +101,184 @@ public sealed class AdaptiveTurnTests
             asked.Enqueue(request);
             return Task.FromResult(new AdaptiveCriticAnswer("1. `parse` drops the last field (src/app.cs:42).\n\nVERDICT: REVISE", null));
         };
+        var decided = new ConcurrentQueue<string>();
+        f.Host.Commands.Adaptive.Decided = (_, outcome) => decided.Enqueue(outcome);
         Assert.AreEqual("ok", (await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId)).Status);
         Assert.AreEqual("medium", (await f.StateAsync()).AdaptiveLevel, "Without a level asked, the default level of the settings.");
-        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+        AdaptiveReviewReceipt? receipt = null;
+        f.Provider.Scripts.Enqueue(run =>
+        {
+            run.Edit("src/app.cs");
+            // The change is complete: the session has it reviewed before it reports it.
+            run.During = async () => receipt = await f.Host.RuntimeService.RequestAdaptiveReviewAsync(
+                new AdaptiveReviewRequest(f.Session.SessionId, Notes: "Parses the export of the billing tool."));
+        });
+        // The run that takes the findings fixes them: a revision is not reviewed again.
         f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
 
         f.Send("parse the CSV export");
         Assert.AreEqual("model-a", (await f.Provider.NextSendAsync()).Options.Model);
-        var revision = await f.Provider.NextSendAsync();
+        var verdict = await f.Provider.NextSendAsync();
         await f.SettleAsync();
 
+        Assert.AreEqual(AdaptiveReviewReceipt.Started, receipt!.Status, receipt.Message);
+        Assert.AreEqual("medium", receipt.Level);
+        CollectionAssert.AreEqual(new[] { "prov-a:model-c@high" }, receipt.Critics.ToArray());
+        CollectionAssert.AreEqual(new[] { "src/app.cs" }, receipt.Files.ToArray());
+        StringAssert.Contains(receipt.Message, "do not push, merge or publish");
         var review = asked.Single();
         Assert.AreEqual("prov-a:model-c@high", review.Critic.Format());
         StringAssert.Contains(review.Prompt, "parse the CSV export", "The critic checks the change against the request.");
+        StringAssert.Contains(review.Prompt, "Parses the export of the billing tool.", "And reads what the session says of its change.");
         StringAssert.Contains(review.Prompt, "src/app.cs");
         StringAssert.Contains(review.Prompt, "VERDICT: APPROVE");
-        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, revision.Provenance);
-        StringAssert.Contains(revision.Text, "`parse` drops the last field");
-        StringAssert.Contains(revision.Text, "prov-a:model-c@high");
-        Assert.DoesNotContain("VERDICT", revision.Text);
-        Assert.AreEqual("model-a", revision.Options.Model, "The revision runs on the model of the turn, which keeps its cache.");
-        Assert.AreEqual(2, f.Provider.SendCount, "A revision is not reviewed again.");
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, verdict.Provenance);
+        StringAssert.Contains(verdict.Text, "`parse` drops the last field");
+        StringAssert.Contains(verdict.Text, "prov-a:model-c@high");
+        StringAssert.Contains(verdict.Text, "These fixes need no second review.");
+        Assert.DoesNotContain("VERDICT", verdict.Text);
+        Assert.AreEqual("model-a", verdict.Options.Model, "The revision runs on the model of the turn, which keeps its cache.");
+        Assert.AreEqual(2, f.Provider.SendCount, "The session asked for the review: it is not reminded, and its revision is not reviewed again.");
+        CollectionAssert.Contains(decided.ToArray(), "the review asked for a revision");
+        CollectionAssert.Contains(decided.ToArray(), "the change was revised");
     }
 
     [TestMethod]
-    public async Task AnApprovedChange_IsNotRevised_AndACardSaysWhoApprovedIt()
+    public async Task AnApprovedChange_IsToldToTheSession_WhichWaitsForTheVerdict()
     {
         await using var f = await Fixture.CreateAsync(Config);
         f.Host.Commands.Adaptive.Critic = static (_, _) => Task.FromResult(new AdaptiveCriticAnswer("All requirements are met.\n**VERDICT: APPROVE**", null));
         await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
-        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+        f.Provider.Scripts.Enqueue(run =>
+        {
+            run.Edit("src/app.cs");
+            run.During = () => f.Host.RuntimeService.RequestAdaptiveReviewAsync(new AdaptiveReviewRequest(f.Session.SessionId));
+        });
 
         f.Send("add the feature");
         await f.Provider.NextSendAsync();
+        var verdict = await f.Provider.NextSendAsync();
         await f.SettleAsync();
 
-        Assert.AreEqual(1, f.Provider.SendCount);
-        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "approval");
-        StringAssert.Contains(card.Message, "approved by prov-a:model-c@high");
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, verdict.Provenance);
+        StringAssert.Contains(verdict.Text, "the critics found nothing to fix");
+        StringAssert.Contains(verdict.Text, "Approved by prov-a:model-c@high");
+        StringAssert.Contains(verdict.Text, "Do what waited for this review");
+        Assert.AreEqual(2, f.Provider.SendCount);
     }
 
     [TestMethod]
-    public async Task ACriticThatGivesNoVerdict_LeavesTheChangeToARecheck_AndACardSaysSo()
+    public async Task ACriticThatGivesNoVerdict_OrThrows_HasTheSessionRecheckItsChangeItself()
+    {
+        // The host of the fixture does not initialize the logging: the failure of a critic is logged nowhere, and told.
+        foreach (var (critic, why) in new (Func<AdaptiveCriticRequest, CancellationToken, Task<AdaptiveCriticAnswer>>, string)[]
+        {
+            (static (_, _) => Task.FromResult(new AdaptiveCriticAnswer(null, "the provider is not ready")), "the provider is not ready"),
+            (static (_, _) => throw new InvalidOperationException("The critic has no session."), "The critic has no session."),
+        })
+        {
+            await using var f = await Fixture.CreateAsync(Config);
+            f.Host.Commands.Adaptive.Critic = critic;
+            await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+            f.Provider.Scripts.Enqueue(run =>
+            {
+                run.Edit("src/app.cs");
+                run.During = () => f.Host.RuntimeService.RequestAdaptiveReviewAsync(new AdaptiveReviewRequest(f.Session.SessionId));
+            });
+
+            f.Send("add the feature");
+            await f.Provider.NextSendAsync();
+            var verdict = await f.Provider.NextSendAsync();
+            await f.SettleAsync();
+
+            Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, verdict.Provenance);
+            StringAssert.Contains(verdict.Text, "could not be done");
+            StringAssert.Contains(verdict.Text, why);
+            StringAssert.Contains(verdict.Text, "Check your change yourself against each requirement of the request");
+            Assert.AreEqual(2, f.Provider.SendCount);
+        }
+    }
+
+    [TestMethod]
+    public async Task ATurnThatEndsWithCodeNobodyReviewed_IsRemindedOnce_AndNoReviewStartsByItself()
     {
         await using var f = await Fixture.CreateAsync(Config);
-        f.Host.Commands.Adaptive.Critic = static (_, _) => Task.FromResult(new AdaptiveCriticAnswer(null, "the provider is not ready"));
+        var asked = 0;
+        f.Host.Commands.Adaptive.Critic = (_, _) =>
+        {
+            Interlocked.Increment(ref asked);
+            return Task.FromResult(new AdaptiveCriticAnswer("VERDICT: APPROVE", null));
+        };
+        var decided = new ConcurrentQueue<string>();
+        f.Host.Commands.Adaptive.Decided = (_, outcome) => decided.Enqueue(outcome);
         await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
         f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
 
         f.Send("add the feature");
         await f.Provider.NextSendAsync();
-        var recheck = await f.Provider.NextSendAsync();
+        var reminder = await f.Provider.NextSendAsync();
         await f.SettleAsync();
 
-        Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
-        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Warning, "review");
-        StringAssert.Contains(card.Message, "the provider is not ready");
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReminder, reminder.Provenance);
+        StringAssert.Contains(reminder.Text, "`src/app.cs`");
+        StringAssert.Contains(reminder.Text, "run `alta adaptive review` now");
+        StringAssert.Contains(reminder.Text, "--base <commit>");
+        Assert.AreEqual(0, Volatile.Read(ref asked), "The session starts the reviews, never the host.");
+        Assert.AreEqual(2, f.Provider.SendCount, "The session that answers the reminder without a review is not reminded again.");
+        Assert.AreEqual("the session was reminded of the review | the turn changed no code", string.Join(" | ", decided.Select(Shortened)));
+
+        static string Shortened(string outcome) => outcome.StartsWith("its tools changed no file", StringComparison.Ordinal) ? "the turn changed no code" : outcome;
     }
 
     [TestMethod]
-    public async Task ACriticThatThrows_LeavesTheChangeToARecheck_InAHostThatLeavesTheLoggingToItsCaller()
+    public async Task AReviewIsRefused_WithWhatToDoInstead_ForASessionOffAdaptive_ALevelWithoutCritics_NoCode_AndASecondReview()
     {
-        // The host of the fixture does not initialize the logging: the failure of the critic is logged nowhere, and told.
         await using var f = await Fixture.CreateAsync(Config);
-        f.Host.Commands.Adaptive.Critic = static (_, _) => throw new InvalidOperationException("The critic has no session.");
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
-        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        f.Host.Commands.Adaptive.Critic = async (_, _) =>
+        {
+            await release.Task;
+            return new AdaptiveCriticAnswer("VERDICT: APPROVE", null);
+        };
+        var runtime = f.Host.RuntimeService;
+        var request = new AdaptiveReviewRequest(f.Session.SessionId);
 
+        Assert.AreEqual("not_adaptive", (await runtime.RequestAdaptiveReviewAsync(request)).Status);
+        Assert.IsFalse((await runtime.GetAdaptiveStatusAsync(f.Session.SessionId)).Adaptive);
+
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Low);
+        var none = await runtime.RequestAdaptiveReviewAsync(request);
+        Assert.AreEqual("no_critics", none.Status);
+        StringAssert.Contains(none.Message, "Check your change yourself");
+
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        Assert.AreEqual("no_change", (await runtime.RequestAdaptiveReviewAsync(request)).Status, "Nothing changed yet.");
+        Assert.AreEqual("invalid_base", (await runtime.RequestAdaptiveReviewAsync(request with { Base = "main" })).Status, "The folder of the fixture has no git.");
+
+        AdaptiveReviewReceipt? first = null, second = null;
+        AdaptiveSessionStatus? status = null;
+        f.Provider.Scripts.Enqueue(run =>
+        {
+            run.Edit("src/app.cs");
+            run.During = async () =>
+            {
+                first = await runtime.RequestAdaptiveReviewAsync(request);
+                second = await runtime.RequestAdaptiveReviewAsync(request);
+                status = await runtime.GetAdaptiveStatusAsync(f.Session.SessionId);
+                release.SetResult();
+            };
+        });
         f.Send("add the feature");
         await f.Provider.NextSendAsync();
-        var recheck = await f.Provider.NextSendAsync();
+        await f.Provider.NextSendAsync();
         await f.SettleAsync();
 
-        Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
-        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Warning, "review");
-        StringAssert.Contains(card.Message, "The critic has no session.");
+        Assert.AreEqual(AdaptiveReviewReceipt.Started, first!.Status, first.Message);
+        Assert.AreEqual("running", second!.Status);
+        Assert.IsTrue(status!.Adaptive);
+        Assert.AreEqual("medium", status.Level);
+        Assert.IsNotNull(status.ReviewStartedAt);
+        Assert.AreEqual(0, status.UnreviewedFiles.Count, "What is under review is not listed as unreviewed.");
     }
 
     [TestMethod]
@@ -184,12 +288,17 @@ public sealed class AdaptiveTurnTests
         // A session without sub-sessions (altacli --no-sub-sessions) is still reviewed: the critic is the host's, not the agent's.
         Assert.AreEqual("ok", (await f.Host.Commands.SetSessionOptionsAsync(f.Session.SessionId, new AgentSessionOptions { SubSessions = false })).Status);
         await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
-        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+        f.Provider.Scripts.Enqueue(run =>
+        {
+            run.Edit("src/app.cs");
+            run.During = () => f.Host.RuntimeService.RequestAdaptiveReviewAsync(new AdaptiveReviewRequest(f.Session.SessionId));
+        });
         f.Provider.Scripts.Enqueue(static run => run.Answer = "The change does what the request asks.\nVERDICT: APPROVE");
 
         f.Send("add the feature");
         await f.Provider.NextSendAsync();
         var review = await f.Provider.NextSendAsync();
+        var verdict = await f.Provider.NextSendAsync();
         await f.SettleAsync();
 
         Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, review.Provenance);
@@ -198,7 +307,44 @@ public sealed class AdaptiveTurnTests
         StringAssert.Contains(review.Text, "You are read-only");
         var disabled = review.Options.DisabledToolPatterns?.ToArray() ?? [];
         foreach (var tool in AdaptiveCritics.ReadOnlyTools) CollectionAssert.Contains(disabled, tool, $"A critic does without {tool}.");
-        // How the answer of a critic decides the turn is told by the tests that give the coordinator a critic of their own.
+        // The scripted provider keeps no history for the driver to read the answer of the critic from: how an answer
+        // decides the verdict is told by the tests that give the coordinator a critic of their own.
+        Assert.AreEqual(f.Session.SessionId, verdict.Options.SessionId, "The verdict of the review comes back to the session.");
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, verdict.Provenance);
+    }
+
+    [TestMethod]
+    public async Task ASessionOnAdaptive_IsToldWithItsPrompt_ThatItStartsTheReviewOfItsChanges_OnceUntilItChanges()
+    {
+        await using var f = await Fixture.CreateAsync(Config);
+        f.Send("what does the parser do?", "plain");
+        Assert.AreEqual(string.Empty, (await f.Provider.NextSendAsync()).Context, "A session that is not on Adaptive is told nothing.");
+        await f.SettleAsync();
+
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        f.Send("and the lexer?");
+        var told = (await f.Provider.NextSendAsync()).Context;
+        await f.SettleAsync();
+        StringAssert.Contains(told, "<codealta-context>Adaptive review: on, level `medium`.");
+        StringAssert.Contains(told, "`prov-a:model-c@high`");
+        StringAssert.Contains(told, "You start that review and you decide when: CodeAlta starts none by itself.");
+        StringAssert.Contains(told, "run `alta adaptive review`");
+        StringAssert.Contains(told, "a push, a merge, a release");
+        Assert.AreEqual("medium:prov-a:model-c@high", (await f.StateAsync()).AdaptiveNoted);
+
+        f.Send("and the printer?", "second");
+        Assert.AreEqual(string.Empty, (await f.Provider.NextSendAsync()).Context, "Told once.");
+        await f.SettleAsync();
+
+        // A level without critics rechecks its changes itself; a session that leaves Adaptive is told so.
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Low);
+        f.Send("and the reader?", "third");
+        StringAssert.Contains((await f.Provider.NextSendAsync()).Context, "<codealta-context>Adaptive recheck: on, level `low`, which has no critics.");
+        await f.SettleAsync();
+        Assert.AreEqual("ok", await f.Host.Commands.SetSessionTierAsync(f.Session.SessionId, ModelTier.Complex));
+        f.Send("and the writer?", "fourth");
+        StringAssert.Contains((await f.Provider.NextSendAsync()).Context, "<codealta-context>Adaptive review: off.");
+        await f.SettleAsync();
     }
 
     [TestMethod]
@@ -249,32 +395,93 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
-    public async Task InAGitFolder_ATurnThatChangedCode_IsToldByGit_WithItsDiff_AndOneThatCommittedItsWork_IsNot()
+    public async Task InAGitFolder_TheChangeUnderReview_IsToldByGit_WithItsDiff_SinceTheCommitTheSessionNames()
     {
         await using var f = await Fixture.CreateAsync(Config, git: true);
         if (!f.HasGit) Assert.Inconclusive("git is not installed.");
         var asked = new ConcurrentQueue<AdaptiveCriticRequest>();
-        f.Host.Commands.Adaptive.Critic = (request, _) => { asked.Enqueue(request); return Task.FromResult(new AdaptiveCriticAnswer("VERDICT: APPROVE", null)); };
+        var reviewing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        f.Host.Commands.Adaptive.Critic = async (request, _) =>
+        {
+            asked.Enqueue(request);
+            // The run that asked ends while the critic reviews: the session waits for the verdict.
+            await reviewing.Task;
+            return new AdaptiveCriticAnswer("VERDICT: APPROVE", null);
+        };
         var decided = new ConcurrentQueue<string>();
-        f.Host.Commands.Adaptive.Decided = (_, outcome) => decided.Enqueue(outcome);
+        f.Host.Commands.Adaptive.Decided = (_, outcome) =>
+        {
+            decided.Enqueue(outcome);
+            if (outcome == "a review runs") reviewing.TrySetResult();
+        };
         await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
-        // The tools say nothing of the files: git tells the change, and gives its diff to the critic.
-        f.Provider.Scripts.Enqueue(run => File.WriteAllText(Path.Combine(run.Folder, "app.js"), "export const value = 2;\n"));
+        AdaptiveReviewReceipt? receipt = null;
+        // The tools say nothing of the files: git tells the change. The session brings in code that is not its own (a
+        // branch it checks out, here a commit), then makes its change, and names the commit its change starts from.
+        f.Provider.Scripts.Enqueue(run =>
+        {
+            File.WriteAllText(Path.Combine(run.Folder, "theirs.js"), "export const theirs = true;\n");
+            Git(run.Folder, "add", "-A");
+            Git(run.Folder, "commit", "-qm", "Their work");
+            File.WriteAllText(Path.Combine(run.Folder, "app.js"), "export const value = 2;\n");
+            run.During = async () => receipt = await f.Host.RuntimeService.RequestAdaptiveReviewAsync(new AdaptiveReviewRequest(f.Session.SessionId, Base: "HEAD"));
+        });
 
         f.Send("change the value");
         await f.Provider.NextSendAsync();
+        var verdict = await f.Provider.NextSendAsync();
         await f.SettleAsync();
-        Assert.AreEqual("the change was reviewed", string.Join(" | ", decided));
-        StringAssert.Contains(asked.Single().Prompt, "+export const value = 2;");
 
-        // A turn that commits what is there changes nothing in the files.
+        Assert.AreEqual(AdaptiveReviewReceipt.Started, receipt!.Status, receipt.Message);
+        CollectionAssert.AreEqual(new[] { "app.js" }, receipt.Files.ToArray(), "What was there at the commit it names is not its change.");
+        StringAssert.Contains(receipt.Message, "since `HEAD`");
+        StringAssert.Contains(asked.Single().Prompt, "+export const value = 2;");
+        Assert.DoesNotContain("theirs", asked.Single().Prompt);
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, verdict.Provenance);
+        Assert.AreEqual("a review runs | the review approved the change | the files did not change", string.Join(" | ", decided));
+
+        // A turn that commits what was reviewed changes nothing in the files.
         f.Provider.Scripts.Enqueue(run => Git(run.Folder, "commit", "-qam", "Change the value"));
         f.Send("commit it", "second");
         await f.Provider.NextSendAsync();
         await f.SettleAsync();
-        Assert.AreEqual("the change was reviewed | the files did not change", string.Join(" | ", decided));
+        Assert.AreEqual("the files did not change", decided.Last());
         Assert.AreEqual(1, asked.Count);
-        Assert.AreEqual(2, f.Provider.SendCount);
+        Assert.AreEqual(3, f.Provider.SendCount);
+        Assert.AreEqual("invalid_base", (await f.Host.RuntimeService.RequestAdaptiveReviewAsync(new AdaptiveReviewRequest(f.Session.SessionId, Base: "no-such-branch"))).Status);
+    }
+
+    [TestMethod]
+    public async Task ARequest_IsFollowedOverAllItsRuns_NotRemindedWhileItsOwnWorkGoesOn_AndRemindedOfWhatALaterRunChanged()
+    {
+        await using var f = await Fixture.CreateAsync(Config, git: true);
+        if (!f.HasGit) Assert.Inconclusive("git is not installed.");
+        f.Host.Commands.Adaptive.Critic = static (_, _) => Task.FromResult(new AdaptiveCriticAnswer("VERDICT: APPROVE", null));
+        var decided = new ConcurrentQueue<string>();
+        f.Host.Commands.Adaptive.Decided = (_, outcome) => decided.Enqueue(outcome);
+        var working = true;
+        f.Host.Commands.Adaptive.OwnWorkPending = _ => Volatile.Read(ref working);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        // The first run starts a job and ends its turn; the run its result starts makes the change.
+        f.Provider.Scripts.Enqueue(run => File.WriteAllText(Path.Combine(run.Folder, "draft.js"), "export const draft = 1;\n"));
+        f.Provider.Scripts.Enqueue(run => File.WriteAllText(Path.Combine(run.Folder, "app.js"), "export const value = 2;\n"));
+
+        f.Send("change the value once the build ends");
+        await f.Provider.NextSendAsync();
+        await f.SettleAsync();
+        Assert.AreEqual("work of the session goes on", string.Join(" | ", decided), "A turn that waits for its own job is not done.");
+        Assert.AreEqual(1, f.Provider.SendCount);
+
+        Volatile.Write(ref working, false);
+        Assert.AreNotEqual("missing_session", await f.Host.RuntimeService.DeliverHostPromptAsync(f.Session.SessionId, "The build ended.", SessionRuntimeService.JobPromptKind));
+        Assert.AreEqual(AgentPromptProvenance.BackgroundJob, (await f.Provider.NextSendAsync()).Provenance);
+        var reminder = await f.Provider.NextSendAsync();
+        await f.SettleAsync();
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReminder, reminder.Provenance);
+        StringAssert.Contains(reminder.Text, "`app.js`", "The run of the job's result belongs to the request: what it changed is not reviewed yet.");
+        StringAssert.Contains(reminder.Text, "`draft.js`", "With what the first run changed, since the start of the request.");
+        Assert.AreEqual(3, f.Provider.SendCount);
     }
 
     [TestMethod]
@@ -356,7 +563,8 @@ public sealed class AdaptiveTurnTests
         if (process.ExitCode != 0) throw new InvalidOperationException($"git {string.Join(' ', arguments)}: {error}");
     }
 
-    private sealed record SendRecord(string Text, AgentSessionCreateOptions Options, string? Provenance);
+    // Context is what the host tells the agent with the prompt (its `<codealta-context>` notes), apart from its text.
+    private sealed record SendRecord(string Text, AgentSessionCreateOptions Options, string? Provenance, string Context);
 
     /// <summary>What a scripted run does before it answers: the tool calls it makes, and whether it answers.</summary>
     private sealed class RunScript(ScriptedProvider.Session session, AgentRunId run)
@@ -366,6 +574,9 @@ public sealed class AdaptiveTurnTests
         public string Folder => session.Folder;
 
         public bool Silent { get; set; }
+
+        // What the run does while it goes on, awaited before it answers: a call of `alta`, which waits for the host.
+        public Func<Task>? During { get; set; }
 
         // The answer of the run; "Done." unless a script says otherwise.
         public string Answer { get; set; } = "Done.";
@@ -619,13 +830,31 @@ public sealed class AdaptiveTurnTests
                 var number = Interlocked.Increment(ref owner._sendCount);
                 var run = new AgentRunId($"{owner.Descriptor.ProviderId.Value}-run-{number}");
                 var text = string.Concat(send.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
-                await owner._sends.Writer.WriteAsync(new SendRecord(text, options, send.Provenance), cancellationToken);
+                var context = string.Concat(send.Input.Items.OfType<AgentInputItem.HostContext>().Select(static item => item.Value));
+                await owner._sends.Writer.WriteAsync(new SendRecord(text, options, send.Provenance, context), cancellationToken);
                 var script = new RunScript(this, run);
                 if (owner.Scripts.TryDequeue(out var steps)) steps(script);
-                if (!script.Silent)
-                    Emit(new AgentContentCompletedEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentContentKind.Assistant, "answer-" + number, null, script.Answer));
-                Emit(new AgentSessionUpdateEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentSessionUpdateKind.Idle, null));
+                if (script.During is { } during)
+                {
+                    // As a provider does, the send returns and its run goes on: a call of `alta` waits for the host,
+                    // which the send of a run holds.
+                    _ = Task.Run(async () =>
+                    {
+                        try { await during(); }
+                        finally { End(); }
+                    }, CancellationToken.None);
+                    return run;
+                }
+
+                End();
                 return run;
+
+                void End()
+                {
+                    if (!script.Silent)
+                        Emit(new AgentContentCompletedEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentContentKind.Assistant, "answer-" + number, null, script.Answer));
+                    Emit(new AgentSessionUpdateEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentSessionUpdateKind.Idle, null));
+                }
             }
 
             public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default) => throw new InvalidOperationException("No steer.");
