@@ -14,8 +14,7 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="SessionId">The session whose change is reviewed; the critic runs in a read-only child session of it.</param>
 /// <param name="Critic">The model of the critic.</param>
 /// <param name="Prompt">The prompt of the review: the request, the change, and the verdict to end with.</param>
-/// <param name="Timeout">The time the review is given.</param>
-internal sealed record AdaptiveCriticRequest(string SessionId, ModelTierTarget Critic, string Prompt, TimeSpan Timeout);
+internal sealed record AdaptiveCriticRequest(string SessionId, ModelTierTarget Critic, string Prompt);
 
 /// <summary>What a critic answered.</summary>
 /// <param name="Answer">The final answer of the review, or <see langword="null"/> when it gave none.</param>
@@ -59,8 +58,6 @@ internal sealed partial class AdaptiveTurnCoordinator
     private static readonly TimeSpan ReleaseWait = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan ReleasePoll = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(30);
-    // A review reads the code and runs tests: the measured ones took one to six minutes.
-    private static readonly TimeSpan ReviewTime = TimeSpan.FromMinutes(10);
     // A tree taken for a send whose run never started is not the tree of a later turn.
     private static readonly TimeSpan SnapshotLife = TimeSpan.FromMinutes(10);
 
@@ -580,7 +577,7 @@ internal sealed partial class AdaptiveTurnCoordinator
         {
             var reviews = await Task.WhenAll(critics.Select(async model =>
             {
-                try { return (Model: model, Answer: await critic(new AdaptiveCriticRequest(sessionId, model, prompt, ReviewTime), _closing.Token).ConfigureAwait(false)); }
+                try { return (Model: model, Answer: await critic(new AdaptiveCriticRequest(sessionId, model, prompt), _closing.Token).ConfigureAwait(false)); }
                 catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
                 {
                     Log?.Error(exception, "Adaptive could not run the review by " + model.Format() + " of session " + sessionId + ".");

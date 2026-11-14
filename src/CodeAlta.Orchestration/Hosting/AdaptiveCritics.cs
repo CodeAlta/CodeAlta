@@ -63,8 +63,10 @@ internal sealed class AdaptiveCritics : IAsyncDisposable
         if (opened.Session is not { } session) return new(null, opened.Message ?? opened.Status.ToString());
         try
         {
+            // No time limit: a review takes the time its model and its provider take. Its session is in the tree of the
+            // reviewed one, where the user can stop it; a review that is stopped is reported as one that gave no verdict.
             var run = await _driver.RunAsync(session, new HeadlessPrompt(request.Prompt) { Provenance = AgentPromptProvenance.AdaptiveReview },
-                request.Timeout, cancellationToken).ConfigureAwait(false);
+                timeout: null, cancellationToken).ConfigureAwait(false);
             return run.Status == HeadlessRunStatus.Completed
                 ? new(run.FinalMessage, null)
                 : new(run.FinalMessage, run.FailureMessage ?? run.Status.ToString().ToLowerInvariant());
