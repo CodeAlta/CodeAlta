@@ -144,6 +144,7 @@ internal static class CodeAltaConfigDocumentCopy
                 }
                 : null,
             Identity = Copy(document.Identity),
+            Links = Copy(document.Links),
         };
     }
 

@@ -1443,13 +1443,22 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     });
                     // A link of the Markdown that the window shows: an address of the web for the system browser, a
                     // file for the code editor. A relative path starts from the folder the session works in.
+                    // An address opens in the browser and the profile the space of the session or the window sets, or the project over it.
+                    var linkBrowsers = new Browser.Links.LinkBrowsers();
+                    var linkConfig = new CodeAltaConfigStore(host.CatalogOptions);
+                    var linkOpener = new DesktopLinkOpener(host.SpaceCatalog, (folder, _) => Task.FromResult(linkConfig.LoadProjectLinks(folder)),
+                        (sessionId, projectId, originLabel, token) => LinkOriginAsync(host, spaceView, sessionId, projectId, originLabel, token), linkBrowsers.Plan);
+                    builder.AddSpaceLinksService(new SpaceLinksService(host.SpaceCatalog, linkBrowsers.Find, epoch));
                     builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open, new DesktopFileLinks(host.ProjectCatalog, diskFolders, editorView,
                         (sessionId, token) => SessionFolderAsync(host, sessionId, token), projectFiles.RootAsync, DesktopLinks.Open,
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
                     {
                         GuidePage = (file, anchor) => documentation.FindPage(file) is { } page && documentationView.Show(page, anchor),
                         ExternalEditors = externalEditors,
-                    }));
+                    })
+                    {
+                        OpenFrom = linkOpener.OpenAsync,
+                    });
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch,
@@ -1658,6 +1667,49 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         application.ForceShutdown(); // Only after confirmed host and native-resource disposal.
     }
 
+    // Where a link was followed: the space of the session, else the space its window shows when the project of the
+    // document is in it, else the space of that project, and the folder whose configuration may set where its links open.
+    private static Task<DesktopLinkOrigin?> LinkOriginAsync(CodeAltaHost host, DesktopSpaceView spaceView, string? sessionId, string? projectId, string? originLabel, CancellationToken cancellationToken)
+        => LinkOriginAsync(host.SpaceCatalog, host.ProjectCatalog,
+            async (id, token) => await host.RuntimeService.GetSessionSpaceAsync(id, token).ConfigureAwait(false) is { } record ? (record.SpaceId, record.ProjectId) : null,
+            (id, token) => SessionFolderAsync(host, id, token), spaceView, sessionId, projectId, originLabel, cancellationToken);
+
+    internal static async Task<DesktopLinkOrigin?> LinkOriginAsync(
+        CodeAlta.Catalog.SpaceCatalog spaceCatalog,
+        CodeAlta.Catalog.ProjectCatalog projectCatalog,
+        Func<string, CancellationToken, ValueTask<(string? SpaceId, string? ProjectId)?>> sessionSpace,
+        Func<string, CancellationToken, ValueTask<string?>> sessionFolder,
+        DesktopSpaceView spaceView,
+        string? sessionId,
+        string? projectId,
+        string? originLabel,
+        CancellationToken cancellationToken)
+    {
+        string? spaceId = null, folder = null;
+        if (sessionId is not null)
+        {
+            if (await sessionSpace(sessionId, cancellationToken).ConfigureAwait(false) is not { } record) return null;
+            (spaceId, projectId) = record;
+            folder = await sessionFolder(sessionId, cancellationToken).ConfigureAwait(false);
+        }
+
+        var project = projectId is null || folder is not null ? null
+            : (await projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(candidate => string.Equals(candidate.Id, projectId, StringComparison.OrdinalIgnoreCase));
+        if (sessionId is null)
+        {
+            // The window chooses among the spaces of the project, or alone for a document of no project. A space the
+            // project is not in (the default space shows the projects of the others) leaves it to the space of the project.
+            var shown = (originLabel is null ? null : spaceView.ShownSpaceOf(originLabel)) ?? spaceView.ShownSpaceId;
+            if (projectId is null || project?.Spaces.Contains(shown ?? string.Empty, StringComparer.Ordinal) == true) spaceId = shown;
+        }
+
+        if (projectId is null && spaceId is null) return null;
+        folder ??= project?.ProjectPath;
+        var space = await spaceCatalog.ResolveSessionSpaceAsync(spaceId, projectId, cancellationToken).ConfigureAwait(false);
+        return new DesktopLinkOrigin(space.Id, folder);
+    }
+
     // The folder a session works in: its git worktree while that folder is there, the folder of its project otherwise.
     private static async ValueTask<string?> SessionFolderAsync(CodeAltaHost host, string sessionId, CancellationToken cancellationToken)
         => (await host.WorkspaceReads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false)).Sessions
@@ -1809,6 +1861,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddLabelsService(new LabelsService());
             builder.AddSubProjectsService(new SubProjectsService());
             builder.AddSpaceIdentityService(new SpaceIdentityService());
+            builder.AddSpaceLinksService(new SpaceLinksService());
             builder.AddSecretsService(new SecretsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());

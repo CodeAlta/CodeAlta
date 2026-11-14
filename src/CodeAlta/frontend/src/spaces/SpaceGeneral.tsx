@@ -11,10 +11,11 @@ import { joinedSessions } from "./sessionSpaceMove";
 import type { SpaceSectionProps } from "./spaceSection";
 import { maximumSpaceDescription, maximumSpaceName, spaceBrand, spaceColors, spaceNameProblem } from "./spaces";
 import { SpaceServerField } from "../fleet/SpaceServerField";
+import { SpaceLinks } from "./SpaceLinks";
 
 /**
- * The section "General" of the page of a space: its name, its icon, its color and what it is for, each saved
- * when it changes.
+ * The section "General" of the page of a space: its name, its icon, its color, what it is for, and where its links
+ * open, each saved when it changes.
  */
 export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSectionProps) {
   const { t } = useShellLanguage();
@@ -28,6 +29,8 @@ export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSe
   const commitName = () => { if (problem || name.trim() === space.name) setName(space.name); else void save({ name: name.trim() }); };
   const commitDescription = () => { if (description.trim() !== (space.description ?? "")) void save({ description: description.trim() }); };
   const id = `space-${space.id}`;
+  // A page drawn without a host (its tests, a hub of a window without spaces) has no links to read.
+  const epoch = hub.hostEpoch?.() ?? null;
   // What search keeps of the space: everything, or nothing of its sessions and projects.
   const search = useLocalSearch();
   const [searchSaving, setSearchSaving] = useState(false);
@@ -66,6 +69,7 @@ export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSe
           void search.hub!.setExcluded("space", space.id, !value).finally(() => setSearchSaving(false)); }} />
     </Field>}
     <SpaceServerField spaceId={space.id} epoch={hub.hostEpoch()} disabled={disabled} />
+    {epoch && <SpaceLinks id={id} space={space} epoch={epoch} canEdit={canEdit} run={run} />}
   </Card>;
 }
 

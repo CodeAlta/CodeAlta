@@ -519,6 +519,64 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.deepEqual(exceptions, []);
     });
 
+    await t.test("the links of a space open in the default browser or one chosen, in a profile of it when the browser lets it be chosen", async () => {
+      await resetWork();
+      await evaluate("linksFixture.links=null; linksFixture.updates.length=0");
+      await evaluate("document.querySelector('.space-switch').click()");
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
+      await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
+      assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
+      await evaluate("document.querySelector('.space-card .space-open').click()");
+      // Where the links open is part of the General section of the space: how the user, not its agents, works in it.
+      assert.equal(await wait("!!document.querySelector('#space-work-links-browser')"), true);
+      const choose = (name: string, value: string) => evaluate(`(()=>{const select=document.querySelector('#space-work-links-${name}');select.value=${JSON.stringify(value)};
+        select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+      const options = (name: string) => evaluate(`[...document.querySelector('#space-work-links-${name}').options].map(option=>option.textContent)`);
+
+      // By default, the default browser of the system, whose profiles can be chosen.
+      assert.deepEqual(await options("browser"), ["Default browser (Google Chrome)", "Google Chrome", "Firefox", "Safari"]);
+      assert.deepEqual(await options("profile"), ["No profile (as the browser opens)", "Privat", "Work"]);
+      await choose("profile", "Work");
+      assert.equal(await wait("linksFixture.updates.length===1"), true);
+      assert.deepEqual(await evaluate("[linksFixture.updates[0].browser, linksFixture.updates[0].profile]"), [null, "Work"], "The default browser stays the default one.");
+
+      // Firefox lists its own profiles: a profile of Chrome it does not have is not kept, so that Firefox never gets a name it
+      // does not know.
+      await choose("browser", "firefox");
+      assert.equal(await wait("linksFixture.updates.length===2"), true);
+      assert.deepEqual(await evaluate("[linksFixture.updates[1].browser, linksFixture.updates[1].profile]"), ["firefox", null]);
+      assert.deepEqual(await options("profile"), ["No profile (as the browser opens)", "default-release"]);
+      await choose("profile", "default-release");
+      assert.equal(await wait("linksFixture.updates.length===3"), true);
+
+      // Safari takes no profile: its list is off, and the card says why.
+      await choose("browser", "safari");
+      assert.equal(await wait("linksFixture.updates.length===4"), true);
+      assert.equal(await evaluate("document.querySelector('#space-work-links-profile').disabled"), true);
+      assert.equal(await evaluate("document.querySelector('.space-links .settings-field-help')?.textContent.includes('Safari does not let a profile be chosen')"), true);
+
+      // Back to the default browser without a profile: the setting is the usual one again.
+      await choose("browser", "");
+      assert.equal(await wait("linksFixture.updates.length===5"), true);
+      assert.equal(await wait("linksFixture.links===null"), true, "Safari kept no profile, so the default browser has none.");
+
+      // When the system keeps the profiles out of reach, the folder is typed, with the steps that find it, and a name
+      // that is not a folder is said to open without a profile.
+      await evaluate("localStorage.setItem('linksFixtureHidden','true')");
+      await evaluate("document.querySelector('.space-section-tab[data-space-section=identity]').click()");
+      await evaluate("document.querySelector('.space-section-tab[data-space-section=general]').click()");
+      assert.equal(await wait("document.querySelector('#space-work-links-profile')?.tagName==='INPUT'"), true);
+      assert.equal(await evaluate("document.querySelector('#space-work-links-profile').placeholder"), "Empty: without a profile", "An empty field says what it does.");
+      assert.equal(await evaluate("document.querySelectorAll('.space-links-guide li').length"), 3);
+      assert.equal(await evaluate("document.querySelector('.space-links-guide code').textContent"), "chrome://version");
+      await evaluate(`(()=>{const input=document.querySelector('#space-work-links-profile');input.focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Marmind');input.dispatchEvent(new Event('input',{bubbles:true}));input.blur();})()`);
+      assert.equal(await wait("linksFixture.updates.at(-1)?.profile==='Marmind'"), true);
+      assert.equal(await wait("document.querySelector('.space-links [role=alert]')?.textContent.includes('Marmind is none of them')"), true);
+      await evaluate("localStorage.removeItem('linksFixtureHidden')");
+      assert.deepEqual(exceptions, []);
+    });
+
     await t.test("the Identity of a space gives a command line tool a profile from a preset, saved, checked, and never with a secret", async () => {
       await resetWork();
       await evaluate("document.querySelector('.space-switch').click()");

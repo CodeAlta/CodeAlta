@@ -128,6 +128,14 @@ public sealed class CodeAltaConfigDocument
     /// </summary>
     [JsonPropertyName("identity")]
     public TomlTable? Identity { get; set; }
+
+    /// <summary>
+    /// Gets or sets where the links of the sessions of a project open, over the setting of their space: <c>[links]</c> with
+    /// <c>browser</c> and <c>profile</c>. Read from a project file only, as a table, so that a value of another type is left
+    /// out without making the rest of the file unreadable (<see cref="CodeAltaConfigStore.LoadProjectLinks(string?)"/>).
+    /// </summary>
+    [JsonPropertyName("links")]
+    public TomlTable? Links { get; set; }
 }
 
 /// <summary>Represents whether sessions get the tools of Code Mode.</summary>

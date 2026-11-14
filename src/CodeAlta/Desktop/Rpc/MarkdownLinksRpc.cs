@@ -27,6 +27,13 @@ internal sealed class MarkdownLinksService
     }
 
     /// <summary>
+    /// Gets the opener of an address of the web that knows where it was followed from, the session or the project of its
+    /// document and the window that showed it, whose space can choose the browser (<see cref="DesktopLinkOpener"/>); null for
+    /// the opener of the constructor.
+    /// </summary>
+    internal Func<string, string?, string?, string?, CancellationToken, Task<bool>>? OpenFrom { get; init; }
+
+    /// <summary>
     /// Opens a bounded, credential-free absolute HTTP(S) address in the system browser, and any other target as
     /// a link to a file of the disk, from the current host document.
     /// </summary>
@@ -45,15 +52,21 @@ internal sealed class MarkdownLinksService
         => OpenFromAsync(request, null, cancellationToken);
 
     // A code editor that no window shows opens in the window where the link was followed.
-    private async Task<MarkdownLinkResponse> OpenFromAsync(MarkdownLinkRequest request, string? originLabel, CancellationToken cancellationToken)
+    internal async Task<MarkdownLinkResponse> OpenFromAsync(MarkdownLinkRequest request, string? originLabel, CancellationToken cancellationToken)
     {
         MarkdownLinkResponse Reply(string status) => new(status, _epoch);
         if (Validate(request) is { } refused) return Reply(refused);
         if (WebAddress(request.Address) is { } address)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            try { return Reply(_open(address) ? "ok" : "failed"); }
-            catch (Exception) { return Reply("failed"); } // Never send OS/browser diagnostics to the page.
+            try
+            {
+                var opened = OpenFrom is { } openFrom
+                    ? await openFrom(address, request.SessionId, request.ProjectId, originLabel, cancellationToken).ConfigureAwait(false)
+                    : _open(address);
+                return Reply(opened ? "ok" : "failed");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); } // Never send OS/browser diagnostics to the page.
         }
 
         if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
