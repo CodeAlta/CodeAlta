@@ -77,6 +77,12 @@ public sealed class LinkBrowsersTests
         var named = Hidden("chrome", "Work")!;
         Assert.IsFalse(named.ProfileFound, "A name that is not a folder would make Chrome create a profile: it opens without one.");
         CollectionAssert.AreEqual(new[] { "-a", "/Applications/Google Chrome.app", Address }, named.Arguments.ToArray());
+        foreach (var flag in new[] { "-headless", "--remote-debugging-port=9222", "/jsconsole" })
+        {
+            var refused = Hidden("firefox", flag)!;
+            Assert.IsFalse(refused.ProfileFound, $"'{flag}' starts like a command-line switch: Firefox must not be given it after -P.");
+            CollectionAssert.AreEqual(new[] { "-a", "/Applications/Firefox.app", Address }, refused.Arguments.ToArray());
+        }
         Assert.IsFalse(LinkBrowsers.IsChromiumProfileFolder("Profile x"));
         Assert.IsFalse(LinkBrowsers.IsChromiumProfileFolder("../Profile 1"));
     }

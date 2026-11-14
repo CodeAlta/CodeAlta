@@ -28,9 +28,10 @@ internal sealed class MarkdownLinksService
 
     /// <summary>
     /// Gets the opener of an address of the web that knows where it was followed from, the session or the project of its
-    /// document, whose space can choose the browser (<see cref="DesktopLinkOpener"/>); null for the opener of the constructor.
+    /// document and the window that showed it, whose space can choose the browser (<see cref="DesktopLinkOpener"/>); null for
+    /// the opener of the constructor.
     /// </summary>
-    internal Func<string, string?, string?, CancellationToken, Task<bool>>? OpenFrom { get; init; }
+    internal Func<string, string?, string?, string?, CancellationToken, Task<bool>>? OpenFrom { get; init; }
 
     /// <summary>
     /// Opens a bounded, credential-free absolute HTTP(S) address in the system browser, and any other target as
@@ -51,7 +52,7 @@ internal sealed class MarkdownLinksService
         => OpenFromAsync(request, null, cancellationToken);
 
     // A code editor that no window shows opens in the window where the link was followed.
-    private async Task<MarkdownLinkResponse> OpenFromAsync(MarkdownLinkRequest request, string? originLabel, CancellationToken cancellationToken)
+    internal async Task<MarkdownLinkResponse> OpenFromAsync(MarkdownLinkRequest request, string? originLabel, CancellationToken cancellationToken)
     {
         MarkdownLinkResponse Reply(string status) => new(status, _epoch);
         if (Validate(request) is { } refused) return Reply(refused);
@@ -61,7 +62,7 @@ internal sealed class MarkdownLinksService
             try
             {
                 var opened = OpenFrom is { } openFrom
-                    ? await openFrom(address, request.SessionId, request.ProjectId, cancellationToken).ConfigureAwait(false)
+                    ? await openFrom(address, request.SessionId, request.ProjectId, originLabel, cancellationToken).ConfigureAwait(false)
                     : _open(address);
                 return Reply(opened ? "ok" : "failed");
             }

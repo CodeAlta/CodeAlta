@@ -44,7 +44,9 @@ public sealed class LinkBrowsers
         var installed = BrowserCatalog.Find(_environment);
         var defaultId = DefaultOf(installed)?.Id;
         return [.. installed.Select(browser => new LinkBrowser(browser.Id, browser.Name, SupportsProfiles(browser),
-            SupportsProfiles(browser) ? [.. browser.Profiles.Select(static profile => profile.Name).Distinct(StringComparer.Ordinal)] : [],
+            SupportsProfiles(browser)
+                ? [.. browser.Profiles.Select(static profile => profile.Name.Trim()).Where(static name => name.Length > 0).Distinct(StringComparer.Ordinal)]
+                : [],
             browser.Id == defaultId))];
     }
 
@@ -86,14 +88,14 @@ public sealed class LinkBrowsers
         if (chosen is null && target.Profiles.Count == 0)
         {
             // A browser always has a profile: none listed is a list the system kept out of reach (macOS privacy). The
-            // name is then given as it is written: Firefox finds a profile by its name, and a Chromium browser takes
-            // the folder of one, which only a folder name such as "Profile 1" can be, never a name that would make a
-            // new profile.
-            if (target.Engine == BrowserEngine.Firefox) return WithProfile(platform, target, ["-P", name], address);
-            if (IsChromiumProfileFolder(name)) return WithProfile(platform, target, ["--profile-directory=" + name], address);
+            // name is then given as it is written: Firefox finds a profile by its name (unless written like a command-line
+            // switch), and a Chromium browser takes the folder of one, which only a folder name such as "Profile 1" can be,
+            // never a name that would make a new profile.
+            if (target.Engine == BrowserEngine.Firefox && IsFirefoxProfileName(name)) return WithProfile(platform, target, ["-P", name], address);
+            if (target.Engine == BrowserEngine.Chromium && IsChromiumProfileFolder(name)) return WithProfile(platform, target, ["--profile-directory=" + name], address);
         }
 
-        if (chosen is null)
+        if (chosen is null || target.Engine == BrowserEngine.Firefox && !IsFirefoxProfileName(chosen.Name))
         {
             var plain = wanted is null ? null : Plain(platform, target, address);
             return plain is null ? null : plain with { ProfileFound = false };
@@ -117,6 +119,10 @@ public sealed class LinkBrowsers
     internal static bool IsChromiumProfileFolder(string name)
         => string.Equals(name, "Default", StringComparison.Ordinal)
             || name.StartsWith("Profile ", StringComparison.Ordinal) && name.Length is > 8 and <= 12 && name.AsSpan(8).IndexOfAnyExceptInRange('0', '9') < 0;
+
+    /// <summary>Whether Firefox's <c>-P</c> takes a text as the name of a profile rather than as a command-line switch.</summary>
+    internal static bool IsFirefoxProfileName(string name)
+        => name.Length > 0 && name[0] is not ('-' or '/');
 
     /// <summary>Whether a link can be opened in a profile of a browser chosen beforehand.</summary>
     internal static bool SupportsProfiles(InstalledBrowser browser) => browser.Engine is BrowserEngine.Chromium or BrowserEngine.Firefox;

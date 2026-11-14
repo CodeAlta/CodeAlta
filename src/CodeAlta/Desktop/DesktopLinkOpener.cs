@@ -19,7 +19,7 @@ internal sealed class DesktopLinkOpener
 {
     private readonly SpaceCatalog _spaces;
     private readonly Func<string?, CancellationToken, Task<SpaceLinks?>> _projectLinks;
-    private readonly Func<string?, string?, CancellationToken, Task<DesktopLinkOrigin?>> _origin;
+    private readonly Func<string?, string?, string?, CancellationToken, Task<DesktopLinkOrigin?>> _origin;
     private readonly Func<string, string?, string?, LinkLaunch?> _plan;
     private readonly Func<LinkLaunch, bool> _start;
     private readonly Func<string, bool> _open;
@@ -27,12 +27,12 @@ internal sealed class DesktopLinkOpener
     /// <summary>Creates the opener of a host.</summary>
     /// <param name="spaces">The spaces, whose settings say where their links open.</param>
     /// <param name="projectLinks">Reads the setting of the configuration of a project, from its folder; null when it has none. It never throws.</param>
-    /// <param name="origin">Tells where a link was followed, from the session or the project of its document; null when neither is known.</param>
+    /// <param name="origin">Tells where a link was followed, from the session, the project of its document, or the window that showed it; null when none is known.</param>
     /// <param name="plan">Says what to start to open an address in a browser and a profile (<see cref="LinkBrowsers.Plan"/>); null for the system.</param>
     /// <param name="start">Starts what <paramref name="plan"/> said; null for <see cref="Start"/>.</param>
     /// <param name="open">Opens an address as the system does; null for <see cref="DesktopLinks.Open"/>.</param>
     internal DesktopLinkOpener(SpaceCatalog spaces, Func<string?, CancellationToken, Task<SpaceLinks?>> projectLinks,
-        Func<string?, string?, CancellationToken, Task<DesktopLinkOrigin?>> origin, Func<string, string?, string?, LinkLaunch?> plan,
+        Func<string?, string?, string?, CancellationToken, Task<DesktopLinkOrigin?>> origin, Func<string, string?, string?, LinkLaunch?> plan,
         Func<LinkLaunch, bool>? start = null, Func<string, bool>? open = null)
     {
         ArgumentNullException.ThrowIfNull(spaces);
@@ -49,13 +49,14 @@ internal sealed class DesktopLinkOpener
     /// <param name="address">The address.</param>
     /// <param name="sessionId">The session whose message has the link; null for none.</param>
     /// <param name="projectId">Without a session, the project whose document has the link; null for none.</param>
+    /// <param name="originLabel">The label of the view of the window where the link was followed; null for none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>False when nothing could open it.</returns>
     /// <exception cref="OperationCanceledException">The request was canceled before anything was opened.</exception>
-    internal async Task<bool> OpenAsync(string address, string? sessionId, string? projectId, CancellationToken cancellationToken)
+    internal async Task<bool> OpenAsync(string address, string? sessionId, string? projectId, string? originLabel, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(address);
-        var links = await LinksAsync(sessionId, projectId, cancellationToken).ConfigureAwait(false);
+        var links = await LinksAsync(sessionId, projectId, originLabel, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (links is { IsEmpty: false } && _plan(address, links.Browser, links.Profile) is { } launch && _start(launch)) return true;
         return _open(address);
@@ -63,11 +64,11 @@ internal sealed class DesktopLinkOpener
 
     /// <summary>The setting the links of a session or a project open with: the one of their project over the one of their space.</summary>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal async Task<SpaceLinks?> LinksAsync(string? sessionId, string? projectId, CancellationToken cancellationToken)
+    internal async Task<SpaceLinks?> LinksAsync(string? sessionId, string? projectId, string? originLabel, CancellationToken cancellationToken)
     {
         try
         {
-            var origin = await _origin(Blank(sessionId), Blank(projectId), cancellationToken).ConfigureAwait(false);
+            var origin = await _origin(Blank(sessionId), Blank(projectId), Blank(originLabel), cancellationToken).ConfigureAwait(false);
             var space = await _spaces.GetAsync(origin?.SpaceId ?? SpaceDescriptor.DefaultId, cancellationToken).ConfigureAwait(false);
             var project = origin?.ProjectFolder is { } folder ? await _projectLinks(folder, cancellationToken).ConfigureAwait(false) : null;
             var links = (space?.Settings.Links ?? new SpaceLinks()).WithProject(project);
