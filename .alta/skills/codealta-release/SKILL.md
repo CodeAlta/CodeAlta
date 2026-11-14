@@ -178,14 +178,9 @@ agents can do with it. [More →](https://codealta.io/docs/<page>/) (#<issue>, #
 ## 🙏 Thank you
 
 To @<login> for <their pull requests>, and to @<login> for <the ideas and reports that became ...>.
-
-<details>
-<summary>All changes</summary>
-
-<the generated notes of the release, unchanged>
-
-</details>
 ```
+
+The tour ends there: `release.py notes` (step 11) adds the generated notes below it, folded in **All changes**.
 
 - One section per headline feature, the most important first; smaller items go in **And also**.
 - Every picture link uses the tag in its URL, so it keeps working when `main` changes; every **More →** link
