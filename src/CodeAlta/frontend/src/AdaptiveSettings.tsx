@@ -104,10 +104,10 @@ export function AdaptiveSettings({ epoch, state, api, store, onSaved, providers,
     <Switch className="settings-checkbox" checked={!!adaptive} label={t("Set up Adaptive")}
       onChange={event => void save(event.currentTarget.checked ? state.adaptive ?? (proposal ? { level: "medium", levels: proposal } : noLevels) : null)} />
     {adaptive && <div className="adaptive-body">
-      {proposal && usingProposal && <p className="adaptive-proposal-used"><AppIcon name="check" size={14} />{t("Your levels are the recommended ones, tested in November 2026.")}</p>}
+      {proposal && usingProposal && <p className="adaptive-proposal-used"><AppIcon name="check" size={14} />{t("Your levels are the recommended ones.")}</p>}
       {proposal && !usingProposal && <Callout className="adaptive-proposal" intent="primary" compact
         icon={<AppIcon name="star" size={16} />} title={t("Recommended for your accounts")}>
-        <p>{t("Tested in November 2026 with the models your providers offer. Use them as they are, or as a start.")}</p>
+        <p>{t("Chosen for the models your providers offer. Use them as they are, or as a start.")}</p>
         <dl className="adaptive-proposal-levels">
           {proposal.map(level => <div key={level.level}>
             <dt>{t(adaptiveLevelLabels[level.level])}</dt>
