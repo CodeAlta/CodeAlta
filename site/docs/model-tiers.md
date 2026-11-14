@@ -158,16 +158,16 @@ Adaptive is the `[models.adaptive]` table, for every space: a table for each lev
 level = "medium"   # the level of a session put on Adaptive without one; medium by default
 
 [models.adaptive.low]
-model = "codex:gpt-6.1-sol@low"
-critics = ["claude-code:haiku@high"]
+model = "codex:gpt-6.1-terra@medium"
+critics = ["claude-code:haiku@xhigh"]
 
 [models.adaptive.medium]
-model = "codex:gpt-6.1-sol@low"
+model = "codex:gpt-6.1-sol@medium"
 critics = ["claude-code:sonnet@high"]   # none: the model rechecks its change
 
 [models.adaptive.max]
-model = "codex:gpt-6.1-sol@high"
-critics = ["claude-code:sonnet@high", "claude-code:opus@high"]
+model = "codex:gpt-6.1-sol@xhigh"
+critics = ["claude-code:fable@high", "claude-code:opus@high"]
 ```
 
 The keys `code`, `escalate` and `recheck` of the first Adaptive are read and ignored: such a file still loads, and Adaptive needs its levels.

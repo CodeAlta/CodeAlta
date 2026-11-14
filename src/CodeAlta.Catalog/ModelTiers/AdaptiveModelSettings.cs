@@ -205,9 +205,9 @@ public sealed record AdaptiveModelSettings(AdaptiveLevel DefaultLevel, IReadOnly
 }
 
 /// <summary>
-/// The combinations of models Adaptive proposes for the providers that are configured, as the evaluation of November 2026
-/// measured them (GPT-6.1 Sol for the turns, a Claude model of another family as the critic), and what it proposes when
-/// only one family is there.
+/// The combinations of models Adaptive proposes for the providers that are configured: GPT-6.1 Sol for the turns with a
+/// Claude model, of another family, as the critic (the combination measured in November 2026), a cheaper model below it
+/// and a longer effort with stronger critics above it, and what it proposes when only one family is there.
 /// </summary>
 public static class AdaptiveProposals
 {
@@ -217,7 +217,7 @@ public static class AdaptiveProposals
     /// <param name="Subscription">Whether the provider runs on a subscription (Codex, Claude Code), which a proposal prefers.</param>
     /// <param name="DisplayName">
     /// The name the provider gives the model, or <see langword="null"/>: an alias (<c>sonnet</c>) is proposed only when it
-    /// names the version that was measured, as Claude Code's <c>haiku</c> may be another one.
+    /// names the version a proposal is made for, as Claude Code's <c>haiku</c> may be another one.
     /// </param>
     public sealed record Candidate(string ProviderKey, string ModelId, bool Subscription, string? DisplayName = null);
 
@@ -235,15 +235,24 @@ public static class AdaptiveProposals
         var haiku = Find(list, "5.5", "claude-haiku-5-5", "haiku");
         if (sol is not null && (sonnet ?? opus) is { } critic)
         {
-            // Both families: measured in November 2026 on SWE-bench Pro and Terminal-Bench.
+            // Both families. Medium is the combination measured in November 2026 on SWE-bench Pro and Terminal-Bench (Sol
+            // at medium, a Sonnet critic). Low spends less: GPT-6.1 Terra when it is there, and a Haiku critic. High and Max
+            // spend more: a longer effort for the turns, and Claude Fable 5.2 as the critic when it is there.
+            var terra = Find(list, "6.1", "gpt-6.1-terra");
+            var fable = Find(list, "5.2", "claude-fable-5-2", "fable");
             var strong = opus ?? critic;
+            (Candidate Model, AgentReasoningEffort Effort)[] two = ReferenceEquals(strong, critic)
+                ? [(critic, AgentReasoningEffort.High)]
+                : [(critic, AgentReasoningEffort.High), (strong, AgentReasoningEffort.High)];
             return
             [
-                Level(AdaptiveLevel.Low, sol, AgentReasoningEffort.Low, haiku is null ? [] : [(haiku, AgentReasoningEffort.High)]),
-                Level(AdaptiveLevel.Medium, sol, AgentReasoningEffort.Low, [(critic, AgentReasoningEffort.High)]),
-                Level(AdaptiveLevel.High, sol, AgentReasoningEffort.Medium, [(critic, AgentReasoningEffort.High)]),
-                Level(AdaptiveLevel.Max, sol, AgentReasoningEffort.High,
-                    ReferenceEquals(strong, critic) ? [(critic, AgentReasoningEffort.High)] : [(critic, AgentReasoningEffort.High), (strong, AgentReasoningEffort.High)]),
+                Level(AdaptiveLevel.Low, terra ?? sol, terra is null ? AgentReasoningEffort.Low : AgentReasoningEffort.Medium,
+                    haiku is null ? [] : [(haiku, AgentReasoningEffort.XHigh)]),
+                Level(AdaptiveLevel.Medium, sol, AgentReasoningEffort.Medium, [(critic, AgentReasoningEffort.High)]),
+                Level(AdaptiveLevel.High, sol, AgentReasoningEffort.High,
+                    [fable is null ? (strong, AgentReasoningEffort.High) : (fable, AgentReasoningEffort.Low)]),
+                Level(AdaptiveLevel.Max, sol, AgentReasoningEffort.XHigh,
+                    fable is null ? two : [(fable, AgentReasoningEffort.High), (strong, AgentReasoningEffort.High)]),
             ];
         }
 
@@ -276,7 +285,7 @@ public static class AdaptiveProposals
     }
 
     // The first candidate of a model, a subscription first, an exact name before an alias; an alias (the names after
-    // the first) only when the provider gives no name or one with the version measured.
+    // the first) only when the provider gives no name or one with the version asked for.
     private static Candidate? Find(Candidate[] candidates, string version, params string[] names)
     {
         foreach (var subscription in new[] { true, false })

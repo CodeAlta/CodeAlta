@@ -258,11 +258,35 @@ public sealed class ModelTierSettingsTests
             new("claude-code", "opus", Subscription: true),
             new("claude-code", "haiku", Subscription: true),
         ]);
-        Assert.AreEqual("codex:gpt-6.1-sol@low", both.Single(level => level.Level == AdaptiveLevel.Medium).Model.Format());
-        CollectionAssert.AreEqual(new[] { "claude-code:sonnet@high" }, both.Single(level => level.Level == AdaptiveLevel.Medium).Critics.Select(static c => c.Format()).ToArray());
-        CollectionAssert.AreEqual(new[] { "claude-code:haiku@high" }, both.Single(level => level.Level == AdaptiveLevel.Low).Critics.Select(static c => c.Format()).ToArray());
-        CollectionAssert.AreEqual(new[] { "claude-code:sonnet@high", "claude-code:opus@high" },
-            both.Single(level => level.Level == AdaptiveLevel.Max).Critics.Select(static c => c.Format()).ToArray());
+        Assert.AreEqual("codex:gpt-6.1-sol@low <- claude-code:haiku@xhigh", Written(both, AdaptiveLevel.Low));
+        Assert.AreEqual("codex:gpt-6.1-sol@medium <- claude-code:sonnet@high", Written(both, AdaptiveLevel.Medium));
+        Assert.AreEqual("codex:gpt-6.1-sol@high <- claude-code:opus@high", Written(both, AdaptiveLevel.High));
+        Assert.AreEqual("codex:gpt-6.1-sol@xhigh <- claude-code:sonnet@high, claude-code:opus@high", Written(both, AdaptiveLevel.Max));
+
+        // With GPT-6.1 Terra, Low runs on it; with Claude Fable 5.2, it is the critic of High and the first one of Max.
+        var wider = AdaptiveProposals.Propose(
+        [
+            new("codex", "gpt-6.1-sol", true),
+            new("codex", "gpt-6.1-terra", true),
+            new("claude-code", "sonnet", true, "Sonnet 5.5"),
+            new("claude-code", "opus", true, "Opus 5.5"),
+            new("claude-code", "haiku", true, "Haiku 5.5"),
+            new("claude-code", "fable", true, "Fable 5.2"),
+        ]);
+        Assert.AreEqual("codex:gpt-6.1-terra@medium <- claude-code:haiku@xhigh", Written(wider, AdaptiveLevel.Low));
+        Assert.AreEqual("codex:gpt-6.1-sol@medium <- claude-code:sonnet@high", Written(wider, AdaptiveLevel.Medium));
+        Assert.AreEqual("codex:gpt-6.1-sol@high <- claude-code:fable@low", Written(wider, AdaptiveLevel.High));
+        Assert.AreEqual("codex:gpt-6.1-sol@xhigh <- claude-code:fable@high, claude-code:opus@high", Written(wider, AdaptiveLevel.Max));
+
+        // An older Fable behind the alias is not the one proposed.
+        var olderFable = AdaptiveProposals.Propose(
+        [
+            new("codex", "gpt-6.1-sol", true),
+            new("claude-code", "sonnet", true, "Sonnet 5.5"),
+            new("claude-code", "fable", true, "Fable 5.1"),
+        ]);
+        Assert.AreEqual("codex:gpt-6.1-sol@high <- claude-code:sonnet@high", Written(olderFable, AdaptiveLevel.High));
+        Assert.AreEqual("codex:gpt-6.1-sol@xhigh <- claude-code:sonnet@high", Written(olderFable, AdaptiveLevel.Max));
 
         var openAi = AdaptiveProposals.Propose([new("openai", "gpt-6.1-sol", Subscription: false)]);
         Assert.AreEqual(4, openAi.Count);
@@ -284,6 +308,13 @@ public sealed class ModelTierSettingsTests
         ]);
         Assert.AreEqual(0, olderHaiku.Single(level => level.Level == AdaptiveLevel.Low).Critics.Count);
         Assert.AreEqual("claude-code:sonnet@high", olderHaiku.Single(level => level.Level == AdaptiveLevel.Medium).Critics.Single().Format());
+    }
+
+    // A proposed level as one line: the model of its turns, then its critics.
+    private static string Written(IReadOnlyList<AdaptiveLevelSettings> proposal, AdaptiveLevel level)
+    {
+        var found = proposal.Single(each => each.Level == level);
+        return found.Critics.Count == 0 ? found.Model.Format() : $"{found.Model.Format()} <- {string.Join(", ", found.Critics.Select(static critic => critic.Format()))}";
     }
 
     private static AdaptiveLevelSettings Level(AdaptiveLevel level, string model, params string[] critics)
