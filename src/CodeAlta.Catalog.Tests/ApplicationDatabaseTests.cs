@@ -355,9 +355,12 @@ public sealed class ApplicationDatabaseTests
     public async Task TwoDatabasesOnTheSameFile_WriteWithoutALockedError()
     {
         using var temp = TempFolder.Create();
-        var options = new CatalogOptions { GlobalRoot = temp.Path };
-        await using var first = ApplicationDatabase.Create(options);
-        await using var second = ApplicationDatabase.Create(options);
+        // A write waits for the other database as long as the test waits for them all: on a loaded machine, where a
+        // write can hold the lock for seconds, the wait of the product (5 seconds) would end first, as a locked error.
+        var limit = TestTime.Seconds(30);
+        var options = new ApplicationDatabaseOptions { DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"), BusyTimeout = limit };
+        await using var first = new ApplicationDatabase(options);
+        await using var second = new ApplicationDatabase(options);
         await first.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER PRIMARY KEY, who TEXT);", token));
 
         var writes = Enumerable.Range(0, 20).Select(index => (index % 2 == 0 ? first : second).WriteAsync(
@@ -367,7 +370,7 @@ public sealed class ApplicationDatabaseTests
                 await ExecuteAsync(connection, $"INSERT INTO t_data (who) VALUES ('{index}');", token);
                 await Task.Delay(5, token);
             }).AsTask()).ToArray();
-        await Task.WhenAll(writes).WithinAsync(TestTime.Seconds(30));
+        await Task.WhenAll(writes).WithinAsync(limit);
 
         Assert.AreEqual(20L, await first.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT COUNT(*) FROM t_data;", token)));
     }
