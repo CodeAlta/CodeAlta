@@ -18,6 +18,55 @@ public sealed class CodeAltaSingleInstanceGuardTests
     }
 
     [TestMethod]
+    public void Dispose_DuringScratchpadCleanupHold_KeepsTheLockUntilTheHoldEnds()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var lockFilePath = Path.Combine(directory, "alta.lock");
+            var guard = CodeAltaSingleInstanceGuard.Acquire(lockFilePath);
+            var hold = guard.HoldForScratchpadCleanup();
+
+            guard.Dispose();
+
+            Assert.IsTrue(File.Exists(lockFilePath), "A premature disposal must not remove the lock while cleanup holds it.");
+            Assert.IsFalse(hold.Handle.IsClosed);
+            Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(lockFilePath));
+            Assert.Throws<ObjectDisposedException>(() => guard.HoldForScratchpadCleanup());
+
+            hold.Dispose();
+            hold.Dispose();
+
+            Assert.IsTrue(hold.Handle.IsClosed);
+            Assert.IsFalse(File.Exists(lockFilePath));
+            using var successor = CodeAltaSingleInstanceGuard.Acquire(lockFilePath);
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    [TestMethod]
+    public void ScratchpadCleanupHold_EndingBeforeDispose_LeavesTheGuardOwning()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var lockFilePath = Path.Combine(directory, "alta.lock");
+            using var guard = CodeAltaSingleInstanceGuard.Acquire(lockFilePath);
+            guard.HoldForScratchpadCleanup().Dispose();
+
+            Assert.IsTrue(File.Exists(lockFilePath));
+            Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(lockFilePath));
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    [TestMethod]
     public void Acquire_WritesCurrentProcessIdToLockFile()
     {
         var directory = CreateTemporaryDirectory();

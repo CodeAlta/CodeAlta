@@ -119,6 +119,11 @@ test("status messages never describe unqualified, disabled or unknown maintenanc
   assert.equal(maintenanceNotice("retention", retention("not_started")), undefined);
   assert.equal(scratchpadReason(["invalid-configuration"]), "Check the storage configuration.");
   assert.equal(scratchpadReason(["unexpected-private"]), "Some scratchpad items were kept.");
+  // A system without path-safe removal keeps everything by design: neither kept items nor a warning.
+  assert.equal(scratchpadReason(["platform-path-safety-unavailable"]), "Scratchpad cleanup does not run on this system.");
+  assert.deepEqual(maintenanceNotice("scratchpad", { ...scratchpad("skipped"), reasons: ["platform-path-safety-unavailable"] }),
+    { key: "Scratchpad cleanup does not run on this system.", intent: "none" });
+  assert.equal(maintenanceNotice("scratchpad", scratchpad("skipped"))?.key, "Scratchpad cleanup was skipped.");
 });
 
 test("session cleanup progress counts sessions and freed space once the pass has listed them", () => {

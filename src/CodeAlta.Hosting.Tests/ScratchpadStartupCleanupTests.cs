@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using CodeAlta.Catalog.Storage;
 using Microsoft.Win32.SafeHandles;
 
@@ -10,7 +11,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task RunningSnapshotAdvancesBeforeCleanupCompletes()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/one", "remove");
         fixture.Write("scratchpad/two", "remove");
@@ -51,7 +52,7 @@ public sealed class ScratchpadStartupCleanupTests
     [DataRow(true)]
     public async Task RemovesOnlyOwnedContentsAndPreservesRootAndProtectedSentinels(bool developer)
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(developer);
         var scratchpad = fixture.Scratchpad;
         var deep = scratchpad;
@@ -80,7 +81,10 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task KeepsEntriesChangedWithinTheRetentionAndRemovesOlderOnes()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
+        // Linux sets neither a birth time nor a change time in the past, and the removal reads one of
+        // them: no entry a test writes can look old there. Windows and macOS set the creation time.
+        if (OperatingSystem.IsLinux()) Assert.Inconclusive("Linux cannot age the birth or change time of a file.");
         using var fixture = new Fixture(false);
         var old = DateTime.UtcNow - StorageSettings.ScratchpadMaxAge - TimeSpan.FromDays(1);
         fixture.Write("scratchpad/old.md", "remove");
@@ -158,7 +162,7 @@ public sealed class ScratchpadStartupCleanupTests
     [DataRow(1, ScratchpadCleanupState.Partial)]
     public async Task UnexpectedManagedFailureStopsWorkerAndPublishesBoundedResult(int filesBeforeFault, ScratchpadCleanupState expected)
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/one", "remove or retain");
         fixture.Write("scratchpad/two", "retain");
@@ -191,7 +195,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task MissingRootIsCompletedWithoutCreatingScratchpad()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         var cleanup = fixture.Cleanup();
         await cleanup.RunAsync(true, true, CancellationToken.None);
@@ -206,7 +210,7 @@ public sealed class ScratchpadStartupCleanupTests
     [DataRow("2147483647")]
     public async Task EveryExistingLegacyLockFailsClosedWithoutReclaiming(string contents)
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/note.md", "keep");
         fixture.Write("dev/alta.lock", contents);
@@ -221,7 +225,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task LegacyOwnerPreventsNormalCleanupButNormalOwnerDoesNotPreventDeveloperCleanup()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         var developer = CodeAltaInstanceProfile.Create(fixture.Root, true);
         using var peer = CodeAltaSingleInstanceGuard.Acquire(developer.LockFilePath);
@@ -239,7 +243,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task LegacyAdmissionAndDelayedPathDeleteCannotBreakTemporaryGate()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/note.md", "remove");
         var developerLock = Path.Combine(fixture.Root, "dev", "alta.lock");
@@ -249,9 +253,19 @@ public sealed class ScratchpadStartupCleanupTests
             MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ =>
             {
-                // Delete-pending names fail before even the legacy PID-reader fallback.
-                Assert.Throws<UnauthorizedAccessException>(() => CodeAltaSingleInstanceGuard.Acquire(developerLock));
-                Assert.Throws<UnauthorizedAccessException>(() => File.Delete(developerLock));
+                if (OperatingSystem.IsWindows())
+                {
+                    // Delete-pending names fail before even the legacy PID-reader fallback.
+                    Assert.Throws<UnauthorizedAccessException>(() => CodeAltaSingleInstanceGuard.Acquire(developerLock));
+                    Assert.Throws<UnauthorizedAccessException>(() => File.Delete(developerLock));
+                }
+                else
+                {
+                    // The reservation holds the live PID of this process, which the legacy guard never reclaims.
+                    Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(developerLock));
+                    Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), File.ReadAllText(developerLock));
+                    Assert.AreEqual(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(developerLock));
+                }
                 checkedGate = true;
             },
         };
@@ -289,7 +303,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task DescendantLinksAreLeftInPlaceAndOutsideFilesAreUntouched()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(true);
         fixture.Write("outside/sentinel", "protected");
         Directory.CreateDirectory(fixture.Scratchpad);
@@ -301,7 +315,7 @@ public sealed class ScratchpadStartupCleanupTests
             await cleanup.RunAsync(true, true, CancellationToken.None);
             Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
             Assert.AreEqual("protected", File.ReadAllText(Path.Combine(fixture.Root, "outside", "sentinel")));
-            Assert.IsTrue((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0);
+            Assert.IsNotNull(new DirectoryInfo(link).LinkTarget);
         }
         finally { Directory.Delete(link); }
     }
@@ -309,7 +323,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task LinkedScratchpadRootIsSkipped()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(true);
         fixture.Write("outside/sentinel", "protected");
         CreateDirectoryLink(fixture.Scratchpad, Path.Combine(fixture.Root, "outside"));
@@ -391,7 +405,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task CancellationAndRepeatedWaitersJoinActualWorkerAndLateSubscribersReplayResult()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(true);
         fixture.Write("dev/scratchpad/note", "keep");
         using var cancellation = new CancellationTokenSource();
@@ -446,7 +460,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task CycleAndLegacyLockDirectoryLinksCannotEscapeTheBoundary()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/sentinel", "keep");
         fixture.Write("outside/sentinel", "protected");
@@ -477,7 +491,7 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task CancellationDuringRemovalRetainsLegacyExclusionAndOwnershipUntilWorkerStops()
     {
-        RequireWindows();
+        RequireCleanupPlatform();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/note", "keep");
         using var cancellation = new CancellationTokenSource();
@@ -493,11 +507,14 @@ public sealed class ScratchpadStartupCleanupTests
         {
             Assert.IsTrue(entered.Wait(TestTime.Seconds(10)));
             cancellation.Cancel();
-            // Even premature guard disposal cannot close the OS ownership handle while deletion runs.
+            // Even premature guard disposal cannot close the OS ownership handle or remove the lock while deletion runs.
             fixture.Guard.Dispose();
             Assert.IsFalse(worker.IsCompleted);
             Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath));
-            Assert.Throws<UnauthorizedAccessException>(() => CodeAltaSingleInstanceGuard.Acquire(Path.Combine(fixture.Root, "dev", "alta.lock")));
+            if (OperatingSystem.IsWindows())
+                Assert.Throws<UnauthorizedAccessException>(() => CodeAltaSingleInstanceGuard.Acquire(Path.Combine(fixture.Root, "dev", "alta.lock")));
+            else
+                Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(Path.Combine(fixture.Root, "dev", "alta.lock")));
             Assert.AreEqual(ScratchpadCleanupState.Running, cleanup.Snapshot.State);
         }
         finally { release.Set(); await worker; }
@@ -505,6 +522,8 @@ public sealed class ScratchpadStartupCleanupTests
         Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
         Assert.AreEqual("keep", File.ReadAllText(Path.Combine(fixture.Scratchpad, "note")));
         Assert.IsFalse(File.Exists(Path.Combine(fixture.Root, "dev", "alta.lock")));
+        // The disposal deferred by the pass released the lock once the worker stopped.
+        using var successor = CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath);
     }
 
     [TestMethod]
@@ -600,6 +619,439 @@ public sealed class ScratchpadStartupCleanupTests
         Assert.IsFalse(File.Exists(sharedDestination));
     }
 
+    [TestMethod]
+    public async Task UnixLinkSwapAfterEnumerationCannotRedirectRemoval()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("outside/sentinel", "protected");
+        var child = Path.Combine(fixture.Scratchpad, "child");
+        Directory.CreateDirectory(child);
+        var swapped = false;
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            BeforeEntryOpen = entry =>
+            {
+                if (Path.GetFileName(entry) != "child" || swapped) return;
+                // Exchange the enumerated directory for a link to the outside before the worker looks at it.
+                Directory.Delete(child);
+                Directory.CreateSymbolicLink(child, Path.Combine(fixture.Root, "outside"));
+                swapped = true;
+            },
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.IsTrue(swapped);
+        Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+        Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
+        CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), "linked-entry");
+        Assert.AreEqual("protected", File.ReadAllText(Path.Combine(fixture.Root, "outside", "sentinel")));
+        Assert.IsNotNull(new DirectoryInfo(child).LinkTarget);
+    }
+
+    [TestMethod]
+    public async Task UnixLinkedStateAncestorCleansOnlyTheScratchpadItLeadsTo()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        fixture.Write("target/scratchpad/note", "remove");
+        fixture.Write("target/config.toml", "protected");
+        fixture.Write("scratchpad/sentinel", "protected");
+        var alias = Path.Combine(fixture.Root, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(fixture.Root, "target"));
+        // On Unix the identity of the state root is proven by the inode of the lock held, not by its
+        // pathname: an ancestor link (as /var on macOS) is followed once, then never again.
+        var profile = CodeAltaInstanceProfile.Create(alias, false);
+        using var guard = CodeAltaSingleInstanceGuard.Acquire(profile.LockFilePath);
+        var cleanup = new ScratchpadStartupCleanup(profile, guard) { MaxAge = TimeSpan.Zero };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Root, "target", "scratchpad", "note")));
+        Assert.AreEqual("protected", File.ReadAllText(Path.Combine(fixture.Root, "target", "config.toml")));
+        Assert.AreEqual("protected", File.ReadAllText(Path.Combine(fixture.Scratchpad, "sentinel")));
+        Assert.IsNotNull(new DirectoryInfo(alias).LinkTarget);
+    }
+
+    [TestMethod]
+    public async Task UnixFileReplacedBeforeItsRemovalIsKept()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/note", "old");
+        fixture.Write("dev/replacement", "new");
+        FileStream? previous = null;
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            BeforeEntryDelete = entry =>
+            {
+                // Keeping the examined file open keeps its inode from being reused by the replacement.
+                previous = File.OpenRead(entry);
+                File.Move(Path.Combine(fixture.Root, "dev", "replacement"), entry, overwrite: true);
+            },
+        };
+        try
+        {
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+        }
+        finally { previous?.Dispose(); }
+        Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+        Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
+        CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), "entry-locked-denied-or-changed");
+        Assert.AreEqual("new", File.ReadAllText(Path.Combine(fixture.Scratchpad, "note")));
+    }
+
+    [TestMethod]
+    public async Task UnixReplacedInstanceLockSkipsThePass()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/note", "keep");
+        // The guard still holds the original file open; the name now leads to another one.
+        File.Delete(fixture.Profile.LockFilePath);
+        File.WriteAllText(fixture.Profile.LockFilePath, "1");
+        var cleanup = fixture.Cleanup();
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.AreEqual(ScratchpadCleanupState.Skipped, cleanup.Snapshot.State);
+        CollectionAssert.AreEqual(new[] { "instance-ownership-path-changed" }, cleanup.Snapshot.Reasons.ToArray());
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(fixture.Scratchpad, "note")));
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Root, "dev", "alta.lock")));
+    }
+
+    [TestMethod]
+    public async Task UnixFifoIsRemovedWithoutOpeningIt()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        Directory.CreateDirectory(fixture.Scratchpad);
+        var fifo = Path.Combine(fixture.Scratchpad, "pipe");
+        Assert.AreEqual(0, MakeFifo(fifo, 0x180 /* 0600 */), $"mkfifo failed: {Marshal.GetLastPInvokeError()}");
+        var cleanup = fixture.Cleanup();
+        // Opening a FIFO without a writer blocks: the pass must not open it.
+        await cleanup.RunAsync(true, true, CancellationToken.None).WithinAsync(TestTime.Seconds(10));
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual(0, Directory.GetFileSystemEntries(fixture.Scratchpad).Length);
+    }
+
+    [TestMethod]
+    [SupportedOSPlatform("linux")]
+    [SupportedOSPlatform("macos")]
+    public async Task UnixReadOnlyFileGoesButEntriesOfAReadOnlyDirectoryStay()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/readonly", "remove");
+        fixture.Write("dev/scratchpad/sealed/note", "keep");
+        // Unix removes a name by the permission of its directory, not of the file: a file of mode 0444
+        // in the writable scratchpad goes, a file in a directory without write permission stays.
+        File.SetUnixFileMode(Path.Combine(fixture.Scratchpad, "readonly"), UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        var sealedDirectory = Path.Combine(fixture.Scratchpad, "sealed");
+        File.SetUnixFileMode(sealedDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var cleanup = fixture.Cleanup();
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+            Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+            Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+            Assert.AreEqual(2L, cleanup.Snapshot.SkippedEntries, string.Join(",", cleanup.Snapshot.Reasons));
+            CollectionAssert.AreEquivalent(new[] { "entry-locked-denied-or-changed", "directory-not-empty-or-unavailable" }, cleanup.Snapshot.Reasons.ToArray());
+            Assert.IsFalse(File.Exists(Path.Combine(fixture.Scratchpad, "readonly")));
+            Assert.AreEqual("keep", File.ReadAllText(Path.Combine(sealedDirectory, "note")));
+        }
+        finally { File.SetUnixFileMode(sealedDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
+
+    [TestMethod]
+    public async Task KeepsEntriesCreatedAfterTheCutoffEvenWithAnOldWriteTime()
+    {
+        RequireCleanupPlatform();
+        using var fixture = new Fixture(false);
+        // Entries written before the cutoff are old, those written after it recent: no time is set back
+        // except the write time of the copy, so this holds on Linux, which sets no birth time.
+        fixture.Write("scratchpad/old.md", "remove");
+        fixture.Write("scratchpad/old-folder/note.md", "remove");
+        fixture.Write("scratchpad/mixed/old.md", "remove");
+        Directory.CreateDirectory(Path.Combine(fixture.Scratchpad, "old-empty"));
+        Thread.Sleep(50);
+        var cutoff = DateTimeOffset.UtcNow;
+        Thread.Sleep(50);
+        fixture.Write("scratchpad/recent.md", "keep");
+        fixture.Write("scratchpad/mixed/recent.md", "keep");
+        fixture.Write("scratchpad/copied.md", "keep");
+        Directory.CreateDirectory(Path.Combine(fixture.Scratchpad, "recent-empty"));
+        // A copy keeps the write time of its source, but it was created after the cutoff: it is recent.
+        File.SetLastWriteTimeUtc(Path.Combine(fixture.Scratchpad, "copied.md"), new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = StorageSettings.ScratchpadMaxAge,
+            Time = new FixedTime(cutoff + StorageSettings.ScratchpadMaxAge),
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(3L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual(2L, cleanup.Snapshot.RemovedDirectories);
+        CollectionAssert.AreEquivalent(
+            new[] { "copied.md", "mixed", "mixed/recent.md", "recent-empty", "recent.md" },
+            Directory.GetFileSystemEntries(fixture.Scratchpad, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(fixture.Scratchpad, path).Replace('\\', '/')).ToArray());
+    }
+
+    [TestMethod]
+    public async Task UnixFileRenamedOntoTheNameAfterTheClaimSurvives()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/victim", "old");
+        fixture.Write("dev/replacement", "new");
+        var victim = Path.Combine(fixture.Scratchpad, "victim");
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            // After the last look at the name: what the claim moved is the examined file, the name is free.
+            AfterEntryClaim = entry => File.Move(Path.Combine(fixture.Root, "dev", "replacement"), entry),
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual("new", File.ReadAllText(victim));
+        CollectionAssert.AreEqual(new[] { "victim" }, Directory.GetFileSystemEntries(fixture.Scratchpad).Select(Path.GetFileName).ToArray());
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task UnixFileSwappedUnderTheClaimNameIsNeverRemoved(bool nameTakenAgain)
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/victim", "old");
+        fixture.Write("dev/replacement", "new");
+        var victim = Path.Combine(fixture.Scratchpad, "victim");
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            AfterEntryClaim = _ =>
+            {
+                // A process that guessed the claim name puts a fresh file there, after the last look at the name.
+                var claim = Directory.GetFiles(fixture.Scratchpad, ".alta-cleanup-*").Single();
+                File.Move(Path.Combine(fixture.Root, "dev", "replacement"), claim, overwrite: true);
+                if (nameTakenAgain) File.WriteAllText(victim, "blocker");
+            },
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+        Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
+        CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), "entry-locked-denied-or-changed");
+        var claims = Directory.GetFiles(fixture.Scratchpad, ".alta-cleanup-*");
+        if (nameTakenAgain)
+        {
+            // The name could not be given back without replacing the blocker: the fresh file stays under the claim name.
+            Assert.AreEqual("blocker", File.ReadAllText(victim));
+            Assert.AreEqual("new", File.ReadAllText(claims.Single()));
+        }
+        else
+        {
+            Assert.AreEqual("new", File.ReadAllText(victim));
+            Assert.AreEqual(0, claims.Length);
+        }
+    }
+
+    [TestMethod]
+    public async Task UnixDirectoryMovedOutDuringThePassKeepsItsFiles()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/child/note", "keep");
+        fixture.Write("dev/scratchpad/child/other", "keep");
+        var child = Path.Combine(fixture.Scratchpad, "child");
+        var outside = Path.Combine(fixture.Root, "outside");
+        var moved = false;
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            BeforeEntryDelete = entry =>
+            {
+                if (moved || Path.GetDirectoryName(entry) != child) return;
+                // The worker holds the directory open: its descriptor now leads outside the scratchpad.
+                Directory.Move(child, outside);
+                moved = true;
+            },
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.IsTrue(moved);
+        Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+        Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
+        CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), "entry-locked-denied-or-changed");
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(outside, "note")));
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(outside, "other")));
+        Assert.AreEqual(0, Directory.GetFiles(outside, ".alta-cleanup-*").Length);
+    }
+
+    [TestMethod]
+    [SupportedOSPlatform("linux")]
+    [SupportedOSPlatform("macos")]
+    public async Task UnixLegacyLockThatCannotBeReleasedMakesThePassPartial()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/note", "remove");
+        var dev = Path.Combine(fixture.Root, "dev");
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            // Without write permission on dev, the reservation cannot be removed at the end of the pass.
+            BeforeEntryDelete = _ => File.SetUnixFileMode(dev, UnixFileMode.UserRead | UnixFileMode.UserExecute),
+        };
+        try
+        {
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+            Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+            Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+            CollectionAssert.AreEqual(new[] { "legacy-developer-exclusion-release-failed" }, cleanup.Snapshot.Reasons.ToArray());
+            Assert.IsTrue(File.Exists(Path.Combine(dev, "alta.lock")));
+        }
+        finally { File.SetUnixFileMode(dev, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
+
+    [TestMethod]
+    public async Task UnixScratchpadRenamedDuringThePassKeepsItsFiles()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/note", "keep");
+        var preserved = Path.Combine(fixture.Profile.StateRoot, "preserved");
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            // The root stays in the state root, so the ".." chain still holds: only its name tells it moved.
+            BeforeEntryDelete = _ => Directory.Move(fixture.Scratchpad, preserved),
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.AreEqual(ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+        Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
+        CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), "entry-locked-denied-or-changed");
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(preserved, "note")));
+        Assert.AreEqual(0, Directory.GetFiles(preserved, ".alta-cleanup-*").Length);
+    }
+
+    [TestMethod]
+    public async Task UnixCancellationAfterTheClaimGivesTheNameBack()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/note", "keep");
+        using var cancellation = new CancellationTokenSource();
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            MaxAge = TimeSpan.Zero,
+            AfterEntryClaim = _ => cancellation.Cancel(),
+        };
+        await cleanup.RunAsync(true, true, cancellation.Token);
+        Assert.AreEqual(ScratchpadCleanupState.Canceled, cleanup.Snapshot.State);
+        Assert.AreEqual(0L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(fixture.Scratchpad, "note")));
+        Assert.AreEqual(0, Directory.GetFiles(fixture.Scratchpad, ".alta-cleanup-*").Length);
+    }
+
+    [TestMethod]
+    [SupportedOSPlatform("linux")]
+    public async Task LinuxReadsTheMountIdAndOrdinaryDirectoriesShareIt()
+    {
+        RequireUnix();
+        if (!OperatingSystem.IsLinux()) Assert.Inconclusive("The mount id is read on Linux only.");
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/child/note", "remove");
+        var rootMount = UnixScratchpadRemoval.MountIdOf(fixture.Scratchpad);
+        if (rootMount is null) Assert.Inconclusive("This kernel returns no mount id (before 5.8): the device check applies.");
+        Assert.AreNotEqual(0UL, rootMount.Value);
+        Assert.AreEqual(rootMount, UnixScratchpadRemoval.MountIdOf(Path.Combine(fixture.Scratchpad, "child")));
+        Assert.AreEqual(rootMount, UnixScratchpadRemoval.MountIdOf(fixture.Profile.StateRoot));
+        var cleanup = fixture.Cleanup();
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(1L, cleanup.Snapshot.RemovedDirectories);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    [SupportedOSPlatform("linux")]
+    public async Task LinuxBindMountsOfTheSameFileSystemAreNeverEntered(bool scratchpadMounted)
+    {
+        RequireUnix();
+        if (!OperatingSystem.IsLinux() || !Environment.IsPrivilegedProcess) Assert.Inconclusive("A bind mount needs root on Linux.");
+        using var fixture = new Fixture(true);
+        fixture.Write("outside/sentinel", "protected");
+        fixture.Write("dev/scratchpad/note", "remove");
+        if (UnixScratchpadRemoval.MountIdOf(fixture.Scratchpad) is null)
+            Assert.Inconclusive("This kernel returns no mount id (before 5.8): a bind mount of the same file system is not told.");
+        var outside = Path.Combine(fixture.Root, "outside");
+        var target = scratchpadMounted ? fixture.Scratchpad : Path.Combine(fixture.Scratchpad, "child");
+        if (scratchpadMounted)
+        {
+            // The pass looks at the root only after it opened it: mount over it with its own content.
+            File.Copy(Path.Combine(fixture.Scratchpad, "note"), Path.Combine(outside, "note"));
+        }
+        else Directory.CreateDirectory(target);
+        // Root in a container without CAP_SYS_ADMIN may not mount: the fixture is then unavailable, not failing.
+        if (RunTool("mount", "--bind", outside, target) is { } refused) Assert.Inconclusive("A bind mount is not permitted here: " + refused);
+        try
+        {
+            var cleanup = fixture.Cleanup();
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+            CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), scratchpadMounted ? "mount-point-root" : "mount-point-entry");
+            Assert.AreEqual(scratchpadMounted ? ScratchpadCleanupState.Skipped : ScratchpadCleanupState.Partial, cleanup.Snapshot.State);
+            Assert.AreEqual("protected", File.ReadAllText(Path.Combine(outside, "sentinel")));
+            if (scratchpadMounted) Assert.IsTrue(File.Exists(Path.Combine(outside, "note")));
+        }
+        finally { Assert.IsNull(RunTool("umount", target), "umount failed."); }
+    }
+
+    // Runs a tool to its end; returns null when it succeeded, else what it wrote on its error output.
+    private static string? RunTool(string tool, params string[] arguments)
+    {
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(tool, arguments) { RedirectStandardError = true })!;
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(TestTime.Seconds(10)))
+        {
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit();
+            Assert.Fail($"{tool} did not end.");
+        }
+        return process.ExitCode == 0 ? null : $"{tool} exited with {process.ExitCode}: {error.GetAwaiter().GetResult().Trim()}";
+    }
+
+    [TestMethod]
+    public void LinuxRunsTheCleanup()
+    {
+        if (!OperatingSystem.IsLinux()) Assert.Inconclusive("Linux qualification.");
+        if (RuntimeInformation.ProcessArchitecture is not (Architecture.X64 or Architecture.Arm64))
+            Assert.Inconclusive("Only Linux x64 and arm64 are qualified.");
+        Assert.IsTrue(OperatingSystem.IsLinux() && UnixScratchpadRemoval.IsSupported,
+            "Linux x64 and arm64 with statx and renameat2 (glibc 2.28, musl 1.2.5 or later) run the cleanup.");
+    }
+
+    [TestMethod]
+    public async Task MacOSRunsTheCleanup()
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Inconclusive("macOS qualification.");
+        Assert.IsTrue(OperatingSystem.IsMacOS() && UnixScratchpadRemoval.IsSupported);
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/note", "remove");
+        var cleanup = fixture.Cleanup();
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        CollectionAssert.DoesNotContain(cleanup.Snapshot.Reasons.ToArray(), "platform-path-safety-unavailable");
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State);
+        Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles);
+    }
+
+    [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+    private static extern int MakeFifo(string path, int mode);
+
     private static SafeFileHandle OpenWritableDirectory(string path)
         => CreateFile(path, 0x40000000 /* GENERIC_WRITE */, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
 
@@ -634,7 +1086,19 @@ public sealed class ScratchpadStartupCleanupTests
 
     private static void RequireWindows()
     {
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows handle-safety qualification; other platforms fail closed.");
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows handle-safety qualification.");
+    }
+
+    private static void RequireCleanupPlatform()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        RequireUnix();
+    }
+
+    private static void RequireUnix()
+    {
+        if (!(OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()) || !UnixScratchpadRemoval.IsSupported)
+            Assert.Inconclusive("No qualified path-safe removal on this platform; the pass is skipped there.");
     }
 
     private static void CreateDirectoryLink(string link, string target)
@@ -642,6 +1106,11 @@ public sealed class ScratchpadStartupCleanupTests
         try { Directory.CreateSymbolicLink(link, target); }
         catch (UnauthorizedAccessException) { Assert.Inconclusive("The test process cannot create symbolic links."); }
         catch (IOException error) { Assert.Inconclusive("Symbolic-link fixture unavailable: " + error.Message); }
+    }
+
+    private sealed class FixedTime(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class Fixture : IDisposable

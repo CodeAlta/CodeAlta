@@ -68,12 +68,13 @@ export function scratchpadReason(reasons: readonly string[]): MessageKey | undef
   if (reasons.includes("invalid-configuration")) return "Check the storage configuration.";
   if (reasons.includes("disabled")) return "Scratchpad cleanup is off.";
   if (reasons.includes("canceled")) return "Scratchpad cleanup was canceled.";
+  if (reasons.includes("platform-path-safety-unavailable")) return "Scratchpad cleanup does not run on this system.";
   if (reasons.length) return "Some scratchpad items were kept.";
   return undefined;
 }
 
 /** Only known, bounded host codes become text. Unknown codes never masquerade as success. */
-export function maintenanceNotice(kind: "scratchpad" | "retention", value: { state: string; reason?: string | null })
+export function maintenanceNotice(kind: "scratchpad" | "retention", value: { state: string; reason?: string | null; reasons?: readonly string[] })
   : { key: MessageKey; intent: "primary" | "success" | "warning" | "none" } | undefined {
   if (value.state === "not_started" || value.state === "notstarted") return undefined;
   if (kind === "scratchpad") {
@@ -81,7 +82,9 @@ export function maintenanceNotice(kind: "scratchpad" | "retention", value: { sta
       case "running": return { key: "Scratchpad cleanup is running…", intent: "primary" };
       case "completed": return { key: "Scratchpad cleanup completed.", intent: "success" };
       case "partial": return { key: "Scratchpad cleanup was partial.", intent: "warning" };
-      case "skipped": return { key: "Scratchpad cleanup was skipped.", intent: "none" };
+      case "skipped": return value.reasons?.includes("platform-path-safety-unavailable")
+        ? { key: "Scratchpad cleanup does not run on this system.", intent: "none" }
+        : { key: "Scratchpad cleanup was skipped.", intent: "none" };
       case "canceled": return { key: "Scratchpad cleanup was canceled.", intent: "warning" };
       default: return { key: "Scratchpad cleanup status is unavailable.", intent: "warning" };
     }

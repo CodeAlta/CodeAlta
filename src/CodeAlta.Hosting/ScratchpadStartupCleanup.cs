@@ -8,8 +8,10 @@ namespace CodeAlta.Hosting;
 /// <remarks>
 /// Only trusted host composition supplies the profile and its acquired instance guard. Cancellation
 /// requests stop between filesystem operations, but every caller joins the original worker. There
-/// is no lifetime lease shared by normal and developer hosts. Platforms without qualified handle-
-/// based path safety report a skipped result instead of falling back to check-then-delete paths.
+/// is no lifetime lease shared by normal and developer hosts. Windows removes through pinned
+/// handles; macOS and Linux (x64, arm64) remove relative to directory descriptors, checking the
+/// identity of each entry. Other platforms report a skipped result instead of falling back to
+/// check-then-delete paths.
 /// </remarks>
 public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
 {
@@ -44,6 +46,10 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
     internal Action<CancellationToken>? WorkerStarted { get; init; }
     internal Action<string>? BeforeEntryOpen { get; init; }
     internal Action<string>? BeforeEntryDelete { get; init; }
+    // Unix only: runs after a file was renamed to its claim name, before what the claim moved is checked.
+    internal Action<string>? AfterEntryClaim { get; init; }
+    // The clock that sets the start of the pass, from which the age of the entries counts.
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>Subscribes and immediately replays the current snapshot in notification order.</summary>
     /// <returns>A subscription that the UI detaches when it closes; detaching never cancels maintenance.</returns>
@@ -73,7 +79,7 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
 
     private void Run(bool enabled, bool configurationValid, CancellationToken cancellationToken)
     {
-        var started = DateTimeOffset.UtcNow;
+        var started = Time.GetUtcNow();
         var result = new ScratchpadRemovalResult
         {
             Progress = current => Publish(new(ScratchpadCleanupState.Running, current.RemovedFiles, current.RemovedDirectories,
@@ -85,18 +91,19 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
         {
             if (!configurationValid) result.Reason("invalid-configuration");
             else if (!enabled) result.Reason("disabled");
-            else if (!OperatingSystem.IsWindows()) result.Reason("platform-path-safety-unavailable");
+            else if (!HasPathSafety) result.Reason("platform-path-safety-unavailable");
             else if (_ownership is null || !string.Equals(_ownership.LockFilePath, _profile.LockFilePath, StringComparison.OrdinalIgnoreCase))
                 result.Reason("instance-ownership-unavailable");
             else
             {
-                // The reference keeps the real Windows lock handle open even if a caller disposes its
-                // guard prematurely. Its FileShare.Read prevents pathname replacement throughout this pass.
+                // The hold keeps the real lock open and its file in place even if a caller disposes its
+                // guard prematurely: the guard releases both when the hold ends. On Windows its FileShare.Read prevents pathname replacement throughout
+                // this pass; on Unix the removal proves that the state root holds this very file.
                 using var ownership = _ownership.HoldForScratchpadCleanup();
                 Publish(new(ScratchpadCleanupState.Running, 0, 0, 0, [], started, null));
                 WorkerStarted?.Invoke(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                state = WindowsScratchpadRemoval.Clear(_profile, ownership.Handle, started - MaxAge, result, BeforeEntryOpen, BeforeEntryDelete, cancellationToken);
+                state = Clear(ownership.Handle, started - MaxAge, result, cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -119,9 +126,22 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
         finally
         {
             Publish(new(state, result.RemovedFiles, result.RemovedDirectories, result.SkippedEntries,
-                result.Reasons.ToImmutableArray(), started, DateTimeOffset.UtcNow)
+                result.Reasons.ToImmutableArray(), started, Time.GetUtcNow())
             { ProcessedFiles = result.ProcessedFiles, ProcessedDirectories = result.ProcessedDirectories, RemovedBytes = result.RemovedBytes });
         }
+    }
+
+    private static bool HasPathSafety
+        => OperatingSystem.IsWindows() || ((OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()) && UnixScratchpadRemoval.IsSupported);
+
+    private ScratchpadCleanupState Clear(Microsoft.Win32.SafeHandles.SafeFileHandle ownership, DateTimeOffset cutoff,
+        ScratchpadRemovalResult result, CancellationToken cancellationToken)
+    {
+        if (OperatingSystem.IsWindows())
+            return WindowsScratchpadRemoval.Clear(_profile, ownership, cutoff, result, BeforeEntryOpen, BeforeEntryDelete, cancellationToken);
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+            return UnixScratchpadRemoval.Clear(_profile, ownership, cutoff, result, BeforeEntryOpen, BeforeEntryDelete, AfterEntryClaim, cancellationToken);
+        throw new ScratchpadSafetyException("platform-path-safety-unavailable");
     }
 
     private void Publish(ScratchpadCleanupSnapshot snapshot)

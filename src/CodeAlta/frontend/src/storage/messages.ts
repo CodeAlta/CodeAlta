@@ -6,6 +6,7 @@ export const storageMessages = {
   "{size} removed.": ["{size} eliminados.", "{size} supprimés.", "{size} entfernt.", "{size} を削除しました。", "已删除 {size}。"],
   "{files} files and {folders} folders processed.": ["{files} archivos y {folders} carpetas procesados.", "{files} fichiers et {folders} dossiers traités.", "{files} Dateien und {folders} Ordner verarbeitet.", "{files} 個のファイルと {folders} 個のフォルダーを処理しました。", "已处理 {files} 个文件和 {folders} 个文件夹。"],
   "Scratchpad cleanup is off.": ["Limpieza del bloc temporal desactivada.", "Nettoyage du brouillon temporaire désactivé.", "Scratchpad-Bereinigung deaktiviert.", "スクラッチパッドの消去は無効です。", "暂存区清理已关闭。"],
+  "Scratchpad cleanup does not run on this system.": ["La limpieza del bloc temporal no se ejecuta en este sistema.", "Le nettoyage du brouillon temporaire ne s’exécute pas sur ce système.", "Scratchpad-Bereinigung läuft auf diesem System nicht.", "このシステムではスクラッチパッドのクリーンアップは実行されません。", "此系统上不运行暂存区清理。"],
   "Some scratchpad items were kept.": ["Se conservaron algunos elementos del bloc temporal.", "Certains éléments du brouillon temporaire ont été conservés.", "Einige Scratchpad-Einträge wurden behalten.", "一部のスクラッチパッド項目を保持しました。", "已保留部分暂存区项目。"],
   "Check the storage configuration.": ["Revisa la configuración de almacenamiento.", "Vérifiez la configuration du stockage.", "Speicherkonfiguration prüfen.", "ストレージ設定を確認してください。", "请检查存储配置。"],
   "Session cleanup completed.": ["Limpieza de sesiones completada.", "Nettoyage des sessions terminé.", "Sitzungsbereinigung abgeschlossen.", "セッションのクリーンアップが完了しました。", "会话清理已完成。"],
