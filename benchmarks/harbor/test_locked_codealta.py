@@ -90,6 +90,26 @@ class ClaudeCodeTests(unittest.TestCase):
         self.assertIn('providers.anthropic.api_key_env="ANTHROPIC_API_KEY"', settings)
 
 
+class CodexSubscriptionTests(unittest.TestCase):
+    def test_the_codex_provider_runs_without_a_key_on_the_sign_in_given(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".credential", delete=False) as credential:
+            credential.write(b"plain64:e30=")
+        try:
+            agent = _agent("codex/gpt-6.1-sol", provider_type="codex", codex_credential=credential.name, reasoning_effort="medium")
+            model_ref, settings, key_name, _ = agent._model_settings()
+        finally:
+            os.unlink(credential.name)
+
+        self.assertTrue(agent._uses_codex())
+        self.assertEqual("codex:gpt-6.1-sol@medium", model_ref)
+        self.assertEqual(['providers.codex.type="codex"', 'chat.default_provider="codex"'], settings)
+        self.assertEqual("CODEALTA_CODEX_SUBSCRIPTION", key_name, "no API key is asked for nor passed")
+
+    def test_the_codex_provider_needs_its_sign_in(self) -> None:
+        with self.assertRaisesRegex(ValueError, "codex_credential"):
+            _agent("codex/gpt-6.1-sol", provider_type="codex")
+
+
 class ResultTests(unittest.TestCase):
     def test_the_session_header_records_the_provider_type_and_an_estimated_cost_stays_out_of_cost_usd(self) -> None:
         agent = _agent("openai/gpt-6-astra")

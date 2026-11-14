@@ -124,4 +124,20 @@ Six runs of `altacli run --isolated --tier adaptive:medium`, on 2026-11-14, on a
   - Sol gave the work to a sub-agent, which revised the change after the verdict, and the session was then reminded of that revision: a revision now counts once the sub-agents and jobs of the session have ended;
   - the sub-agent tried `alta adaptive review` itself: the note says a sub-agent cannot, and the refusal tells it to report to its parent.
 - **`wait-then-fix` is the shape of the session that started this work**: a turn that ends while a job runs is not reminded, the run of the job's result makes the change, has it reviewed, and pushes after the approval.
-- **Not measured:** the quality on HARD-51 (its sandboxes cannot use the sign-ins of the subscriptions), a session that ignores the note (none did in six runs, so the reminder was only seen through the wrong one of run 1), and long sessions after a compaction (the note is told again then).
+- **Not measured:** a session that ignores the note (none did, so the reminder was only seen through the wrong one of run 1), and long sessions after a compaction (the note is told again then).
+
+### HARD-51 subset
+
+The 16 tasks of `fusion16`, the subset of the November comparison, with Harbor under the locked protocol, on 2026-11-14: Adaptive High, GPT-6.1 Sol `medium` for the turns on CodeAlta's `codex` provider (the ChatGPT subscription, `--ak provider_type=codex`, added to the adapter for this run), Claude Sonnet 5.5 `high` on the Anthropic API as the critic, `--no-sub-sessions`. The scores are those of the replay of each patch on a pristine image.
+
+| | Solved | Review asked by the session | Critic asked for a revision | Median time | Cost at API prices (estimate) |
+| --- | --- | --- | --- | --- | --- |
+| Adaptive High, review started by the session | 14 / 16 | 16 / 16 | 5 | 6.4 min | $6.83, $0.43 per task |
+| November, the critique pattern in the adapter (two runs) | 16 and 15 / 16 | by the adapter | | | $0.20 to 0.40 per task |
+
+- **Every session asked for its review**, once, before its final answer, and none needed a reminder: on real repositories the note is followed as on the small scenarios.
+- **The two misses:**
+  - `ansible-40ade1`: the task Adaptive High also missed in the full run of November. The critic asked for a revision; 18 minutes.
+  - `flipt-c1728053`: the patch puts its fixtures where the hidden tests do not look. The critic asked for a revision here too; 3.4 minutes.
+- **14 against 15 or 16** is within what one run varies by on 16 tasks (a task or two), and one run cannot tell more. The turns also ran on another provider than in November (the subscription, not the OpenAI API).
+- **The token of the subscription lives an hour**: the tasks ran in batches that end within the hour, each on a copy of the sign-in without its refresh token (`benchmarks/harbor/README.md`).

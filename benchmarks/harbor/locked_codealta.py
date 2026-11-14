@@ -92,6 +92,14 @@ _CLAUDE_CODE_ENV = {
     "DISABLE_TELEMETRY": "1",
     "DISABLE_ERROR_REPORTING": "1",
 }
+# CodeAlta's own agent loop on a ChatGPT subscription (--ak provider_type=codex, -m codex/<model>): the sign-in of the
+# `codex` provider of a CodeAlta of the host, copied into the profile of the sandbox (--ak codex_credential=). Its access
+# token lives an hour and the sandbox cannot renew it: the sign-in host stays closed, and the copy has no refresh token,
+# so that nothing ends the sign-in it was copied from.
+_CODEX_TYPE = "codex"
+# The run has no API key: the variable the adapter passes in its place, which nothing reads.
+_CODEX_MARKER = "CODEALTA_CODEX_SUBSCRIPTION"
+
 # The CodeAlta claude-code provider offers the models the CLI lists, under its aliases: claude-opus-5-5 is `opus`, the
 # latest Opus of the pinned CLI. Another name (an alias such as `opus[1m]`) is passed as it is.
 _CLAUDE_CODE_FAMILIES = ("opus", "sonnet", "haiku")
@@ -300,7 +308,9 @@ class LockedCodeAlta(BaseInstalledAgent):
       provider_type     the CodeAlta provider type, for a provider not in the table (openai-chat, mistral, xai...), or
                         claude-code to run CodeAlta on the Claude Code CLI, installed during setup (-m anthropic/<model>)
       claude_code_version  the Claude Code CLI of claude-code (default: the version CodeAlta pins)
-      api_key_env       the variable that holds the API key (host environment or --ae); passed to the sandbox
+      codex_credential  with provider_type=codex (-m codex/<model>): the host path of the sign-in of a `codex` provider,
+                        readable on Linux (`plain64:`), without its refresh token; the run is billed to that subscription
+      api_key_env      the variable that holds the API key (host environment or --ae); passed to the sandbox
       api_url           the base URL of the provider (OpenAI-compatible endpoints, proxies)
       prompt_id         the CodeAlta agent prompt (default: default)
       disable_tools     the --disable-tools patterns (default: web)
@@ -323,6 +333,7 @@ class LockedCodeAlta(BaseInstalledAgent):
         timeout_sec: int | str | None = None,
         provider_type: str | None = None,
         claude_code_version: str | None = None,
+        codex_credential: str | None = None,
         api_key_env: str | None = None,
         api_url: str | None = None,
         prompt_id: str | None = None,
@@ -346,6 +357,9 @@ class LockedCodeAlta(BaseInstalledAgent):
             raise ValueError(f"timeout_sec must be more than 120 seconds; got {self._budget_sec}")
         self._provider_type = provider_type
         self._claude_code_version = str(claude_code_version).strip() if claude_code_version else _CLAUDE_CODE_VERSION
+        self._codex_credential = Path(codex_credential).expanduser() if codex_credential else None
+        if self._uses_codex() and (self._codex_credential is None or not self._codex_credential.is_file()):
+            raise ValueError("provider_type=codex needs codex_credential=<host path of the sign-in of a codex provider>")
         self._api_key_env = api_key_env
         self._api_url = api_url
         self._prompt_id = prompt_id
@@ -422,6 +436,23 @@ class LockedCodeAlta(BaseInstalledAgent):
             return self._provider_type.strip().lower() == _CLAUDE_CODE_TYPE
         return False
 
+    def _uses_codex(self) -> bool:
+        return bool(self._provider_type) and self._provider_type.strip().lower() == _CODEX_TYPE
+
+    async def _prepare_provider(self, environment: BaseEnvironment) -> None:
+        """What the provider needs in the sandbox before its run: for `codex`, the copy of its sign-in in the profile."""
+        if not self._uses_codex():
+            return
+        provider = (self.model_name or "").split("/", 1)[0].lower()
+        folder = f"{_PROFILE_DIR}/auth/openai-codex-subscription"
+        await environment.upload_file(self._codex_credential, f"{_RUN_DIR}/codex.credential")
+        r = await environment.exec(
+            command=(f"set -e; mkdir -p {folder}; mv {_RUN_DIR}/codex.credential {folder}/{shlex.quote(provider)}.credential; "
+                     f"chmod -R a+rwX {_PROFILE_DIR}"),
+            user="root", timeout_sec=60)
+        if r.return_code != 0:
+            raise RuntimeError(f"the sign-in of Codex could not be placed (rc={r.return_code}): {(r.stderr or '')[-300:]}")
+
     async def _install_claude_code(self, environment: BaseEnvironment, runtime: str) -> None:
         """The Claude Code CLI the claude-code provider runs: the setup phase has network, the agent phase the model host only."""
         r = await environment.exec(command=_claude_code_install_command(runtime, self._claude_code_version), user="root", timeout_sec=1200)
@@ -471,6 +502,12 @@ class LockedCodeAlta(BaseInstalledAgent):
         provider_type = self._provider_type or (known[0] if known else None)
         if provider_type is None:
             raise ValueError(f"unknown provider {provider!r}: pass --ak provider_type=<CodeAlta type> --ak api_key_env=<VAR>")
+        if provider_type == _CODEX_TYPE:
+            # Signed in with the copy of the sign-in placed in the profile: no key.
+            provider_id = provider.lower()
+            settings = [f"providers.{provider_id}.type={_toml_string(provider_type)}",
+                        f"chat.default_provider={_toml_string(provider_id)}"]
+            return f"{provider_id}:{model}" + (f"@{self._effort}" if self._effort else ""), settings, _CODEX_MARKER, "1"
         key_names = ((_CLAUDE_CODE_KEY,) if provider_type == _CLAUDE_CODE_TYPE
                      else (self._api_key_env,) if self._api_key_env else (known[1] if known else ()))
         if not key_names:
@@ -555,6 +592,7 @@ class LockedCodeAlta(BaseInstalledAgent):
                 local.write_text(instruction, encoding="utf-8")
                 await environment.upload_file(local, f"{_RUN_DIR}/instruction.md")
             await environment.exec(command=f"chmod a+r {_RUN_DIR}/instruction.md", user="root", timeout_sec=60)
+            await self._prepare_provider(environment)
 
             command = self._command(repo, model_ref, settings)
             self.logger.info(f"altacli: {command}")

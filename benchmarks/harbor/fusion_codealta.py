@@ -406,6 +406,7 @@ class FusionCodeAlta(LockedCodeAlta):
                 user="root", timeout_sec=120)
             repo = (r.stdout or "").strip().splitlines()[-1] if (r.stdout or "").strip() else "/app"
             await self._upload_text(environment, instruction, "instruction.md")
+            await self._prepare_provider(environment)
 
             command = self._command(repo, model_ref, settings)
             self.logger.info(f"altacli primary: {command}")

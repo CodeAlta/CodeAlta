@@ -44,6 +44,7 @@ The agent phase is offline: the tasks set `[agent] network_mode = "no-network"`,
 | `timeout_sec` | `3000` | The agent budget; `altacli --timeout` gets budget − 90 s, the in-sandbox `timeout` budget − 60 s |
 | `provider_type`, `api_key_env`, `api_url` | from `-m` | Another provider or endpoint (below); `provider_type=claude-code` runs CodeAlta on the Claude Code CLI ([below](#codealta-on-the-claude-code-cli)) |
 | `claude_code_version` | CodeAlta's pin | The Claude Code CLI installed for `provider_type=claude-code` |
+| `codex_credential` | | With `provider_type=codex`: the sign-in the sandbox runs on ([below](#codealta-on-a-chatgpt-subscription)) |
 | `prompt_id` | `default` | The CodeAlta agent prompt |
 | `disable_tools` | `web` | `--disable-tools` patterns |
 | `plugins` | `false` | `true` starts plugins and MCP servers |
@@ -79,6 +80,19 @@ harbor run -p v2/tasks -e docker -n 4   -a locked_codealta:LockedCodeAlta -m ant
 - The provider offers the models the CLI lists, under their aliases: `-m anthropic/claude-opus-5-5` becomes `-m anthropic:opus`, the latest Opus of the pinned CLI. Another name (`-m anthropic/opus[1m]`) is passed as it is.
 - The CLI is started with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING`: in the agent phase it reaches the model host alone.
 - `cost_usd` is the cost Claude Code reports.
+
+## CodeAlta on a ChatGPT subscription
+
+`--ak provider_type=codex -m codex/<model>` runs CodeAlta's own agent loop on its `codex` provider: the requests are billed to a ChatGPT subscription instead of an API key.
+
+```sh
+harbor run -p v2/tasks -e docker -n 8   -a locked_codealta:LockedCodeAlta -m codex/gpt-6.1-sol --ak reasoning_effort=medium   --ak provider_type=codex --ak codex_credential=<file>   --allow-agent-host api.openai.com --job-name sbp-v2-codealta-sol
+```
+
+- `codex_credential` is a copy of the sign-in of the `codex` provider of a CodeAlta of the host (`~/.alta/auth/openai-codex-subscription/<provider>.credential`), in the form a Linux sandbox reads: `plain64:` and the base64 of its JSON. On Windows the file of the host is protected for its user account and must be read there. The adapter puts the copy in the profile of the sandbox.
+- **Remove the refresh token from the copy, and do not allow `auth.openai.com`.** A sandbox that renewed the token would end the sign-in of the host.
+- The access token lives an hour, and CodeAlta renews it only in its last five minutes: use the provider once on the host when the token is about to end, copy the sign-in, and run a batch of tasks that ends within the hour.
+- The name of the provider in `-m` is the name of the credential file in the sandbox, whatever the provider is called on the host.
 
 ## What it runs and writes
 
