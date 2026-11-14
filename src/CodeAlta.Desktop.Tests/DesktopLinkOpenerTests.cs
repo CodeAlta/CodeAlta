@@ -95,6 +95,16 @@ public sealed class DesktopLinkOpenerTests
         Assert.AreEqual(new DesktopLinkOrigin("work", null),
             await DesktopApplication.LinkOriginAsync(fixture.Spaces, fixture.Projects, (_, _) => ValueTask.FromResult<(string? SpaceId, string? ProjectId)?>(null),
                 (_, _) => ValueTask.FromResult<string?>(null), spaceView, null, null, "main", default));
+        // A window that shows a space the project is not in, as the default space does with the projects of the others,
+        // leaves the document to the space of its project.
+        var fabrikam = Path.Combine(fixture.Root, "fabrikam");
+        Directory.CreateDirectory(fabrikam);
+        var alone = await fixture.Projects.UpsertFromPathAsync(fabrikam);
+        Assert.IsTrue((await fixture.Spaces.AssignAsync(alone.Id, ["work"], null)).Succeeded);
+        spaceView.SetShown("main", SpaceDescriptor.DefaultId);
+        Assert.AreEqual(new DesktopLinkOrigin("work", alone.ProjectPath),
+            await DesktopApplication.LinkOriginAsync(fixture.Spaces, fixture.Projects, (_, _) => ValueTask.FromResult<(string? SpaceId, string? ProjectId)?>(null),
+                (_, _) => ValueTask.FromResult<string?>(null), spaceView, null, alone.Id, "main", default));
         // A session keeps its own recorded space whatever space the window shows.
         Assert.AreEqual(new DesktopLinkOrigin(clients.Id, contoso),
             await DesktopApplication.LinkOriginAsync(fixture.Spaces, fixture.Projects,

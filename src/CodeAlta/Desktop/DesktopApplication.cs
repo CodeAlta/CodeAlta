@@ -1667,8 +1667,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         application.ForceShutdown(); // Only after confirmed host and native-resource disposal.
     }
 
-    // Where a link was followed: the space of the session, else the space its window shows, and the folder whose
-    // configuration may set where its links open.
+    // Where a link was followed: the space of the session, else the space its window shows when the project of the
+    // document is in it, else the space of that project, and the folder whose configuration may set where its links open.
     private static Task<DesktopLinkOrigin?> LinkOriginAsync(CodeAltaHost host, DesktopSpaceView spaceView, string? sessionId, string? projectId, string? originLabel, CancellationToken cancellationToken)
         => LinkOriginAsync(host.SpaceCatalog, host.ProjectCatalog,
             async (id, token) => await host.RuntimeService.GetSessionSpaceAsync(id, token).ConfigureAwait(false) is { } record ? (record.SpaceId, record.ProjectId) : null,
@@ -1692,15 +1692,20 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             (spaceId, projectId) = record;
             folder = await sessionFolder(sessionId, cancellationToken).ConfigureAwait(false);
         }
-        else
+
+        var project = projectId is null || folder is not null ? null
+            : (await projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(candidate => string.Equals(candidate.Id, projectId, StringComparison.OrdinalIgnoreCase));
+        if (sessionId is null)
         {
-            spaceId = originLabel is not null ? spaceView.ShownSpaceOf(originLabel) ?? spaceView.ShownSpaceId : spaceView.ShownSpaceId;
+            // The window chooses among the spaces of the project, or alone for a document of no project. A space the
+            // project is not in (the default space shows the projects of the others) leaves it to the space of the project.
+            var shown = (originLabel is null ? null : spaceView.ShownSpaceOf(originLabel)) ?? spaceView.ShownSpaceId;
+            if (projectId is null || project?.Spaces.Contains(shown ?? string.Empty, StringComparer.Ordinal) == true) spaceId = shown;
         }
 
         if (projectId is null && spaceId is null) return null;
-        folder ??= projectId is null ? null
-            : (await projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
-                .FirstOrDefault(project => string.Equals(project.Id, projectId, StringComparison.OrdinalIgnoreCase))?.ProjectPath;
+        folder ??= project?.ProjectPath;
         var space = await spaceCatalog.ResolveSessionSpaceAsync(spaceId, projectId, cancellationToken).ConfigureAwait(false);
         return new DesktopLinkOrigin(space.Id, folder);
     }

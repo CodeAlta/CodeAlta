@@ -52,6 +52,10 @@ public sealed class LinkBrowsersTests
         var launch = Plan("firefox", "Work")!;
         Assert.AreEqual("/usr/bin/open", launch.FileName);
         CollectionAssert.AreEqual(new[] { "-n", "-a", "/Applications/Firefox.app", "--args", "-P", "Work", Address }, launch.Arguments.ToArray());
+        // The list shows a name without the spaces around it: the profile is found by it, and given as Firefox wrote it.
+        var spaced = LinkBrowsers.Plan(BrowserPlatform.Windows, [Firefox with { Profiles = [new BrowserProfile(" Work ", "/data/firefox/Profiles/b.work", false)] }], null, Address, "firefox", "Work")!;
+        Assert.IsTrue(spaced.ProfileFound);
+        CollectionAssert.AreEqual(new[] { "-P", " Work ", Address }, spaced.Arguments.ToArray());
     }
 
     [TestMethod]

@@ -81,7 +81,7 @@ public sealed class LinkBrowsers
             return wanted is null ? null : Plain(platform, target, address);
         }
 
-        var chosen = target.Profiles.FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+        var chosen = target.Profiles.FirstOrDefault(candidate => candidate.Name.AsSpan().Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
             ?? (target.Engine == BrowserEngine.Chromium
                 ? target.Profiles.FirstOrDefault(candidate => string.Equals(Path.GetFileName(candidate.Directory), name, StringComparison.OrdinalIgnoreCase))
                 : null);
