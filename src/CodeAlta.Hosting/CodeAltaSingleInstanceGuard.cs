@@ -15,6 +15,8 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     private const int PidReadRetryCount = 20;
     private static readonly TimeSpan PidReadRetryDelay = TimeSpan.FromMilliseconds(25);
     private readonly FileStream _lockStream;
+    private readonly object _gate = new();
+    private int _cleanupHolds;
     private bool _disposed;
 
     private CodeAltaSingleInstanceGuard(FileStream lockStream, string lockFilePath)
@@ -26,19 +28,36 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     /// <summary>Gets the absolute path of the acquired lock file.</summary>
     public string LockFilePath { get; }
 
+    /// <summary>Keeps the lock open and its name in place until the returned hold is disposed, even across <see cref="Dispose"/>.</summary>
+    /// <exception cref="ObjectDisposedException">The guard was already disposed.</exception>
     internal CleanupHandleReference HoldForScratchpadCleanup()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var handle = _lockStream.SafeFileHandle;
-        var held = false;
-        handle.DangerousAddRef(ref held);
-        return new CleanupHandleReference(handle);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _cleanupHolds++;
+            return new CleanupHandleReference(this, _lockStream.SafeFileHandle);
+        }
     }
 
-    internal sealed class CleanupHandleReference(Microsoft.Win32.SafeHandles.SafeFileHandle handle) : IDisposable
+    internal sealed class CleanupHandleReference(CodeAltaSingleInstanceGuard owner, Microsoft.Win32.SafeHandles.SafeFileHandle handle) : IDisposable
     {
+        private int _released;
         internal Microsoft.Win32.SafeHandles.SafeFileHandle Handle => handle;
-        public void Dispose() => handle.DangerousRelease();
+        /// <exception cref="IOException">The guard was disposed meanwhile and its stream could not be disposed.</exception>
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) owner.ReleaseCleanupHold();
+        }
+    }
+
+    private void ReleaseCleanupHold()
+    {
+        lock (_gate)
+        {
+            if (--_cleanupHolds > 0 || !_disposed) return;
+        }
+        ReleaseLock();
     }
 
     /// <summary>Acquires the existing guard under the default user-profile .alta directory.</summary>
@@ -169,17 +188,31 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     }
 
     /// <summary>Releases this guard and attempts to remove its lock file; repeated calls are ignored.</summary>
+    /// <remarks>While a scratchpad cleanup holds the lock, the lock stays open and its file in place until the hold ends.</remarks>
     /// <exception cref="IOException">The underlying stream could not be disposed.</exception>
     public void Dispose()
     {
-        if (_disposed)
+        lock (_gate)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (_cleanupHolds > 0)
+            {
+                return;
+            }
         }
 
+        ReleaseLock();
+    }
+
+    private void ReleaseLock()
+    {
         _lockStream.Dispose();
         TryDeleteLockFile(LockFilePath);
-        _disposed = true;
     }
 
     internal static string GetDefaultLockFilePath()
