@@ -52,6 +52,11 @@ internal sealed partial class AdaptiveTurnCoordinator
     // A tree taken for a send whose run never started is not the tree of a later turn.
     private static readonly TimeSpan SnapshotLife = TimeSpan.FromMinutes(10);
 
+    // The logger of Adaptive, once the host initialized the logging. Before, a message written with an interpolated string
+    // throws, even at a level that is off (XenoAtom.Logging 1.2.0), and a host that leaves the logging to its caller, such
+    // as a test, may never initialize it.
+    private static Logger? Log => LogManager.IsInitialized ? LogManager.GetLogger(LoggerName) : null;
+
     internal const string RecheckPrompt = """
         [CodeAlta Adaptive]
         Before you report, check your change against each requirement of the request above, one by one, with a test or a run for each rule it states. Fix what is missing or wrong, keep the tests passing, and answer as you would have.
@@ -94,6 +99,12 @@ internal sealed partial class AdaptiveTurnCoordinator
     /// </summary>
     internal Func<AdaptiveCriticRequest, CancellationToken, Task<AdaptiveCriticAnswer>>? Critic { get; set; }
 
+    /// <summary>
+    /// Gets or sets what is told of the decision at the end of each run, with its session: what it did, or why it did
+    /// nothing. The log at Debug level says the same.
+    /// </summary>
+    internal Action<string, string>? Decided { get; set; }
+
     /// <summary>Waits for the decisions that run and stops new ones.</summary>
     public async Task CloseAsync()
     {
@@ -122,7 +133,7 @@ internal sealed partial class AdaptiveTurnCoordinator
         try { Observe(envelope.SessionId, envelope.Event); }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            LogManager.GetLogger(LoggerName).Error(exception, "Adaptive could not follow an event of session " + envelope.SessionId + ".");
+            Log?.Error(exception, "Adaptive could not follow an event of session " + envelope.SessionId + ".");
         }
     }
 
@@ -260,7 +271,7 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
         catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
         {
-            LogManager.GetLogger(LoggerName).Error(exception, "Adaptive could not choose the model of a turn of session " + session.SessionId + ".");
+            Log?.Error(exception, "Adaptive could not choose the model of a turn of session " + session.SessionId + ".");
             return selection;
         }
     }
@@ -273,30 +284,53 @@ internal sealed partial class AdaptiveTurnCoordinator
             if (!adaptive)
             {
                 Forget(sessionId, turn);
+                Tell(sessionId, runId, "the session is not on Adaptive");
                 return;
             }
 
             var notice = await _runtime.ReadAdaptiveNoticeAsync(sessionId, _closing.Token).ConfigureAwait(false);
-            if (notice is not { Adaptive: true, Scope.Adaptive: { } settings }) return;
+            if (notice is not { Adaptive: true, Scope.Adaptive: { } settings })
+            {
+                Tell(sessionId, runId, "Adaptive is not set up for the session");
+                return;
+            }
+
             Facts facts;
             lock (_gate) facts = turn.Read();
-            // A failed run is the fallback's; a recheck or a revision ends the turn.
-            if (facts.Failed || facts.Phase is not null || facts.Checked) return;
-            // A prompt that waits starts the next turn: the user, or another session, said what comes next.
-            if (notice.HasQueuedPrompts) return;
-            var change = await ChangeOfTurnAsync(facts).ConfigureAwait(false);
-            if (change is null) return;
+            // A failed run is the fallback's; a recheck or a revision ends the turn. A prompt that waits starts the next
+            // turn: the user, or another session, said what comes next.
+            var ended = facts.Failed ? "the run failed" : facts.Phase is { } phase ? $"the run was a {phase}" : facts.Checked ? "the turn was checked"
+                : notice.HasQueuedPrompts ? "a prompt waits" : null;
+            if (ended is not null)
+            {
+                Tell(sessionId, runId, ended);
+                return;
+            }
+
+            var (change, unchanged) = await ChangeOfTurnAsync(facts).ConfigureAwait(false);
+            if (change is null)
+            {
+                Tell(sessionId, runId, unchanged!);
+                return;
+            }
+
             lock (_gate) turn.Checked = true;
             var level = settings.Resolve(notice.Level);
             if (level is { Critics.Count: > 0 } && Critic is { } critic
                 && await ReviewAsync(notice, level, critic, facts, change, runId).ConfigureAwait(false))
+            {
+                Tell(sessionId, runId, "the change was reviewed");
                 return;
+            }
+
             await RecheckAsync(notice, runId).ConfigureAwait(false);
+            Tell(sessionId, runId, "the change was rechecked");
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             if (exception is OperationCanceledException or ObjectDisposedException && _closing.IsCancellationRequested) return;
-            LogManager.GetLogger(LoggerName).Error(exception, "Adaptive could not decide the end of a run of session " + sessionId + ".");
+            Log?.Error(exception, "Adaptive could not decide the end of a run of session " + sessionId + ".");
+            Decided?.Invoke(sessionId, "the decision failed: " + exception.Message);
         }
     }
 
@@ -308,24 +342,35 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
     }
 
-    // The code a turn changed: the paths, the diff when git gives it, and the tree after the turn; null when it changed
-    // no code (documentation only, or nothing).
-    private async Task<TurnChange?> ChangeOfTurnAsync(Facts facts)
+    // The code a turn changed: the paths, the diff when git gives it, and the tree after the turn; else why it changed no
+    // code (documentation only, nothing, or a folder whose trees were not read).
+    private async Task<(TurnChange? Change, string? Unchanged)> ChangeOfTurnAsync(Facts facts)
     {
+        var unread = "the tree of the folder before the turn was not read";
         if (facts.Before is { } before)
         {
             var after = await Snapshot(before.Folder, _closing.Token).ConfigureAwait(false);
             if (after is not null)
             {
-                if (string.Equals(after, before.Tree, StringComparison.Ordinal)) return null;
+                if (string.Equals(after, before.Tree, StringComparison.Ordinal)) return (null, "the files did not change");
                 var changed = await Changes(before.Folder, before.Tree, after, _closing.Token).ConfigureAwait(false);
-                if (changed is not null && !changed.Any(IsCode)) return null;
+                if (changed is not null && !changed.Any(IsCode)) return (null, "the turn changed no code");
                 var diff = await Diff(before.Folder, before.Tree, after, _closing.Token).ConfigureAwait(false);
-                return new TurnChange(changed ?? facts.ChangedFiles, diff, before.Folder, after);
+                return (new TurnChange(changed ?? facts.ChangedFiles, diff, before.Folder, after), null);
             }
+
+            unread = "the tree of the folder after the turn was not read";
         }
 
-        return facts.ChangedFiles.Any(IsCode) ? new TurnChange(facts.ChangedFiles, null, facts.Before?.Folder, null) : null;
+        // Without the trees, what the tools of the turn say they changed.
+        if (facts.ChangedFiles.Any(IsCode)) return (new TurnChange(facts.ChangedFiles, null, facts.Before?.Folder, null), null);
+        return (null, facts.ChangedFiles.Count > 0 ? "the turn changed no code" : $"its tools changed no file, and {unread}");
+    }
+
+    private void Tell(string sessionId, string runId, string outcome)
+    {
+        Log?.Debug($"Adaptive, at the end of run {runId} of session {sessionId}: {outcome}.");
+        Decided?.Invoke(sessionId, outcome);
     }
 
     /// <summary>Gets whether a path changed by a turn is code: not documentation, not what CodeAlta keeps under <c>.alta</c>.</summary>
@@ -357,7 +402,7 @@ internal sealed partial class AdaptiveTurnCoordinator
             try { return (Model: model, Answer: await critic(new AdaptiveCriticRequest(notice.SessionId, model, prompt, ReviewTime), _closing.Token).ConfigureAwait(false)); }
             catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
             {
-                LogManager.GetLogger(LoggerName).Error(exception, $"Adaptive could not run the review by {model.Format()} of session {notice.SessionId}.");
+                Log?.Error(exception, $"Adaptive could not run the review by {model.Format()} of session {notice.SessionId}.");
                 return (Model: model, Answer: new AdaptiveCriticAnswer(null, exception.Message));
             }
         })).ConfigureAwait(false);
@@ -468,7 +513,7 @@ internal sealed partial class AdaptiveTurnCoordinator
             if (admission.Kind != OwnedSessionCommandAdmissionKind.Busy || Time.GetUtcNow() >= deadline)
             {
                 if (admission.Kind != OwnedSessionCommandAdmissionKind.Accepted)
-                    LogManager.GetLogger(LoggerName).Warn($"Adaptive could not continue session {request.SessionId} ({admission.Kind}).");
+                    Log?.Warn($"Adaptive could not continue session {request.SessionId} ({admission.Kind}).");
                 return admission;
             }
 
@@ -597,15 +642,20 @@ internal sealed partial class AdaptiveTurnCoordinator
             var error = process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
             var text = await output.ConfigureAwait(false);
-            await error.ConfigureAwait(false);
-            return process.ExitCode == 0 ? text : null;
+            var failure = await error.ConfigureAwait(false);
+            if (process.ExitCode == 0) return text;
+            // A folder without git fails here too: the line says why git gave nothing.
+            LogFailure($"exit code {process.ExitCode}: {failure.Trim().Split('\n')[0].Trim()}");
+            return null;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            LogFailure($"no answer within {GitTimeout.TotalSeconds:0} s");
             return null;
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
         {
+            LogFailure(exception.Message);
             return null;
         }
         finally
@@ -617,6 +667,8 @@ internal sealed partial class AdaptiveTurnCoordinator
                 process.Dispose();
             }
         }
+
+        void LogFailure(string why) => Log?.Debug($"Adaptive: git {string.Join(' ', arguments)} in {folder} gave nothing ({why}).");
     }
 
     // A verdict line of a review: `VERDICT: APPROVE`, `**Verdict: revise**`.

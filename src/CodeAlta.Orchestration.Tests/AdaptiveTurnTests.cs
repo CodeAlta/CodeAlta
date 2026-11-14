@@ -159,6 +159,25 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
+    public async Task ACriticThatThrows_LeavesTheChangeToARecheck_InAHostThatLeavesTheLoggingToItsCaller()
+    {
+        // The host of the fixture does not initialize the logging: the failure of the critic is logged nowhere, and told.
+        await using var f = await Fixture.CreateAsync(Config);
+        f.Host.Commands.Adaptive.Critic = static (_, _) => throw new InvalidOperationException("The critic has no session.");
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+
+        f.Send("add the feature");
+        await f.Provider.NextSendAsync();
+        var recheck = await f.Provider.NextSendAsync();
+        await f.SettleAsync();
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Warning, "review");
+        StringAssert.Contains(card.Message, "The critic has no session.");
+    }
+
+    [TestMethod]
     public async Task TheCriticOfTheHost_OpensAReadOnlyChildSession_OnItsOwnModel_ThoughTheSessionStartsNoSessionOfItsOwn()
     {
         await using var f = await Fixture.CreateAsync(Config);
@@ -236,6 +255,8 @@ public sealed class AdaptiveTurnTests
         if (!f.HasGit) Assert.Inconclusive("git is not installed.");
         var asked = new ConcurrentQueue<AdaptiveCriticRequest>();
         f.Host.Commands.Adaptive.Critic = (request, _) => { asked.Enqueue(request); return Task.FromResult(new AdaptiveCriticAnswer("VERDICT: APPROVE", null)); };
+        var decided = new ConcurrentQueue<string>();
+        f.Host.Commands.Adaptive.Decided = (_, outcome) => decided.Enqueue(outcome);
         await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
         // The tools say nothing of the files: git tells the change, and gives its diff to the critic.
         f.Provider.Scripts.Enqueue(run => File.WriteAllText(Path.Combine(run.Folder, "app.js"), "export const value = 2;\n"));
@@ -243,6 +264,7 @@ public sealed class AdaptiveTurnTests
         f.Send("change the value");
         await f.Provider.NextSendAsync();
         await f.SettleAsync();
+        Assert.AreEqual("the change was reviewed", string.Join(" | ", decided));
         StringAssert.Contains(asked.Single().Prompt, "+export const value = 2;");
 
         // A turn that commits what is there changes nothing in the files.
@@ -250,8 +272,27 @@ public sealed class AdaptiveTurnTests
         f.Send("commit it", "second");
         await f.Provider.NextSendAsync();
         await f.SettleAsync();
+        Assert.AreEqual("the change was reviewed | the files did not change", string.Join(" | ", decided));
         Assert.AreEqual(1, asked.Count);
         Assert.AreEqual(2, f.Provider.SendCount);
+    }
+
+    [TestMethod]
+    public async Task ADecisionThatFails_SaysWhy_InAHostThatLeavesTheLoggingToItsCaller()
+    {
+        // The host of the fixture does not initialize the logging: the failure is told all the same.
+        await using var f = await Fixture.CreateAsync(Config);
+        var trees = new ConcurrentQueue<string>(["tree-before", "tree-after"]);
+        f.Host.Commands.Adaptive.Snapshot = (_, _) => Task.FromResult(trees.TryDequeue(out var tree) ? tree : null);
+        f.Host.Commands.Adaptive.Changes = (_, _, _, _) => throw new IOException("The index is in use.");
+        var decided = new ConcurrentQueue<string>();
+        f.Host.Commands.Adaptive.Decided = (_, outcome) => decided.Enqueue(outcome);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+
+        f.Send("change the value");
+        await f.Provider.NextSendAsync();
+        await f.SettleAsync();
+        Assert.AreEqual("the decision failed: The index is in use.", string.Join(" | ", decided));
     }
 
     [TestMethod]
