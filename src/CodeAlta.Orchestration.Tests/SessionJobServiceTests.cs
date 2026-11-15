@@ -393,7 +393,10 @@ public sealed class SessionJobServiceTests
                 $start.ArgumentList.Add('-Command')
                 $start.ArgumentList.Add('Start-Sleep -Seconds 60')
                 $grandchild = [Diagnostics.Process]::Start($start)
-                [IO.File]::WriteAllText((Join-Path (Get-Location) $args[0]), "$($grandchild.Id)")
+                # Written whole under another name first: the test reads the file as soon as it is there.
+                $file = Join-Path (Get-Location) $args[0]
+                [IO.File]::WriteAllText("$file.tmp", "$($grandchild.Id)")
+                [IO.File]::Move("$file.tmp", $file)
                 """);
             using var job = ShellCommandProcess.Start("& (Get-Process -Id $PID).Path -NoProfile -File intermediate.ps1 grandchild.txt; Start-Sleep -Seconds 60", folder, static _ => { });
             var file = Path.Combine(folder, "grandchild.txt");
