@@ -15,9 +15,8 @@ export type DiskUsageStale = Readonly<{ projects: ReadonlySet<string>; paths: Re
 export type DiskUsageState = Readonly<{ loading: boolean; shown: DiskUsageShown | null; scan: DiskUsageScan | null; ending: DiskUsageEnding | null; stale: DiskUsageStale }>;
 
 /**
- * The disk usage of a window, for every view that shows it (the tab and the Storage page): one state, one measurement
- * followed at a time. A view attaches while it is shown; the measurement stops when the last view went, a moment
- * later, so that a view mounted again keeps it.
+ * The disk usage of a window: one state, one measurement followed at a time. The Storage page attaches while it
+ * is shown; the measurement stops when it closes, a moment later, so that a page mounted again keeps it.
  * @param api The service of the host.
  * @param later Runs the release of the last view after the current task: a test runs it itself.
  */

@@ -7,7 +7,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
  * is the folder the terminal started in. The automations of the application have one tab, of no project
  * (`view: "automations"`), and so have the work items, the tasks and the plans of every project
- * (`view: "workItems"`), the issues and pull requests (`view: "issues"`), the canvases that plugins declare (`view: "canvases"`), the user guide that ships with the application (`view: "documentation"`), the bookmarks of every project (`view: "bookmarks"`), and the disk usage of the projects and the profile (`view: "diskUsage"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
+ * (`view: "workItems"`), the issues and pull requests (`view: "issues"`), the canvases that plugins declare (`view: "canvases"`), the user guide that ships with the application (`view: "documentation"`), and the bookmarks of every project (`view: "bookmarks"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
  * file that a link named and no project has: its tab names that folder where a tab names a project, and carries the name of the plugin, of the skill or of the folder.
  *
  * A canvas is a tab that a plugin provides (`view: "canvas"`). Its identity is the plugin, the canvas, the project or the
@@ -15,7 +15,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * shows before the plugin has started: the title (`name`) and the `icon`, kept up to date by the plugin, and `plugin`, the id
  * of the folder of the plugin package, which says where to rebuild it and open its source when it is not running.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workflows" | "workflowRun" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks" | "diskUsage" | "claudeCode";
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workflows" | "workflowRun" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks" | "claudeCode";
   terminalId?: string; name?: string; pluginKey?: string; canvasId?: string; sessionId?: string; key?: string; icon?: string; plugin?: string; origin?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
@@ -53,9 +53,6 @@ export const documentationTab: FileTab = Object.freeze({ projectId: "", projectP
 /** The tab of the bookmarks of every project, where they are found and managed: there is one, whatever the project. */
 export const isBookmarksTab = (tab: FileTab) => tab.view === "bookmarks";
 export const bookmarksTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "bookmarks" });
-/** The tab of the disk usage of every project and of the profile: there is one, whatever the project. */
-export const isDiskUsageTab = (tab: FileTab) => tab.view === "diskUsage";
-export const diskUsageTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "diskUsage" });
 export const isCanvasTab = (tab: FileTab) => tab.view === "canvas";
 /** Which canvas a tab shows, and about what: the plugin and the canvas it declares, the project and the session when it has them, and its key. */
 export type CanvasTabIdentity = Readonly<{ pluginKey: string; canvasId: string; project?: Readonly<{ id: string; path: string }> | null; sessionId?: string | null; key?: string | null }>;
@@ -208,7 +205,7 @@ export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot):
   // The folder of a plugin or of a skill is not a project of the workspace: its editor says so itself when the folder is gone.
   // A canvas of the application lasts; one of a project or of a session lasts as long as they are in the space.
   const canvas = (tab: FileTab) => (tab.projectId === "" || resolveFileTab(snapshot, tab)) && (tab.sessionId === undefined || snapshot.sessions.some(session => session.id === tab.sessionId));
-  const lasting = (tab: FileTab) => isClaudeCodeTab(tab) ? !!resolveFileTab(snapshot, tab) : isTerminalTab(tab) || isAutomationsTab(tab) || isWorkflowsTab(tab) || isWorkflowRunTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isDiskUsageTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
+  const lasting = (tab: FileTab) => isClaudeCodeTab(tab) ? !!resolveFileTab(snapshot, tab) : isTerminalTab(tab) || isAutomationsTab(tab) || isWorkflowsTab(tab) || isWorkflowRunTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -257,7 +254,6 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   if (stored.view === "canvases") return stored.projectId === "" && stored.projectPath === "" ? { tab: canvasesTab, file: null } : null;
   if (stored.view === "documentation") return stored.projectId === "" && stored.projectPath === "" ? { tab: documentationTab, file: null } : null;
   if (stored.view === "bookmarks") return stored.projectId === "" && stored.projectPath === "" ? { tab: bookmarksTab, file: null } : null;
-  if (stored.view === "diskUsage") return stored.projectId === "" && stored.projectPath === "" ? { tab: diskUsageTab, file: null } : null;
   if (stored.view === "canvas") { const tab = storedCanvasTab(stored); return tab ? { tab, file: null } : null; }
   if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
   const project = { id: stored.projectId, path: stored.projectPath };

@@ -1,14 +1,11 @@
-/* The disk usage, a tab or a view of the Storage page: a heading, the table of the level shown with the donut it is the
+/* The disk usage of the Storage page: a heading, the table of the level shown with the donut it is the
    legend of (the layout of the Storage card, `storage-distribution`), and the dialog of a clean. */
-.disk-usage-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--text); container: disk-usage / inline-size; }
-.disk-usage-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 20px 12px; border-bottom: 1px solid var(--line); }
-.disk-usage-heading { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; }
-.disk-usage-heading > svg { color: var(--accent); }
-.disk-usage-heading h1 { margin: 0; font-size: 17px; }
+.disk-usage-panel { display: flex; flex-direction: column; min-height: 0; background: transparent; color: var(--text); container: disk-usage / inline-size; }
+.disk-usage-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 0 0 8px; }
 .disk-usage-total { color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
-.disk-usage-tools { display: flex; flex: 1 1 240px; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.disk-usage-tools { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .disk-usage-age { color: var(--muted); font-size: 12px; }
-.disk-usage-body { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 20px 16px; overflow: auto; scrollbar-gutter: stable; }
+.disk-usage-body { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; }
 .disk-usage-hint { margin: 0; color: var(--muted); font-size: 12px; }
 .disk-usage-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; font-size: 12.5px; }
 .disk-usage-progress small { color: var(--muted); }
@@ -79,16 +76,9 @@ button.disk-usage-verdict:focus-visible { outline: 2px solid var(--accent); outl
 .disk-usage-reasons .bp6-popover-content { max-width: 420px; padding: 8px 12px; }
 .disk-usage-reasons ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.5; }
 .disk-usage-none { color: var(--muted); text-align: center; }
-/* Inside the Storage card: the page scrolls, and the card gives the room around it. */
-.disk-usage-panel[data-embedded] { height: auto; background: transparent; }
-.disk-usage-panel[data-embedded] .disk-usage-header { padding: 0 0 8px; border-bottom: 0; }
-.disk-usage-panel[data-embedded] .disk-usage-tools { flex-basis: auto; }
-.disk-usage-panel[data-embedded] .disk-usage-body { padding: 0; overflow: visible; }
-.disk-usage-panel[data-embedded] .disk-usage-footer { padding-inline: 0; }
-.disk-usage-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 20px; border-top: 1px solid var(--line); }
-/* In a narrow tab the columns that say least go: their figures are in the rows of the next level. */
+.disk-usage-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+/* In a narrow card the columns that say least go: their figures are in the rows of the next level. */
 @container disk-usage (max-width: 640px) {
-  .disk-usage-header, .disk-usage-body, .disk-usage-footer { padding-inline: 12px; }
   .disk-usage-cell-build { display: none; }
   /* Narrow: the marks go under the name rather than past the edge. */
   .disk-usage-name { flex-wrap: wrap; }

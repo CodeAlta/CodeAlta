@@ -9,13 +9,13 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import { testLimit, testLimitRanOut } from "../testTime";
 
-test("the tab of the disk usage shows the last measurement, measures, drills in, cleans build output and removes a worktree", { skip: !browserExecutable, timeout: testLimit(180_000) }, async () => {
+test("the disk usage shows the last measurement, measures, drills in, cleans build output and removes a worktree", { skip: !browserExecutable, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-disk-usage-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./diskUsage.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
-      // The tab is given the host it talks to: the generated client is not part of this page.
+      // The panel is given the host it talks to: the generated client is not part of this page.
       plugins: [{ name: "no-host", setup(bundle) { bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("../demo-api.ts", import.meta.url)) })); } }] });
     await writeFile(join(root, "style.css"), await readFile(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
       + await readFile(new URL("../style.css", import.meta.url), "utf8") + await readFile(new URL("../worktrees/worktrees.css", import.meta.url), "utf8")
@@ -106,28 +106,27 @@ test("the tab of the disk usage shows the last measurement, measures, drills in,
     await open("Worktrees");
     assert.equal(await evaluate(`${button(row("quiet-heron"), "Clean the build output")}.title`), "Measure first: only a measurement of this run can be cleaned.");
 
-    // The panel inside Settings shows the same state, and opens the tab.
+    // Another mounted panel shows the same state, fits a narrow Settings card, and has no tab action.
     await act(`${f}.setEmbedded(true)`);
-    const embedded = "document.querySelector('.disk-usage-panel[data-embedded]')";
+    const embedded = "document.querySelector('.disk-usage-settings-fixture .disk-usage-panel')";
     await until(`${embedded}?.querySelector('.disk-usage-row')`);
     assert.equal(await evaluate(`${embedded}.querySelector('h1')`), null, "no second title of the page");
-    await act(`[...${embedded}.querySelectorAll('button')].find(button => button.textContent === 'Open as tab').click()`);
-    assert.equal(await evaluate(`${state}.tabs`), 1);
+    assert.equal(await evaluate(`[...${embedded}.querySelectorAll('button')].some(button => button.textContent === 'Open as tab')`), false);
     assert.equal(await evaluate(`(() => { const panel = ${embedded}; return panel.scrollWidth <= panel.clientWidth + 1 && panel.getBoundingClientRect().right <= panel.parentElement.getBoundingClientRect().right + 1; })()`), true,
       "the panel fits the Settings window");
     await capture("0-embedded");
 
-    // Measure from Settings: one measurement, which the tab shows too.
+    // One measurement even with multiple subscribers.
     await act(`[...${embedded}.querySelectorAll('button')].find(button => button.textContent === 'Measure').click()`);
     await until(`${state}.scans.length === 1`);
-    await act(`[...document.querySelectorAll('.disk-usage-panel:not([data-embedded]) button')].find(button => button.textContent === 'Measure')?.click()`);
-    assert.equal(await evaluate(`${state}.scans.length`), 1, "the tab has Stop, not a second Measure");
+    await act(`[...document.querySelectorAll('.disk-usage-main-fixture .disk-usage-panel button')].find(button => button.textContent === 'Measure')?.click()`);
+    assert.equal(await evaluate(`${state}.scans.length`), 1, "the other panel has Stop, not a second Measure");
     assert.ok(await evaluate(`!!${textButton("Stop")}`));
     await act(`${state}.scans[0].push({ status: 'ok', kind: 'progress', progress: { phase: 'sessions', current: null, checkoutsDone: 0, checkoutsTotal: 0, files: '1200' } })`);
     assert.ok(await evaluate(`document.querySelector('.disk-usage-progress').textContent.includes('Measuring the sessions…')`));
     assert.equal(await evaluate("[...document.querySelectorAll('.disk-usage-progress')].length"), 2, "both views follow the measurement");
     await act(`${f}.setEmbedded(false)`);
-    assert.equal(await evaluate(`${state}.scans[0].aborted`), false, "the tab still follows it");
+    assert.equal(await evaluate(`${state}.scans[0].aborted`), false, "the other panel still follows it");
     await act(`${state}.scans[0].push({ status: 'ok', kind: 'progress', progress: { phase: 'projects', current: '/trees/alpha/quiet-heron', checkoutsDone: 2, checkoutsTotal: 7, files: '5000' } })`);
     assert.ok(await evaluate(`document.querySelector('.disk-usage-progress').textContent.includes('Measuring the projects: 2 of 7 checkouts')`));
     assert.ok(await evaluate(`document.querySelector('.disk-usage-progress').textContent.includes('/trees/alpha/quiet-heron')`));
@@ -200,7 +199,7 @@ test("the tab of the disk usage shows the last measurement, measures, drills in,
     assert.ok(await evaluate(`[...document.querySelectorAll('.disk-usage-verdict')].every(verdict => verdict.dataset.verdict === 'nothing_local' ? verdict.tagName === 'SPAN' : verdict.tagName === 'BUTTON')`));
 
     // One checkout: its build folders are listed, all ticked, one is unticked, and the result says what went. The unticked one stays.
-    const total = "document.querySelector('.disk-usage-panel:not([data-embedded]) .disk-usage-total').textContent";
+    const total = "document.querySelector('.disk-usage-main-fixture .disk-usage-panel .disk-usage-total').textContent";
     const totalBefore = await evaluate(total);
     await act(`${button(row("quiet-heron"), "Clean the build output")}.click()`);
     await until("document.querySelector('.disk-usage-clean')");
@@ -244,10 +243,10 @@ test("the tab of the disk usage shows the last measurement, measures, drills in,
 
     // A view that goes during a clean: the clean goes on in the hub, and the view that stays shows its end.
     await act(`${f}.setEmbedded(true)`);
-    await until("document.querySelector('.disk-usage-panel[data-embedded] .disk-usage-total')");
-    const embeddedTotal = "document.querySelector('.disk-usage-panel[data-embedded] .disk-usage-total').textContent";
+    await until("document.querySelector('.disk-usage-settings-fixture .disk-usage-panel .disk-usage-total')");
+    const embeddedTotal = "document.querySelector('.disk-usage-settings-fixture .disk-usage-panel .disk-usage-total').textContent";
     const asked = await evaluate(`${state}.lastAsked`) as number;
-    await act("[...document.querySelectorAll('.disk-usage-panel:not([data-embedded]) .disk-usage-trail > button')].find(button => button.textContent === 'Alpha').click()");
+    await act("[...document.querySelectorAll('.disk-usage-main-fixture .disk-usage-panel .disk-usage-trail > button')].find(button => button.textContent === 'Alpha').click()");
     await act(`${button(row("Alpha"), "Clean the build output")}.click()`);
     await until("document.querySelector('.disk-usage-clean-folders')");
     await act("document.querySelector('.disk-usage-clean-folders li[data-folder=\"obj\"] input').click()");
@@ -260,7 +259,7 @@ test("the tab of the disk usage shows the last measurement, measures, drills in,
     await act(`${f}.setShown(true); ${f}.setEmbedded(false)`);
     await until(`${row("Work")}`);
     await open("Work"); await open("Alpha");
-    assert.equal(await evaluate(`${row("Alpha")}.querySelector('.disk-usage-cell-build').textContent`), "256 MiB", "the tab shows the folder cleaned, with obj that was kept");
+    assert.equal(await evaluate(`${row("Alpha")}.querySelector('.disk-usage-cell-build').textContent`), "256 MiB", "the panel shows the folder cleaned, with obj that was kept");
     await open("Worktrees");
 
     // A worktree is removed with the confirmation of the window of the worktrees; its project is then marked as changed.
@@ -288,11 +287,11 @@ test("the tab of the disk usage shows the last measurement, measures, drills in,
     await open("Fix the parser");
     assert.deepEqual(await evaluate(`${state}.sessions`), ["s1"]);
 
-    // Both themes and a narrow tab: nothing goes past the edge.
+    // Both themes and a narrow card: nothing goes past the edge.
     await act("[...document.querySelectorAll('.disk-usage-trail > button')].find(button => button.textContent === 'Everything').click()");
     await open("Work"); await open("Alpha"); await open("Worktrees");
     assert.equal(await evaluate(noOverflow), true, "wide, dark");
-    const color = () => evaluate("getComputedStyle(document.querySelector('.disk-usage-panel')).backgroundColor");
+    const color = () => evaluate("getComputedStyle(document.querySelector('.disk-usage-panel')).color");
     const dark = await color();
     await act("document.documentElement.dataset.theme = 'light'; document.documentElement.classList.remove('bp6-dark')");
     assert.notEqual(await color(), dark, "the light theme");

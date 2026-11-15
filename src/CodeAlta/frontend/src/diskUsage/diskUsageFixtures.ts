@@ -1,4 +1,4 @@
-// Records of the disk usage as the host gives them, for the tests of the model and the page of the tab.
+// Records of the disk usage as the host gives them, for the tests of the model and the Settings panel.
 import type { DiskUsageCheckout, DiskUsageGitState, DiskUsageMeasurement, DiskUsageProject, DiskUsageSession } from "#neoastra";
 
 const gib = 1024 ** 3, mib = 1024 ** 2;

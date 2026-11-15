@@ -208,7 +208,7 @@ test("Storage edits valid durations only and measures independently without clea
     const view = (label: string) => act(`[...document.querySelectorAll('.storage-usage .bp6-segmented-control button')].find(button => button.textContent === ${JSON.stringify(label)}).click()`);
     assert.equal(await evaluate("document.querySelector('.storage-usage .disk-usage-panel')"), null);
     await view("Disk usage");
-    await until("document.querySelector('.storage-usage .disk-usage-panel[data-embedded] .disk-usage-row')");
+    await until("document.querySelector('.storage-usage .disk-usage-panel .disk-usage-row')");
     assert.equal(await evaluate("document.querySelector('.storage-usage .storage-table')"), null, "the sizes of the profile give their place");
     assert.equal(await evaluate("document.querySelector('.storage-usage h1')"), null, "no second title");
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.storage-usage .disk-usage-open')).borderTopWidth"), "0px", "the names are links, not the buttons of Settings");
@@ -220,8 +220,7 @@ test("Storage edits valid durations only and measures independently without clea
       await act("document.querySelector('.storage-usage').scrollIntoView({ block: 'start' })");
       await capture(`storage-disk-usage-${dark ? "dark" : "light"}`);
     }
-    await act(`[...document.querySelectorAll('.storage-usage button')].find(button => button.textContent === 'Open as tab').click()`);
-    assert.equal(await evaluate(`${state}.diskUsageTabs`), 1);
+    assert.equal(await evaluate("[...document.querySelectorAll('.storage-usage button')].some(button => button.textContent === 'Open as tab')"), false);
     await act(`[...document.querySelectorAll('.storage-usage button')].find(button => button.textContent === 'Measure').click()`);
     assert.equal(await evaluate(`${state}.diskUsageScans`), 1);
     assert.ok(await evaluate("!!document.querySelector('.storage-usage .disk-usage-progress')"));

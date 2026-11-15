@@ -17,7 +17,7 @@ import { checkoutsByPath, cleanBlock, cleanBlockText, drillable, levelDonut, nod
   type SpaceName, type Sort, type SortColumn, type UsageNode } from "./diskUsage";
 import type { DiskUsageHub } from "./diskUsageHub";
 
-/** What the tab asks of the worktrees: their list, to remove one as their window does. */
+/** What the panel asks of the worktrees: their list, to remove one as their window does. */
 export type DiskUsageWorktreesApi = Pick<WorktreeManagerApi, "inventory" | "removeMany">;
 
 const refusals: Readonly<Record<string, "Disk usage is not available in this window." | "The host changed. Reload the window.">> = {
@@ -34,20 +34,15 @@ const icons: Readonly<Record<UsageNode["kind"], IconName>> = {
  * The disk usage: what the projects, their worktrees and their sessions hold, as a table of a level to
  * drill into and the donut whose legend it is. It shows the last measurement at once, with its age, and measures again
  * on demand, filling as each project is measured. From a checkout it cleans the build output, removes a worktree as the
- * window of the worktrees does, or opens it; a session opens. It is a tab of its own, and a view of the Storage page
- * (`embedded`): both show the one state of the window's hub.
+ * window of the worktrees does, or opens it; a session opens. It is part of the Storage page.
  */
-export function DiskUsagePanel({ epoch, spaces, hub, visible = true, worktreesApi = worktreesHostApi, embedded, onActivate, onOpenSession }: {
+export function DiskUsagePanel({ epoch, spaces, hub, worktreesApi = worktreesHostApi, onOpenSession }: {
   /** The host epoch; null where the window has no host of its own. */
   epoch: string | null;
   spaces: readonly SpaceName[];
-  /** The measurement of the window, which every view of it shows. */
+  /** The measurement of the window, retained when Settings closes. */
   hub: DiskUsageHub;
-  visible?: boolean;
   worktreesApi?: DiskUsageWorktreesApi;
-  /** Shown inside another page: no title of its own, and a button that opens the tab. */
-  embedded?: Readonly<{ onOpenTab: () => void }>;
-  onActivate?: () => void;
   onOpenSession: (sessionId: string) => void;
 }) {
   const { t, locale } = useShellLanguage();
@@ -232,16 +227,11 @@ export function DiskUsagePanel({ epoch, spaces, hub, visible = true, worktreesAp
       onClick={() => { setNotice(null); hub.measure(); }} />;
   const total = root && root.size.state !== "unknown" && <span className="disk-usage-total" title={done ? t("Everything measured, each byte once.") : undefined}>{sizeText(root.size, locale, t)}</span>;
   const ageText = !scan && age && <span className="disk-usage-age" title={age.title}>{t("Measured {time}", { time: age.label })}</span>;
-  return <div className="disk-usage-panel" data-embedded={embedded ? "true" : undefined} aria-label={t("Disk usage")} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
-    {embedded ? <header className="disk-usage-header">
+  return <div className="disk-usage-panel" aria-label={t("Disk usage")}>
+    <header className="disk-usage-header">
       {total}{ageText}
-      <div className="disk-usage-tools">{measureButton}
-        <Button variant="minimal" icon={<AppIcon name="openExternal" size={14} />} text={t("Open as tab")} onClick={embedded.onOpenTab} /></div>
+      <div className="disk-usage-tools">{measureButton}</div>
     </header>
-    : <header className="disk-usage-header">
-      <div className="disk-usage-heading"><AppIcon name="diskUsage" size={18} /><h1>{t("Disk usage")}</h1>{total}</div>
-      <div className="disk-usage-tools">{ageText}{measureButton}</div>
-    </header>}
     <div className="disk-usage-body">
       {scan && <div className="disk-usage-progress" role="status">
         <ActivitySpinner size={14} />
@@ -321,7 +311,7 @@ export function DiskUsagePanel({ epoch, spaces, hub, visible = true, worktreesAp
               </tbody>
             </table>
           </div>
-          {donut.slices.length > 0 && <ShareDonut ariaLabel={t("What {name} holds", { name: label(level!) })} visible={visible} onSelect={select}
+          {donut.slices.length > 0 && <ShareDonut ariaLabel={t("What {name} holds", { name: label(level!) })} onSelect={select}
             segments={donut.slices.map(slice => ({ name: slice.id === null ? t("Other") : label(slice.nodes[0]), value: slice.value, id: slice.id }))} />}
           </div>
           {/* Under the table: what is above it is the same at every level, so the table does not move when the level changes. */}

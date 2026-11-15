@@ -39,7 +39,7 @@ export interface StorageRetentionSummary {
 export function StorageSettings({ epoch, api, filesApi, onOpenFile, diskUsage, maintenance, retention }: {
   epoch: string | null; api: StorageApi; filesApi?: SettingsFilesApi; onOpenFile?: () => void;
   /**
-   * The disk usage of the projects, their worktrees, their sessions and the profile, embedded: the card of the sizes
+   * The disk usage of the projects, their worktrees and their sessions: the card of the sizes
    * switches between it and the sizes of the profile. None where the window has no host of its own.
    */
   diskUsage?: ReactNode;

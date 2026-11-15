@@ -4,13 +4,6 @@ type Row = readonly [string, string, string, string, string];
 
 export const diskUsageMessages = {
   "Disk usage": ["Uso del disco", "Utilisation du disque", "Speicherbelegung", "ディスク使用量", "磁盘占用"],
-  "Open the disk usage: what the projects, their worktrees and their sessions hold, and free space.": [
-    "Abre el uso del disco: lo que ocupan los proyectos, sus worktrees y sus sesiones, y libera espacio.",
-    "Ouvre l’utilisation du disque : ce qu’occupent les projets, leurs worktrees et leurs sessions, et libère de la place.",
-    "Öffnet die Speicherbelegung: was die Projekte, ihre Worktrees und ihre Sitzungen belegen, und gibt Platz frei.",
-    "ディスク使用量を開きます。プロジェクト、ワークツリー、セッションが占める容量を確認し、空き容量を増やします。",
-    "打开磁盘占用：查看项目、其工作树和其会话占用的空间，并释放空间。"],
-  "Open as tab": ["Abrir como pestaña", "Ouvrir dans un onglet", "Als Tab öffnen", "タブとして開く", "在标签页中打开"],
   "What the file sizes show": ["Qué muestran los tamaños de archivos", "Ce que montrent les tailles des fichiers", "Was die Dateigrößen zeigen", "ファイルサイズの表示内容", "文件大小显示的内容"],
   "Measure": ["Medir", "Mesurer", "Messen", "測定", "测量"],
   "Measured {time}": ["Medido {time}", "Mesuré {time}", "Gemessen {time}", "{time}に測定", "测量于 {time}"],

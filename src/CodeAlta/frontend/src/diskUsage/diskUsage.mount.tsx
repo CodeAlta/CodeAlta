@@ -1,4 +1,4 @@
-// Disposable page: the tab of the disk usage over a host whose answers the test plays.
+// Disposable page: the disk usage over a host whose answers the test plays.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DiskUsageCleanEvent, DiskUsageCleanRequest, DiskUsageCleanResponse, DiskUsageLastResponse, DiskUsageMeasurement, DiskUsageScanEvent } from "#neoastra";
@@ -54,8 +54,6 @@ const state = {
   removals: [] as { paths: string[]; discard: string[] }[],
   inventoryAsked: [] as string[],
   sessions: [] as string[],
-  /** How often the panel inside Settings asked to open the tab. */
-  tabs: 0,
 };
 
 const api: DiskUsageApi = {
@@ -110,7 +108,7 @@ const worktreesApi = {
   },
 } as unknown as DiskUsageWorktreesApi;
 
-// One hub for the window, as the application has: the tab and the panel inside Settings show its one state.
+// One hub for the window, retained while Settings is closed.
 const hub = createDiskUsageHub(api);
 function Fixture() {
   const [shown, setShown] = useState(true);
@@ -120,12 +118,12 @@ function Fixture() {
   Object.assign(window, { diskUsageFixture: { state, played, setShown, setEmbedded, setWidth, setHeight, size } });
   const handlers = { onOpenSession: (id: string) => { state.sessions.push(id); } };
   return <div>
-    <div className="ide-shell" style={{ width, height, display: "flex", flexDirection: "column" }}>
+    <div className="ide-shell disk-usage-main-fixture" style={{ width, height, display: "flex", flexDirection: "column", overflow: "auto" }}>
       {shown && <DiskUsagePanel epoch="epoch" spaces={spaces} hub={hub} worktreesApi={worktreesApi} {...handlers} />}
     </div>
     {/* The content of the Settings window at 900 x 650: about 430 pixels, the card's padding taken. */}
     {embedded && <div className="ide-shell disk-usage-settings-fixture" style={{ width: 398, overflow: "auto" }}>
-      <DiskUsagePanel epoch="epoch" spaces={spaces} hub={hub} worktreesApi={worktreesApi} embedded={{ onOpenTab: () => { state.tabs++; } }} {...handlers} />
+      <DiskUsagePanel epoch="epoch" spaces={spaces} hub={hub} worktreesApi={worktreesApi} {...handlers} />
     </div>}
   </div>;
 }

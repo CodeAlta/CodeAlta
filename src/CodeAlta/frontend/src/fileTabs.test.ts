@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, isWorkflowsTab, workflowsTab, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab, bookmarksTab, isBookmarksTab, diskUsageTab, isDiskUsageTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, isWorkflowsTab, workflowsTab, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab, bookmarksTab, isBookmarksTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -298,21 +298,18 @@ test("the bookmarks have one tab, of no project, that outlives the projects and 
   }
 });
 
-test("the disk usage has one tab, of no project, that outlives the projects and is kept for the next start", () => {
-  assert.deepEqual(diskUsageTab, { projectId: "", projectPath: "", view: "diskUsage" });
-  assert.ok(isDiskUsageTab(diskUsageTab) && !isDiskUsageTab(bookmarksTab) && !isBookmarksTab(diskUsageTab) && !isEditorTab(diskUsageTab));
-  const state = openFileTab(openFileTab(emptyFileTabs(), editor()), diskUsageTab);
-  assert.equal(state.active, diskUsageTab);
-  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [diskUsageTab], active: diskUsageTab, closed: [] });
+test("old disk usage tabs are not restored and other tabs are kept", () => {
+  const state = openFileTab(emptyFileTabs(), editor());
   let stored = "";
   persistFileTabs(value => { stored = value; }, state);
-  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
-  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "diskUsage" }], active: null })), emptyFileTabs());
-  for (const locale of locales) {
-    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
-      createElement(FileTabLabel, { tab: diskUsageTab, project: "", dirty: false })));
-    assert.ok(html.includes(translate(locale, "Disk usage")), html);
-  }
+  const old = { projectId: "", projectPath: "", view: "diskUsage" };
+  const saved = JSON.parse(stored);
+  saved.open.push(old);
+  saved.active = old;
+  const restored = restoreFileTabs(() => JSON.stringify(saved));
+  assert.ok(restored);
+  assert.deepEqual(restored.open, state.open);
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [old], active: old })), emptyFileTabs());
 });
 
 test("the automations have one tab, of no project, that outlives the projects and is kept for the next start", () => {

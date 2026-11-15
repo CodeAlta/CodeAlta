@@ -5,7 +5,7 @@ import type { MessageKey } from "./localization";
  * keyboard dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
  */
 export type CommandId =
-  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workflows" | "workItems" | "reviews" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "diskUsage" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
+  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workflows" | "workItems" | "reviews" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
@@ -61,8 +61,6 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "documentation", name: "documentation", label: "Documentation", description: "Open the user guide of CodeAlta.", category: "General", search: "docs doc guide help manual user guide readme how to" },
   { id: "reviews", name: "reviews", label: "Reviews", description: "Open the reviews in flight: the plans, files and changes that wait for you or for an agent.", category: "General", search: "review reviews annotate annotations comments diff changes plan approve verdict waiting" },
   { id: "bookmarks", name: "bookmarks", label: "Bookmarks", description: "Open the bookmarks of every project.", category: "General", keys: ["Ctrl+G Ctrl+F"], search: "bookmark saved marked favorites starred pinned keep find again" },
-  { id: "diskUsage", name: "disk_usage", label: "Disk usage", description: "Open the disk usage: what the projects, their worktrees and their sessions hold, and free space.", category: "General",
-    search: "disk space storage size free clean build output bin obj node_modules worktrees du" },
   { id: "spaces", name: "spaces", label: "Spaces", description: "Create the spaces and choose the projects of each.", category: "General", search: "space group projects organize workspaces" },
   { id: "newSpace", name: "new_space", label: "New Space", description: "Create a space: a group of projects shown together.", category: "General", search: "space create group projects workspace" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },

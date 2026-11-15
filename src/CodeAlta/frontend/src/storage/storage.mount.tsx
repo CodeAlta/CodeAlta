@@ -19,8 +19,8 @@ const state = {
   settings: { clearScratchpadOnStartup: true, retentionEnabled: true, retentionAmount: 3, retentionUnit: "months" } as StoragePreferences,
   saves: [] as StoragePreferences[], scans: [] as { signal?: AbortSignal; timeoutMilliseconds?: number; resolve: (value: ScanUpdate) => void; finish: () => void }[],
   saveStatus: "ok", readStatus: "ok", opened: 0,
-  /** The disk usage: the tabs it asked to open, and the measurements it started. */
-  diskUsageTabs: 0, diskUsageScans: 0,
+  /** The measurements the disk usage started. */
+  diskUsageScans: 0,
 };
 // The disk usage of the window: the last measurement, and scans that never end.
 const diskUsageHub = createDiskUsageHub({
@@ -75,7 +75,7 @@ function Fixture() {
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
     <div className="settings-dialog-content" style={{ ...size, overflow: "auto" }}>
       {shown && <StorageSettings epoch={epoch} api={api} filesApi={filesApi} onOpenFile={() => state.opened++} maintenance={maintenance} retention={retention}
-        diskUsage={epoch ? <DiskUsagePanel hub={diskUsageHub} epoch={epoch} spaces={spaces} embedded={{ onOpenTab: () => { state.diskUsageTabs++; } }}
+        diskUsage={epoch ? <DiskUsagePanel hub={diskUsageHub} epoch={epoch} spaces={spaces}
           onOpenSession={() => { }} /> : undefined} />}
     </div>
   </ShellLanguageContext.Provider>;
