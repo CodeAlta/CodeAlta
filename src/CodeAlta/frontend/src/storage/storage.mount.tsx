@@ -7,13 +7,27 @@ import { ShellLanguageContext } from "../shellLanguage";
 import type { Locale } from "../localization";
 import type { StorageScanResponse } from "#neoastra";
 import "../charts/charts.css";
+import "../worktrees/worktrees.css";
+import "../diskUsage/diskUsage.css";
+import { DiskUsagePanel } from "../diskUsage/DiskUsagePanel";
+import type { DiskUsageApi } from "../diskUsage/diskUsage";
+import { measurement as diskMeasurement, spaces } from "../diskUsage/diskUsageFixtures";
+import { createDiskUsageHub } from "../diskUsage/diskUsageHub";
 
 type ScanUpdate = Pick<StorageScanResponse, "status" | "snapshot"> & Partial<StorageScanResponse>;
 const state = {
   settings: { clearScratchpadOnStartup: true, retentionEnabled: true, retentionAmount: 3, retentionUnit: "months" } as StoragePreferences,
   saves: [] as StoragePreferences[], scans: [] as { signal?: AbortSignal; timeoutMilliseconds?: number; resolve: (value: ScanUpdate) => void; finish: () => void }[],
   saveStatus: "ok", readStatus: "ok", opened: 0,
+  /** The measurements the disk usage started. */
+  diskUsageScans: 0,
 };
+// The disk usage of the window: the last measurement, and scans that never end.
+const diskUsageHub = createDiskUsageHub({
+  last: async () => ({ status: "ok", measurement: diskMeasurement(), running: false, current: true }),
+  scan: async () => { state.diskUsageScans++; return (async function* () { await new Promise(() => { }); })(); },
+  clean: async () => { throw new Error("not played"); },
+} as unknown as DiskUsageApi);
 // A realistic Windows profile: the paths are long enough to be cut, never to widen the page.
 const root = "C:\\Users\\alexandre.mutel.contoso\\AppData\\Roaming\\..\\..\\.alta";
 const api: StorageApi = {
@@ -60,7 +74,9 @@ function Fixture() {
   Object.assign(window, { storageFixture: { state, setShown, setEpoch, setLocale, setSize, setMaintenance, setRetention } });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
     <div className="settings-dialog-content" style={{ ...size, overflow: "auto" }}>
-      {shown && <StorageSettings epoch={epoch} api={api} filesApi={filesApi} onOpenFile={() => state.opened++} maintenance={maintenance} retention={retention} />}
+      {shown && <StorageSettings epoch={epoch} api={api} filesApi={filesApi} onOpenFile={() => state.opened++} maintenance={maintenance} retention={retention}
+        diskUsage={epoch ? <DiskUsagePanel hub={diskUsageHub} epoch={epoch} spaces={spaces}
+          onOpenSession={() => { }} /> : undefined} />}
     </div>
   </ShellLanguageContext.Provider>;
 }

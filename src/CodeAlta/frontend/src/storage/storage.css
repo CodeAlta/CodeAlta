@@ -28,6 +28,8 @@
 .storage-retention-controls .bp6-numeric-input { flex: none; width: 88px; }
 .storage-retention-controls .bp6-numeric-input .bp6-input-group { flex: 1 1 auto; width: auto; min-width: 0; }
 .storage-retention-controls .bp6-numeric-input .bp6-input { width: 100%; }
+/* What the next start removes, under its switch, across the row. */
+.storage-settings .storage-scratchpad-old { grid-column: 1 / -1; margin-top: -2px; }
 .storage-validation { grid-column: 1 / -1; margin: 0; color: var(--red); font-size: 12px; }
 
 .storage-maintenance { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }

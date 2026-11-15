@@ -12,7 +12,7 @@ public sealed class StartupScratchpadAdmissionTests
     [TestMethod]
     public async Task HostConstructionAndAllItsExecutionServicesWaitForCleanupTermination()
     {
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows deletion qualification.");
+        RequireQualifiedPlatform();
         using var fixture = new Fixture();
         using var ownership = CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath);
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership);
@@ -57,13 +57,13 @@ public sealed class StartupScratchpadAdmissionTests
     [TestMethod]
     public async Task HostRetainsCompletedSnapshotAndDefaultPreferenceIsOn()
     {
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows deletion qualification.");
+        RequireQualifiedPlatform();
         using var fixture = new Fixture();
         using var ownership = CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath);
         var scratchpad = Path.Combine(fixture.Profile.StateRoot, "scratchpad");
         Directory.CreateDirectory(scratchpad);
         WriteOld(Path.Combine(scratchpad, "old.md"), "remove");
-        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership);
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership) { MaxAge = TimeSpan.Zero };
         await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
             GlobalRoot = fixture.Profile.GlobalRoot,
@@ -92,7 +92,7 @@ public sealed class StartupScratchpadAdmissionTests
     [DataRow("[storage\n", false, "invalid-configuration")]
     public async Task SharedHostResolvesStoragePolicyAndNeverRewritesDeveloperConfiguration(string content, bool removed, string? reason)
     {
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows deletion qualification.");
+        RequireQualifiedPlatform();
         using var fixture = new Fixture();
         using var ownership = CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath);
         var configPath = Path.Combine(fixture.Profile.GlobalRoot, "config.toml");
@@ -100,7 +100,7 @@ public sealed class StartupScratchpadAdmissionTests
         File.WriteAllBytes(configPath, config);
         var scratchpad = Directory.CreateDirectory(Path.Combine(fixture.Profile.StateRoot, "scratchpad")).FullName;
         WriteOld(Path.Combine(scratchpad, "note.md"), "scratchpad");
-        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership);
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership) { MaxAge = TimeSpan.Zero };
         await using (var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
             GlobalRoot = fixture.Profile.GlobalRoot,
@@ -125,7 +125,7 @@ public sealed class StartupScratchpadAdmissionTests
     [TestMethod]
     public async Task UnexpectedCleanupFailureStillAdmitsHostAndPreservesSharedDeveloperConfiguration()
     {
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows deletion qualification.");
+        RequireQualifiedPlatform();
         using var fixture = new Fixture();
         using var ownership = CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath);
         var configPath = Path.Combine(fixture.Profile.GlobalRoot, "config.toml");
@@ -136,6 +136,7 @@ public sealed class StartupScratchpadAdmissionTests
         var faultInjected = false;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ => { faultInjected = true; throw new InvalidOperationException("Injected cleanup failure"); },
         };
         await using (var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
@@ -200,14 +201,15 @@ public sealed class StartupScratchpadAdmissionTests
         Assert.IsFalse(Directory.Exists(Path.Combine(profile.StateRoot, "scratchpad")), "Prompt composition must not migrate or create scratchpads.");
     }
 
-    // The startup cleanup removes only what was not created or written for a while: these files are as old as that.
-    private static void WriteOld(string path, string content)
+    private static void RequireQualifiedPlatform()
     {
-        File.WriteAllText(path, content);
-        var old = DateTime.UtcNow - StorageSettings.ScratchpadMaxAge - TimeSpan.FromDays(1);
-        File.SetCreationTimeUtc(path, old);
-        File.SetLastWriteTimeUtc(path, old);
+        if (!OperatingSystem.IsWindows() && !(Environment.Is64BitProcess && (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())))
+            Assert.Inconclusive("Other platforms fail closed.");
     }
+
+    // A file of the scratchpad, which the cleanups of these tests count as old (MaxAge zero): setting its times back would
+    // be a change of its status on Unix, which keeps it recent.
+    private static void WriteOld(string path, string content) => File.WriteAllText(path, content);
 
     private sealed class Fixture : IDisposable
     {

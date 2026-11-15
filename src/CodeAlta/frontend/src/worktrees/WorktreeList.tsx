@@ -66,10 +66,11 @@ export function WorktreeList({ epoch, projectId, projectName, worktrees, selecte
             </span>
             {worktree.busy && <span className="worktree-row-busy" title={t("A session is working here")}><ActivitySpinner size={12} /></span>}
           </button>
-          {!worktree.main && <Button variant="minimal" size="small" className="worktree-row-remove" disabled={worktree.busy || removing !== null}
+          {!worktree.main && <Button variant="minimal" size="small" className="worktree-row-remove" disabled={worktree.busy || worktree.holdsWorktree || removing !== null}
             icon={removing === worktree.path ? <ActivitySpinner size={14} /> : <AppIcon name="trash" size={14} />}
             aria-label={t("Remove the worktree {name}", { name: worktree.name })}
-            title={worktree.busy ? t("A session is working here") : t("Remove the worktree {name}", { name: worktree.name })}
+            title={worktree.busy ? t("A session is working here") : worktree.holdsWorktree ? t("Another worktree is inside its folder: remove that one first.")
+              : t("Remove the worktree {name}", { name: worktree.name })}
             onClick={() => setAsking({ worktree, force: false })} />}
         </div>;
       })}

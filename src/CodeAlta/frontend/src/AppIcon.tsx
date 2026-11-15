@@ -167,6 +167,7 @@ import {
   Waypoints,
   UsersRound,
   CircleCheckBig,
+  HardDrive,
 } from "lucide-react";
 
 const icons = {
@@ -256,6 +257,7 @@ const icons = {
   issueFeature: Trophy,
   issueEpic: Crown,
   database: Database,
+  diskUsage: HardDrive,
   fileGeneric: File,
   attach: Paperclip,
   fileCode: FileCode,

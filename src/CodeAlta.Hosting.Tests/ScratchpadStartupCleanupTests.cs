@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using CodeAlta.Catalog.Storage;
@@ -81,10 +82,8 @@ public sealed class ScratchpadStartupCleanupTests
     [TestMethod]
     public async Task KeepsEntriesChangedWithinTheRetentionAndRemovesOlderOnes()
     {
-        RequireCleanupPlatform();
-        // Linux sets neither a birth time nor a change time in the past, and the removal reads one of
-        // them: no entry a test writes can look old there. Windows and macOS set the creation time.
-        if (OperatingSystem.IsLinux()) Assert.Inconclusive("Linux cannot age the birth or change time of a file.");
+        // Unix status-change time cannot be backdated; the cutoff-based test below covers Unix recency.
+        RequireWindows();
         using var fixture = new Fixture(false);
         var old = DateTime.UtcNow - StorageSettings.ScratchpadMaxAge - TimeSpan.FromDays(1);
         fixture.Write("scratchpad/old.md", "remove");
@@ -208,9 +207,9 @@ public sealed class ScratchpadStartupCleanupTests
     [DataRow("")]
     [DataRow("unknown")]
     [DataRow("2147483647")]
-    public async Task EveryExistingLegacyLockFailsClosedWithoutReclaiming(string contents)
+    public async Task WindowsEveryExistingLegacyLockFailsClosedWithoutReclaiming(string contents)
     {
-        RequireCleanupPlatform();
+        RequireWindows();
         using var fixture = new Fixture(false);
         fixture.Write("scratchpad/note.md", "keep");
         fixture.Write("dev/alta.lock", contents);
@@ -220,6 +219,103 @@ public sealed class ScratchpadStartupCleanupTests
         CollectionAssert.Contains(cleanup.Snapshot.Reasons.ToArray(), "legacy-developer-exclusion-unavailable");
         Assert.AreEqual(contents, File.ReadAllText(Path.Combine(fixture.Root, "dev", "alta.lock")));
         Assert.AreEqual("keep", File.ReadAllText(Path.Combine(fixture.Scratchpad, "note.md")));
+    }
+
+    [TestMethod]
+    public async Task UnixACopyThatKeepsTheTimesOfItsSource_IsRecent_ByItsStatusChange()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        var source = Path.Combine(fixture.Root, "source.md");
+        File.WriteAllText(source, "keep");
+        var old = DateTime.UtcNow - TimeSpan.FromDays(30); // not a limit
+        File.SetCreationTimeUtc(source, old);
+        File.SetLastWriteTimeUtc(source, old);
+        Directory.CreateDirectory(fixture.Scratchpad);
+        var copy = Path.Combine(fixture.Scratchpad, "copied.md");
+        using var process = Process.Start(new ProcessStartInfo("cp", ["-p", source, copy]) { UseShellExecute = false })!;
+        await process.WaitForExitAsync().WithinAsync(TestTime.Seconds(10));
+        Assert.AreEqual(0, process.ExitCode);
+        Assert.IsTrue(File.GetLastWriteTimeUtc(copy) < DateTime.UtcNow - StorageSettings.ScratchpadMaxAge);
+
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard);
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.IsTrue(File.Exists(copy));
+    }
+
+    [TestMethod]
+    public async Task UnixAGateLeftByAProcessThatIsGone_IsReclaimed_AndTheCleanupRuns()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/note.md", "remove");
+        using var process = Process.Start(new ProcessStartInfo("true") { UseShellExecute = false })!;
+        var processId = process.Id;
+        await process.WaitForExitAsync().WithinAsync(TestTime.Seconds(10));
+        fixture.Write("dev/alta.lock", processId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        var cleanup = fixture.Cleanup();
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Scratchpad, "note.md")));
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Root, "dev", "alta.lock")));
+    }
+
+    [TestMethod]
+    public async Task UnixAnEmptyGateThatAnOlderBuildLeftLongAgo_IsReclaimed_ByTheCleanupAndByTheDeveloperStart()
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/note.md", "remove");
+        var gate = Path.Combine(fixture.Root, "dev", "alta.lock");
+        fixture.Write("dev/alta.lock", "");
+        File.SetLastWriteTimeUtc(gate, DateTime.UtcNow - TimeSpan.FromHours(1)); // not a limit
+        var cleanup = fixture.Cleanup();
+
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.IsFalse(File.Exists(gate));
+        fixture.Write("dev/alta.lock", "not a pid");
+        File.SetLastWriteTimeUtc(gate, DateTime.UtcNow - TimeSpan.FromHours(1)); // not a limit
+        using var developer = CodeAltaSingleInstanceGuard.Acquire(gate);
+    }
+
+    [TestMethod]
+    public void TheGuard_ReclaimsALockWithoutAPidThatWasWrittenLongAgo_ButNotAFreshOne()
+    {
+        using var fixture = new Fixture(false);
+        var path = Path.Combine(fixture.Root, "other.lock");
+        File.WriteAllText(path, "");
+        Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(path));
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow - TimeSpan.FromHours(1)); // not a limit
+        using var guard = CodeAltaSingleInstanceGuard.Acquire(path);
+        // The guard keeps a writable handle: the reader must share writes on Windows.
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), reader.ReadToEnd().Trim());
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("unknown")]
+    public async Task UnixAFreshGateWithoutAPid_OrTheGateOfALivingProcess_IsNeverReclaimed(string contents)
+    {
+        RequireUnix();
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/note.md", "keep");
+        foreach (var gateContents in new[] { contents, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+        {
+            fixture.Write("dev/alta.lock", gateContents);
+            var cleanup = fixture.Cleanup();
+            await cleanup.RunAsync(true, true, CancellationToken.None);
+            Assert.AreEqual(ScratchpadCleanupState.Skipped, cleanup.Snapshot.State);
+            Assert.IsTrue(File.Exists(Path.Combine(fixture.Scratchpad, "note.md")));
+            Assert.AreEqual(gateContents, File.ReadAllText(Path.Combine(fixture.Root, "dev", "alta.lock")));
+        }
     }
 
     [TestMethod]

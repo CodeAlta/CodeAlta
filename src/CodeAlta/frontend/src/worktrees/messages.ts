@@ -102,4 +102,7 @@ export const worktreeMessages = {
   "This session now works in {name}.": ["Esta sesión trabaja ahora en {name}.", "Cette session travaille désormais dans {name}.", "Diese Sitzung arbeitet jetzt in {name}.", "このセッションは現在 {name} で作業しています。", "此会话现在在 {name} 中工作。"],
   "This session now works in the folder of the project.": ["Esta sesión trabaja ahora en la carpeta del proyecto.", "Cette session travaille désormais dans le dossier du projet.", "Diese Sitzung arbeitet jetzt im Projektordner.", "このセッションは現在プロジェクトフォルダーで作業しています。", "此会话现在在项目文件夹中工作。"],
   "The worktree {name} stays: {reason}": ["El worktree {name} se conserva: {reason}", "Le worktree {name} est conservé : {reason}", "Der Worktree {name} bleibt erhalten: {reason}", "ワークツリー {name} は残ります: {reason}", "工作树 {name} 已保留：{reason}"],
+  "Holds a worktree": ["Contiene un worktree", "Contient un worktree", "Enthält einen Worktree", "ワークツリーを含む", "包含工作树"],
+  "Another worktree is inside its folder: remove that one first.": ["Otro worktree está dentro de su carpeta: quita ese primero.", "Un autre worktree se trouve dans son dossier : supprimez-le d’abord.",
+    "Ein anderer Worktree liegt in seinem Ordner: entfernen Sie zuerst diesen.", "そのフォルダー内に別のワークツリーがあります。先にそちらを削除してください。", "其文件夹中有另一个工作树：请先移除那个。"],
 } satisfies Record<string, Row>;

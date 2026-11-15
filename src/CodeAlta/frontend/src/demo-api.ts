@@ -195,6 +195,12 @@ export const storage = Object.freeze({
   watchMaintenance: unavailable,
   watchRetention: unavailable,
 });
+// A browser preview measures no disk and deletes nothing.
+export const diskUsage = Object.freeze({
+  last: async () => ({ status: "unavailable", measurement: null, running: false, current: false }),
+  scan: async () => (async function* () { yield { status: "unavailable", kind: null, progress: null, project: null, profile: null, done: null, problem: null }; })(),
+  clean: async () => (async function* () { yield { kind: "done", progress: null, result: { status: "unavailable", message: null, entries: [], bytesFreed: "0", moreRemain: false, checkout: null } }; })(),
+});
 // A browser preview has no microphone permission, no model and no worker: speech to prompt does not exist there.
 const noSpeech = async () => ({ status: "unavailable", supported: false, enabled: false, model: "", modelId: null, models: [], rootPath: null, send: "manual", error: null });
 export const speech = Object.freeze({

@@ -265,8 +265,11 @@ import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences
 import { AppearanceSettings, themeIcons } from "./AppearanceSettings";
 import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis";
 import { StorageSettings } from "./storage/StorageSettings";
+import { DiskUsagePanel } from "./diskUsage/DiskUsagePanel";
+import { createDiskUsageHub } from "./diskUsage/diskUsageHub";
+import "./diskUsage/diskUsage.css";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
-import { storage } from "#neoastra";
+import { diskUsage as diskUsageApi, storage } from "#neoastra";
 import { machines as machinesApi } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import { mcpApps as mcpAppsApi } from "#neoastra";
@@ -547,6 +550,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // whole, and the window is given what the shown space has of it, so that everything it lists and opens
   // (the Explorer, the tabs, the search, the work items) is the space's.
   const [spacesHub] = useState(() => createSpacesHub(spacesApi));
+  // The disk usage of the window, retained when the Storage page closes.
+  const [diskUsageHub] = useState(() => createDiskUsageHub(diskUsageApi));
   // The tabs that plugins provide: what they declare, what they ask of the window, and what they push to their tabs.
   const [canvasHub] = useState(() => createCanvasHub(canvasesApi));
   // The buttons of plugins that the user hid are a view state of this window, as its open tabs are.
@@ -6716,6 +6721,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             return item ? () => { closeSettings(); openCanvasHere(item); } : undefined; })()} />
       : settingsSection === "speech" ? <SpeechSettings api={speechApi} speech={speech} epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
+          diskUsage={owned ? <DiskUsagePanel hub={diskUsageHub} epoch={status?.hostEpoch ?? null} spaces={spacesState.spaces}
+            onOpenSession={id => { closeSettings(); void openAutomationSession(id); }} /> : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} spaceScope={resourceScope}
         space={settingsSpace} pickFolder={canPickFolder() ? initial => pickFolder(desktopShell.pickFolder, t("Choose a folder of skills"), initial) : undefined}
@@ -6859,7 +6866,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onSetUp={() => setUpMonorepo(subProjectsProject.id)}
       onOpenProject={id => { setDialog(null); selectProject(id); }} />}
     {dialog === "worktrees" && worktreesProject && owned && status?.hostEpoch && <WorktreeManager epoch={status.hostEpoch} project={worktreesProject}
-      onClose={() => setDialog(null)} onChanged={refreshSessionList}
+      onClose={() => setDialog(null)}
+      // The disk usage marks what went, wherever it is shown.
+      onChanged={removed => { refreshSessionList(); diskUsageHub.removed(worktreesProject.id, removed); }}
       onShowChanges={row => { const project = worktreesProject; setDialog(null); showChanges(project, null, row.project ? null : row.folder); }} />}
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}

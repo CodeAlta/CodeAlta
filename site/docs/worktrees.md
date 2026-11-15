@@ -79,6 +79,7 @@ Run `/worktree`, or right-click a project in the Explorer and choose **Worktrees
 | **Project folder** | The folder of the project. It is never removed. |
 | **In use** | A session is working there now. Wait for it to finish, or stop it. |
 | **Locked** | Git keeps this worktree. Run `git worktree unlock` to remove it. |
+| **Holds a worktree** | Another worktree is inside its folder. Remove that one first. |
 | **Folder gone** | Git still lists the worktree, but its folder was deleted. Removing it makes git forget it. |
 | **Last used** | When the last session of the worktree was active, or **Unknown** when none is left. |
 
@@ -89,6 +90,8 @@ Run `/worktree`, or right-click a project in the Explorer and choose **Worktrees
 - The buttons of a row open the worktree in the code editor or your [external editor](workspace/code.md#external-editor), show its changes, copy its path, or open its folder.
 
 You cannot remove a worktree, or change its branch, while a session works in it.
+
+To see which worktrees of all your projects take the most room, and clean their build output, use [Disk usage](disk-usage.md).
 
 Deleting a session keeps its worktree and branch, unless you tick **Also remove the worktree** in the question, which follows the same rules. Its `alta/` branch goes only when it has no commit of its own. Deleting a session with its [child sessions](sessions/delegation.md#child-sessions) asks the same about every worktree they work in. A worktree that a session you keep works in is not offered, and stays even when the question did not know of that session.
 

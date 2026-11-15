@@ -139,7 +139,8 @@ public sealed class GitWorktreeService
     /// <summary>How long a command that checks files out or removes them may run.</summary>
     public static readonly TimeSpan WriteTimeout = TimeSpan.FromMinutes(9);
 
-    private const int MaximumOutputCharacters = 1024 * 1024;
+    // What RunGitAsync keeps of an output; the rest is read and dropped. An output of this length may have been cut.
+    internal const int MaximumOutputCharacters = 1024 * 1024;
     private const int MaximumMessageLength = 600;
     private const int MaximumBranches = 400;
     private const string IgnoreFileName = ".gitignore";
@@ -1178,8 +1179,10 @@ public sealed class GitWorktreeService
 
         start.Environment["GIT_TERMINAL_PROMPT"] = "0";
         start.Environment["LC_ALL"] = "C";
-        // The folder decides the repository, not variables inherited from the process that started the host.
-        foreach (var inherited in (ReadOnlySpan<string>)["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"])
+        // The folder decides the repository, not variables inherited from the process that started the host; nor do they
+        // decide how a pathspec reads (with GIT_LITERAL_PATHSPECS, `:(top,literal)bin` names a file of that name).
+        foreach (var inherited in (ReadOnlySpan<string>)["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_LITERAL_PATHSPECS",
+                     "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"])
         {
             start.Environment.Remove(inherited);
         }
@@ -1360,8 +1363,8 @@ public sealed class GitWorktreeService
         return false;
     }
 
-    // What git said, on one line and without what a terminal would interpret.
-    private static string? Clean(string? text)
+    // What git said, on one line, bounded, and without what a terminal would interpret.
+    internal static string? Clean(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
         {

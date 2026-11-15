@@ -13,11 +13,13 @@ public sealed class RpcChannelBudgetTests
     /// <c>canvases.watch</c> channel instead of adding channels, so that the budget does not grow with plugins. The answer
     /// of a side question (<c>sideQuestion.ask</c>) is the channel of its panel: one at a time per session, for as long as it
     /// streams. A shell command of the prompt (<c>shellCommands.run</c>) holds a channel while it runs, four at most per session.
+    /// A measurement of the disk usage (<c>diskUsage.scan</c>) holds one while it runs, and so does a clean of build output
+    /// (<c>diskUsage.clean</c>), one at a time, which may outlast the time a request may take.
     /// </summary>
-    private const int PageBudget = 38;
+    private const int PageBudget = 40;
 
     /// <summary>The channel methods the services offer today. A new one takes room from the budget: count it here.</summary>
-    private const int Offered = 38;
+    private const int Offered = 40;
 
     [TestMethod]
     public void TheChannelsOfTheServices_AreCounted_AndStayWithinThePageBudget()

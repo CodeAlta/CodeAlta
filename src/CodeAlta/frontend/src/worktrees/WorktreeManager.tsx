@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, Checkbox, NonIdealState } from "@blueprintjs/core";
 import { worktrees as worktreesApi } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -17,8 +17,8 @@ const refreshMilliseconds = 10_000;
 // A refusal that asking again does not lift: the list it replaces is no longer shown.
 const lasting = new Set(["not_repository", "unknown_project", "project_unavailable", "unavailable", "stale_epoch"]);
 
-type Phase =
-  | Readonly<{ kind: "list" }>
+/** Where a removal is: asked, asked again for the changes that are not committed, removing, or said. */
+export type RemovalPhase =
   /** The worktrees that were chosen, shown again before anything is removed. */
   | Readonly<{ kind: "review"; rows: readonly InventoryRow[] }>
   /** The worktrees that hold changes that are not committed: throwing those away is asked by itself. */
@@ -50,6 +50,7 @@ function States({ row }: { row: InventoryRow }) {
     {row.busy && <span className="worktree-state" data-state="busy" title={running.length ? `${t("A session is working here")}\n${running.join("\n")}` : t("A session is working here")}>
       <ActivitySpinner size={11} />{t("In use")}</span>}
     {row.locked && <span className="worktree-state" data-state="locked" title={t("Git keeps this worktree locked: unlock it with git to remove it.")}>{t("Locked")}</span>}
+    {row.protection === "holds_worktree" && <span className="worktree-state" data-state="holds" title={t("Another worktree is inside its folder: remove that one first.")}>{t("Holds a worktree")}</span>}
     {row.missing && <span className="worktree-state" data-state="missing" title={t("Git still lists this worktree, and its folder is gone.")}>{t("Folder gone")}</span>}
   </span>;
 }
@@ -92,6 +93,7 @@ export function WorktreeTable({ inventory, projectName, selected, busy, onToggle
   const line = (row: InventoryRow) => {
     const can = removable(row);
     const why = row.protection === "in_use" ? t("A session is working here") : row.protection === "locked" ? t("Git keeps this worktree locked: unlock it with git to remove it.")
+      : row.protection === "holds_worktree" ? t("Another worktree is inside its folder: remove that one first.")
       : row.protection === "main" || !can ? t(row.project ? "This is the folder of the project: it is not a worktree to remove." : "The checkout the repository lives in is not removed.") : null;
     return <tr key={row.path} className="worktree-line" data-path={row.path} data-removable={can || undefined} data-missing={row.missing || undefined} data-selected={selected.has(row.path) || undefined}>
       <td className="worktree-cell-select" title={why ?? undefined}><Checkbox checked={can && selected.has(row.path)} disabled={!can || busy}
@@ -226,26 +228,22 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
   onClose: () => void;
   /** Shows the changes of a checkout in the changes tab of the project; the window closes. */
   onShowChanges: (row: InventoryRow) => void;
-  /** Worktrees were removed: what the sessions record is read again. */
-  onChanged?: () => void;
+  /** A removal ended, with the folders of the worktrees that went: what the sessions record is read again, and what was measured marked. */
+  onChanged?: (removed: readonly string[]) => void;
   api?: WorktreeManagerApi;
 }) {
-  const { t, locale } = useShellLanguage();
+  const { t } = useShellLanguage();
   const titleId = useId();
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [reading, setReading] = useState(true);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const [phase, setPhase] = useState<Phase>({ kind: "list" });
-  const [deleteBranches, setDeleteBranches] = useState(false);
-  const [outcomes, setOutcomes] = useState<readonly RemovalOutcome[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   // The last question asked: an answer to an older one says what was, not what is.
   const asked = useRef(0);
   const pending = useRef<number | null>(null);
   const alive = useRef(false);
-  const stop = useRef(false);
   const changed = useRef(onChanged); changed.current = onChanged;
 
   const refresh = useCallback((shown = false) => {
@@ -273,9 +271,13 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
   useEffect(() => {
     alive.current = true;
     refresh(true);
-    return () => { alive.current = false; stop.current = true; asked.current++; pending.current = null; };
+    return () => { alive.current = false; asked.current++; pending.current = null; };
   }, [refresh]);
-  const listed = phase.kind === "list";
+  const removal = useWorktreeRemoval({ epoch, api, onRemoved: outcomes => {
+    setSelected(new Set()); refresh(true);
+    changed.current?.(outcomes.filter(outcome => outcome.status === "ok").map(outcome => outcome.path));
+  } });
+  const listed = removal.phase === null;
   useEffect(() => {
     if (!listed) return;
     const focused = () => refresh();
@@ -283,33 +285,6 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
     const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") refresh(); }, refreshMilliseconds);
     return () => { window.removeEventListener("focus", focused); window.clearInterval(timer); };
   }, [listed, refresh]);
-
-  // Removes worktrees, a few in each request, and keeps what the host said of each. `discard` is only true for
-  // the worktrees the user was asked about by themselves.
-  async function remove(rows: readonly InventoryRow[], discard: boolean) {
-    stop.current = false;
-    setNotice(null); setPhase({ kind: "removing", total: rows.length, done: 0, freed: 0 });
-    const collected: RemovalOutcome[] = [];
-    const none = { message: null, branchKept: null, branchDeleted: null };
-    for (const chunk of removalChunks(rows)) {
-      if (stop.current) { collected.push(...chunk.map(row => ({ row, path: row.path, status: "canceled", ...none }))); continue; }
-      const paths = chunk.map(row => row.path);
-      const reply = await api.removeMany({ expectedEpoch: epoch, projectId: project.id, paths, discard: discard ? paths : [], deleteMergedBranches: deleteBranches, keepUsed: false },
-        { timeoutMilliseconds: 600_000 }).then(value => removalReply(value, paths), () => "unconfirmed");
-      if (typeof reply === "string") {
-        // Nothing is known of these, and nothing more is asked of a host that did not answer.
-        collected.push(...chunk.map(row => ({ row, path: row.path, status: reply, ...none })));
-        stop.current = true;
-      } else collected.push(...reply.map((result, index) => ({ ...result, row: chunk[index] })));
-      if (!alive.current) return;
-      setPhase({ kind: "removing", total: rows.length, done: collected.length, freed: freedBytes(collected) });
-    }
-    if (!alive.current) return;
-    setOutcomes(known => discard ? mergeOutcomes(known, collected) : collected);
-    setSelected(new Set()); setPhase({ kind: "results" });
-    refresh(true);
-    changed.current?.();
-  }
 
   // Beside the code editor, the editor the user chose and the file manager of the system.
   const external = useExternalOpener();
@@ -328,13 +303,11 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
       });
   }
 
-  const working = phase.kind === "removing";
+  const working = removal.working;
   // Escape, and a press beside the window while it only lists: one step back, never out of a removal.
   function back() {
-    if (working) return;
-    if (phase.kind === "list") onClose();
-    else if (phase.kind === "discard") setPhase({ kind: "results" });
-    else { setPhase({ kind: "list" }); setOutcomes([]); }
+    if (listed) onClose();
+    else removal.back();
   }
   const chosen = inventory ? selectedRows(selected, inventory.rows) : [];
   // `main` protects both checkouts when the project lives in a linked worktree; only the repository's main one is excluded.
@@ -347,8 +320,8 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
     onClose={() => { if (!working) onClose(); }} closeLabel={t("Close")} keepOnOutsidePress={!listed}
     onCancel={event => { event.preventDefault(); back(); }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); back(); } }}>
-    <div className="worktree-manager" data-phase={phase.kind}>
-      {phase.kind === "list" && <>
+    <div className="worktree-manager" data-phase={removal.phase?.kind ?? "list"}>
+      {listed && <>
         <header className="worktree-manager-bar">
           <span className="worktree-manager-count" role="status">{inventory
             ? t(total === 1 ? "{count} worktree" : "{count} worktrees", { count: total }) : ""}</span>
@@ -364,7 +337,7 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
           : <div className="worktree-manager-rows">
             <WorktreeTable inventory={inventory} projectName={project.name} selected={selected} busy={opening}
               onToggle={row => setSelected(current => toggleOne(current, row))} onToggleAll={() => setSelected(current => toggleAll(current, inventory.rows))}
-              onRemove={row => { setDeleteBranches(false); setPhase({ kind: "review", rows: [row] }); }} onOpenEditor={openEditor} onShowChanges={onShowChanges} external={externalRows} />
+              onRemove={row => removal.begin(project, [row])} onOpenEditor={openEditor} onShowChanges={onShowChanges} external={externalRows} />
             {total === 0 && <p className="worktree-manager-none">{t("This repository has no worktree. A session started in a new worktree makes one.")}</p>}
           </div>}
         <footer className="worktree-manager-footer">
@@ -373,18 +346,96 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
             {chosen.length > 0 && <Button variant="minimal" text={t("Clear selection")} onClick={() => setSelected(new Set())} />}
             <Button intent="danger" icon={<AppIcon name="trash" size={14} />} disabled={!chosen.length || opening}
               text={`${t(chosen.length === 0 ? "Remove" : chosen.length === 1 ? "Remove the worktree" : "Remove {count} worktrees", { count: chosen.length })}…`}
-              onClick={() => { setDeleteBranches(false); setPhase({ kind: "review", rows: chosen }); }} />
+              onClick={() => removal.begin(project, chosen)} />
           </span>
         </footer>
       </>}
-      {phase.kind === "review" && <WorktreeRemovalReview rows={phase.rows} projectName={project.name} deleteBranches={deleteBranches} onDeleteBranches={setDeleteBranches}
-        onCancel={back} onConfirm={() => void remove(phase.rows, false)} />}
-      {phase.kind === "discard" && <WorktreeDiscardReview rows={phase.rows} projectName={project.name} onCancel={back} onConfirm={() => void remove(phase.rows, true)} />}
-      {phase.kind === "removing" && <NonIdealState className="worktree-manager-empty" icon={<ActivitySpinner size={28} />}
-        title={t("Removing… {done} of {count} done", { done: phase.done, count: phase.total })}
-        description={phase.freed > 0 ? t("{size} freed so far", { size: storageSize(phase.freed, locale) }) : undefined}
-        action={phase.total > removalChunkSize ? <Button text={t("Stop")} title={t("What is being removed is finished first.")} onClick={() => { stop.current = true; }} /> : undefined} />}
-      {phase.kind === "results" && <WorktreeRemovalResults outcomes={outcomes} projectName={project.name} onDiscard={rows => setPhase({ kind: "discard", rows })} onDone={back} />}
+      {removal.view}
     </div>
   </AppWindow>;
+}
+
+/** The project whose worktrees are removed. */
+export type RemovalProject = Readonly<{ id: string; name: string }>;
+
+/**
+ * The removal of worktrees of one project, for the window of the worktrees and for any other place that offers it: the
+ * worktrees shown again before anything goes, the request to the host a few at a time, what became of each, and the
+ * ones that hold changes that are not committed asked about by themselves. The caller shows `view` while `phase` is
+ * not null.
+ * @param onRemoved Called once a removal ended, with what the host said of each worktree: the caller reads its list again.
+ */
+export function useWorktreeRemoval({ epoch, api, onRemoved }: {
+  epoch: string; api: Pick<WorktreeManagerApi, "removeMany">; onRemoved?: (outcomes: readonly RemovalOutcome[]) => void;
+}): Readonly<{
+  phase: RemovalPhase | null;
+  /** Worktrees are being removed: nothing closes, nothing else starts. */
+  working: boolean;
+  /** Shows the worktrees chosen again, before anything is removed. */
+  begin: (project: RemovalProject, rows: readonly InventoryRow[]) => void;
+  /** One step back: from the question about the changes to the results, else out of the removal. Nothing while it works. */
+  back: () => void;
+  view: ReactNode;
+}> {
+  const { t, locale } = useShellLanguage();
+  const [phase, setPhase] = useState<RemovalPhase | null>(null);
+  const [project, setProject] = useState<RemovalProject | null>(null);
+  const [deleteBranches, setDeleteBranches] = useState(false);
+  const [outcomes, setOutcomes] = useState<readonly RemovalOutcome[]>([]);
+  const alive = useRef(false);
+  const stop = useRef(false);
+  const removed = useRef(onRemoved); removed.current = onRemoved;
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; stop.current = true; };
+  }, []);
+
+  // Removes worktrees, a few in each request, and keeps what the host said of each. `discard` is only true for
+  // the worktrees the user was asked about by themselves.
+  async function remove(target: RemovalProject, rows: readonly InventoryRow[], discard: boolean) {
+    stop.current = false;
+    setPhase({ kind: "removing", total: rows.length, done: 0, freed: 0 });
+    const collected: RemovalOutcome[] = [];
+    const none = { message: null, branchKept: null, branchDeleted: null };
+    for (const chunk of removalChunks(rows)) {
+      if (stop.current) { collected.push(...chunk.map(row => ({ row, path: row.path, status: "canceled", ...none }))); continue; }
+      const paths = chunk.map(row => row.path);
+      const reply = await api.removeMany({ expectedEpoch: epoch, projectId: target.id, paths, discard: discard ? paths : [], deleteMergedBranches: deleteBranches, keepUsed: false },
+        { timeoutMilliseconds: 600_000 }).then(value => removalReply(value, paths), () => "unconfirmed");
+      if (typeof reply === "string") {
+        // Nothing is known of these, and nothing more is asked of a host that did not answer.
+        collected.push(...chunk.map(row => ({ row, path: row.path, status: reply, ...none })));
+        stop.current = true;
+      } else collected.push(...reply.map((result, index) => ({ ...result, row: chunk[index] })));
+      if (!alive.current) return;
+      setPhase({ kind: "removing", total: rows.length, done: collected.length, freed: freedBytes(collected) });
+    }
+    if (!alive.current) return;
+    setOutcomes(known => discard ? mergeOutcomes(known, collected) : collected);
+    setPhase({ kind: "results" });
+    removed.current?.(collected);
+  }
+
+  const working = phase?.kind === "removing";
+  function back() {
+    if (working) return;
+    if (phase?.kind === "discard") setPhase({ kind: "results" });
+    else { setPhase(null); setOutcomes([]); }
+  }
+  function begin(target: RemovalProject, rows: readonly InventoryRow[]) {
+    if (working || rows.length === 0) return;
+    setProject(target); setDeleteBranches(false); setPhase({ kind: "review", rows });
+  }
+
+  const name = project?.name ?? "";
+  const view = !phase || !project ? null
+    : phase.kind === "review" ? <WorktreeRemovalReview rows={phase.rows} projectName={name} deleteBranches={deleteBranches} onDeleteBranches={setDeleteBranches}
+      onCancel={back} onConfirm={() => void remove(project, phase.rows, false)} />
+    : phase.kind === "discard" ? <WorktreeDiscardReview rows={phase.rows} projectName={name} onCancel={back} onConfirm={() => void remove(project, phase.rows, true)} />
+    : phase.kind === "removing" ? <NonIdealState className="worktree-manager-empty" icon={<ActivitySpinner size={28} />}
+      title={t("Removing… {done} of {count} done", { done: phase.done, count: phase.total })}
+      description={phase.freed > 0 ? t("{size} freed so far", { size: storageSize(phase.freed, locale) }) : undefined}
+      action={phase.total > removalChunkSize ? <Button text={t("Stop")} title={t("What is being removed is finished first.")} onClick={() => { stop.current = true; }} /> : undefined} />
+    : <WorktreeRemovalResults outcomes={outcomes} projectName={name} onDiscard={rows => setPhase({ kind: "discard", rows })} onDone={back} />;
+  return { phase, working, begin, back, view };
 }

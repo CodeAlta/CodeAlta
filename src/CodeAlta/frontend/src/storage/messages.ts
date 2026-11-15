@@ -75,4 +75,10 @@ export const storageMessages = {
   "After": ["Tras", "Après", "Nach", "指定期間後", "超过"],
   "Enter a positive whole number.": ["Introduce un entero positivo.", "Saisissez un entier positif.", "Eine positive ganze Zahl eingeben.", "正の整数を入力してください。", "请输入正整数。"],
   "Partial scan: {links} links and {entries} unavailable entries skipped.": ["Análisis parcial: se omitieron {links} enlaces y {entries} entradas no disponibles.", "Analyse partielle : {links} liens et {entries} entrées indisponibles ignorés.", "Teilweise Messung: {links} Links und {entries} nicht verfügbare Einträge übersprungen.", "部分的なスキャン: {links} 件のリンクと {entries} 件の利用できない項目をスキップしました。", "部分扫描：已跳过 {links} 个链接和 {entries} 个不可用条目。"],
+  "The next start removes {size} of old scratchpad files ({files} file).": ["El próximo inicio elimina {size} de archivos antiguos del bloc temporal ({files} archivo).",
+    "Le prochain démarrage supprime {size} d’anciens fichiers du brouillon temporaire ({files} fichier).", "Der nächste Start entfernt {size} alter Scratchpad-Dateien ({files} Datei).",
+    "次回の起動で古いスクラッチパッドのファイル {size}（{files} 個）を削除します。", "下次启动将删除 {size} 的旧暂存区文件（{files} 个文件）。"],
+  "The next start removes {size} of old scratchpad files ({files} files).": ["El próximo inicio elimina {size} de archivos antiguos del bloc temporal ({files} archivos).",
+    "Le prochain démarrage supprime {size} d’anciens fichiers du brouillon temporaire ({files} fichiers).", "Der nächste Start entfernt {size} alter Scratchpad-Dateien ({files} Dateien).",
+    "次回の起動で古いスクラッチパッドのファイル {size}（{files} 個）を削除します。", "下次启动将删除 {size} 的旧暂存区文件（{files} 个文件）。"],
 } as const;

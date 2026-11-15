@@ -123,6 +123,8 @@ public sealed class ProfileStorageScannerTests
                 ("reviews/project/project.json", "reviews", 24),
                 ("dev/sessions/session.jsonl", "developer", 21), ("dev/data/alta.sqlite3", "developer", 22),
                 ("unrecognized/keep", "other", 23),
+                ("browser/profile/Cookies", "browser", 25), ("llama/models/model.gguf", "models", 26),
+                ("llama/bin/llama-server", "models", 27), ("dev/browser/profile/Cookies", "developer", 28),
             };
             foreach (var fixture in fixtures)
             {
@@ -206,6 +208,110 @@ public sealed class ProfileStorageScannerTests
             Assert.IsTrue(File.Exists(Path.Combine(outside, "not-profile-data")));
         }
         finally { Directory.Delete(root, true); Directory.Delete(outside, true); }
+    }
+
+    [TestMethod]
+    public async Task OldScratchpadFiles_AreTheCandidatesByAge()
+    {
+        var root = NewRoot();
+        try
+        {
+            var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            // The scan runs a month from now: every file written today is old then, unless its last write says otherwise.
+            var scanTime = now.AddDays(30);
+            var recent = (scanTime - StorageSettings.ScratchpadMaxAge + TimeSpan.FromHours(1)).UtcDateTime;
+            async Task<string> Write(string relative, int bytes, DateTime? lastWrite = null)
+            {
+                var path = Path.Combine(root, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllBytesAsync(path, new byte[bytes]);
+                if (lastWrite is { } time) File.SetLastWriteTimeUtc(path, time);
+                return path;
+            }
+
+            await Write("scratchpad/old.md", 10);
+            await Write("scratchpad/run/old-in-recent-folder.md", 20);
+            await Write("scratchpad/run/recent.md", 40, recent);
+            await Write("scratchpad/recent.md", 80, recent);
+            // Exactly at the cutoff is not before it: not old.
+            await Write("scratchpad/at-cutoff.md", 640, (scanTime - StorageSettings.ScratchpadMaxAge).UtcDateTime);
+            // A folder written recently keeps nothing old it holds: the cleanup goes by each file.
+            Directory.SetLastWriteTimeUtc(Path.Combine(root, "scratchpad/run"), recent);
+            // Not the scratchpad of this instance: other categories, and the developer's own scratchpad.
+            await Write("dev/scratchpad/old.md", 160);
+            await Write("sessions/2026/11/10/old.jsonl", 320);
+
+            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }) { Time = new FixedTime(scanTime) };
+            var snapshot = await scanner.ScanAsync(CancellationToken.None);
+
+            Assert.AreEqual(scanTime, snapshot.StartedAt);
+            Assert.AreEqual(scanTime, snapshot.CompletedAt, "both scan timestamps use the same clock");
+            Assert.AreEqual(scanTime - StorageSettings.ScratchpadMaxAge, snapshot.ScratchpadCutoff);
+            Assert.AreEqual(30L, snapshot.OldScratchpadBytes);
+            Assert.AreEqual(2L, snapshot.OldScratchpadFiles);
+            Assert.AreEqual(790L, snapshot.Categories.Single(category => category.Id == "scratchpad").Bytes);
+
+            var developer = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root, StateRoot = Path.Combine(root, "dev") }) { Time = new FixedTime(scanTime) };
+            var ofDeveloper = await developer.ScanAsync(CancellationToken.None);
+            Assert.AreEqual(160L, ofDeveloper.OldScratchpadBytes, "the developer instance clears its own scratchpad, not the normal one");
+            Assert.AreEqual(1L, ofDeveloper.OldScratchpadFiles);
+
+            var today = await new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }).ScanAsync(CancellationToken.None);
+            Assert.AreEqual(0L, today.OldScratchpadBytes, "nothing is a week old yet");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
+    public async Task ScratchpadFileCreatedRecently_ButWrittenLongAgo_IsNotOld()
+    {
+        var root = NewRoot();
+        try
+        {
+            var scanTime = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()).AddDays(30);
+            var recent = (scanTime - StorageSettings.ScratchpadMaxAge + TimeSpan.FromHours(1)).UtcDateTime;
+            var path = Path.Combine(root, "scratchpad", "copied.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, new byte[10]);
+            // A copy: created anew, with the last write of its source, long before the cutoff.
+            File.SetCreationTimeUtc(path, recent);
+            File.SetLastWriteTimeUtc(path, (scanTime - TimeSpan.FromDays(60)).UtcDateTime);
+            if (File.GetCreationTimeUtc(path) != recent) Assert.Inconclusive("This file system does not let a test set the creation time of a file.");
+
+            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }) { Time = new FixedTime(scanTime) };
+            var snapshot = await scanner.ScanAsync(CancellationToken.None);
+
+            Assert.AreEqual(0L, snapshot.OldScratchpadFiles, "the later of the creation and the last write counts");
+            Assert.AreEqual(10L, snapshot.Categories.Single(category => category.Id == "scratchpad").Bytes);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
+    public async Task LinkInScratchpad_IsNotCountedAsOld()
+    {
+        TestLinks.RequireSymbolicLinks();
+        var root = NewRoot();
+        var outside = NewRoot();
+        Directory.CreateDirectory(Path.Combine(root, "scratchpad"));
+        Directory.CreateDirectory(outside);
+        try
+        {
+            await File.WriteAllBytesAsync(Path.Combine(outside, "large"), new byte[100]);
+            Directory.CreateSymbolicLink(Path.Combine(root, "scratchpad", "folder"), outside);
+            File.CreateSymbolicLink(Path.Combine(root, "scratchpad", "file"), Path.Combine(outside, "large"));
+            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }) { Time = new FixedTime(DateTimeOffset.UtcNow.AddDays(30)) };
+            var snapshot = await scanner.ScanAsync(CancellationToken.None);
+            Assert.AreEqual(0L, snapshot.OldScratchpadBytes);
+            Assert.AreEqual(0L, snapshot.OldScratchpadFiles);
+            Assert.AreEqual(2L, snapshot.SkippedLinks);
+        }
+        finally { Directory.Delete(root, true); Directory.Delete(outside, true); }
+    }
+
+    private sealed class FixedTime(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private static string NewRoot() => Path.Combine(Path.GetTempPath(), "codealta-storage-scan-" + Guid.NewGuid().ToString("N"));

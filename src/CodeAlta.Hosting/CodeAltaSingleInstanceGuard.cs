@@ -14,6 +14,10 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     private const string LockFileName = "alta.lock";
     private const int PidReadRetryCount = 20;
     private static readonly TimeSpan PidReadRetryDelay = TimeSpan.FromMilliseconds(25);
+
+    // A writer writes its PID right after it creates the lock: a lock without one that was last written this long ago is
+    // what a crash between the two left (an older build did not create the lock whole).
+    internal static readonly TimeSpan IncompleteLockAge = TimeSpan.FromMinutes(1);
     private readonly FileStream _lockStream;
     private readonly object _gate = new();
     private int _cleanupHolds;
@@ -265,7 +269,7 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
             catch (IOException ex)
             {
                 var runningProcessId = ReadRunningProcessId(lockFilePath);
-                if (runningProcessId is { } processId && !IsProcessRunning(processId) && TryDeleteLockFile(lockFilePath))
+                if (IsAbandoned(runningProcessId, lockFilePath) && TryDeleteLockFile(lockFilePath))
                 {
                     continue;
                 }
@@ -274,6 +278,36 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
             }
         }
     }
+
+    // Whether a lock found at the path may be taken over, by the rule of IsAbandoned below.
+    internal static bool IsAbandoned(int? processId, string lockFilePath)
+    {
+        if (processId is { } pid) return !IsProcessRunning(pid);
+        try
+        {
+            // A failed read is not an incomplete PID. Re-read before reclaiming: a writer may have finished meanwhile.
+            if (TryReadRunningProcessId(lockFilePath, out var currentPid, out var readable)) return !IsProcessRunning(currentPid);
+            if (!readable) return false;
+            var file = new FileInfo(lockFilePath);
+            return file.Exists && IsAbandoned(null, file.LastWriteTimeUtc, DateTime.UtcNow);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a lock may be taken over: the PID it holds is that of no running process, or it holds no PID (empty, or
+    /// not a number) and was last written more than <see cref="IncompleteLockAge"/> ago. A living process, or one that
+    /// cannot be inspected, keeps its lock; a lock that cannot be read is not given to this rule.
+    /// </summary>
+    /// <param name="processId">The PID the lock holds; null when it holds none.</param>
+    /// <param name="lastWriteUtc">When the lock was last written.</param>
+    /// <param name="nowUtc">The time now.</param>
+    /// <returns>Whether it may be removed and created again.</returns>
+    internal static bool IsAbandoned(int? processId, DateTime lastWriteUtc, DateTime nowUtc)
+        => processId is { } pid ? !IsProcessRunning(pid) : nowUtc - lastWriteUtc > IncompleteLockAge;
 
     private static bool IsProcessRunning(int processId)
         => IsProcessRunning<Process>(processId, Process.GetProcessById, static process => process.HasExited);
@@ -349,7 +383,7 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     {
         for (var attempt = 0; attempt < PidReadRetryCount; attempt++)
         {
-            if (TryReadRunningProcessId(lockFilePath, out var processId))
+            if (TryReadRunningProcessId(lockFilePath, out var processId, out _))
             {
                 return processId;
             }
@@ -360,14 +394,16 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
         return null;
     }
 
-    private static bool TryReadRunningProcessId(string lockFilePath, out int processId)
+    private static bool TryReadRunningProcessId(string lockFilePath, out int processId, out bool readable)
     {
         processId = 0;
+        readable = false;
         try
         {
             using var stream = new FileStream(lockFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             var text = reader.ReadToEnd().Trim();
+            readable = true;
             return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out processId);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -298,6 +298,20 @@ test("the bookmarks have one tab, of no project, that outlives the projects and 
   }
 });
 
+test("old disk usage tabs are not restored and other tabs are kept", () => {
+  const state = openFileTab(emptyFileTabs(), editor());
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  const old = { projectId: "", projectPath: "", view: "diskUsage" };
+  const saved = JSON.parse(stored);
+  saved.open.push(old);
+  saved.active = old;
+  const restored = restoreFileTabs(() => JSON.stringify(saved));
+  assert.ok(restored);
+  assert.deepEqual(restored.open, state.open);
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [old], active: old })), emptyFileTabs());
+});
+
 test("the automations have one tab, of no project, that outlives the projects and is kept for the next start", () => {
   assert.deepEqual(automationsTab, { projectId: "", projectPath: "", view: "automations" });
   assert.ok(isAutomationsTab(automationsTab) && !isAutomationsTab(editor()) && !isEditorTab(automationsTab) && !isChangesTab(automationsTab) && !isTerminalTab(automationsTab));

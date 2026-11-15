@@ -352,6 +352,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
         ProviderUsageService? providerUsage = null;
+        DiskUsageService? diskUsage = null;
         SpeechService? speech = null;
         ClaudeCliService? claudeCli = null;
         // The providers whose type a plugin runs (ACP agents), and the MCP endpoints that give them the tools of a session.
@@ -647,6 +648,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
                 await CloseStepAsync(closing, "paired computers", async () => { if (desktopNode is not null) await desktopNode.DisposeAsync(); }); // The computers paired with this one see it offline.
                 await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
+                await CloseStepAsync(closing, "disk usage", async () => { if (diskUsage is not null) await diskUsage.DisposeAsync(); }); // A measurement stops; what it measured is not kept.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
                 await CloseStepAsync(closing, "automations", async () => { if (automations is not null) await automations.DisposeAsync(); }); // Nothing more is started; sessions end with the host.
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
@@ -1466,6 +1468,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         ExternalEditors = externalEditors,
                     });
+                    // The disk usage of the projects, their checkouts and sessions: the same join of sessions to checkouts.
+                    diskUsage = new DiskUsageService(host.CatalogOptions, worktrees, host.RuntimeService.ListBusySessionFolders, host.RuntimeService.ListWorkingSessionFolders,
+                        token => host.WorkspaceReads.ReadSnapshotAsync(token), epoch);
+                    builder.AddDiskUsageService(diskUsage);
                     // A terminal opened from a session starts in the folder that session works in: its worktree
                     // while that folder is there, the folder of its project otherwise.
                     builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch,
@@ -1844,6 +1850,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSettingsFilesService(new SettingsFilesService());
             builder.AddProjectGitService(new ProjectGitService());
             builder.AddWorktreesService(new WorktreesService());
+            builder.AddDiskUsageService(new DiskUsageService());
             builder.AddMcpHostService(new McpHostService());
             builder.AddTerminalsService(new TerminalsService());
             builder.AddCloudSessionsService(new CloudSessionsService());
