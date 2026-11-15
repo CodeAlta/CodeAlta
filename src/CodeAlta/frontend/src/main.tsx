@@ -4826,11 +4826,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const capability = mutation?.capability;
     // The locks of a deletion from the Explorer: a deletion or a rename whose outcome is not known blocks this one too.
     if (sessionArchivePending.current || deletingPending.current || renamingPending.current || !owned || !capability?.canMutate() || !row.workspacePath
-      || deleteLocked || renameLocked || !!uncertainDelete.current || !!uncertainRename.current) return t(sessionDeletionMessage("busy") as MessageKey);
+      || deleteLocked || renameLocked || !!uncertainDelete.current || !!uncertainRename.current) return t(sessionDeletionMessage("busy"));
     if (remember) setConfirm("sessionDelete", false);
     if (knownChildren(row.id)) { setDialog(null); showSessionChildren(row, true); return null; }
     const project = row.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === row.projectId && value.path === row.workspacePath) : undefined;
-    if (row.scopeKind === "project" && (!project || project.archived)) return t(sessionDeletionMessage("scope_missing") as MessageKey);
+    if (row.scopeKind === "project" && (!project || project.archived)) return t(sessionDeletionMessage("scope_missing"));
     const target: RenameTarget = project ? { scope: "project", projectId: project.id, projectPath: project.path } : { scope: "global", projectPath: row.workspacePath };
     sessionArchivePending.current = true;
     setSessionArchiveBusy(true);
@@ -4845,7 +4845,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         if (creationAlive.current && currentSnapshot.current)
           setBrowserCapture(value => value && { ...value, snapshot: currentSnapshot.current!, revision: browserRevision.current });
       }
-      return result.kind === "deleted" ? null : t(sessionDeletionMessage(result.code) as MessageKey);
+      return result.kind === "deleted" ? null : t(sessionDeletionMessage(result.code));
     } finally {
       sessionArchivePending.current = false;
       if (creationAlive.current) setSessionArchiveBusy(false);
@@ -4877,7 +4877,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       for (const row of rows) {
         // The sessions of an archived project are read-only.
         if (row.scopeKind === "project" && catalog.current?.projects.find(value => value.id === row.projectId)?.archived) {
-          reason ??= t(sessionDeletionMessage("scope_missing") as MessageKey); continue;
+          reason ??= t(sessionDeletionMessage("scope_missing")); continue;
         }
         const result = await setSessionArchived(archive ? workspace.archiveSession : workspace.restoreSession, epoch, row.id, !archive);
         if (!creationAlive.current) return done();
@@ -4909,7 +4909,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // The locks of a single deletion, again: a deletion or a rename whose outcome is not known blocks this one too.
     if (sessionArchivePending.current || deletingPending.current || renamingPending.current || !owned || !capability?.canMutate() || !epoch
       || deleteLocked || renameLocked || !!uncertainDelete.current || !!uncertainRename.current)
-      return { deleted: [], error: t(sessionDeletionMessage("busy") as MessageKey) };
+      return { deleted: [], error: t(sessionDeletionMessage("busy")) };
     sessionArchivePending.current = true;
     deletingPending.current = true;
     setSessionArchiveBusy(true);
@@ -4918,12 +4918,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     try {
       for (const row of rows) {
         const project = row.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === row.projectId && value.path === row.workspacePath) : undefined;
-        if (!row.workspacePath || row.scopeKind === "project" && (!project || project.archived)) { reason ??= t(sessionDeletionMessage("scope_missing") as MessageKey); continue; }
+        if (!row.workspacePath || row.scopeKind === "project" && (!project || project.archived)) { reason ??= t(sessionDeletionMessage("scope_missing")); continue; }
         const target: RenameTarget = project ? { scope: "project", projectId: project.id, projectPath: project.path } : { scope: "global", projectPath: row.workspacePath };
         const result = await deleteSession(epoch, target, row.id, row.title, capability);
         if (!creationAlive.current) return { deleted, error: null };
         if (result.kind === "deleted") { deleted.push(row.id); continue; }
-        reason ??= t(sessionDeletionMessage(result.code) as MessageKey);
+        reason ??= t(sessionDeletionMessage(result.code));
         // Not known whether it went: every deletion stays locked, as after a single one, and nothing more is asked.
         if (result.code === "delete_unconfirmed") { uncertainDelete.current = { target, id: row.id }; setDeleteLocked(true); break; }
       }
@@ -5845,7 +5845,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         } else {
           uncertainDelete.current = captured;
           setDeleteLocked(true);
-          failed("Deletion may have completed, but the refreshed catalog did not confirm absence. No retry will be sent.");
+          failed(t("Deletion may have completed, but the refreshed catalog did not confirm absence. No retry will be sent."));
         }
       } else if (result.code === "has_children") {
         // Children the window did not know of: they are shown, with the choice to delete them with it.
@@ -5856,7 +5856,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           uncertainDelete.current = captured;
           setDeleteLocked(true);
         }
-        failed(sessionDeletionMessage(result.code));
+        failed(t(sessionDeletionMessage(result.code)));
       }
     } finally { deletingPending.current = false; if (creationAlive.current) setDeletingBusy(false); }
   }

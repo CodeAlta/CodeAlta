@@ -1,5 +1,6 @@
 import type { WorkspaceDeleteSessionRequest, WorkspaceDeleteSessionResponse, WorkspaceSessionChildrenRequest, WorkspaceSessionChildrenResponse,
   WorkspaceSnapshot } from "#neoastra";
+import type { MessageKey } from "./localization";
 import { readSessionChildren } from "./sessionChildren/sessionChildren";
 import type { createMutationCapability } from "./sessionOperations";
 import type { RenameTarget } from "./sessionRename";
@@ -95,7 +96,8 @@ export function deleteSelectionCurrent(result: DeletedTarget, projectId: string 
   return projectId === (result.target.scope === "project" ? result.target.projectId : null) && sessionId === result.id;
 }
 
-export function sessionDeletionMessage(code: string): string {
+/** The sentence of a deletion that did not delete, as a key of the translations: a sentence without one fails the type check. */
+export function sessionDeletionMessage(code: string): MessageKey {
   switch (code) {
     case "unconfigured": return "Deleting sessions requires an owned host.";
     case "invalid_confirmation": return "The title of this session could not be confirmed. Refresh the sessions and try again.";
