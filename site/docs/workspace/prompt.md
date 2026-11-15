@@ -362,4 +362,4 @@ When the provider reports no token usage, as some [ACP agents](../model-provider
   <figcaption class="small text-secondary mt-2">Current session adds up the tokens, the duration and the cost of every request of the session.</figcaption>
 </figure>
 
-**Session info**, in the **⋯** menu (or `Ctrl+G Ctrl+T`), reports the scope, provider and model, run and queue state and history of the session, for troubleshooting or a handoff.
+**Session info**, in the **⋯** menu (or `Ctrl+G Ctrl+T`), reports the scope, provider and model, run and queue state and history of the session, for troubleshooting or a handoff. **Session folder** is the folder that stores the session on this computer; the buttons beside it copy its path and show the session in the file manager.

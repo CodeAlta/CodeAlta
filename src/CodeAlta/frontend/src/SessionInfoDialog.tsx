@@ -19,16 +19,20 @@ export type SessionSpaceResources = Readonly<{ spaces: readonly Space[]; read: (
 import { SessionIdentityInfo } from "./spaces/SessionIdentityInfo";
 import { ClaudeCodeConversationRow } from "./claudeCodeOpen/ClaudeCodeConversationRow";
 import type { SessionClaudeCodeConversationResult } from "#neoastra";
+import { SessionStorageRow } from "./sessionStorage/SessionStorageRow";
+import type { SessionStorageHost } from "./sessionStorage/sessionStorage";
 
 export type SessionInfoLifetime = { revision: number; current: () => boolean };
 
-export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime, canRead = () => true, spaceResources = null, conversation = null }: {
+export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime, canRead = () => true, spaceResources = null, conversation = null, storage = null }: {
   info: SessionInfoView; demo: boolean; onClose: () => void; target?: RuntimeTarget | null;
   lifetime?: SessionInfoLifetime; canRead?: () => boolean;
   /** The space of the session and what it can use there. */
   spaceResources?: SessionSpaceResources;
   /** Reads the conversation of the Claude Code CLI the session continues, once; null for a session that has none. */
   conversation?: (() => Promise<SessionClaudeCodeConversationResult | null>) | null;
+  /** Reads the folder the session is stored in, and opens it in the file manager; null where no host tells it. */
+  storage?: SessionStorageHost | null;
 }) {
   const { t } = useShellLanguage();
   const [resources, setResources] = useState<SpaceSessionResourcesResponse | null>(null);
@@ -59,6 +63,13 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
   const hasConversation = !!conversation;
   const conversationRead = useMemo(() => hasConversation ? () => conversationLatest.current?.() ?? Promise.resolve(null) : null,
     [hasConversation, info.id, lifetime?.revision]);
+  // The same for the folder of the session.
+  const storageLatest = useRef(storage); storageLatest.current = storage;
+  const hasStorage = !!storage;
+  const storageHost = useMemo<SessionStorageHost | null>(() => hasStorage ? {
+    read: () => storageLatest.current?.read() ?? Promise.resolve(null),
+    reveal: () => storageLatest.current?.reveal() ?? Promise.resolve(false),
+  } : null, [hasStorage, info.id, lifetime?.revision]);
   const generation = useRef(0);
   const request = useRef<AbortController | null>(null);
   const identity = useRef<InfoObservations["identity"]>(undefined);
@@ -163,6 +174,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Recorded working directory")}</dt><dd>{info.path ?? t("Not recorded or unverified")}</dd></div>
       {info.worktree && <div><dt>{t("Git worktree")}</dt><dd>{info.worktree.path}
         {info.worktree.missing && <small>{t("The folder of this worktree is gone: the session continues in the folder of the project.")}</small>}</dd></div>}
+      {storageHost && <SessionStorageRow host={storageHost} />}
       <div><dt>{t("Provider")}</dt><dd>{info.provider ? <span className="with-logo"><ProviderIcon providerKey={info.provider} size={14} />{info.provider}</span> : t("Not recorded or unverified")}</dd></div>
       {conversationRead && <ClaudeCodeConversationRow read={conversationRead} />}
       <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>

@@ -711,6 +711,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .session-info-fields dt { margin-bottom: 3px; color: var(--muted); font-size: 11px; }
 .session-info-fields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 13px; }
 .session-info-fields small { display: block; color: var(--muted); }
+.session-storage-actions { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
 .session-info-dialog > footer { gap: 12px; flex-wrap: wrap; }
 .session-info-dialog > footer span { overflow-wrap: anywhere; }
 .session-info-dialog > footer > span:last-child { display: flex; flex-wrap: wrap; gap: 6px; }

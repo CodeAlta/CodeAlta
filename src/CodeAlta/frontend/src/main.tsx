@@ -361,6 +361,7 @@ import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
+import { createSessionStorageHost } from "./sessionStorage/sessionStorage";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
 import { aboutFacts, AboutSettings } from "./AboutDialog";
 import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
@@ -6890,7 +6891,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         selectSessionTab(tab); setDialog(null); return true;
       }} />}
     {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
-      demo={demoMode} onClose={() => setArchivedInfo(null)} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
+      demo={demoMode} onClose={() => setArchivedInfo(null)}
+      storage={owned && !demoMode ? createSessionStorageHost(workspaceApi.sessionStorage, workspaceApi.revealSessionStorage, status?.hostEpoch, row.id, row.createdAt) : null} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} unavailableReason={commandUnavailableReason} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
@@ -7466,6 +7468,7 @@ function SessionWorkspace({ sideQuestions, shellCommands, canAdmit, remoteContro
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
         ? () => readClaudeCodeConversation(claudeCodeOpenHostApi, status?.hostEpoch, session.id) : null}
+      storage={ownedSession && !demoMode ? createSessionStorageHost(workspaceApi.sessionStorage, workspaceApi.revealSessionStorage, status?.hostEpoch, session.id, session.createdAt) : null}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       spaceResources={sessionSpaces && !demoMode ? { spaces: sessionSpaces.spaces, read: () => sessionSpaces.read(session.id) } : null}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
