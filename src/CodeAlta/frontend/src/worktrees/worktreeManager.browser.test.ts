@@ -67,7 +67,7 @@ test("the window of the worktrees selects, asks, removes in part and says what b
       state.questions.splice(0).forEach(answer => answer([])); state.finishRemovals.splice(0).forEach(finish => finish());
       await Promise.resolve(); await Promise.resolve();
       Object.assign(state, { rows: [], hold: false, asked: 0, removals: [], outcomes: {}, lost: false, malformed: false,
-        holdRemovals: false, editors: [], editor: 'ok', closed: 0, changed: 0, shown: [] });
+        holdRemovals: false, editors: [], editor: 'ok', closed: 0, changed: 0, removed: [], shown: [] });
     })()`);
 
     await t.test("timer and focus refreshes coalesce while a slow inventory is pending", async () => {
@@ -155,6 +155,8 @@ test("the window of the worktrees selects, asks, removes in part and says what b
         assert.equal(await evaluate("document.querySelector('.worktree-results h3').textContent"), "4 of 5 removed, 1 not removed.");
         assert.equal(await evaluate("worktreesFixture.state.rows.length"), 4, "Every already-admitted removal finished.");
         assert.equal(await evaluate("worktreesFixture.state.changed"), 1);
+        assert.deepEqual(await evaluate("worktreesFixture.state.removed.map(path => path.split('\\\\').pop())"), ["quiet-heron", "amber-denali", "calm-egret", "pale-wren"],
+          "the window says which worktrees went, so that the disk usage marks them");
       } finally { await reset(); }
     });
 

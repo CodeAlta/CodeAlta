@@ -119,7 +119,10 @@ internal sealed class StorageService
             var measured = await _scanner!.ScanAsync(new ScanProgress(updates), cancellationToken).ConfigureAwait(false);
             updates.TryWrite(new("ok", new(measured.RootPath, measured.TotalBytes, measured.CompletedAt,
                 measured.Categories.Select(category => new StorageCategory(category.Id, category.Bytes, category.FileCount)).ToArray(),
-                measured.SkippedLinks, measured.SkippedEntries, measured.IsPartial))
+                measured.SkippedLinks, measured.SkippedEntries, measured.IsPartial)
+            {
+                OldScratchpadBytes = measured.OldScratchpadBytes, OldScratchpadFiles = measured.OldScratchpadFiles,
+            })
             { ProcessedFiles = measured.ProcessedFiles, ProcessedDirectories = measured.ProcessedDirectories });
             updates.TryComplete();
         }
@@ -213,7 +216,16 @@ internal sealed record StorageMeasurement(string RootPath,
     DateTimeOffset CompletedAt, IReadOnlyList<StorageCategory> Categories,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long SkippedLinks,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long SkippedEntries,
-    bool IsPartial);
+    bool IsPartial)
+{
+    /// <summary>Gets the bytes of scratchpad files old enough for startup cleanup by creation and last write.</summary>
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long OldScratchpadBytes { get; init; }
+
+    /// <summary>Gets the number of those files.</summary>
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long OldScratchpadFiles { get; init; }
+}
 internal sealed record StorageScanResponse(string Status, StorageMeasurement? Snapshot)
 {
     [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]

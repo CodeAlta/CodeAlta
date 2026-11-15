@@ -74,7 +74,7 @@ import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget }
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, claudeCodeTabProvider, automationsTab, isWorkflowsTab, workflowsTab, isWorkflowRunTab, workflowRunTab,bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
+import { activateFileTab, claudeCodeTabProvider, automationsTab, isWorkflowsTab, workflowsTab, isWorkflowRunTab, workflowRunTab,bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isDiskUsageTab, diskUsageTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -265,8 +265,11 @@ import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences
 import { AppearanceSettings, themeIcons } from "./AppearanceSettings";
 import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis";
 import { StorageSettings } from "./storage/StorageSettings";
+import { DiskUsagePanel } from "./diskUsage/DiskUsagePanel";
+import { createDiskUsageHub } from "./diskUsage/diskUsageHub";
+import "./diskUsage/diskUsage.css";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
-import { storage } from "#neoastra";
+import { diskUsage as diskUsageApi, storage } from "#neoastra";
 import { machines as machinesApi } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import { mcpApps as mcpAppsApi } from "#neoastra";
@@ -546,6 +549,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // whole, and the window is given what the shown space has of it, so that everything it lists and opens
   // (the Explorer, the tabs, the search, the work items) is the space's.
   const [spacesHub] = useState(() => createSpacesHub(spacesApi));
+  // The disk usage of the window: its tab and the Storage page show the one state and follow one measurement.
+  const [diskUsageHub] = useState(() => createDiskUsageHub(diskUsageApi));
   // The tabs that plugins provide: what they declare, what they ask of the window, and what they push to their tabs.
   const [canvasHub] = useState(() => createCanvasHub(canvasesApi));
   // The buttons of plugins that the user hid are a view state of this window, as its open tabs are.
@@ -3751,7 +3756,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "externalEditor": case "fileExplorer": { const origin = view === "workspace" ? terminalOrigin() : null; return !!origin && !!(origin.projectId || origin.sessionId); }
-      case "automations": case "workflows": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
+      case "automations": case "workflows": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": case "diskUsage": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -3863,6 +3868,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "canvases": openFile(canvasesTab); break;
       case "documentation": openDocumentation(); break;
       case "bookmarks": openFile(bookmarksTab); break;
+      case "diskUsage": openFile(diskUsageTab); break;
       case "reviews": openWorkItems({ projectId: null, kind: "review" }); break;
       case "bookmarkSession": if (selectedSession) void toggleSessionBookmark(selectedSession.id); break;
       case "bookmarkPrevious": case "bookmarkNext": {
@@ -6499,6 +6505,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               ? <BookmarksPanel key={fileTabKey(tab)} hub={bookmarkHost.hub} projects={(catalog.current ?? snapshot)?.projects ?? noBookmarkProjects}
                 onActivate={activateShown(tab, visible)} onGo={bookmarkHost.go} onOpenSession={id => void openAutomationSession(id)}
                 onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} />
+              : isDiskUsageTab(tab)
+              // Every project of the application, whatever the space shown: each space is a level.
+              ? <DiskUsagePanel key={fileTabKey(tab)} hub={diskUsageHub} epoch={owned ? status?.hostEpoch ?? null : null} spaces={spacesState.spaces}
+                visible={visible && view === "workspace" && !settingsOpen} onActivate={activateShown(tab, visible)}
+                onOpenSession={id => void openAutomationSession(id)} />
               : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
@@ -6715,6 +6726,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             return item ? () => { closeSettings(); openCanvasHere(item); } : undefined; })()} />
       : settingsSection === "speech" ? <SpeechSettings api={speechApi} speech={speech} epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
+          diskUsage={owned ? <DiskUsagePanel hub={diskUsageHub} epoch={status?.hostEpoch ?? null} spaces={spacesState.spaces}
+            embedded={{ onOpenTab: () => { closeSettings(); openFile(diskUsageTab); } }}
+            onOpenSession={id => { closeSettings(); void openAutomationSession(id); }} /> : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} spaceScope={resourceScope}
         space={settingsSpace} pickFolder={canPickFolder() ? initial => pickFolder(desktopShell.pickFolder, t("Choose a folder of skills"), initial) : undefined}
@@ -6858,7 +6872,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onSetUp={() => setUpMonorepo(subProjectsProject.id)}
       onOpenProject={id => { setDialog(null); selectProject(id); }} />}
     {dialog === "worktrees" && worktreesProject && owned && status?.hostEpoch && <WorktreeManager epoch={status.hostEpoch} project={worktreesProject}
-      onClose={() => setDialog(null)} onChanged={refreshSessionList}
+      onClose={() => setDialog(null)}
+      // The disk usage marks what went, wherever it is shown.
+      onChanged={removed => { refreshSessionList(); diskUsageHub.removed(worktreesProject.id, removed); }}
       onShowChanges={row => { const project = worktreesProject; setDialog(null); showChanges(project, null, row.project ? null : row.folder); }} />}
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}

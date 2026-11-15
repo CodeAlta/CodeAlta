@@ -3,8 +3,11 @@ import { sameFolder, worktreeFailure, type DeletedWorktree } from "./worktrees";
 
 /** A session of the catalog that records a checkout. */
 export type InventorySession = Readonly<{ id: string; title: string; updatedAt: string; running: boolean }>;
-/** Why a checkout is not removed: it is the one of the project or the main one, a session is at work in it, or git keeps it. */
-export type Protection = "main" | "in_use" | "locked";
+/**
+ * Why a checkout is not removed: it is the one of the project or the main one, a session is at work in it, git keeps it,
+ * or another worktree is inside its folder.
+ */
+export type Protection = "main" | "in_use" | "locked" | "holds_worktree";
 /**
  * A checkout of a project's repository, as the window of the worktrees shows it: what git lists, whether or not
  * a session still records it, with the sessions that do.
@@ -26,7 +29,7 @@ export const removalChunkSize = 4;
 const text = (value: unknown, limit: number): value is string => typeof value === "string" && value.length > 0 && value.length <= limit;
 const optional = (value: unknown, limit: number): value is string | null => value === null || text(value, limit);
 const time = (value: unknown): value is string => text(value, 64) && Number.isFinite(Date.parse(value));
-const protections: readonly unknown[] = ["main", "in_use", "locked"];
+const protections: readonly unknown[] = ["main", "in_use", "locked", "holds_worktree"];
 
 /** Accepts a well-formed `worktrees.inventory` answer for the asked project; anything else is its status. */
 export function inventoryReply(reply: unknown, projectId: string): Inventory | string {

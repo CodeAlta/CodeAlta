@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Storage;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -38,8 +39,6 @@ internal sealed class WorktreesService
     internal const int MaximumSessionsPerCheckout = 5;
 
     private const int MaximumPathLength = 4096;
-    private const int MaximumTitleLength = 200;
-    private const int MaximumIdLength = 256;
     private const int AbbreviatedCommitLength = 7;
 
     private readonly GitWorktreeService? _worktrees;
@@ -121,13 +120,14 @@ internal sealed class WorktreesService
                 worktree.Main || worktree.Path.Equals(checkout, PathComparison), worktree.Locked, worktree.Missing,
                 below == "." ? worktree.Path : Path.Combine(worktree.Path, below), busy.Contains(worktree.Path),
                 // The two are told apart: a project that lives in a worktree has the main checkout of its repository beside it.
-                worktree.Path.Equals(checkout, PathComparison)))],
+                worktree.Path.Equals(checkout, PathComparison))
+            { HoldsWorktree = CheckoutSessions.HoldsWorktree(worktree, worktrees) })],
             parent);
     }
 
     /// <summary>
     /// Removes a worktree of a project's repository. A worktree that holds changes that are not committed is
-    /// answered with <c>dirty</c> unless the request forces it; one a session is at work in, with <c>in_use</c>.
+    /// answered with <c>dirty</c> unless the request forces it; one a session is at work in, with <c>in_use</c>; one that holds another worktree in its folder, with <c>holds_worktree</c>.
     /// </summary>
     [NeoRpcMethod("remove", TimeoutMilliseconds = 600_000)]
     public async Task<WorktreeChangeResponse> RemoveAsync(WorktreeRemoveRequest request, CancellationToken cancellationToken)
@@ -140,7 +140,7 @@ internal sealed class WorktreesService
         if (await _worktrees!.ListAsync(root, cancellationToken).ConfigureAwait(false) is not { } worktrees) return new("not_repository");
         if (GitWorktreeService.Find(worktrees, request.Path!) is not { } target) return new("not_worktree");
         // A locked worktree is refused here: git would refuse it too, or leave one whose folder is gone listed without saying so.
-        if (Protection(target, GitWorktreeService.FindCheckoutRoot(root), BusyCheckouts().Contains(target.Path)) is { } protection) return new(protection);
+        if (CheckoutSessions.Protection(target, GitWorktreeService.FindCheckoutRoot(root), BusyCheckouts().Contains(target.Path), worktrees) is { } protection) return new(protection);
         // Not the caller's token: a removal that started is not left half done because a page went away.
         var outcome = await _worktrees.RemoveAsync(root, target.Path, request.Force, CancellationToken.None).ConfigureAwait(false);
         return new(outcome.Status, outcome.Message, outcome.BranchKept);
@@ -163,9 +163,9 @@ internal sealed class WorktreesService
         // What a window can show: the first ones git lists, the main checkout among them.
         IReadOnlyList<GitWorktree> worktrees = listed.Count > MaximumCheckouts ? [.. listed.Take(MaximumCheckouts)] : listed;
         var below = Path.GetRelativePath(checkout, root);
-        var working = _busy!();
-        var busy = BusyCheckouts(working);
-        var running = new HashSet<string>(working.Select(static session => session.SessionId), StringComparer.Ordinal);
+        // The sessions at work when the inventory was asked, and the checkouts they work in: one that starts, or a folder that
+        // changes, while the catalog is read is in the next one.
+        var work = CheckoutSessions.AtWork(_busy!());
 
         // What the catalog cannot say is not known: the checkouts are listed all the same.
         IReadOnlyList<AgentSessionMetadata> sessions = [];
@@ -182,34 +182,18 @@ internal sealed class WorktreesService
             }
         }
 
-        // The sessions of each checkout, by the folder each records: its worktree, else the folder it was created in.
-        var recorded = new Dictionary<string, List<AgentSessionMetadata>>(PathComparer);
-        var owners = new Dictionary<string, string?>(PathComparer);
-        foreach (var session in sessions)
-        {
-            var folder = string.IsNullOrWhiteSpace(session.WorktreePath) ? session.WorkspacePath : session.WorktreePath;
-            if (session.SessionId is not { Length: > 0 and <= MaximumIdLength } || !ValidPath(folder)) continue;
-            if (!owners.TryGetValue(folder!, out var owner)) owners[folder!] = owner = Owner(worktrees, folder!);
-            if (owner is null) continue;
-            if (!recorded.TryGetValue(owner, out var list)) recorded[owner] = list = [];
-            list.Add(session);
-        }
-
+        var join = CheckoutSessions.Join(worktrees, checkout, work, sessions);
         return new("ok", request.ProjectId,
-            [.. worktrees.Select(worktree =>
+            [.. join.Checkouts.Select(joined =>
             {
-                var own = recorded.GetValueOrDefault(worktree.Path) ?? [];
-                var project = worktree.Path.Equals(checkout, PathComparison);
-                var inUse = busy.Contains(worktree.Path);
+                var worktree = joined.Worktree;
                 return new WorktreeInventoryItem(worktree.Path, worktree.Name, worktree.Branch,
                     worktree.Head is { Length: >= AbbreviatedCommitLength } head ? head[..AbbreviatedCommitLength] : worktree.Head,
-                    worktree.Main || project, project, worktree.Locked, worktree.Missing,
-                    below == "." ? worktree.Path : Path.Combine(worktree.Path, below), inUse,
-                    Protection(worktree, checkout, inUse),
-                    [.. own.OrderByDescending(session => running.Contains(session.SessionId)).ThenByDescending(static session => session.UpdatedAt)
-                        .ThenBy(static session => session.SessionId, StringComparer.Ordinal).Take(MaximumSessionsPerCheckout)
-                        .Select(session => new WorktreeSessionItem(session.SessionId, Title(session), session.UpdatedAt, running.Contains(session.SessionId)))],
-                    own.Count, own.Count == 0 ? null : own.Max(static session => session.UpdatedAt));
+                    worktree.Main || joined.Project, joined.Project, worktree.Locked, worktree.Missing,
+                    below == "." ? worktree.Path : Path.Combine(worktree.Path, below), joined.InUse, joined.Protection,
+                    [.. joined.Sessions.Take(MaximumSessionsPerCheckout)
+                        .Select(session => new WorktreeSessionItem(session.SessionId, CheckoutSessions.Title(session), session.UpdatedAt, join.Running.Contains(session.SessionId)))],
+                    joined.SessionCount, joined.LastUsedAt);
             })],
             sessionsKnown, listed.Count > MaximumCheckouts);
     }
@@ -261,31 +245,6 @@ internal sealed class WorktreesService
         return new("ok", [.. results]);
     }
 
-    /// <summary>
-    /// The bytes of the files of a folder and of its folders, without following a link (a junction to another folder, a
-    /// link to a file): what removing the folder frees. What cannot be read counts for nothing.
-    /// </summary>
-    /// <param name="folder">The folder.</param>
-    /// <returns>The bytes; 0 for a folder that cannot be read.</returns>
-    internal static long FolderBytes(string folder)
-    {
-        try
-        {
-            var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
-            var files = new System.IO.Enumeration.FileSystemEnumerable<long>(folder, static (ref System.IO.Enumeration.FileSystemEntry entry) => entry.Length, options)
-            {
-                ShouldIncludePredicate = static (ref System.IO.Enumeration.FileSystemEntry entry) => !entry.IsDirectory,
-            };
-            long total = 0;
-            foreach (var length in files) total += length;
-            return total;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return 0;
-        }
-    }
-
     // One worktree of a request: what git lists now and the sessions at work now decide, not what the window showed.
     private async Task<WorktreeRemoval> RemoveOneAsync(string root, string? checkout, string folder, string asked, HashSet<string> gone, HashSet<string> discard,
         bool keepUsed, bool deleteBranch)
@@ -298,8 +257,8 @@ internal sealed class WorktreesService
                 // A folder that was gone is no longer listed either: something else made git forget it meanwhile,
                 // which is what was asked. Nothing here prunes.
                 return new(asked, gone.Contains(folder) ? "ok" : "not_worktree");
-            var busy = BusyCheckouts(_busy!()).Contains(target.Path);
-            if (Protection(target, checkout, busy) is { } protection) return new(asked, protection);
+            var busy = BusyCheckouts().Contains(target.Path);
+            if (CheckoutSessions.Protection(target, checkout, busy, worktrees) is { } protection) return new(asked, protection);
             if (keepUsed)
             {
                 if (await UsedNowAsync(worktrees).ConfigureAwait(false) is not { } used) return new(asked, "sessions_unavailable");
@@ -307,7 +266,7 @@ internal sealed class WorktreesService
             }
 
             // What it holds, read right before git removes it: the window says how much the removal freed.
-            var size = target.Missing ? 0 : FolderBytes(target.Path);
+            var size = target.Missing ? 0 : FolderUsage.Measure(target.Path, CancellationToken.None).Bytes;
             var outcome = await _worktrees.RemoveAsync(root, target.Path, discard.Contains(folder), deleteBranch, CancellationToken.None).ConfigureAwait(false);
             return new(asked, outcome.Status, outcome.Message, outcome.BranchKept, outcome.BranchDeleted) { Bytes = outcome.Status == "ok" ? size : 0 };
         }
@@ -500,77 +459,19 @@ internal sealed class WorktreesService
 
     // The roots of the checkouts a session is at work in. A session works in the nearest checkout that holds
     // its folder: a worktree placed inside the repository is not the repository's own checkout.
-    private HashSet<string> BusyCheckouts() => BusyCheckouts(_busy!());
-
-    private static HashSet<string> BusyCheckouts(IReadOnlyList<SessionWorkFolder> working)
-    {
-        var checkouts = new HashSet<string>(PathComparer);
-        foreach (var session in working)
-        {
-            if (GitWorktreeService.FindCheckoutRoot(session.Folder) is { } checkout) checkouts.Add(checkout);
-        }
-
-        return checkouts;
-    }
+    private HashSet<string> BusyCheckouts() => CheckoutSessions.BusyCheckouts(_busy!());
 
     // The checkouts the sessions of the catalog work in now; null when the catalog cannot be read.
     private async Task<HashSet<string>?> UsedNowAsync(IReadOnlyList<GitWorktree> worktrees)
     {
         try
         {
-            return UsedCheckouts(worktrees, await _sessions!(CancellationToken.None).ConfigureAwait(false));
+            return CheckoutSessions.UsedCheckouts(worktrees, await _sessions!(CancellationToken.None).ConfigureAwait(false));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Data.Common.DbException)
         {
             return null;
         }
-    }
-
-    // The checkouts the sessions of the catalog work in, by the folder each records: its worktree, else the folder
-    // it was created in, as the inventory counts them.
-    private static HashSet<string> UsedCheckouts(IReadOnlyList<GitWorktree> worktrees, IReadOnlyList<AgentSessionMetadata> sessions)
-    {
-        var used = new HashSet<string>(PathComparer);
-        foreach (var session in sessions)
-        {
-            var folder = string.IsNullOrWhiteSpace(session.WorktreePath) ? session.WorkspacePath : session.WorktreePath;
-            if (ValidPath(folder) && Owner(worktrees, folder!) is { } owner) used.Add(owner);
-        }
-
-        return used;
-    }
-
-    // Why a checkout is not removed: it is the one of the project or the main one of the repository, a session is
-    // at work in it, or git keeps it. Null for a worktree that can go.
-    private static string? Protection(GitWorktree worktree, string? checkout, bool busy)
-        => worktree.Main || worktree.Path.Equals(checkout, PathComparison) ? "main" : busy ? "in_use" : worktree.Locked ? "locked" : null;
-
-    // The checkout a folder that a session records is in. A folder that is there is in the nearest checkout above
-    // it; one that is gone is only in a worktree git still lists without its folder, never in the checkout around it.
-    private static string? Owner(IReadOnlyList<GitWorktree> worktrees, string folder)
-    {
-        if (GitWorktreeService.Find(worktrees, folder) is not { } holder) return null;
-        if (holder.Missing) return holder.Path;
-        return Directory.Exists(folder) && GitWorktreeService.FindCheckoutRoot(folder) is { } at && at.Equals(holder.Path, PathComparison) ? holder.Path : null;
-    }
-
-    // The title a session is listed with, on one line and short enough for a row.
-    private static string Title(AgentSessionMetadata session)
-    {
-        var title = SessionRuntimeService.ListedTitle(session, null, null);
-        var text = new System.Text.StringBuilder(Math.Min(title.Length, MaximumTitleLength));
-        for (var index = 0; index < title.Length && text.Length < MaximumTitleLength; index++)
-        {
-            var character = title[index];
-            if (char.IsHighSurrogate(character) && index + 1 < title.Length && char.IsLowSurrogate(title[index + 1]))
-            {
-                if (text.Length + 2 > MaximumTitleLength) break;
-                text.Append(character).Append(title[++index]);
-            }
-            else if (!char.IsSurrogate(character)) text.Append(char.IsControl(character) ? ' ' : character);
-        }
-
-        return text.ToString().Trim() is { Length: > 0 } shown ? shown : session.SessionId;
     }
 
     private static string Normalize(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
@@ -598,19 +499,7 @@ internal sealed class WorktreesService
         return Directory.Exists(worktree) && GitWorktreeService.SameRepository(root, worktree) ? (Path.GetFullPath(worktree), "ok") : (null, "not_worktree");
     }
 
-    private static bool ValidPath(string? path)
-    {
-        if (path is not { Length: > 0 and <= MaximumPathLength } || path.AsSpan().ContainsAnyInRange('\0', '\u001f')) return false;
-        try
-        {
-            // A path that cannot be made whole names no folder.
-            return Path.IsPathFullyQualified(path) && Path.GetFullPath(path).Length > 0;
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-    }
+    private static bool ValidPath(string? path) => CheckoutSessions.ValidPath(path);
 }
 
 /// <summary>Asks for the checkouts of a project's repository.</summary>
@@ -642,7 +531,14 @@ internal sealed record WorktreesListResponse(string Status, string? ProjectId, W
 /// Whether it is the checkout the project lives in: the one a request reads when it names no worktree. For a
 /// project that lives in a linked worktree it is not the main checkout of the repository, which is listed too.
 /// </param>
-internal sealed record WorktreeItem(string Path, string Name, string? Branch, string? Head, bool Main, bool Locked, bool Missing, string Folder, bool Busy, bool Project = false);
+internal sealed record WorktreeItem(string Path, string Name, string? Branch, string? Head, bool Main, bool Locked, bool Missing, string Folder, bool Busy, bool Project = false)
+{
+    /// <summary>
+    /// Gets whether git lists another worktree of the repository inside its folder: removing it would delete that one with
+    /// it, so it is not removed (<c>holds_worktree</c>).
+    /// </summary>
+    public bool HoldsWorktree { get; init; }
+}
 
 /// <summary>Asks to remove a worktree.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
@@ -685,7 +581,7 @@ internal sealed record WorktreeInventoryResponse(string Status, string? ProjectI
 /// <param name="Missing">Whether its folder is gone while git still lists it.</param>
 /// <param name="Folder">The folder of the project inside this checkout: what a request names to read its changes.</param>
 /// <param name="Busy">Whether a session is at work in it right now.</param>
-/// <param name="Protection">Why it is not removed: <c>main</c>, <c>in_use</c> or <c>locked</c>; null for a worktree that can go.</param>
+/// <param name="Protection">Why it is not removed: <c>main</c>, <c>in_use</c>, <c>locked</c> or <c>holds_worktree</c> (another worktree is inside its folder); null for a worktree that can go.</param>
 /// <param name="Sessions">The sessions of the catalog that record it: the ones at work, then the most recent, a few at most.</param>
 /// <param name="SessionCount">How many sessions of the catalog record it.</param>
 /// <param name="LastUsedAt">When the most recent of those sessions was last updated; null when no session records it.</param>

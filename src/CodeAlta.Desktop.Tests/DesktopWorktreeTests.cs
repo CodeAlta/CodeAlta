@@ -26,42 +26,6 @@ public sealed class DesktopWorktreeTests
     private const string Epoch = "11111111-1111-4111-8111-111111111111";
 
     [TestMethod]
-    public void TheSizeOfAWorktree_CountsItsFiles_WithoutFollowingALinkToAnotherFolder()
-    {
-        var root = Directory.CreateTempSubdirectory("codealta-worktree-size-");
-        try
-        {
-            var tree = Directory.CreateDirectory(Path.Combine(root.FullName, "tree"));
-            File.WriteAllBytes(Path.Combine(tree.FullName, "a.txt"), new byte[10]);
-            File.WriteAllBytes(Path.Combine(Directory.CreateDirectory(Path.Combine(tree.FullName, "src", "deep")).FullName, "b.bin"), new byte[2048]);
-            var elsewhere = Directory.CreateDirectory(Path.Combine(root.FullName, "elsewhere"));
-            File.WriteAllBytes(Path.Combine(elsewhere.FullName, "big.bin"), new byte[100_000]);
-            if (OperatingSystem.IsWindows())
-            {
-                // A junction, as a package manager makes one, to a folder the removal does not delete.
-                using var link = Process.Start(new ProcessStartInfo("cmd.exe", ["/d", "/c", "mklink", "/J", Path.Combine(tree.FullName, "node_modules"), elsewhere.FullName])
-                    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
-                link.WaitForExit();
-                Assert.AreEqual(0, link.ExitCode, "the junction is made");
-            }
-            else
-            {
-                Directory.CreateSymbolicLink(Path.Combine(tree.FullName, "node_modules"), elsewhere.FullName);
-            }
-
-            Assert.AreEqual(2058L, WorktreesService.FolderBytes(tree.FullName));
-            Assert.AreEqual(0L, WorktreesService.FolderBytes(Path.Combine(root.FullName, "gone")), "a folder that is not there holds nothing");
-        }
-        finally
-        {
-            // The link goes first, without what it points to.
-            var link = Path.Combine(root.FullName, "tree", "node_modules");
-            if (Directory.Exists(link)) Directory.Delete(link);
-            root.Delete(recursive: true);
-        }
-    }
-
-    [TestMethod]
     public async Task WorkStartedOnANamedBranch_InTheProjectFolder_MovesTheFolderToANewBranch()
     {
         using var repository = await Repository.CreateAsync();
@@ -790,6 +754,145 @@ public sealed class DesktopWorktreeTests
         Assert.AreEqual("unavailable", (await new WorktreesService().InventoryAsync(new(Epoch, project.Id), default)).Status);
         var plain = await repository.Projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(repository.Home, "plain")).FullName);
         Assert.AreEqual("not_repository", (await service.InventoryAsync(new(Epoch, plain.Id), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task AWorktreeThatHoldsAnotherWorktree_IsNotRemoved_AndTheWindowSaysWhy()
+    {
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var outer = Path.Combine(repository.Home, "outer");
+        repository.Git("worktree", "add", "-q", "-b", "outer", outer);
+        // A worktree inside its folder, which git ignores there: the outer one looks clean.
+        Directory.CreateDirectory(Path.Combine(outer, "nested"));
+        File.AppendAllText(Path.Combine(repository.Root, ".git", "info", "exclude"), "nested/\n");
+        var inner = Path.Combine(outer, "nested", "inner");
+        repository.Git("worktree", "add", "-q", "-b", "inner", inner);
+        File.WriteAllText(Path.Combine(inner, "work.txt"), "not committed");
+        var service = repository.Manager(static () => [], static () => []);
+
+        var listed = await service.ListAsync(new(Epoch, project.Id), default);
+        var inventory = await service.InventoryAsync(new(Epoch, project.Id), default);
+        var removed = await service.RemoveAsync(new(Epoch, project.Id, outer), default);
+        var many = await service.RemoveManyAsync(new(Epoch, project.Id, [outer]), default);
+
+        Assert.AreEqual((true, false), (listed.Worktrees.Single(item => item.Path == outer).HoldsWorktree, listed.Worktrees.Single(item => item.Path == inner).HoldsWorktree));
+        Assert.AreEqual(("holds_worktree", null as string), (inventory.Worktrees.Single(item => item.Path == outer).Protection, inventory.Worktrees.Single(item => item.Path == inner).Protection));
+        Assert.AreEqual("holds_worktree", removed.Status);
+        Assert.AreEqual("holds_worktree", many.Results.Single().Status);
+        Assert.IsTrue(File.Exists(Path.Combine(inner, "work.txt")));
+    }
+
+    [TestMethod]
+    public async Task Inventory_TakesTheSessionsAtWork_BeforeItReadsTheCatalog()
+    {
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var used = await repository.Worktrees.CreateAsync(project);
+        var busy = new List<SessionWorkFolder>();
+        // A session starts while the catalog is read: the inventory says what was at work when it was asked.
+        var service = repository.Manager(() => [.. busy], () =>
+        {
+            busy.Add(new("late", used.Root!, true));
+            return [];
+        });
+
+        var inventory = await service.InventoryAsync(new(Epoch, project.Id), default);
+
+        var item = inventory.Worktrees.Single(worktree => worktree.Path == used.Root);
+        Assert.AreEqual((false, null as string), (item.Busy, item.Protection));
+    }
+
+    [TestMethod]
+    public async Task Inventory_FindsTheCheckoutsAtWork_BeforeItReadsTheCatalog()
+    {
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var worktree = (await repository.Worktrees.CreateAsync(project)).Root!;
+        var sub = Directory.CreateDirectory(Path.Combine(worktree, "sub")).FullName;
+        var busy = new List<SessionWorkFolder> { new("working", sub, true) };
+        // While the catalog is read, a repository of its own appears in the folder the session works in.
+        var service = repository.Manager(() => [.. busy], () =>
+        {
+            Directory.CreateDirectory(Path.Combine(sub, ".git"));
+            return [];
+        });
+
+        var item = (await service.InventoryAsync(new(Epoch, project.Id), default)).Worktrees.Single(listed => listed.Path == worktree);
+
+        Assert.AreEqual((true, "in_use"), (item.Busy, item.Protection));
+    }
+
+    [TestMethod]
+    public async Task ASessionAtWorkInAFolderThatBecameALink_KeepsItsWorktreeBusy_AndTheWorktreeStays()
+    {
+        TestLinks.RequireSymbolicLinks();
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var worktree = (await repository.Worktrees.CreateAsync(project)).Root!;
+        var sub = Directory.CreateDirectory(Path.Combine(worktree, "sub")).FullName;
+        var busy = new List<SessionWorkFolder> { new("working", sub, true) };
+        // The folder the session works in is renamed, and a link to a folder outside the repository takes its name.
+        Directory.Move(sub, Path.Combine(worktree, "sub-moved"));
+        Directory.CreateSymbolicLink(sub, Directory.CreateDirectory(Path.Combine(repository.Home, "outside")).FullName);
+        var service = repository.Manager(() => [.. busy], static () => []);
+
+        var item = (await service.InventoryAsync(new(Epoch, project.Id), default)).Worktrees.Single(listed => listed.Path == worktree);
+        var removed = await service.RemoveAsync(new(Epoch, project.Id, worktree, Force: true), default);
+        var many = await service.RemoveManyAsync(new(Epoch, project.Id, [worktree], Discard: [worktree]), default);
+
+        Assert.AreEqual((true, "in_use"), (item.Busy, item.Protection));
+        Assert.AreEqual("in_use", removed.Status);
+        Assert.AreEqual("in_use", many.Results.Single().Status);
+        Assert.IsTrue(Directory.Exists(worktree));
+    }
+
+    [TestMethod]
+    public async Task AWorktreeReplacedByALinkToAnother_DoesNotTakeTheSessionsOfTheOther_WhichKeepUsedKeeps()
+    {
+        TestLinks.RequireSymbolicLinks();
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var first = (await repository.Worktrees.CreateAsync(project)).Root!;
+        var second = (await repository.Worktrees.CreateAsync(project)).Root!;
+        Repository.Delete(first);
+        Directory.CreateSymbolicLink(first, second);
+        var sessions = new List<AgentSessionMetadata> { Recorded("in-second", new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero), repository.Root, second) };
+        var service = repository.Manager(static () => [], () => sessions);
+
+        var inventory = await service.InventoryAsync(new(Epoch, project.Id), default);
+        var removal = await service.RemoveManyAsync(new(Epoch, project.Id, [second], KeepUsed: true), default);
+
+        Assert.AreEqual((0, 1), (inventory.Worktrees.Single(item => item.Path == first).SessionCount, inventory.Worktrees.Single(item => item.Path == second).SessionCount));
+        Assert.AreEqual("used", removal.Results.Single().Status);
+        Assert.IsTrue(File.Exists(Path.Combine(second, "readme.md")));
+    }
+
+    [TestMethod]
+    public async Task WorktreesWhoseNamesDifferOnlyInCase_AreToldApartAsTheWindowAlwaysDid()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Inconclusive("Windows compares the paths of the worktrees without case.");
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        // Two worktrees git records on another volume, whose folders are not there: tree and TREE.
+        var volume = Path.Combine(repository.Home, "other-volume");
+        string lower = Path.Combine(volume, "tree"), upper = Path.Combine(volume, "TREE");
+        foreach (var (name, path) in new[] { ("w1", lower), ("w2", upper) })
+        {
+            var made = Path.Combine(repository.Home, name);
+            repository.Git("worktree", "add", "-q", "-b", name, made);
+            File.WriteAllText(Path.Combine(repository.Root, ".git", "worktrees", name, "gitdir"), Path.Combine(path, ".git") + "\n");
+            Repository.Delete(made);
+        }
+
+        // One session in each: whichever git lists first, neither takes the session of the other.
+        var day = new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero);
+        var sessions = new List<AgentSessionMetadata> { Recorded("in-lower", day, repository.Root, lower), Recorded("in-upper", day, repository.Root, upper) };
+        var inventory = await repository.Manager(static () => [], () => sessions).InventoryAsync(new(Epoch, project.Id), default);
+
+        string[] Ids(string path) => [.. inventory.Worktrees.Single(item => item.Path == path).Sessions.Select(static session => session.Id)];
+        CollectionAssert.AreEqual(new[] { "in-lower" }, Ids(lower));
+        CollectionAssert.AreEqual(new[] { "in-upper" }, Ids(upper));
     }
 
     [TestMethod]

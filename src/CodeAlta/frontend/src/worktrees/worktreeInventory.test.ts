@@ -36,6 +36,15 @@ test("the inventory is taken only when it is whole and for the asked project", (
   assert.equal(inventoryReply(null, "p"), "read_failed");
 });
 
+test("a worktree that holds another in its folder is listed, marked and never asked to go", () => {
+  const holder = row({ protection: "holds_worktree" });
+  const reply = inventoryReply({ status: "ok", projectId: "p", sessionsKnown: true, worktrees: [holder] }, "p");
+  assert.notEqual(typeof reply, "string", "the window still lists the worktrees");
+  assert.equal(typeof reply === "string" ? null : reply.rows[0].protection, "holds_worktree");
+  assert.equal(removable(holder), false);
+  assert.equal(removalReason("holds_worktree", null, t), "Another worktree is inside its folder: remove that one first.");
+});
+
 test("only a worktree that nothing protects can be asked to go", () => {
   assert.equal(removable(row()), true);
   assert.equal(removable(row({ missing: true })), true, "a worktree whose folder is gone is forgotten");

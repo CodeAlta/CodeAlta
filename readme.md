@@ -90,6 +90,7 @@ CodeAlta Desktop brings together:
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer. `Ctrl+F` finds in the session you are in, with every match marked and counted.
 - **Code & Git**: search and edit files, run terminals and inspect diffs; [paste the commands of an answer](https://codealta.io/docs/workspace/code/#commands-from-a-message) in the terminal of its session, to check them before you press Enter.
 - **Worktrees**: give sessions separate checkouts and branches, move a session to another worktree with its conversation; manage and clean them up.
+- **[Disk usage](https://codealta.io/docs/disk-usage/)**: see what projects, worktrees and sessions take on disk, with the git state of each checkout; clean build output and remove worktrees.
 - **Prompt suggestions**: after a turn, the model suggests the next prompt in the empty composer, with any provider; `Tab` or `→` takes it.
 - **Session titles**: a title you give stays; other sessions are titled from the first prompt, the last message or by the model, as you choose.
 - **Work items**: review agent-proposed tasks and plans in an Inbox; start them, keep them in the Backlog or dismiss them; [tag tasks](https://codealta.io/docs/work-items/#tags) and name them by their short id; follow the reviews in flight.

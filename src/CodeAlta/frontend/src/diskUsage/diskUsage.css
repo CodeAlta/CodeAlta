@@ -1,0 +1,122 @@
+/* The disk usage, a tab or a view of the Storage page: a heading, the table of the level shown with the donut it is the
+   legend of (the layout of the Storage card, `storage-distribution`), and the dialog of a clean. */
+.disk-usage-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--text); container: disk-usage / inline-size; }
+.disk-usage-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 20px 12px; border-bottom: 1px solid var(--line); }
+.disk-usage-heading { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; }
+.disk-usage-heading > svg { color: var(--accent); }
+.disk-usage-heading h1 { margin: 0; font-size: 17px; }
+.disk-usage-total { color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
+.disk-usage-tools { display: flex; flex: 1 1 240px; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.disk-usage-age { color: var(--muted); font-size: 12px; }
+.disk-usage-body { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 20px 16px; overflow: auto; scrollbar-gutter: stable; }
+.disk-usage-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.disk-usage-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; font-size: 12.5px; }
+.disk-usage-progress small { color: var(--muted); }
+.disk-usage-progress code { flex: 1 1 200px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.disk-usage-unreadable ul { margin: 4px 0 0; padding-left: 18px; }
+.disk-usage-unreadable code { overflow-wrap: anywhere; }
+.disk-usage-empty { flex: 1; }
+/* As high at the top level, with one name, as below it, with links: the table under it keeps its place. */
+.disk-usage-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; min-height: 24px; font-size: 13px; }
+.disk-usage-trail > button { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--accent); cursor: pointer; font: inherit; }
+.disk-usage-trail > button:hover, .disk-usage-trail > button:focus-visible { background: var(--panel-3); }
+.disk-usage-trail > [aria-current] { padding: 2px 4px; font-weight: 600; }
+.disk-usage-trail > svg { color: var(--muted); }
+/* The donut goes below the table, as on a narrow Storage card, until the table has the room of its columns beside it:
+   at the level of the worktrees, the widest, about 680 pixels of columns, then the gap and the 168 of the donut. The Storage card in Settings is wider. */
+.disk-usage-panel .disk-usage-distribution[data-chart] { grid-template-columns: minmax(0, 1fr); }
+@container disk-usage (min-width: 870px) {
+  .disk-usage-panel .disk-usage-distribution[data-chart] { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+}
+/* The donut keeps the small size of the Storage card at every width: the table has the room. */
+.disk-usage-panel .storage-distribution .storage-donut { width: 168px; }
+.disk-usage-panel .storage-distribution .storage-donut .chart-surface { height: 168px; }
+.disk-usage-table-scroll { flex: none; max-width: 100%; overflow-x: auto; }
+.disk-usage-swatch { flex: none; width: 9px; height: 9px; }
+.disk-usage-swatch.storage-swatch { position: static; }
+.disk-usage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
+.disk-usage-table th { padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-weight: 600; text-align: left; white-space: nowrap; }
+.disk-usage-table th > button { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.disk-usage-table th > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* One height for every row, with or without a checkbox or buttons. */
+.disk-usage-table td { height: 30px; padding: 0 8px; vertical-align: middle; }
+.disk-usage-row[data-selected] > td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.disk-usage-cell-select { width: 28px; }
+/* The table fills the room left of the donut at every level, so the donut keeps its place: the name takes what the other columns leave.
+   A long name is cut; its path is in its tooltip. */
+.disk-usage-cell-name { min-width: 9rem; max-width: 0; width: 100%; }
+.disk-usage-cell-size, .disk-usage-cell-build { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.disk-usage-table th.disk-usage-cell-size, .disk-usage-table th.disk-usage-cell-build { text-align: right; }
+.disk-usage-cell-size[data-state="unknown"], .disk-usage-cell-build[data-state="unknown"] { color: var(--muted); font-style: italic; }
+.disk-usage-cell-used { white-space: nowrap; }
+/* The buttons of a row have a column of their own, as wide as three buttons at every level, and show when the row is pointed at or holds the focus. */
+.disk-usage-table .disk-usage-cell-actions { width: 72px; min-width: 72px; padding-block: 0; white-space: nowrap; text-align: right; }
+.disk-usage-table td.disk-usage-cell-actions > * { opacity: 0; pointer-events: none; }
+.disk-usage-row:hover > td.disk-usage-cell-actions > *, .disk-usage-row:focus-within > td.disk-usage-cell-actions > * { opacity: 1; pointer-events: auto; }
+/* Every row has the height of a line of text, with or without buttons: the buttons of a row fit in it. */
+.disk-usage-cell-actions .bp6-button { min-width: 22px; min-height: 22px; height: 22px; padding: 0 4px; }
+.disk-usage-cell-select .bp6-control { display: flex; align-items: center; min-height: 16px; margin: 0; }
+.disk-usage-cell-select .bp6-control .bp6-control-indicator { margin-top: 0; }
+.disk-usage-name { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.disk-usage-name > svg { flex: none; color: var(--muted); }
+.disk-usage-name > strong, .disk-usage-open { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.disk-usage-open { max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-weight: 600; text-align: left; }
+.disk-usage-open:hover { text-decoration: underline; }
+.disk-usage-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.disk-usage-detail { display: block; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.disk-usage-detail[data-problem] { color: var(--orange, var(--muted)); }
+.disk-usage-mark { padding: 0 6px; border-radius: 8px; background: var(--panel-3); color: var(--muted); font-size: 11px; line-height: 16px; white-space: nowrap; }
+.disk-usage-mark[data-tone="busy"] { background: color-mix(in srgb, var(--green, var(--accent)) 18%, transparent); color: var(--text); }
+.disk-usage-mark[data-tone="missing"] { background: color-mix(in srgb, var(--orange, var(--accent)) 18%, transparent); color: var(--text); }
+.disk-usage-muted { color: var(--muted); }
+.disk-usage-verdict { display: inline-flex; flex-wrap: nowrap; white-space: nowrap; align-items: center; gap: 3px 6px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; }
+/* A verdict with reasons is underlined, dotted, as a word that says more when clicked. */
+button.disk-usage-verdict:not(:disabled) { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+button.disk-usage-verdict:not(:disabled):hover { text-decoration-style: solid; }
+button.disk-usage-verdict:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.disk-usage-verdict[data-verdict="has_local_work"] { color: var(--orange, var(--text)); font-weight: 600; }
+.disk-usage-verdict[data-verdict="nothing_local"] { color: var(--green, var(--text)); }
+.disk-usage-reasons .bp6-popover-content { max-width: 420px; padding: 8px 12px; }
+.disk-usage-reasons ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.5; }
+.disk-usage-none { color: var(--muted); text-align: center; }
+/* Inside the Storage card: the page scrolls, and the card gives the room around it. */
+.disk-usage-panel[data-embedded] { height: auto; background: transparent; }
+.disk-usage-panel[data-embedded] .disk-usage-header { padding: 0 0 8px; border-bottom: 0; }
+.disk-usage-panel[data-embedded] .disk-usage-tools { flex-basis: auto; }
+.disk-usage-panel[data-embedded] .disk-usage-body { padding: 0; overflow: visible; }
+.disk-usage-panel[data-embedded] .disk-usage-footer { padding-inline: 0; }
+.disk-usage-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 20px; border-top: 1px solid var(--line); }
+/* In a narrow tab the columns that say least go: their figures are in the rows of the next level. */
+@container disk-usage (max-width: 640px) {
+  .disk-usage-header, .disk-usage-body, .disk-usage-footer { padding-inline: 12px; }
+  .disk-usage-cell-build { display: none; }
+  /* Narrow: the marks go under the name rather than past the edge. */
+  .disk-usage-name { flex-wrap: wrap; }
+}
+@container disk-usage (max-width: 480px) {
+  .disk-usage-cell-used, .disk-usage-cell-git { display: none; }
+}
+
+/* The dialog of a clean. */
+.disk-usage-clean { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.disk-usage-clean-body { flex: 1; min-height: 0; padding: 12px 16px; overflow: auto; }
+.disk-usage-clean-body > p:first-child { margin-top: 0; }
+.disk-usage-clean-checkout { margin-bottom: 14px; }
+.disk-usage-clean-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 0 6px; font-size: 13px; }
+.disk-usage-clean-heading code { min-width: 0; max-width: 100%; overflow: hidden; color: var(--muted); font-size: 11.5px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.disk-usage-clean-folders { margin: 0; padding: 0; list-style: none; }
+.disk-usage-clean-folders li { padding: 2px 0; }
+.disk-usage-clean-folders .bp6-control { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; }
+.disk-usage-clean-folders code { overflow-wrap: anywhere; }
+.disk-usage-clean-figures { color: var(--muted); font-size: 12px; }
+.disk-usage-clean-blocked ul, .disk-usage-clean-results { margin: 0; padding: 0; list-style: none; }
+.disk-usage-clean-blocked li { display: flex; flex-wrap: wrap; gap: 2px 8px; padding: 3px 0; }
+.disk-usage-clean-blocked li > span { color: var(--muted); }
+.disk-usage-clean-results > li { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.disk-usage-result-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.disk-usage-result-folders { margin: 2px 0 0; padding-left: 16px; }
+.disk-usage-result-folders li { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.disk-usage-result-folders code { overflow-wrap: anywhere; }
+.disk-usage-clean-progress { flex: 1; }
+.disk-usage-clean-total { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.disk-usage-clean-footer { display: flex; justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }

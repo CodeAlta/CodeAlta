@@ -45,6 +45,12 @@ test("Storage edits valid durations only and measures independently without clea
     const act = (script: string) => evaluate(`(async () => { ${script}; for (let turn = 0; turn < 4; turn++) await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))); return true; })()`);
     const until = async (expression: string) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
       if (${expression}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`), true, expression);
+    // STORAGE_SHOTS names a folder that receives pictures to look at.
+    const capture = async (name: string) => {
+      if (!process.env.STORAGE_SHOTS) return;
+      const shot = await command("Page.captureScreenshot", { format: "png" }) as { data?: string };
+      await writeFile(join(process.env.STORAGE_SHOTS, `${name}.png`), Buffer.from(shot.data!, "base64"));
+    };
     const f = "window.storageFixture", state = `${f}.state`, amount = "document.querySelector('#storage-retention-amount')";
     const mode = "document.querySelector('#storage-retention-mode')", unit = "document.querySelector('select[aria-label=\"Retention unit\"]')";
     const button = (text: string) => `[...document.querySelectorAll('button')].find(button => button.textContent === ${JSON.stringify(text)})`;
@@ -52,7 +58,8 @@ test("Storage edits valid durations only and measures independently without clea
     const input = (value: string) => act(`${amount}.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(${amount}, ${JSON.stringify(value)}); ${amount}.dispatchEvent(new Event('input', { bubbles: true }))`);
     const key = async (value: string, code: number) => { await command("Input.dispatchKeyEvent", { type: "keyDown", key: value, code: value, windowsVirtualKeyCode: code }); await command("Input.dispatchKeyEvent", { type: "keyUp", key: value, code: value, windowsVirtualKeyCode: code }); await act(""); };
     const snapshot = (bytes: number, partial = false) => ({ status: "ok", snapshot: { rootPath: "/fixture/.alta", totalBytes: String(bytes), completedAt: "2026-10-10T10:00:00Z",
-      categories: [{ id: "sessions", bytes: String(Math.floor(bytes * .75)), fileCount: "3" }, { id: "configuration", bytes: String(bytes - Math.floor(bytes * .75)), fileCount: "1" }], skippedLinks: partial ? "2" : "0", skippedEntries: partial ? "1" : "0", isPartial: partial } });
+      categories: [{ id: "sessions", bytes: String(Math.floor(bytes * .75)), fileCount: "3" }, { id: "configuration", bytes: String(bytes - Math.floor(bytes * .75)), fileCount: "1" }], skippedLinks: partial ? "2" : "0", skippedEntries: partial ? "1" : "0", isPartial: partial,
+      oldScratchpadBytes: bytes ? "3145728" : "0", oldScratchpadFiles: bytes ? "12" : "0" } });
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1000, height: 1100, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -121,6 +128,7 @@ test("Storage edits valid durations only and measures independently without clea
     await act(`${state}.saveStatus = 'ok'`);
 
     // Cancel/supersede cannot publish late results; closing Settings aborts only its own measurement.
+    assert.equal(await evaluate("document.querySelector('.storage-scratchpad-old')"), null, "before the scan, nothing is said of the old scratchpad files");
     await act(`${button("Cancel scan")}.click()`);
     assert.equal(await evaluate(`${state}.scans.at(-1).signal.aborted`), true);
     await act(`${state}.scans.at(-1).resolve(${JSON.stringify(snapshot(999))})`);
@@ -132,6 +140,10 @@ test("Storage edits valid durations only and measures independently without clea
     await act(`${state}.scans.at(-1).resolve(${JSON.stringify(snapshot(400, true))})`);
     await act(`${state}.scans.at(-2).resolve(${JSON.stringify(snapshot(999))})`);
     assert.equal(await evaluate("document.querySelector('.storage-total').textContent"), "400 B");
+    // The cleanup says, with its switch, what the next start removes of the scratchpad of this instance: nothing while it is off.
+    assert.equal(await evaluate("document.querySelector('.storage-scratchpad-old')"), null);
+    await act("document.querySelector('#storage-scratchpad').click()");
+    assert.equal(await evaluate("document.querySelector('.storage-cleanup .storage-scratchpad-old')?.textContent"), "The next start removes 3 MiB of old scratchpad files (12 files).");
     assert.ok(await evaluate("document.body.textContent.includes('2 links and 1 unavailable')"));
     assert.equal(await evaluate("document.querySelectorAll('.storage-table tbody tr').length"), 10);
     assert.equal(await evaluate("document.querySelector('.storage-table tbody tr td:last-child').textContent"), "75%");
@@ -192,6 +204,29 @@ test("Storage edits valid durations only and measures independently without clea
         }
     }
     await act(`${f}.setLocale('en'); ${f}.setSize({ width: 518, height: 484 })`);
+    // The card shows the disk usage of the projects too, in the place of the sizes of the profile, in a small Settings window and both themes.
+    const view = (label: string) => act(`[...document.querySelectorAll('.storage-usage .bp6-segmented-control button')].find(button => button.textContent === ${JSON.stringify(label)}).click()`);
+    assert.equal(await evaluate("document.querySelector('.storage-usage .disk-usage-panel')"), null);
+    await view("Disk usage");
+    await until("document.querySelector('.storage-usage .disk-usage-panel[data-embedded] .disk-usage-row')");
+    assert.equal(await evaluate("document.querySelector('.storage-usage .storage-table')"), null, "the sizes of the profile give their place");
+    assert.equal(await evaluate("document.querySelector('.storage-usage h1')"), null, "no second title");
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.storage-usage .disk-usage-open')).borderTopWidth"), "0px", "the names are links, not the buttons of Settings");
+    for (const dark of [true, false]) {
+      await act(`document.documentElement.classList.toggle('bp6-dark', ${dark}); document.documentElement.dataset.theme = '${dark ? "dark" : "light"}'`);
+      assert.equal(await evaluate(`[document.querySelector('.settings-dialog-content'), document.querySelector('.storage-usage'), document.querySelector('.disk-usage-panel')]
+        .every(element => element.scrollWidth <= element.clientWidth + 1)`), true, `${dark ? "dark" : "light"}: the disk usage fits the Settings window`);
+      assert.ok(await evaluate("[...document.querySelectorAll('.storage-usage .disk-usage-row')].every(row => row.getBoundingClientRect().right <= document.querySelector('.storage-usage').getBoundingClientRect().right)"));
+      await act("document.querySelector('.storage-usage').scrollIntoView({ block: 'start' })");
+      await capture(`storage-disk-usage-${dark ? "dark" : "light"}`);
+    }
+    await act(`[...document.querySelectorAll('.storage-usage button')].find(button => button.textContent === 'Open as tab').click()`);
+    assert.equal(await evaluate(`${state}.diskUsageTabs`), 1);
+    await act(`[...document.querySelectorAll('.storage-usage button')].find(button => button.textContent === 'Measure').click()`);
+    assert.equal(await evaluate(`${state}.diskUsageScans`), 1);
+    assert.ok(await evaluate("!!document.querySelector('.storage-usage .disk-usage-progress')"));
+    await view("CodeAlta profile");
+    await until("document.querySelector('.storage-usage .storage-table')");
     await act(`${f}.setMaintenance({ state: 'running', reasons: [], processedFiles: '12345', processedDirectories: '678', removedBytes: '3145728' })`);
     assert.ok(await evaluate("document.querySelector('.storage-maintenance').textContent.includes('12,345 files and 678 folders processed, 3 MiB removed.')"), "the size removed so far");
     await act(`${f}.setMaintenance({ state: 'completed', reasons: [], processedFiles: '12345', processedDirectories: '678', removedBytes: '3145728' })`);
@@ -201,7 +236,14 @@ test("Storage edits valid durations only and measures independently without clea
     await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).resolve({ status: 'read_failed', snapshot: null })`);
     assert.ok(await evaluate("document.body.textContent.includes('Storage could not be measured.')"));
     await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).resolve(${JSON.stringify(snapshot(0))})`);
+    assert.equal(await evaluate("document.querySelector('.storage-scratchpad-old')"), null, "nothing old, nothing said");
     assert.ok(await evaluate("document.body.textContent.includes('No file bytes were measured.')"));
+    assert.equal(await evaluate("document.querySelectorAll('.storage-table tbody tr').length"), 10);
+    // A category the page has no row for adds to Other state: the table says what the donut draws.
+    await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).resolve(${JSON.stringify({ ...snapshot(100), snapshot: { ...snapshot(100).snapshot,
+      categories: [{ id: "sessions", bytes: "40", fileCount: "1" }, { id: "reviews", bytes: "60", fileCount: "1" }] } })})`);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.storage-table tbody tr')].slice(0, 2).map(row => [row.querySelector('th').textContent, row.querySelector('td:last-child').textContent])"),
+      [["Other state", "60%"], ["Sessions and attachments", "40%"]]);
     assert.equal(await evaluate("document.querySelectorAll('.storage-table tbody tr').length"), 10);
     await act(`${button("Refresh")}.click(); ${f}.setShown(false)`);
     assert.equal(await evaluate(`${state}.scans.at(-1).signal.aborted`), true);

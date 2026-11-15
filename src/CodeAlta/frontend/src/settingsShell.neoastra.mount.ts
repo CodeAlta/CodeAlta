@@ -193,6 +193,8 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
   models: [{ id: "old", name: "Old", efforts: ["Low"], imageInput: false, startEffort: "Low" }, ...(localStorage.getItem("settingsFixtureNewChoices") === "true"
     ? [{ id: "new", name: "New", efforts: ["High"], imageInput: true, startEffort: "High" }] : [])] });
+// The tab of the disk usage measures nothing here.
+export const diskUsage = { last: async () => ({ status: "unavailable", measurement: null, running: false, current: false }), scan: unavailable, clean: unavailable };
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
   hostEpoch: owned() ? epoch : null, commandReviewEnabled: localStorage.getItem("permissionFixtureEnabled") === "true",
   ownedUserInputEnabled: localStorage.getItem("inputFixtureEnabled") === "true", developerMode: false, productName: "CodeAlta", version: "development" }),

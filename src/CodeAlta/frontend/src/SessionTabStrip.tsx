@@ -13,7 +13,7 @@ import type { ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
   type SessionTabView as Tabs } from "./sessionTabLayout";
 import { ProviderIcon } from "./ProviderIcon";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isWorkflowsTab, isWorkflowRunTab, isClaudeCodeTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isWorkflowsTab, isWorkflowRunTab, isClaudeCodeTab, isBookmarksTab, isDiskUsageTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
@@ -115,6 +115,7 @@ ${tab.key ?? ""}`}>{tab.name ?? tab.key}</span></span>;
   if (isCanvasesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Canvases")}>{t("Canvases")}</span></span>;
   if (isDocumentationTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Documentation")}>{t("Documentation")}</span></span>;
   if (isBookmarksTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Bookmarks")}>{t("Bookmarks")}</span></span>;
+  if (isDiskUsageTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Disk usage")}>{t("Disk usage")}</span></span>;
   if (isClaudeCodeTab(tab)) {
     // A preview: the title of the conversation, in italics as the transient tab, the project in the tooltip.
     const title = plainTitle(tab.name || t("Claude Code"));
@@ -245,6 +246,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     if (isCanvasesTab(file)) return t("Canvases");
     if (isDocumentationTab(file)) return t("Documentation");
     if (isBookmarksTab(file)) return t("Bookmarks");
+    if (isDiskUsageTab(file)) return t("Disk usage");
     if (isClaudeCodeTab(file)) return `${plainTitle(file.name || t("Claude Code"))} - ${projectName(file)}`;
     if (isCanvasTab(file)) return `${file.name ?? t("Canvas")}${file.projectId ? ` · ${projectName(file)}` : ""}`;
     if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : isSkillTab(file) ? "Skill" : "Editor")} · ${projectName(file)}`;
@@ -500,6 +502,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
             : isCanvasesTab(file) ? { icon: "canvases" as const, tone: "purple" }
             : isDocumentationTab(file) ? { icon: "documentation" as const, tone: "azure" }
             : isBookmarksTab(file) ? { icon: "bookmark" as const, tone: "gold" }
+            : isDiskUsageTab(file) ? { icon: "diskUsage" as const, tone: "azure" }
             : isPluginTab(file) ? { icon: "plugin" as const, tone: "purple" }
             : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.

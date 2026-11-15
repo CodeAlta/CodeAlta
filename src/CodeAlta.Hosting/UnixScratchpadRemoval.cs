@@ -68,7 +68,7 @@ internal static class UnixScratchpadRemoval
             if (!profile.IsDeveloper)
             {
                 // Legacy --dev builds still write normal scratchpads. Reserve their existing lock
-                // protocol only during this worker. Never reclaim an existing lock using a PID.
+                // protocol only during this worker; reclaim abandoned gates by the instance guard's rule.
                 try { legacy = LegacyReservation.Acquire(api, state); }
                 catch (Exception ex) when (IsFilesystemFailure(ex))
                 {
@@ -318,9 +318,12 @@ internal static class UnixScratchpadRemoval
         {
             api.MakeDirectoryAt(state, "dev", 0x1C0 /* 0700 */);
             var directory = api.OpenDirectoryAt(state, "dev");
+            var temporary = ClaimPrefix + RandomNumberGenerator.GetHexString(32, lowercase: true);
+            var temporaryCreated = false;
             try
             {
-                var lockFile = api.CreateExclusiveAt(directory, LockFileName, 0x180 /* 0600 */);
+                var lockFile = api.CreateExclusiveAt(directory, temporary, 0x180 /* 0600 */);
+                temporaryCreated = true;
                 UnixStat identity;
                 try { identity = api.Stat(lockFile); }
                 catch
@@ -329,23 +332,55 @@ internal static class UnixScratchpadRemoval
                     lockFile.Dispose();
                     throw;
                 }
-                var reservation = new LegacyReservation(api, directory, lockFile, identity);
                 try
                 {
                     api.WriteAll(lockFile, Encoding.UTF8.GetBytes(Environment.ProcessId.ToString(CultureInfo.InvariantCulture)));
-                    return reservation;
+                    try { api.RenameNoReplace(directory, temporary, LockFileName); }
+                    catch (UnixIOException ex) when (ex.Errno == UnixFileSystem.ExistsError)
+                    {
+                        if (!TryReclaim(api, directory)) throw;
+                        api.RenameNoReplace(directory, temporary, LockFileName);
+                    }
+                    temporaryCreated = false;
+                    return new LegacyReservation(api, directory, lockFile, identity);
                 }
                 catch
                 {
-                    reservation.Release();
+                    lockFile.Dispose();
                     throw;
                 }
             }
             catch
             {
+                if (temporaryCreated)
+                {
+                    try { api.UnlinkAt(directory, temporary, 0); }
+                    catch (Exception ex) when (IsFilesystemFailure(ex)) { }
+                }
                 directory.Dispose();
                 throw;
             }
+        }
+
+        private static bool TryReclaim(UnixFileSystem api, SafeFileHandle directory)
+        {
+            try
+            {
+                using var file = api.OpenReadAt(directory, LockFileName);
+                var identity = api.Stat(file);
+                if (identity.Kind != UnixEntryKind.Regular || identity.Links != 1) return false;
+                using var stream = new FileStream(new SafeFileHandle(file.DangerousGetHandle(), ownsHandle: false), FileAccess.Read);
+                var buffer = new byte[64];
+                var length = stream.Read(buffer);
+                var text = Encoding.UTF8.GetString(buffer, 0, length).Trim();
+                int? processId = int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var pid) ? pid : null;
+                if (!CodeAltaSingleInstanceGuard.IsAbandoned(processId, new DateTime(identity.ModifiedTicks, DateTimeKind.Utc), DateTime.UtcNow)
+                    || !api.StatAt(directory, LockFileName).SameEntry(identity))
+                    return false;
+                api.UnlinkAt(directory, LockFileName, 0);
+                return true;
+            }
+            catch (Exception ex) when (IsFilesystemFailure(ex)) { return false; }
         }
 
         // Removes the lock name once; false when it could not be removed. A lock left behind holds a
@@ -373,7 +408,8 @@ internal static class UnixScratchpadRemoval
 
     private enum UnixEntryKind { Other, Directory, Regular, SymbolicLink }
 
-    // ModifiedTicks is the last write; ChangedTicks the latest of the last write and the creation.
+    // ModifiedTicks is the last write; ChangedTicks the latest of last write, creation and status change:
+    // native timestamp-preserving copies on macOS can backdate both creation and last write.
     // MountId is the Linux mount id (statx STATX_MNT_ID), null where the kernel or the system has none.
     private readonly record struct UnixStat(ulong Device, ulong Inode, UnixEntryKind Kind, uint Links, long Size, long ModifiedTicks, long ChangedTicks,
         ulong? MountId = null)
@@ -454,6 +490,9 @@ internal static class UnixScratchpadRemoval
 
         internal SafeFileHandle OpenDirectoryAt(SafeFileHandle directory, string name)
             => Opened(OpenAt(directory, name, ReadOnly | Directory | NoFollow | NonBlock | CloseOnExec), "openat");
+
+        internal SafeFileHandle OpenReadAt(SafeFileHandle directory, string name)
+            => Opened(OpenAt(directory, name, ReadOnly | NoFollow | NonBlock | CloseOnExec), "openat");
 
         internal SafeFileHandle CreateExclusiveAt(SafeFileHandle directory, string name, int mode)
         {
@@ -540,11 +579,12 @@ internal static class UnixScratchpadRemoval
                 // st_mtimespec @48, st_ctimespec @64, st_birthtimespec @80, and st_size @96; 144 bytes.
                 var mode = BinaryPrimitives.ReadUInt16LittleEndian(buffer[4..]);
                 var modified = Ticks(BinaryPrimitives.ReadInt64LittleEndian(buffer[48..]), BinaryPrimitives.ReadInt64LittleEndian(buffer[56..]));
+                var changed = Ticks(BinaryPrimitives.ReadInt64LittleEndian(buffer[64..]), BinaryPrimitives.ReadInt64LittleEndian(buffer[72..]));
                 var born = Ticks(BinaryPrimitives.ReadInt64LittleEndian(buffer[80..]), BinaryPrimitives.ReadInt64LittleEndian(buffer[88..]));
                 return new((uint)BinaryPrimitives.ReadInt32LittleEndian(buffer),
                     BinaryPrimitives.ReadUInt64LittleEndian(buffer[8..]), Kind(mode),
                     BinaryPrimitives.ReadUInt16LittleEndian(buffer[6..]),
-                    BinaryPrimitives.ReadInt64LittleEndian(buffer[96..]), modified, Math.Max(modified, born));
+                    BinaryPrimitives.ReadInt64LittleEndian(buffer[96..]), modified, Math.Max(changed, Math.Max(modified, born)));
             }
 
             // struct statx (linux/stat.h), the same on every architecture: stx_mask @0, stx_nlink @16,
@@ -559,7 +599,7 @@ internal static class UnixScratchpadRemoval
             var device = ((ulong)BinaryPrimitives.ReadUInt32LittleEndian(buffer[136..]) << 32) | BinaryPrimitives.ReadUInt32LittleEndian(buffer[140..]);
             return new(device, BinaryPrimitives.ReadUInt64LittleEndian(buffer[32..]), Kind(linuxMode),
                 BinaryPrimitives.ReadUInt32LittleEndian(buffer[16..]), (long)BinaryPrimitives.ReadUInt64LittleEndian(buffer[40..]),
-                linuxModified, Math.Max(linuxModified, second),
+                linuxModified, Math.Max(Timestamp(buffer[96..]), Math.Max(linuxModified, second)),
                 (mask & StatxMountId) != 0 ? BinaryPrimitives.ReadUInt64LittleEndian(buffer[144..]) : null);
 
             static long Timestamp(ReadOnlySpan<byte> value)

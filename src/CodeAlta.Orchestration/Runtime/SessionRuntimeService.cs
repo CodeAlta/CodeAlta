@@ -3706,6 +3706,34 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             .Select(static entry => new SessionWorkFolder(entry.SessionId, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.WorktreeDirectory is not null))];
 
     /// <summary>
+    /// Lists every folder a session of this runtime works in right now, whatever the work: a run or a queue drain, a
+    /// background task of its provider, a script of Code Mode, each in the folder of the session, and a background command,
+    /// in the folder it runs in. A reading taken without waiting for any session, for what must not change a folder while
+    /// anything works in it (the clean of its build output); <see cref="ListBusySessionFolders"/> stays what the Worktrees
+    /// window asks.
+    /// </summary>
+    /// <returns>The folders, a session listed once for each folder it works in.</returns>
+    public IReadOnlyList<SessionWorkFolder> ListWorkingSessionFolders()
+    {
+        var scripts = new HashSet<string>(ScriptRuns?.ListSessionsWithRunningScripts() ?? [], StringComparer.OrdinalIgnoreCase);
+        var folders = new HashSet<SessionWorkFolder>();
+        foreach (var entry in _entries.Values)
+        {
+            if (entry.IsTerminated || !(entry.HasActiveRun || entry.QueueDrainInProgress || entry.BackgroundTasks.Any(static task => task.Outcome is null)
+                    || scripts.Contains(entry.SessionId)))
+                continue;
+            folders.Add(new(entry.SessionId, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.WorktreeDirectory is not null));
+        }
+
+        foreach (var job in Jobs.List())
+        {
+            if (job.State == SessionJobState.Running) folders.Add(new(job.SessionId, job.Folder, false));
+        }
+
+        return [.. folders];
+    }
+
+    /// <summary>
     /// Returns whether the session's active coordinator session has an in-flight run.
     /// </summary>
     public async Task<bool> HasActiveRunAsync(SessionViewDescriptor session, CancellationToken cancellationToken = default)

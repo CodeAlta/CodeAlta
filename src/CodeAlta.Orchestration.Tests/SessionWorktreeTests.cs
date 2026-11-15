@@ -3,6 +3,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
@@ -181,6 +182,36 @@ public sealed class SessionWorktreeTests
             StringAssert.Contains(turn.Instructions, "- Git worktree:");
             Assert.AreEqual(temp.Worktree, (await ListedAsync(host, sessionId)).WorktreePath);
         }
+    }
+
+    [TestMethod]
+    public async Task ASessionWithOnlyABackgroundCommand_WorksInItsFolder_ForWhatAsksAboutAllWork()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "With a command", null, temp.Worktree);
+        Assert.AreEqual(0, host.RuntimeService.ListWorkingSessionFolders().Count);
+
+        var started = host.RuntimeService.Jobs.Start(new SessionJobRequest
+        {
+            SessionId = session.SessionId, Command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 600" : "sleep 600", Folder = temp.Worktree,
+        });
+        Assert.AreEqual("ok", started.Status, started.Message);
+        try
+        {
+            // No run: what the Worktrees window asks stays as it was; what asks about all work sees the command.
+            Assert.AreEqual(0, host.RuntimeService.ListBusySessionFolders().Count);
+            var working = host.RuntimeService.ListWorkingSessionFolders();
+            Assert.IsTrue(working.Any(folder => folder.SessionId == session.SessionId && folder.Folder == temp.Worktree), string.Join(", ", working));
+        }
+        finally
+        {
+            await host.RuntimeService.Jobs.CancelAsync(started.Job!.Id, byUser: true);
+        }
+
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
+        while (host.RuntimeService.ListWorkingSessionFolders().Count > 0) await Task.Delay(20, timeout.Token);
     }
 
     [TestMethod]

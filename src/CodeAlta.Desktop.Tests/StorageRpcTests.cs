@@ -117,6 +117,31 @@ public sealed class StorageRpcTests
     }
 
     [TestMethod]
+    public async Task TheScan_CarriesTheFilesOfTheScratchpadOldEnoughForTheCleanupAtStart()
+    {
+        var root = NewRoot();
+        try
+        {
+            var scratchpad = Directory.CreateDirectory(Path.Combine(root, "scratchpad")).FullName;
+            var old = Path.Combine(scratchpad, "old.md");
+            await File.WriteAllTextAsync(old, new string('o', 40));
+            await File.WriteAllTextAsync(Path.Combine(scratchpad, "recent.md"), "recent");
+            var aged = DateTime.UtcNow - StorageSettings.ScratchpadMaxAge - TimeSpan.FromDays(1); // not a limit
+            File.SetCreationTimeUtc(old, aged);
+            File.SetLastWriteTimeUtc(old, aged);
+            var service = new StorageService(new CatalogOptions { GlobalRoot = root }, "host");
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
+
+            StorageScanResponse? last = null;
+            await foreach (var update in service.ScanAsync(new("host"), timeout.Token)) last = update;
+
+            var snapshot = last!.Snapshot!;
+            Assert.AreEqual((40L, 1L), (snapshot.OldScratchpadBytes, snapshot.OldScratchpadFiles));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
     public async Task CancelingScanStreamDoesNotCancelMaintenanceOrLaterScans()
     {
         var root = NewRoot();

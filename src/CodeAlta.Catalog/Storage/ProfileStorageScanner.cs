@@ -33,14 +33,34 @@ public sealed record ProfileStorageSnapshot(string RootPath, DateTimeOffset Star
 
     /// <summary>Gets the child directory entries examined, excluding the profile root.</summary>
     public long ProcessedDirectories { get; init; }
+
+    /// <summary>
+    /// Gets the instant before which a file of the scratchpad of the instance counts as old: the start of the scan less
+    /// <see cref="StorageSettings.ScratchpadMaxAge"/>, as the startup cleanup computes it from its own start.
+    /// </summary>
+    public DateTimeOffset ScratchpadCutoff { get; init; }
+
+    /// <summary>
+    /// Gets the sum of the lengths of the files of the scratchpad of the instance whose creation and last write are both
+    /// before <see cref="ScratchpadCutoff"/>: the candidates of the startup cleanup by their age. It is not what a cleanup
+    /// removes: the cleanup may not run on this system, keeps a file that is held, and on macOS and Linux also keeps a file
+    /// whose status changed since (a copy that kept the times of its source), which a walk does not read.
+    /// </summary>
+    public long OldScratchpadBytes { get; init; }
+
+    /// <summary>Gets the number of the files counted in <see cref="OldScratchpadBytes"/>.</summary>
+    public long OldScratchpadFiles { get; init; }
 }
 
 /// <summary>Measures file metadata under a host-owned global profile; never deletes or opens file contents.</summary>
 public sealed class ProfileStorageScanner
 {
     private readonly string _root;
+    private readonly string _scratchpad;
 
     internal Action<string, bool>? EntryEnumerated { get; init; }
+
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>Captures the profile root. Callers cannot select another path per scan.</summary>
     /// <exception cref="ArgumentNullException">Options is null.</exception>
@@ -50,6 +70,8 @@ public sealed class ProfileStorageScanner
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.GlobalRoot);
         _root = Path.GetFullPath(options.GlobalRoot);
+        // The scratchpad the startup cleanup of this instance clears: the one of its state root, under the profile.
+        _scratchpad = Path.TrimEndingDirectorySeparator(Path.Combine(Path.GetFullPath(options.StateRoot), "scratchpad"));
     }
 
     /// <summary>Enumerates metadata on a worker thread, with cancellation independent of maintenance.</summary>
@@ -65,23 +87,25 @@ public sealed class ProfileStorageScanner
 
     private ProfileStorageSnapshot Scan(IProgress<ProfileStorageProgress>? progress, CancellationToken cancellationToken)
     {
-        var started = DateTimeOffset.UtcNow;
+        var started = Time.GetUtcNow();
+        var scratchpadCutoff = started - StorageSettings.ScratchpadMaxAge;
         var totals = new Dictionary<string, (long Bytes, long Files)>(StringComparer.Ordinal)
         {
             ["sessions"] = default, ["scratchpad"] = default, ["savedStatistics"] = default, ["reviews"] = default,
             ["database"] = default, ["configuration"] = default, ["extensions"] = default,
             ["projects"] = default, ["cacheLogs"] = default, ["other"] = default, ["developer"] = default,
+            ["browser"] = default, ["models"] = default,
         };
-        long skippedLinks = 0, skippedEntries = 0, totalBytes = 0;
+        long skippedLinks = 0, skippedEntries = 0, totalBytes = 0, oldScratchpadBytes = 0, oldScratchpadFiles = 0;
         long processedFiles = 0, processedDirectories = 0, lastProgress = 0;
         progress?.Report(new(0, 0));
-        var directories = new Stack<(DirectoryInfo Directory, string? Category)>();
+        var directories = new Stack<(DirectoryInfo Directory, string? Category, bool Scratchpad)>();
         var enumeration = new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false, RecurseSubdirectories = false };
         var root = new DirectoryInfo(_root);
         try
         {
-            if (HasLinkedAncestor(root)) skippedLinks++;
-            else directories.Push((root, null));
+            if (StorageLinks.HasLinkedAncestor(root)) skippedLinks++;
+            else directories.Push((root, null, false));
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -92,18 +116,22 @@ public sealed class ProfileStorageScanner
         while (directories.TryPop(out var pending))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var (directory, category) = pending;
+            var (directory, category, scratchpad) = pending;
             try
             {
                 // Recheck on use, not just when the parent enumerated it: profiles can change during a scan.
-                if (HasLinkedAncestor(directory)) { skippedLinks++; continue; }
+                if (StorageLinks.HasLinkedAncestor(directory)) { skippedLinks++; continue; }
                 var entries = new FileSystemEnumerable<StorageEntry>(directory.FullName, (ref FileSystemEntry entry) =>
                 {
                     var attributes = entry.Attributes;
                     var isDirectory = entry.IsDirectory;
+                    var file = !isDirectory && (attributes & FileAttributes.ReparsePoint) == 0;
+                    // The age of a file as the startup cleanup reads it, less the status change a walk does not read.
+                    var changed = scratchpad && file
+                        ? (entry.CreationTimeUtc > entry.LastWriteTimeUtc ? entry.CreationTimeUtc : entry.LastWriteTimeUtc)
+                        : default;
                     var value = new StorageEntry(isDirectory ? entry.ToFullPath() : null,
-                        category ?? Classify(entry.FileName),
-                        isDirectory || (attributes & FileAttributes.ReparsePoint) != 0 ? 0 : entry.Length, attributes);
+                        category ?? Classify(entry.FileName), file ? entry.Length : 0, attributes, changed);
                     EntryEnumerated?.Invoke(value.DirectoryPath ?? entry.ToFullPath(), isDirectory);
                     return value;
                 }, enumeration);
@@ -121,14 +149,22 @@ public sealed class ProfileStorageScanner
                             skippedLinks++;
                             continue;
                         }
-                        if (entry.DirectoryPath is { } child) { directories.Push((new DirectoryInfo(child), entry.Category)); continue; }
+                        if (entry.DirectoryPath is { } child)
+                        {
+                            directories.Push((new DirectoryInfo(child), entry.Category, scratchpad || string.Equals(child, _scratchpad, PathComparison)));
+                            continue;
+                        }
                         // No path traversal here: use the enumerated file metadata, not another stat/open.
                         // Directories (including their ancestors) are still rechecked before enumeration.
                         var bytes = entry.Length;
                         var prior = totals[entry.Category];
                         var nextTotal = checked(totalBytes + bytes);
+                        var old = scratchpad && entry.Changed < scratchpadCutoff;
+                        var nextOld = old ? checked(oldScratchpadBytes + bytes) : oldScratchpadBytes;
                         totals[entry.Category] = (checked(prior.Bytes + bytes), checked(prior.Files + 1));
                         totalBytes = nextTotal;
+                        oldScratchpadBytes = nextOld;
+                        if (old) oldScratchpadFiles++;
                     }
                     catch (Exception ex) when (IsEnumerationFailure(ex) || ex is OverflowException) { skippedEntries++; }
                     finally
@@ -145,22 +181,19 @@ public sealed class ProfileStorageScanner
         }
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(processedFiles, processedDirectories));
-        return new(_root, started, DateTimeOffset.UtcNow, totalBytes,
+        return new(_root, started, Time.GetUtcNow(), totalBytes,
             totals.Select(pair => new ProfileStorageCategory(pair.Key, pair.Value.Bytes, pair.Value.Files)).ToArray(),
-            skippedLinks, skippedEntries) { ProcessedFiles = processedFiles, ProcessedDirectories = processedDirectories };
-    }
-
-    private readonly record struct StorageEntry(string? DirectoryPath, string Category, long Length, FileAttributes Attributes);
-
-    private static bool HasLinkedAncestor(DirectoryInfo directory)
-    {
-        for (DirectoryInfo? current = directory; current is not null; current = current.Parent)
+            skippedLinks, skippedEntries)
         {
-            var attributes = File.GetAttributes(current.FullName);
-            if ((attributes & FileAttributes.ReparsePoint) != 0 || current.LinkTarget is not null) return true;
-        }
-        return false;
+            ProcessedFiles = processedFiles, ProcessedDirectories = processedDirectories,
+            ScratchpadCutoff = scratchpadCutoff, OldScratchpadBytes = oldScratchpadBytes, OldScratchpadFiles = oldScratchpadFiles,
+        };
     }
+
+    private readonly record struct StorageEntry(string? DirectoryPath, string Category, long Length, FileAttributes Attributes, DateTimeOffset Changed);
+
+    // Windows and macOS compare names without case by default.
+    private static StringComparison PathComparison => OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
     private static bool IsEnumerationFailure(Exception exception)
         => exception is IOException or UnauthorizedAccessException or System.Security.SecurityException;
@@ -180,6 +213,8 @@ public sealed class ProfileStorageScanner
         if (name.Equals("prompts", comparison) || name.Equals("skills", comparison) || name.Equals("plugins", comparison) || name.Equals("plugin-data", comparison)) return "extensions";
         if (name.Equals("projects", comparison) || name.Equals("worktrees", comparison) || name.Equals("spaces", comparison)) return "projects";
         if (name.Equals("cache", comparison) || name.Equals("logs", comparison)) return "cacheLogs";
+        if (name.Equals("browser", comparison)) return "browser";
+        if (name.Equals("llama", comparison)) return "models";
         return "other";
     }
 }

@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, Callout, Card, HTMLSelect, HTMLTable, NumericInput, PopoverNext, Switch } from "@blueprintjs/core";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Button, Callout, Card, HTMLSelect, HTMLTable, NumericInput, PopoverNext, SegmentedControl, Switch } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
-import { Chart } from "../charts/Chart";
-import { seriesVariable } from "../charts/palette";
 import { SettingsPage } from "../SettingsPage";
 import { SettingsFileLocations } from "../SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
 import { settingsFailure, type SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
-import { measuredPercentage, retentionAmount, retentionUnits, storageBytes, storageCategories, storageSize, type StorageApi, type StorageMeasurement, type StoragePreferences } from "./storage";
+import { categoryBytes, oldScratchpadText, shareText, retentionAmount, retentionUnits, storageBytes, storageCategories, storageSize, type StorageApi, type StorageMeasurement, type StoragePreferences } from "./storage";
 import { retentionProgress } from "./maintenance";
+import { ShareDonut, ShareSwatch } from "./ShareDonut";
 import "./storage.css";
 
 /** Host-owned scratchpad maintenance feedback. Closing this page cancels measurement only, never maintenance. */
@@ -37,8 +36,13 @@ export interface StorageRetentionSummary {
 }
 
 /** Global storage preferences and a read-only measurement of the profile. No category has a removal action. */
-export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance, retention }: {
+export function StorageSettings({ epoch, api, filesApi, onOpenFile, diskUsage, maintenance, retention }: {
   epoch: string | null; api: StorageApi; filesApi?: SettingsFilesApi; onOpenFile?: () => void;
+  /**
+   * The disk usage of the projects, their worktrees, their sessions and the profile, embedded: the card of the sizes
+   * switches between it and the sizes of the profile. None where the window has no host of its own.
+   */
+  diskUsage?: ReactNode;
   maintenance?: StorageMaintenanceSummary; retention?: StorageRetentionSummary;
 }) {
   const { t, locale } = useShellLanguage();
@@ -50,6 +54,10 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
   const [revision, setRevision] = useState(0);
   const [measurement, setMeasurement] = useState<StorageMeasurement | null>(null);
   const [scanState, setScanState] = useState<"loading" | "ready" | "error" | "canceled">("loading");
+  const [sizesView, setSizesView] = useState<"profile" | "diskUsage">("profile");
+  const disk = !!diskUsage && sizesView === "diskUsage";
+  // What the next start removes of this instance's scratchpad, from the last scan.
+  const oldScratchpad = oldScratchpadText(measurement, locale, t);
   const [progress, setProgress] = useState({ processedFiles: "0", processedDirectories: "0" });
   const scanController = useRef<AbortController | null>(null);
   const writeController = useRef<AbortController | null>(null);
@@ -133,6 +141,7 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
               <Switch id="storage-scratchpad" checked={settings.clearScratchpadOnStartup} disabled={busy}
                 onChange={event => void save({ ...settings, clearScratchpadOnStartup: event.currentTarget.checked })} />
             </div>
+            {settings.clearScratchpadOnStartup && oldScratchpad && <p className="storage-hint storage-scratchpad-old">{oldScratchpad}</p>}
           </div>
           <RetentionEditor settings={settings} disabled={busy} onSave={next => void save(next)} />
         </>}
@@ -143,7 +152,10 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
       <Card className="storage-card storage-usage" role="region" aria-labelledby="storage-distribution-title">
         <div className="storage-card-heading">
           <h2 id="storage-distribution-title">{t("File sizes")}</h2>
-          <StorageHelp label={t("About file sizes")}>
+          {diskUsage && <SegmentedControl size="small" className="storage-sizes-view" aria-label={t("What the file sizes show")} value={sizesView}
+            onValueChange={value => setSizesView(value === "diskUsage" ? "diskUsage" : "profile")}
+            options={[{ value: "profile", label: t("CodeAlta profile") }, { value: "diskUsage", label: t("Disk usage") }]} />}
+          {!disk && <><StorageHelp label={t("About file sizes")}>
             <p>{t("Logical sizes, which can differ from disk usage. Links are not followed.")}</p>
             <p>{t("Nothing can be deleted here.")}</p>
             {measuredRoot && <code className="storage-help-path">{measuredRoot}</code>}
@@ -155,8 +167,9 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
               <Button size="small" variant="minimal" onClick={() => { scanController.current?.abort(); setScanState("canceled"); }}>{t("Cancel scan")}</Button>
             </>}
             <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} onClick={refresh}>{t("Refresh")}</Button>
-          </span>
+          </span></>}
         </div>
+        {disk ? diskUsage : <>
         {scanState === "loading" && <p className="storage-hint storage-progress" role="status">{t("{files} files and {folders} folders processed.", {
           files: new Intl.NumberFormat(locale).format(storageBytes(progress.processedFiles)),
           folders: new Intl.NumberFormat(locale).format(storageBytes(progress.processedDirectories)),
@@ -165,6 +178,7 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
         {scanState === "canceled" && <p className="storage-hint" role="status">{t("Scan canceled.")}</p>}
         {scanState === "error" && <Callout compact intent="warning" role="alert">{t("Storage could not be measured. Refresh to try again.")}</Callout>}
         {measurement && <StorageDistribution measurement={measurement} />}
+        </>}
       </Card>
     </div>
   </SettingsPage>;
@@ -292,11 +306,9 @@ export function RetentionEditor({ settings, disabled, onSave }: { settings: Stor
 export function StorageDistribution({ measurement }: { measurement: StorageMeasurement }) {
   const { t, locale } = useShellLanguage();
   const total = storageBytes(measurement.totalBytes);
-  const rows = storageCategories.map(([id, label], index) => ({ id, index, label: t(label), bytes: storageBytes(measurement.categories.find(value => value.id === id)?.bytes ?? "0") }));
+  const bytes = categoryBytes(measurement.categories);
+  const rows = storageCategories.map(([id, label], index) => ({ id, index, label: t(label), bytes: bytes.get(id) ?? 0 }));
   const sorted = [...rows].sort((left, right) => right.bytes - left.bytes || left.index - right.index);
-  const share = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
-  // A category that holds bytes never reads as 0%.
-  const percentage = (bytes: number) => bytes > 0 && measuredPercentage(bytes, total) < .001 ? `<${share.format(.001)}` : share.format(measuredPercentage(bytes, total));
   return <div className="storage-measurement">
     {measurement.isPartial && <Callout compact intent="warning" role="status">{t("Partial scan: {links} links and {entries} unavailable entries skipped.",
       { links: measurement.skippedLinks, entries: measurement.skippedEntries })}</Callout>}
@@ -306,13 +318,11 @@ export function StorageDistribution({ measurement }: { measurement: StorageMeasu
         <caption>{t("Measured file sizes by category")}</caption>
         <thead><tr><th scope="col">{t("Category")}</th><th scope="col">{t("Size")}</th><th scope="col">{t("Share")}</th></tr></thead>
         <tbody>{sorted.map(row => <tr key={row.id} data-empty={row.bytes === 0 || undefined}>
-          <th scope="row"><span className="storage-swatch" aria-hidden="true" style={{ "--storage-swatch": `var(${seriesVariable(row.index)})` } as CSSProperties} />{row.label}</th>
-          <td>{storageSize(row.bytes, locale)}</td><td>{percentage(row.bytes)}</td></tr>)}</tbody>
+          <th scope="row"><ShareSwatch index={row.index} />{row.label}</th>
+          <td>{storageSize(row.bytes, locale)}</td><td>{shareText(row.bytes, total, locale)}</td></tr>)}</tbody>
       </HTMLTable>
       {/* No `legend` in the option: the table is the legend, so the chart draws none of its own. Its size is in the CSS. */}
-      {total > 0 && <Chart className="storage-donut" ariaLabel={t("Storage distribution")} height={168} hideTableToggle
-        option={{ tooltip: { trigger: "item", formatter: "{b}: {d}%" }, series: [{ type: "pie", radius: ["56%", "94%"], padAngle: 1, itemStyle: { borderRadius: 2 },
-          label: { show: false }, emphasis: { scale: false }, data: rows.map(row => ({ name: row.label, value: row.bytes })) }] }} />}
+      {total > 0 && <ShareDonut ariaLabel={t("Storage distribution")} segments={rows.map(row => ({ name: row.label, value: row.bytes }))} />}
     </div>
   </div>;
 }

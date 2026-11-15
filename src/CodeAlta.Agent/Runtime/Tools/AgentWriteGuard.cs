@@ -1,3 +1,5 @@
+using CodeAlta.Core.IO;
+
 namespace CodeAlta.Agent.Runtime.Tools;
 
 /// <summary>
@@ -18,9 +20,6 @@ public sealed class AgentWriteGuard
 
     // The most entries a folder that is deleted or moved is looked through for what it may not take away.
     private const int MaximumTreeEntries = 100_000;
-
-    // The most links one path is followed through.
-    private const int MaximumLinks = 40;
 
     // The files of other tools that CodeAlta reads MCP servers from, at any depth.
     private static readonly string[] ProtectedFileNames = [".mcp.json"];
@@ -78,7 +77,7 @@ public sealed class AgentWriteGuard
         string real;
         try
         {
-            real = RealPath(Path.GetFullPath(path));
+            real = PhysicalPath.Resolve(Path.GetFullPath(path));
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
         {
@@ -134,7 +133,7 @@ public sealed class AgentWriteGuard
         string real;
         try
         {
-            real = RealPath(Path.GetFullPath(path));
+            real = PhysicalPath.Resolve(Path.GetFullPath(path));
             if (!Directory.Exists(real)) return null;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
@@ -223,7 +222,7 @@ public sealed class AgentWriteGuard
                 var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
                 try
                 {
-                    return RealPath(full);
+                    return PhysicalPath.Resolve(full);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
@@ -241,51 +240,5 @@ public sealed class AgentWriteGuard
         if (PathEquals(root, path)) return true;
         var relative = Path.GetRelativePath(root, path);
         return relative != "." && !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
-    }
-
-    // The path with every link along it resolved, as far as it exists: what follows is appended unchanged. The
-    // target of a link is resolved again, for the links above it; a path with too many links is refused.
-    private static string RealPath(string fullPath) => RealPath(fullPath, 0);
-
-    private static string RealPath(string fullPath, int links)
-    {
-        var root = Path.GetPathRoot(fullPath);
-        if (string.IsNullOrEmpty(root)) return fullPath;
-        var current = root;
-        var segments = fullPath[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        for (var index = 0; index < segments.Length; index++)
-        {
-            var next = Path.Combine(current, segments[index]);
-            FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
-            if (!info.Exists && info.LinkTarget is null)
-            {
-                // Nothing further exists: the rest is created as written.
-                return Path.Combine([next, .. segments[(index + 1)..]]);
-            }
-
-            // The short name Windows may give a folder (`ALTA~1` for `.alta`) is the folder under its own name.
-            if (OperatingSystem.IsWindows() && segments[index].Contains('~')
-                && new DirectoryInfo(current).EnumerateFileSystemInfos(segments[index]).FirstOrDefault() is { } named)
-            {
-                next = named.FullName;
-                info = named;
-            }
-
-            if (info.LinkTarget is not null)
-            {
-                if (links >= MaximumLinks)
-                {
-                    throw new IOException("Too many links.");
-                }
-
-                // The target as the link names it, from the folder of the link, then resolved as a path of its own.
-                var target = Path.GetFullPath(info.LinkTarget, current);
-                return RealPath(Path.Combine([target, .. segments[(index + 1)..]]), links + 1);
-            }
-
-            current = next;
-        }
-
-        return current;
     }
 }

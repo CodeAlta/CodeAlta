@@ -309,9 +309,9 @@ internal sealed partial class WorkspaceService
     private const int NewestAlwaysListed = 50;
 
     // What a session records of where it belongs: its kind of scope, its project, the automation that started it, its space.
-    private readonly record struct SessionScope(string? ScopeKind, string? ProjectId, string? AutomationId, string? RecordedSpace);
+    internal readonly record struct SessionScope(string? ScopeKind, string? ProjectId, string? AutomationId, string? RecordedSpace);
 
-    private static SessionScope ScopeOf(AgentSessionMetadata session, IReadOnlyDictionary<string, SessionViewJournalHeader>? headers, IReadOnlyList<ProjectDescriptor> projects)
+    internal static SessionScope ScopeOf(AgentSessionMetadata session, IReadOnlyDictionary<string, SessionViewJournalHeader>? headers, IReadOnlyList<ProjectDescriptor> projects)
     {
         string? scopeKind = null;
         string? projectId = null;

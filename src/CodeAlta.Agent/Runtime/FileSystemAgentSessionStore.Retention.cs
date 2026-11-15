@@ -84,38 +84,14 @@ public sealed partial class FileSystemAgentSessionStore
         foreach (var info in new DirectoryInfo(root).EnumerateFiles("*", options))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsOwnedElsewhere(root, info.FullName)) continue;
+            if (AgentSessionFolderFiles.IsOwnedElsewhere(root, info.FullName)) continue;
             var lastWrite = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
             if (lastWrite >= cutoff) continue;
-            var (owner, kind) = OwnerOf(root, info.FullName);
+            var (owner, kind) = AgentSessionFolderFiles.OwnerOf(root, info.FullName);
             files.Add(new SessionFolderFile(info.FullName, owner, kind, info.Length, lastWrite));
         }
 
         return files;
-    }
-
-    private static bool IsOwnedElsewhere(string root, string path)
-    {
-        var parts = Path.GetRelativePath(root, path).Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
-        return parts.Length > 1 && (string.Equals(parts[0], AgentRuntimePathLayout.SessionLeasesFolderName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(parts[0], AgentRuntimePathLayout.SessionMarkersFolderName, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static (string? Owner, SessionFolderFileKind Kind) OwnerOf(string root, string path)
-    {
-        var parts = Path.GetRelativePath(root, path).Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
-        var name = parts[^1];
-        if (parts.Length == 2 && string.Equals(parts[0], "traces", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".trace", StringComparison.OrdinalIgnoreCase))
-            return (Owner(name[..^".trace".Length]), SessionFolderFileKind.Artifact);
-        foreach (var part in parts.AsSpan(0, parts.Length - 1))
-        {
-            if (part.EndsWith(".attachments", StringComparison.OrdinalIgnoreCase))
-                return (Owner(part[..^".attachments".Length]), SessionFolderFileKind.Artifact);
-        }
-
-        return name.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ? (Owner(name[..^".jsonl".Length]), SessionFolderFileKind.Journal) : (null, SessionFolderFileKind.Other);
-
-        static string? Owner(string id) => string.IsNullOrWhiteSpace(id) ? null : id;
     }
 
     // Deletes one file of the sessions folder by its path, after a new stat: a file written since the listing, or a link,

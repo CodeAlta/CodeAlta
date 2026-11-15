@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { translate } from "../localization";
-import { branchesReply, checkoutFolder, checkoutShown, filterBranches, folderName, newBranchName, persistWorkPlaces, projectFolder, referenceName, restoreWorkPlaces, sameFolder,
+import { type WorktreeList, branchesReply, checkoutFolder, checkoutShown, filterBranches, folderName, newBranchName, persistWorkPlaces, projectFolder, referenceName, restoreWorkPlaces, sameFolder,
   deletedSessionWorktree, deletedSessionsWorktrees, sessionWorktree, worktreesLeft, shownCheckout, withWorkPlace, worktreeFailure, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
 
 const t = (key: Parameters<typeof translate>[1]) => translate("en", key);
@@ -107,6 +107,11 @@ test("the list of checkouts is taken only when it is whole and for the asked pro
   assert.equal(worktreesReply({ status: "ok", projectId: "p", worktrees: [{ ...item, project: true }], newFolder: null }, "p"), "read_failed");
   assert.equal(worktreesReply({ status: "ok", projectId: "p", worktrees: [home, { ...repository, project: true }], newFolder: null }, "p"), "read_failed");
   assert.equal(worktreesReply(null, "p"), "read_failed");
+  // A worktree that holds another in its folder says so; an answer of a host that does not say it holds none.
+  const holder = (worktreesReply({ status: "ok", projectId: "p", worktrees: [{ ...item, holdsWorktree: true }], newFolder: null }, "p") as WorktreeList).worktrees[0];
+  assert.equal(holder.holdsWorktree, true);
+  assert.equal((worktreesReply({ status: "ok", projectId: "p", worktrees: [{ ...item, holdsWorktree: undefined }], newFolder: null }, "p") as WorktreeList).worktrees[0].holdsWorktree, undefined);
+  assert.equal(worktreesReply({ status: "ok", projectId: "p", worktrees: [{ ...item, holdsWorktree: "yes" }], newFolder: null }, "p"), "read_failed");
 });
 
 test("branches are filtered by what is typed, and a new name is offered only when no branch has it", () => {
@@ -128,6 +133,7 @@ test("branches are filtered by what is typed, and a new name is offered only whe
 test("a refusal is told in the words of the window, and what git said is kept for what has none", () => {
   assert.equal(worktreeFailure("in_use", "ignored", t), "A session is working there. Wait for it to finish, or stop it.");
   assert.equal(worktreeFailure("locked", null, t), "Git keeps this worktree locked: unlock it with git to remove it.");
+  assert.equal(worktreeFailure("holds_worktree", null, t), "Another worktree is inside its folder: remove that one first.");
   assert.equal(worktreeFailure("failed", " error: Your local changes would be overwritten ", t), "error: Your local changes would be overwritten");
   assert.equal(worktreeFailure("failed", null, t), "Git could not do it.");
   assert.equal(worktreeFailure("something_new", "", t), "Git could not do it.");

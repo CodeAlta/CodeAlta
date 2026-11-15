@@ -32,6 +32,8 @@ const state = {
   malformed: false,
   editors: [] as string[], editor: "ok",
   closed: 0, changed: 0, shown: [] as string[],
+  /** The worktrees the window said went. */
+  removed: [] as string[],
   /** The projects whose worktrees the menu of a row asked for. */
   managed: [] as string[],
 };
@@ -88,7 +90,7 @@ const fixture = {
   open(projectId = "p") {
     flushSync(() => root.render(createElement(StrictMode, null, createElement(WorktreeManager, {
       epoch: "epoch", project: { id: projectId, name: "Alpha", path: "C:\\code\\alpha" }, api,
-      onClose: () => { state.closed++; }, onChanged: () => { state.changed++; }, onShowChanges: (value: InventoryRow) => { state.shown.push(value.folder); },
+      onClose: () => { state.closed++; }, onChanged: (removed: readonly string[]) => { state.changed++; state.removed.push(...removed); }, onShowChanges: (value: InventoryRow) => { state.shown.push(value.folder); },
     }))));
   },
   tick() { for (const tick of refreshTimers.values()) tick(); },
