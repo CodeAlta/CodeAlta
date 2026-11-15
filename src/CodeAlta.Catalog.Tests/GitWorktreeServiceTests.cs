@@ -15,6 +15,29 @@ public sealed partial class GitWorktreeServiceTests
     private static partial Regex Word();
 
     [TestMethod]
+    public async Task AGitRefusedTheConfigurationAnotherGitReplaces_IsRunAgain()
+    {
+        // What git for Windows answers when it starts while another git renames its new configuration over the file.
+        var refused = new GitRun(128, "", "warning: unable to access '.git/config': Permission denied\nfatal: unknown error occurred while reading the configuration files\n");
+        var done = new GitRun(0, "main\n", "");
+
+        var runs = 0;
+        Assert.AreSame(done, await GitWorktreeService.AgainWhileConfigurationIsReplacedAsync(() => Task.FromResult(++runs < 3 ? refused : done), CancellationToken.None));
+        Assert.AreEqual(3, runs);
+
+        // A configuration that stays unreadable is the answer, after a bounded number of runs.
+        runs = 0;
+        Assert.AreSame(refused, await GitWorktreeService.AgainWhileConfigurationIsReplacedAsync(() => { runs++; return Task.FromResult(refused); }, CancellationToken.None));
+        Assert.AreEqual(5, runs);
+
+        // Any other failure is the answer at once: git may have done part of the work.
+        var failed = new GitRun(128, "", "fatal: not a git repository (or any of the parent directories): .git\n");
+        runs = 0;
+        Assert.AreSame(failed, await GitWorktreeService.AgainWhileConfigurationIsReplacedAsync(() => { runs++; return Task.FromResult(failed); }, CancellationToken.None));
+        Assert.AreEqual(1, runs);
+    }
+
+    [TestMethod]
     public void Names_AreLowerCaseWordsThatAppearOnce()
     {
         var adjectives = WorktreeNames.Adjectives.ToArray();

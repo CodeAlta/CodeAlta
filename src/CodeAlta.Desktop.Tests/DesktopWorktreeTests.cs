@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -1423,15 +1422,13 @@ public sealed class DesktopWorktreeTests
             if (Directory.ResolveLinkTarget(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar), returnFinalTarget: true) is { } target)
                 home = Path.Combine(target.FullName, Path.GetFileName(home));
             var repository = new Repository(home);
-            try
-            {
-                repository.Git("init", "-q", "-b", "main");
-            }
-            catch (Win32Exception)
+            if (repository.RunAsync(repository.Root, ["--version"], TimeSpan.FromMinutes(2), CancellationToken.None).GetAwaiter().GetResult().ExitCode == GitRun.NotStarted)
             {
                 repository.Dispose();
                 Assert.Inconclusive("git is not installed.");
             }
+
+            repository.Git("init", "-q", "-b", "main");
 
             foreach (var (name, value) in new[] { ("user.name", "Test"), ("user.email", "test@example.invalid"), ("core.autocrlf", "false"), ("commit.gpgsign", "false") })
                 repository.Git("config", name, value);
@@ -1489,34 +1486,20 @@ public sealed class DesktopWorktreeTests
 
         public string GitIn(string folder, params string[] arguments)
         {
-            using var process = Process.Start(Start(folder, arguments))!;
-            var error = process.StandardError.ReadToEndAsync();
-            var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
-            Assert.AreEqual(0, process.ExitCode, $"git {string.Join(' ', arguments)}: {error.Result}");
-            return output;
+            var run = RunAsync(folder, arguments, TimeSpan.FromMinutes(2), CancellationToken.None).GetAwaiter().GetResult();
+            Assert.AreEqual(0, run.ExitCode, $"git {string.Join(' ', arguments)}: {run.Error}");
+            return run.Output;
         }
 
-        // What the service runs, with nothing of the machine's or the user's configuration deciding the outcome.
-        private async Task<GitRun> RunAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            using var process = Process.Start(Start(folder, arguments))!;
-            var error = process.StandardError.ReadToEndAsync(cancellationToken);
-            var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            return new(process.ExitCode, await output, await error);
-        }
-
-        private ProcessStartInfo Start(string folder, IReadOnlyList<string> arguments)
-        {
-            var start = new ProcessStartInfo("git") { WorkingDirectory = folder, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
-            foreach (var argument in arguments) start.ArgumentList.Add(argument);
-            start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            start.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(Home, "no-global-config");
-            start.Environment["LC_ALL"] = "C";
-            foreach (var inherited in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) start.Environment.Remove(inherited);
-            return start;
-        }
+        // What the service runs, with nothing of the machine's or the user's configuration deciding the outcome. It is
+        // the run of the application, which runs git again when another git was replacing the configuration: a test
+        // reads a repository while the service still writes it.
+        private Task<GitRun> RunAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+            => GitWorktreeService.RunGitAsync(folder, arguments, timeout, new Dictionary<string, string>
+            {
+                ["GIT_CONFIG_NOSYSTEM"] = "1",
+                ["GIT_CONFIG_GLOBAL"] = Path.Combine(Home, "no-global-config"),
+            }, cancellationToken);
 
         public static void Delete(string folder)
         {

@@ -1151,11 +1151,46 @@ public sealed class GitWorktreeService
         CancellationToken cancellationToken)
         => RunGitAsync(folder, arguments, timeout, progress: null, environment, cancellationToken);
 
-    private static async Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
+    private static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
         IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentNullException.ThrowIfNull(arguments);
+        return AgainWhileConfigurationIsReplacedAsync(() => RunGitOnceAsync(folder, arguments, timeout, progress, environment, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs git again when it stopped before doing anything because a configuration file could not be read.
+    /// On Windows a git that writes the configuration (<c>git branch -D</c>, <c>git worktree add</c>,
+    /// <c>git config</c>) replaces the file, and a git that starts at that moment is refused the file
+    /// ("unable to access '.git/config': Permission denied") and ends with code 128. Nothing was run, so any
+    /// command is safe to run again, and the file is there a moment later.
+    /// </summary>
+    /// <param name="run">Runs git once.</param>
+    /// <param name="cancellationToken">Stops the wait between two runs.</param>
+    /// <returns>The first answer that is not that failure, or that failure after the last run.</returns>
+    internal static async Task<GitRun> AgainWhileConfigurationIsReplacedAsync(Func<Task<GitRun>> run, CancellationToken cancellationToken)
+    {
+        for (var wait = 20; ; wait *= 2)
+        {
+            var answer = await run().ConfigureAwait(false);
+            // 20, 40, 80 and 160 ms: five runs in all.
+            if (wait > 160 || !CouldNotReadConfiguration(answer))
+            {
+                return answer;
+            }
+
+            await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // The message of git (in English: LC_ALL is C) when a configuration file exists and cannot be opened.
+    private static bool CouldNotReadConfiguration(GitRun run)
+        => run.ExitCode == 128 && run.Error.Contains("unknown error occurred while reading the configuration files", StringComparison.Ordinal);
+
+    private static async Task<GitRun> RunGitOnceAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
+        IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken)
+    {
         var start = new ProcessStartInfo("git")
         {
             WorkingDirectory = folder,
