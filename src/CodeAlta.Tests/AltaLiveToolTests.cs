@@ -3189,13 +3189,23 @@ public sealed partial class AltaLiveToolTests
         Assert.IsEmpty(provider.SteeredOptions);
 
         // A queued prompt keeps its files: saved with the session, an image and a file, given to the model with its text.
+        // The session is idle, so the prompt would be sent as soon as it is queued, and the record of a sent prompt keeps
+        // no file: its turn is held while the record is read.
+        var turn = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.QueuedRunGate = async (_, cancellationToken) => { await turn.Task.WaitAsync(cancellationToken).ConfigureAwait(false); return null; };
         var queued = await dispatcher.InvokeAsync(["session", "queue", sessionId, "--message", "later", "--attachments", path], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode, queued.Stdout + queued.Stderr);
         var state = await ReadJournalStateAsync(new SessionViewCatalog(options), sessionId).ConfigureAwait(false);
-        var kept = state.QueuedPrompts.Single(static prompt => prompt.State == "queued");
+        var kept = state.QueuedPrompts.Single(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State));
         Assert.AreEqual("later", kept.Prompt);
         CollectionAssert.AreEqual(new[] { ("photo.png", false), ("notes.txt", true) }, kept.Images!.Select(static image => (image.Title!, image.IsFile)).ToArray());
         CollectionAssert.AreEqual(png, await File.ReadAllBytesAsync(kept.Images![0].Path).ConfigureAwait(false));
+        turn.SetResult();
+        await WaitUntilAsync(() => provider.SentOptions.Count == 3).ConfigureAwait(false);
+        var later = provider.SentOptions[2].Input.Items;
+        Assert.AreEqual("later", ((AgentInputItem.Text)later[0]).Value);
+        Assert.AreEqual("photo.png", ((AgentInputItem.LocalImage)later[1]).DisplayName);
+        Assert.AreEqual("notes.txt", ((AgentInputItem.LocalFile)later[2]).DisplayName);
 
         var invalid = Path.Combine(root.Path, "invalid.json");
         await File.WriteAllTextAsync(invalid, "{}").ConfigureAwait(false);
