@@ -47,8 +47,8 @@ unknown one). Skills that MCP servers publish are a separate origin, named by se
 - `name` is required, matches the folder, and is lowercase letters, digits and single hyphens.
 - `description` is required.
 - Frontmatter fields are checked against the allowed set. The fields other skill tools add (`argument-hint`,
-  `user-invocable`, `disable-model-invocation`, `context`) are accepted; `disable-model-invocation: true` hides the
-  skill from the model while the user can still activate it.
+  `user-invocable`, `disable-model-invocation`, `context`, `triggers`, `version`) are accepted;
+  `disable-model-invocation: true` hides the skill from the model while the user can still activate it.
 - Resource paths are relative and stay inside the skill folder; walking respects `.gitignore` and skips VCS folders.
 
 ## Enablement and spaces

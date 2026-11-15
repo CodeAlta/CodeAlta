@@ -349,8 +349,12 @@ public sealed class UpdateCampaignTests
                     return Task.FromResult<StagedUpdate?>(new StagedUpdate(UpdateVersion.Parse(request.Version!), folder, PackageHash.Parse(request.ExpectedSha512!), "expected hash", false));
                 },
                 Check = (_, _) => throw new InvalidOperationException("No automatic campaign here."),
-                Status = () => new FleetUpdateStatus(_running, null, null, null, null,
-                    Applied.Count > 0 && _running != Applied[^1].Version ? new FleetUpdatePending(Applied[^1].Version!, "waiting_idle", DateTimeOffset.UtcNow, 0, false) : null, [], null),
+                Status = () =>
+                {
+                    lock (Applied)
+                        return new FleetUpdateStatus(_running, null, null, null, null,
+                            Applied.Count > 0 && _running != Applied[^1].Version ? new FleetUpdatePending(Applied[^1].Version!, "waiting_idle", DateTimeOffset.UtcNow, 0, false) : null, [], null);
+                },
                 Connector = _ => connector,
                 Time = server.Clock,
                 Interval = TimeSpan.FromMilliseconds(50),

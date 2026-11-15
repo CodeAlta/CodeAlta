@@ -26,7 +26,7 @@ public sealed class SkillCatalog
         """);
 
     // The fields of the Agent Skills format, then what skill tools such as `npx skills` and GitHub Copilot write beside
-    // them. Those four are accepted in every folder; only `disable-model-invocation` has an effect.
+    // them. Those are accepted in every folder; only `disable-model-invocation` has an effect.
     private static readonly FrozenSet<string> AllowedTopLevelFields = new[]
     {
         "name",
@@ -39,6 +39,8 @@ public sealed class SkillCatalog
         "user-invocable",
         "disable-model-invocation",
         "context",
+        "triggers",
+        "version",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     // Beyond this number of roots the cache starts again empty, so that roots no longer asked about do not stay forever.
