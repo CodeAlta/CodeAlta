@@ -3029,7 +3029,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         => _agentHub.RunAsync(sessionHandleId, sendOptions, cancellationToken);
 
     /// <summary>
-    /// Persists a headless prompt queue item for later submission by the owning runtime/front-end queue drain path.
+    /// Persists a prompt in the queue of a session. It is sent when the session has nothing in flight: at once for a
+    /// session that is attached and idle, at the end of the turn that runs otherwise.
     /// </summary>
     /// <param name="session">Target session.</param>
     /// <param name="prompt">Prompt text to submit later.</param>
@@ -3045,7 +3046,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string kind,
         AltaActorProvenance? submittedBy,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, images: null, CancellationToken.None), cancellationToken)
+        => await AdmitAsync(() => QueueThenDrainAsync(session, prompt, kind, submittedBy, images: null), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
 
     /// <summary>
@@ -3084,8 +3085,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             });
         }
 
-        return await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, queued, CancellationToken.None), cancellationToken)
+        return await AdmitAsync(() => QueueThenDrainAsync(session, prompt, kind, submittedBy, queued), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // A prompt queued for a session that is attached and has nothing in flight is sent at once, as one the host queues
+    // is; any other waits for the turn that runs to end. Nobody waits here for the turn it starts.
+    private async Task<SessionViewQueuedPrompt> QueueThenDrainAsync(SessionViewDescriptor session, string prompt, string kind,
+        AltaActorProvenance? submittedBy, IReadOnlyList<SessionViewQueuedPromptImage>? images)
+    {
+        var item = await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, images, CancellationToken.None).ConfigureAwait(false);
+        _ = _forwarding.RunAsync(() => TryDrainNextQueuedPromptAsync(session.SessionId), external: false);
+        return item;
     }
 
     // The images and files of a queued prompt are saved with the attachments of the session: the drain sends them with its text.

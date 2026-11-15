@@ -1294,7 +1294,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     {
         string? sessionId = null;
         var options = new PromptOptions();
-        var command = Leaf("queue", "Queue a prompt for later session submission when a queue service is available.");
+        var command = Leaf("queue", "Queue a prompt for a session: it is sent once the session is idle, at once when it already is.");
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         AddMessageOptions(command, options);
         command.Add("prompt-id=", "Agent prompt id the session runs from the queued prompt on, as shown by `alta prompt list`.", value => options.PromptId = value);
@@ -2482,8 +2482,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingSession", "Session id is required.", "alta session info");
         }
 
-        var infoResult = await ResolveSessionInfoAsync(context, sessionId,
-            includeLocalState: recordType is "alta.session.info" or "alta.session.detail", includeChildren: true).ConfigureAwait(false);
+        // With its last state: the record says how many prompts wait in its queue, also for a session that is attached.
+        var infoResult = await ResolveSessionInfoAsync(context, sessionId, includeLocalState: true, includeChildren: true).ConfigureAwait(false);
         if (infoResult.ExitCode != AltaExitCodes.Success)
         {
             return infoResult.ExitCode;

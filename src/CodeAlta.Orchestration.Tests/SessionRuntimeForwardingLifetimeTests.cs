@@ -591,6 +591,17 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task QueuedPrompt_OfAnAttachedIdleSession_IsSentAtOnce() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        // No turn ends after it: the queue is looked at when the prompt is queued, not only at the end of a turn.
+        await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "now", "queue", null));
+        await f.Ready(f.Provider.SendStarted.Task);
+        Assert.IsTrue((await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId))).Entry!.QueueDrainInProgress);
+        f.Provider.ReleaseSend.TrySetResult();
+    });
+
+    [TestMethod]
     public Task Deletion_SaysWhatHoldsTheSession_AndDeletesItOnceIdle() => Fixture.Run(async f =>
     {
         Task<string> Delete() => f.Wait(f.Runtime.DeleteOwnedCatalogSessionAsync(f.Session.SessionId, f.ProjectId, f.ProjectPath, f.Session.Title));

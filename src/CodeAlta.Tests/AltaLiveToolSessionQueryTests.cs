@@ -181,6 +181,32 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionStatus_CountsThePromptsThatWaitInTheQueueOfARunningSession()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("queued");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId) { PublishRunEventOnSend = true });
+        await using var _ = runtime.ConfigureAwait(false);
+        var execution = new SessionExecutionOptions
+        {
+            ProviderId = providerId, ProviderKey = providerId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var session = await runtime.CreateGlobalSessionAsync(execution, "Queued").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime));
+
+        async Task<int> QueuedAsync()
+            => ReadJsonLines((await dispatcher.InvokeAsync(["session", "status", session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout)
+                .Single(static line => line.GetProperty("type").GetString() == "alta.session.status").GetProperty("queuedPromptCount").GetInt32();
+        // The session runs a turn that does not end: what is queued waits for it.
+        await runtime.SendAsync(session, execution, new AgentSendOptions { Input = AgentInput.Text("keep running") }).ConfigureAwait(false);
+        Assert.AreEqual(0, await QueuedAsync().ConfigureAwait(false));
+        await runtime.QueuePromptAsync(session, "later", "queue", submittedBy: null).ConfigureAwait(false);
+        Assert.AreEqual(1, await QueuedAsync().ConfigureAwait(false), "the status of an attached session counts what waits in its queue");
+    }
+
+    [TestMethod]
     public async Task SessionStatus_SaysWhatHoldsTheSessionBesidesARun()
     {
         using var root = TempDirectory.Create();
