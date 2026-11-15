@@ -76,7 +76,7 @@ export async function withSessionWindow(storage: Readonly<Record<string, string>
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      // Well above the 7 s a wait of `until` may take inside the page: on a loaded machine this limit only tells a hang.
+      // Above the 20 s a wait of `until` may take inside the page: on a loaded machine this limit only tells a hang.
       const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -87,8 +87,11 @@ export async function withSessionWindow(storage: Readonly<Record<string, string>
     const tabs = `[...document.querySelectorAll('.session-dock .flexlayout__tab_button')].map(button => {
       const node = button.querySelector('[data-session-node]');
       return (node?.dataset.transient ? '~' : '') + (node?.textContent ?? '').trim() + (button.classList.contains('flexlayout__tab_button--selected') ? '*' : ''); })`;
+    // A browser on a new profile can hold the first text the page lays out for seconds (Edge on Windows answers no
+    // font until about 4 s after its start, in one start out of two, and later beside other work): the first wait of
+    // a test includes it, so the limit is several times what the window itself takes.
     const until = async (condition: string, what: string) => {
-      const limit = testLimit(7000), found = await evaluate(`new Promise(resolve=>{const end=Date.now()+${limit};const tick=()=>{let ok=false;try{ok=!!(${condition})}catch{}if(ok)resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
+      const limit = testLimit(20_000), found = await evaluate(`new Promise(resolve=>{const end=Date.now()+${limit};const tick=()=>{let ok=false;try{ok=!!(${condition})}catch{}if(ok)resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
       assert.equal(found, true, `${what} (not within ${limit} ms); tabs: ${JSON.stringify(await evaluate(tabs))}; ${exceptions.join("\n")}`);
     };
     const shown = (expected: string[], what: string) => until(`JSON.stringify(${tabs})===${JSON.stringify(JSON.stringify(expected))}`, what);

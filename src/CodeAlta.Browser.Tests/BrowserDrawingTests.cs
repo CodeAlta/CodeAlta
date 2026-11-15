@@ -50,7 +50,9 @@ public sealed class BrowserDrawingTests
         await using var registration = await page.StartToolbarAsync(messages.Add, timeout.Token);
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/cards")}}"}""");
         var ready = Next(messages, "ready", timeout.Token, message => message.Url?.EndsWith("/cards", StringComparison.Ordinal) == true);
-        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
+        // The test is the host that takes the picture: the bar waits for it as long as the test may last, not the 5 s
+        // after which it gives the page back, which a busy machine takes between two questions to the browser.
+        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"enable({{\"pictureWait\":{TestTime.Seconds(60).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture)}}})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "draw(true)", timeout.Token));
         // An expression for the toolbar calls it once: one question at a time.

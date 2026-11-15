@@ -31,6 +31,9 @@ export const chartDataFreshness = 5_000;
 /** The time a chart takes to draw at most: the worker that draws it is stopped, and the chart is refused. */
 export const chartTimeLimit = 10_000;
 
+/** The time a worker takes to start at most, before the time of its first chart counts: its code is loaded and it has a font. */
+export const chartWorkerStartLimit = 60_000;
+
 /** A longer SVG is not shown: what a chart draws past it is no chart a reader can see. */
 export const maximumChartSvgLength = 5_000_000;
 
@@ -228,23 +231,34 @@ type Answer = Readonly<{ id: number; svg?: string; refused?: string }>;
 
 /**
  * Draws charts in a worker of their own, one at a time: a chart that takes more than `timeLimit` milliseconds is refused
- * and its worker stopped, and the next chart starts another. A worker that cannot start or that fails refuses its chart.
+ * and its worker stopped, and the next chart starts another. That time starts once the worker says it is ready, which
+ * it has `startLimit` milliseconds for: a worker that starts slowly on a busy computer refuses no chart that draws in
+ * time. A worker that cannot start or that fails refuses its chart.
  */
-export function createChartWorkerClient(start: () => Worker, timeLimit = chartTimeLimit) {
+export function createChartWorkerClient(start: () => Worker, timeLimit = chartTimeLimit, startLimit = chartWorkerStartLimit) {
   let worker: Worker | null = null;
+  let ready = false;
+  // What starts the time of the chart that waits for the worker to be ready.
+  let whenReady: (() => void) | null = null;
   let sequence = 0;
   let queue: Promise<unknown> = Promise.resolve();
   const answers = new Map<number, (answer: Drawn) => void>();
   const stop = (refused: string) => {
     worker?.terminate();
     worker = null;
+    ready = false;
+    whenReady = null;
     for (const [, settle] of answers) settle({ refused });
     answers.clear();
   };
   function started(): Worker {
     if (worker) return worker;
     const created = start();
-    created.onmessage = (event: MessageEvent<Answer>) => {
+    created.onmessage = (event: MessageEvent<Answer & { ready?: boolean }>) => {
+      if (event.data?.ready) {
+        if (worker === created) { ready = true; whenReady?.(); whenReady = null; }
+        return;
+      }
       const settle = answers.get(event.data?.id);
       if (!settle) return;
       answers.delete(event.data.id);
@@ -257,9 +271,17 @@ export function createChartWorkerClient(start: () => Worker, timeLimit = chartTi
   function run(job: ChartJob): Promise<Drawn> {
     return new Promise<Drawn>(resolve => {
       const id = ++sequence;
-      const timer = setTimeout(() => { if (answers.has(id)) stop(`The chart took more than ${Math.round(timeLimit / 1000)} seconds to draw`); }, timeLimit);
-      answers.set(id, answer => { clearTimeout(timer); resolve(answer); });
-      try { started().postMessage({ id, job }); } catch { answers.delete(id); clearTimeout(timer); resolve({ refused: "The chart could not be drawn" }); }
+      const drawing = () => setTimeout(() => { if (answers.has(id)) stop(`The chart took more than ${Math.round(timeLimit / 1000)} seconds to draw`); }, timeLimit);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      answers.set(id, answer => { clearTimeout(timer); whenReady = null; resolve(answer); });
+      try {
+        started().postMessage({ id, job });
+        if (ready) timer = drawing();
+        else {
+          timer = setTimeout(() => { if (answers.has(id)) stop("The chart could not be drawn"); }, startLimit);
+          whenReady = () => { clearTimeout(timer); timer = drawing(); };
+        }
+      } catch { answers.delete(id); clearTimeout(timer); resolve({ refused: "The chart could not be drawn" }); }
     });
   }
   return {

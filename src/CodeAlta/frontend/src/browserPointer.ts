@@ -17,6 +17,13 @@ export type PressOptions = Readonly<{
 }>;
 
 /**
+ * How long an element may take to appear, hold still and be reachable. The first measure of a page can wait seconds
+ * for the browser alone: Edge on a new profile answers no font until about 4 s after its start, in one start out of
+ * two, and later on a busy machine. The limit is under the 30 s the harnesses give a DevTools command.
+ */
+const pressLimit = () => testLimit(15_000);
+
+/**
  * A page expression that waits, frame after frame, until the element that `element` (a page expression) gives keeps
  * the same rectangle over two frames and is not inside a Blueprint transition that is still entering, and with
  * `reachable` until it is also what the pointer reaches at its middle. It gives that point, or after `timeoutMs` why
@@ -25,17 +32,18 @@ export type PressOptions = Readonly<{
  * A popover or a dialog grows into place, and a row can give part of its width to its buttons under the pointer:
  * a point measured during such a change is beside the element once the press arrives.
  */
-export function steadyPoint(element: string, block: ScrollLogicalPosition = "center", timeoutMs = testLimit(5000), reachable = true): string {
+export function steadyPoint(element: string, block: ScrollLogicalPosition = "center", timeoutMs = pressLimit(), reachable = true): string {
   return `(async () => {
     const find = () => (${element}) ?? null;
     const describe = node => node ? node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className.trim() ? '.' + node.className.trim().split(/\\s+/).join('.') : '') : 'nothing';
     const entering = node => { for (let at = node; at; at = at.parentElement) if ([...at.classList].some(name => /^bp6-.+-(enter|appear)(-active)?$/.test(name))) return at; return null; };
     const frame = () => new Promise(resolve => { const timer = setTimeout(resolve, 100); requestAnimationFrame(() => { clearTimeout(timer); resolve(); }); });
     const end = performance.now() + ${timeoutMs};
-    let scrolled = null, last = '', why = 'nothing matches';
+    let scrolled = null, last = '', why = 'nothing matches', looks = 0, missing = 0;
     for (;;) {
       const target = find();
-      if (!target) { scrolled = null; last = ''; why = 'nothing matches'; }
+      looks++;
+      if (!target) { scrolled = null; last = ''; why = 'nothing matches'; missing++; }
       else {
         if (scrolled !== target) { target.scrollIntoView({ block: ${JSON.stringify(block)} }); scrolled = target; }
         const box = target.getBoundingClientRect(), shape = box.x + ',' + box.y + ' ' + box.width + 'x' + box.height, growing = entering(target);
@@ -50,7 +58,8 @@ export function steadyPoint(element: string, block: ScrollLogicalPosition = "cen
         }
         last = shape;
       }
-      if (performance.now() > end) return { problem: why };
+      // How often the page was looked at tells a page that had no time to draw from an element that never holds still.
+      if (performance.now() > end) return { problem: why + ' after ${timeoutMs} ms (looked ' + looks + ' times, ' + missing + ' without the element)' };
       await frame();
     }
   })()`;
@@ -62,7 +71,7 @@ export function steadyPoint(element: string, block: ScrollLogicalPosition = "cen
  * @throws Error when the element is missing, moving or covered after the deadline, or when the page cannot be evaluated.
  */
 export async function pressElement(command: DevToolsCommand, element: string, what: string, options: PressOptions = {}): Promise<void> {
-  const { times = 1, button = "left", block = "center", timeoutMs = testLimit(5000) } = options;
+  const { times = 1, button = "left", block = "center", timeoutMs = pressLimit() } = options;
   const point = async (reachable: boolean) => {
     const reply = await command("Runtime.evaluate", { expression: steadyPoint(element, block, timeoutMs, reachable), returnByValue: true, awaitPromise: true });
     if (reply.exceptionDetails) throw new Error(`pressing ${what}: ${JSON.stringify(reply.exceptionDetails).slice(0, 600)}`);

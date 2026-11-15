@@ -34,3 +34,8 @@ self.onmessage = (event: MessageEvent<{ id: number; job: ChartJob }>) => {
   const { id, job } = event.data;
   drawChart(job).then(svg => self.postMessage({ id, svg }), error => self.postMessage({ id, refused: chartRefusalOf(error) }));
 };
+
+// The time a chart is given starts once the worker can draw (`vegaLite.ts`): its code is loaded, and the browser gave
+// it a font, which the first text of a new browser can wait seconds for.
+context?.measureText("0");
+self.postMessage({ ready: true });

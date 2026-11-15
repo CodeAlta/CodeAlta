@@ -107,14 +107,17 @@ test("the cache keeps the newest charts, within a number and a size, once no ren
   assert.ok(cache.usage().characters <= 1_000);
 });
 
-// A worker of tests: it answers what `answer` says, or nothing.
+// A worker of tests: it answers what `answer` says, or nothing. It is ready at once, or when `ready()` says so.
 class FakeWorker {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: { preventDefault(): void }) => void) | null = null;
   onmessageerror: (() => void) | null = null;
   terminated = false;
   posted: { id: number; job: unknown }[] = [];
-  constructor(private readonly answer: (job: { id: number; job: { spec: Record<string, unknown> } }) => object | null) { }
+  constructor(private readonly answer: (job: { id: number; job: { spec: Record<string, unknown> } }) => object | null, slow = false) {
+    if (!slow) queueMicrotask(() => this.ready());
+  }
+  ready() { this.onmessage?.({ data: { ready: true } } as MessageEvent); }
   postMessage(message: { id: number; job: { spec: Record<string, unknown> } }) {
     this.posted.push(message);
     const reply = this.answer(message);
@@ -141,6 +144,24 @@ test("charts are drawn one at a time in a worker; one that takes too long is ref
   await new Promise(resolve => setTimeout(resolve, 0));
   started[1].onerror!({ preventDefault() { /* Nothing to prevent. */ } });
   assert.deepEqual(await failing, { refused: "The chart could not be drawn" });
+});
+
+test("the time of a chart starts once its worker is ready; a worker that never is refuses its chart", async () => {
+  const started: FakeWorker[] = [];
+  const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+  const job = (spec: Record<string, unknown>) => ({ spec, files: {}, config: {}, width: 640 });
+  const client = createChartWorkerClient(() => { const worker = new FakeWorker(() => null, true); started.push(worker); return worker as unknown as Worker; }, 40, 400);
+  // The worker takes longer to start than a chart may take to draw: the chart still waits.
+  let settled: unknown = null;
+  const slow = client.draw(job({})).then(answer => settled = answer);
+  await pause(150);
+  assert.equal(settled, null, "the chart is not refused while its worker starts");
+  started[0].ready();
+  assert.deepEqual(await slow, { refused: "The chart took more than 0 seconds to draw" }, "its time counts from there");
+  assert.ok(started[0].terminated);
+  // A worker that is never ready is stopped after the time it has to start.
+  assert.deepEqual(await client.draw(job({})), { refused: "The chart could not be drawn" });
+  assert.ok(started[1].terminated);
 });
 
 test("a chart takes the font, the text and guide colors and the series of the window", () => {

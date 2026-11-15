@@ -1652,9 +1652,10 @@
   const TEXT_SIZE = 18;
   const MAX_SHAPES = 200;
   const MAX_POINTS = 2000;
-  // The room around the drawing in its picture, and how long the bar waits for the host to take it.
+  // The room around the drawing in its picture, and how long the bar waits for the host to take it
+  // (`pictureWait` of enable gives another time, in milliseconds).
   const DRAW_MARGIN = 24;
-  const PICTURE_WAIT = 5000;
+  let pictureWait = 5000;
 
   const DRAW_STYLE = `
     .sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 2147483644; pointer-events: auto; cursor: crosshair; touch-action: none; }
@@ -2149,7 +2150,7 @@
       hidden.push(node);
     }
     sheet.classList.remove('hidden');
-    sketch.saving = { id: id, hidden: hidden, timer: setTimeout(() => finishDrawing(id), PICTURE_WAIT) };
+    sketch.saving = { id: id, hidden: hidden, timer: setTimeout(() => finishDrawing(id), pictureWait) };
     updateDrawControls();
     // The picture is taken once the browser painted the page without the bar.
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -2257,6 +2258,7 @@
       enabled = true;
       if (options && typeof options.theme === 'string') applyTheme(options.theme);
       if (options && 'position' in options) moveBar(options.position);
+      if (options && options.pictureWait > 0) pictureWait = +options.pictureWait;
       if (options && typeof options.details === 'boolean') details = options.details;
       whenBody(() => {
         build();
