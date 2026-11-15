@@ -7,7 +7,7 @@ title: Disk usage
 Projects, their [worktrees](worktrees.md) and their sessions grow without anyone seeing it. **Disk usage** in CodeAlta Desktop measures them all, shows what takes room, and frees space by cleaning build output and removing worktrees. What the CodeAlta profile itself holds is on the [Storage](workspace/settings.md#storage) page.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-disk-usage.webp" alt="The Disk usage tab of CodeAlta Desktop on the worktrees of a project: a table with size, share, build output, last use, sessions and git state, the reasons of one worktree opened, and a donut of the sizes" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-disk-usage.webp" alt="The Disk usage tab of CodeAlta Desktop showing CodeAlta worktrees in the Personal space: sizes, build output, last use, Git state with one verdict's reasons open, and a donut of the sizes" loading="lazy">
   <figcaption class="small text-secondary mt-2">The worktrees of a project: what each holds, how much of it is build output, and whether removing it loses work.</figcaption>
 </figure>
 
