@@ -123,8 +123,15 @@ public sealed class CliSandboxEscapeTests
             }
 
             // A process started in the background ends with the worker.
-            var started = await Run(windows ? "(Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru).Id" : "nohup sleep 600 >/dev/null 2>&1 & echo $!");
-            var id = int.Parse(started.Split('\n').Select(static line => line.Trim()).First(static line => line.Length > 0 && line.All(char.IsAsciiDigit)), System.Globalization.CultureInfo.InvariantCulture);
+            var marker = "codealta-escape-" + Guid.NewGuid().ToString("N");
+            var started = await Run(windows ? "(Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru).Id"
+                : OperatingSystem.IsLinux() ? $"nohup bash -c 'exec -a {marker} sleep 600' >/dev/null 2>&1 & echo $!"
+                : "nohup sleep 600 >/dev/null 2>&1 & echo $!");
+            // Bubblewrap gives the sandbox its own PID namespace: $! is not the PID the host sees. Find this sleep by
+            // its unique argv[0] before closing the worker, so that the check cannot name an unrelated host process.
+            var id = OperatingSystem.IsLinux() ? await FindHostProcessAsync(marker)
+                : int.Parse(started.Split('\n').Select(static line => line.Trim()).First(static line => line.Length > 0 && line.All(char.IsAsciiDigit)), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.IsTrue(IsRunning(id), "the background process is running before the container ends");
             await worker.DisposeAsync();
             var watch = Stopwatch.StartNew();
             while (watch.Elapsed < TestTime.Seconds(10) && IsRunning(id)) await Task.Delay(200);
@@ -272,6 +279,31 @@ public sealed class CliSandboxEscapeTests
         {
             return false;
         }
+    }
+
+    private static async Task<int> FindHostProcessAsync(string marker)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed < TestTime.Seconds(10))
+        {
+            foreach (var folder in Directory.EnumerateDirectories("/proc"))
+            {
+                if (!int.TryParse(Path.GetFileName(folder), out var id)) continue;
+                try
+                {
+                    if (File.ReadAllText(Path.Combine(folder, "cmdline")).StartsWith(marker + '\0', StringComparison.Ordinal)) return id;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // A process may exit during the scan, or belong to another user.
+                }
+            }
+
+            await Task.Delay(20);
+        }
+
+        Assert.Fail("The background process did not appear in the host PID namespace.");
+        return 0;
     }
 
     private static bool IsRunning(int id)
