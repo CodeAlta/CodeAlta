@@ -71,6 +71,26 @@ public sealed class SkillCatalogTests
     }
 
     [TestMethod]
+    public async Task SkillCatalog_ListAsync_AcceptsTheTriggersOfASkill()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        // A skill that lists the commands that start it, as other skill tools write it.
+        Directory.CreateDirectory(Path.Combine(userHome, ".agents", "skills", "codereview-roasted"));
+        await File.WriteAllTextAsync(Path.Combine(userHome, ".agents", "skills", "codereview-roasted", "SKILL.md"),
+            "---\nname: codereview-roasted\ndescription: Brutally honest code review.\ntriggers:\n- /codereview-roasted\n---\n# Code review\n");
+
+        var descriptors = await new SkillCatalog().ListAsync(new SkillCatalogQuery
+        {
+            Discovery = new SkillDiscoveryContext { ProjectRoots = [], UserCodeAltaRoot = Path.Combine(userHome, ".alta"), UserProfileRoot = userHome },
+        });
+
+        var review = descriptors.Single(static skill => skill.Name == "codereview-roasted");
+        Assert.IsTrue(review.IsValid && review.IsModelVisible, string.Join("; ", review.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.AreEqual(0, review.Diagnostics.Count);
+    }
+
+    [TestMethod]
     public async Task SkillCatalog_ListAsync_KeepsTheTextEntriesOfMetadata_AndIgnoresTheOthersWithAWarning()
     {
         using var temp = TempDirectory.Create();

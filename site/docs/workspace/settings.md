@@ -279,7 +279,7 @@ Of two skills with the same name, the one closest to the work wins: the project'
 
 A [sandboxed session](../sessions/sandbox.md) reads your skill folders and the ones you added, and never writes them.
 
-In `SKILL.md`, `disable-model-invocation: true` makes a skill manual: it is used only with `/` and its name. `argument-hint`, `user-invocable` and `context` are accepted and ignored; any other unknown field makes the skill **Invalid**, except in a [GitHub Copilot](../copilot-layout.md#skills) folder.
+In `SKILL.md`, `disable-model-invocation: true` makes a skill manual: it is used only with `/` and its name. `argument-hint`, `user-invocable`, `context` and `triggers` are accepted and ignored; any other unknown field makes the skill **Invalid**, except in a [GitHub Copilot](../copilot-layout.md#skills) folder.
 
 The prompt of a session lists the skills of CodeAlta first, then those used most in the project lately; agents find the others with [`alta search`](../search.md).
 
