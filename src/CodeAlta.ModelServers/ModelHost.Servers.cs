@@ -325,7 +325,7 @@ public sealed partial class ModelHost
         return found?.ModelPath is { } path ? (path, found.MmprojPath) : null;
     }
 
-    private ServerSupervisor? Find(string id)
+    internal ServerSupervisor? Find(string id)
     {
         lock (_gate) return _servers.GetValueOrDefault(id);
     }

@@ -96,6 +96,31 @@ public sealed class ModelHostUpdateTests
     }
 
     [TestMethod]
+    public async Task TheEndOfAProcessARestartReplaced_IsNotTakenForTheEndOfTheServer()
+    {
+        // Regression: the monitor of a server read that its process ended while a restart was ending it, and acted on it
+        // once the restart had started the next process. That process was let go and left running, with a second one
+        // started beside it: the fake left behind that failed AnUpdateThatPasses_RestartsTheServerOnTheNewBuild at times.
+        await using var machine = FakeMachine.Create();
+        machine.GitHub.Publish("b12000", new FakeBehaviour());
+        await using var host = machine.CreateHost();
+        var before = await machine.PrepareAsync(host, "b12000");
+        var supervisor = host.Find(host.ListServers().Single().Definition.Id)!;
+        using var replaced = Process.GetProcessById(before.ProcessId!.Value);
+
+        await supervisor.RestartAsync(CancellationToken.None);
+        var after = await machine.WaitReadyAsync(host, "b12000");
+        Assert.AreNotEqual(before.ProcessId, after.ProcessId, "the server restarted");
+
+        // The end of the process the restart ended, told late.
+        await supervisor.OnExitedAsync(replaced, CancellationToken.None);
+        var status = host.ListServers().Single().Status;
+        Assert.AreEqual(("ready", after.ProcessId), (status.State, status.ProcessId), status.Reason);
+        Assert.IsTrue(IsRunning(after.ProcessId!.Value), "the process of the restart still runs");
+        // The dispose of the machine fails the test when the host leaves a server running.
+    }
+
+    [TestMethod]
     public async Task APlannedUpdate_IsKeptAcrossANewModelHost_AndRunsAtItsTime()
     {
         var time = new ManualTime(new DateTimeOffset(2026, 11, 9, 10, 0, 0, TimeSpan.Zero));

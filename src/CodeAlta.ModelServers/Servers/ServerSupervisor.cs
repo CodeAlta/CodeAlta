@@ -564,7 +564,8 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
         Set(previous with { State = ready ? "ready" : "starting", Models = models, Reason = reason, Restarts = ready && previous.State != "ready" ? previous.Restarts : previous.Restarts });
     }
 
-    private async Task OnExitedAsync(Process process, CancellationToken cancellationToken)
+    // Internal for the test of an end told late: the monitor reads that a process ended, then acts on it here.
+    internal async Task OnExitedAsync(Process process, CancellationToken cancellationToken)
     {
         int code;
         try { code = process.ExitCode; }
@@ -572,6 +573,9 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
         bool stopping;
         lock (_gate)
         {
+            // A stop or a restart went by since the monitor read this process: the server is theirs now. Letting go of the
+            // process of a restart here would leave it running with nobody to stop it, and start another one beside it.
+            if (_process != process) return;
             stopping = _stopping;
             _process = null;
             _client = null;
