@@ -181,6 +181,48 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionStatus_SaysWhatHoldsTheSessionBesidesARun()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("held");
+        var provider = new StatefulProviderRuntime(providerId);
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, provider.DisplayName), () => provider);
+        var catalog = new SessionViewCatalog(options);
+        var skills = new SkillCatalog();
+        var leases = new SessionLeaseStore(options);
+        var runtime = new SessionRuntimeService(new AgentHub(registry), new AgentSessionCatalog(catalog.JournalStore.CreateSessionStore()),
+            new ProjectCatalog(options), catalog, new AgentInstructionTemplateProvider(skills, options), options, skills)
+        {
+            Leases = new SessionLeaseRegistry(leases, new SessionLeaseOwner(SessionLeaseOwner.DesktopKind, "this")),
+        };
+        await using var _ = runtime.ConfigureAwait(false);
+        var session = await runtime.CreateGlobalSessionAsync(new SessionExecutionOptions
+        {
+            ProviderId = providerId, ProviderKey = providerId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }, "Held").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+
+        async Task<System.Text.Json.JsonElement> RecordAsync(string command)
+            => ReadJsonLines((await dispatcher.InvokeAsync(["session", command, session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout)
+                .Single(line => line.GetProperty("type").GetString() == "alta.session." + command);
+        var attached = await RecordAsync("status").ConfigureAwait(false);
+        Assert.IsFalse(attached.GetProperty("transitionInProgress").GetBoolean());
+        Assert.IsFalse(attached.GetProperty("queueDrainInProgress").GetBoolean());
+        Assert.IsFalse(attached.TryGetProperty("heldElsewhere", out var _), "this runtime holds the session it attached");
+        Assert.IsFalse((await RecordAsync("info").ConfigureAwait(false)).TryGetProperty("transitionInProgress", out var _), "only the live status says it");
+
+        Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(session.SessionId).ConfigureAwait(false));
+        using var elsewhere = leases.TryAcquire(session.SessionId, new SessionLeaseOwner(SessionLeaseOwner.CliKind, "other"));
+        Assert.IsNotNull(elsewhere);
+        var holder = (await RecordAsync("status").ConfigureAwait(false)).GetProperty("heldElsewhere");
+        Assert.AreEqual(SessionLeaseOwner.CliKind, holder.GetProperty("ownerKind").GetString());
+        Assert.AreEqual(Environment.ProcessId, holder.GetProperty("processId").GetInt32());
+    }
+
+    [TestMethod]
     public async Task SessionList_ReadsTheSessionProjection_NeverAJournal()
     {
         using var root = TempDirectory.Create();

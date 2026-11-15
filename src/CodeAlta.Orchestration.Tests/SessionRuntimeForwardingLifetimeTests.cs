@@ -591,6 +591,45 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task Deletion_SaysWhatHoldsTheSession_AndDeletesItOnceIdle() => Fixture.Run(async f =>
+    {
+        Task<string> Delete() => f.Wait(f.Runtime.DeleteOwnedCatalogSessionAsync(f.Session.SessionId, f.ProjectId, f.ProjectPath, f.Session.Title));
+        var store = f.Journal.CreateSessionStore();
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+
+        // A prompt of its queue is being sent: no run is recorded yet.
+        await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "held", "send", null));
+        f.Provider.Latest.EmitIdle();
+        await f.Ready(f.Provider.SendStarted.Task);
+        Assert.AreEqual("queue_draining", await Delete());
+        f.Provider.ReleaseSend.TrySetResult();
+        using (var timeout = new CancellationTokenSource(TestDeadlines.Hang))
+        {
+            while ((await f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, timeout.Token))).Entry is not { QueueDrainInProgress: false })
+                await Task.Delay(10, timeout.Token);
+        }
+
+        // A run nobody of this window started.
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("observed-run"));
+        Assert.AreEqual("run_active", await Delete());
+        Assert.IsNotNull(await f.Wait(store.GetSessionAsync(f.Session.SessionId)), "A refused deletion deletes nothing.");
+
+        await f.EmitAndObserve(AgentSessionUpdateKind.Idle, new AgentRunId("observed-run"));
+
+        // Its attachment is being replaced. Last: the retirement of an attachment releases the gates of the fixture.
+        f.Provider.HoldAbort = true;
+        var replace = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("replacement-model")));
+        await f.Ready(f.Provider.AbortStarted.Task);
+        Assert.AreEqual("transition_pending", await Delete());
+        f.Provider.HoldAbort = false;
+        f.Provider.ReleaseAbort.TrySetResult();
+        await f.Wait(replace);
+
+        Assert.AreEqual("ok", await Delete());
+        Assert.IsNull(await f.Wait(store.GetSessionAsync(f.Session.SessionId)));
+    });
+
+    [TestMethod]
     public Task OwnedSteer_RejectsAbsentAndUnownedWithoutAcquisitionOrRunMutation() => Fixture.Run(async f =>
     {
         var absent = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));

@@ -59,7 +59,7 @@ On the row of a session, `F2` renames it and `Delete` or `Backspace` deletes it,
 
 The menu of a session also has:
 
-- **Delete…**: deletes the history of the session, not the files of the project, after a small question beside the row (`Enter` deletes, `Esc` keeps). **Also remove the worktree** removes the [worktree](../worktrees.md) of the session too; a session with child sessions asks about them (see [Delete a session and its child sessions](../sessions/delegation.md#child-sessions)).
+- **Delete…**: deletes the history of the session, not the files of the project, after a small question beside the row (`Enter` deletes, `Esc` keeps). **Also remove the worktree** removes the [worktree](../worktrees.md) of the session too; a session with child sessions asks about them (see [Delete a session and its child sessions](../sessions/delegation.md#child-sessions)). A session at work is kept, and the message says what holds it: a turn, a prompt of its queue, or another process.
 - **Move to project…** (also drag the row onto a project) and **Move to space…**: see [Move a session to another project](../sessions/readme.md#move-a-session) and [to another space](../spaces.md#move-a-session).
 - **Archive**: takes the session out of the Explorer; the search and the session browser restore it. See [Archive a session](../sessions/readme.md#archive-a-session).
 

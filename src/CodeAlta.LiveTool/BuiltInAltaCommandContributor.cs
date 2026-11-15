@@ -963,7 +963,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var command = Leaf("status", "Show compact live status for one session.");
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         command.Add(async (_, _) => await HandleSessionShowAsync(context, sessionId, "alta.session.status").ConfigureAwait(false));
-        AddHelpText(command, "Example: `alta session status <session-id>` after choosing a session from `alta session list`.");
+        AddHelpText(command, "Example: `alta session status <session-id>` after choosing a session from `alta session list`.",
+            "`transitionInProgress`, `queueDrainInProgress` and `heldElsewhere` say what holds the session besides a run: it cannot be deleted, archived or moved meanwhile.");
         return command;
     }
 
@@ -2493,8 +2494,21 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var metrics = recordType is "alta.session.info" or "alta.session.detail"
             ? await BuildCompactMetricsAsync(context, info).ConfigureAwait(false)
             : null;
-        WriteSession(context, recordType, info, includeChildren: true, infoResult.Infos, metrics, await SessionSandboxRecordAsync(context, info.Session.SessionId).ConfigureAwait(false));
+        WriteSession(context, recordType, info, includeChildren: true, infoResult.Infos, metrics, await SessionSandboxRecordAsync(context, info.Session.SessionId).ConfigureAwait(false),
+            recordType is "alta.session.status" ? await SessionHoldsAsync(context, info.Session.SessionId).ConfigureAwait(false) : null);
         return AltaExitCodes.Success;
+    }
+
+    // What holds a session besides a run, and refuses its deletion, its archiving or its move meanwhile.
+    private sealed record SessionHolds(bool TransitionInProgress, bool QueueDrainInProgress, object? HeldElsewhere);
+
+    private static async Task<SessionHolds?> SessionHoldsAsync(AltaCommandContext context, string sessionId)
+    {
+        if (context.Services.Get<SessionRuntimeService>() is not { } runtime) return null;
+        var state = await runtime.GetCurrentStateAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
+        var holder = runtime.GetSessionLeaseHolderElsewhere(sessionId);
+        return new(state.CoordinatorTransitionInProgress, state.Entry?.QueueDrainInProgress ?? false,
+            holder is null ? null : new { ownerKind = holder.OwnerKind, processId = holder.ProcessId });
     }
 
     private static async ValueTask<int> HandleSessionMetricsAsync(AltaCommandContext context, string? sessionId, string? scope)
@@ -7135,7 +7149,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         });
 
     private static void WriteSession(AltaCommandContext context, string type, AltaSessionInfo info, bool includeChildren, IReadOnlyList<AltaSessionInfo> infos, SessionMetrics? metrics = null,
-        object? sandbox = null)
+        object? sandbox = null, SessionHolds? holds = null)
     {
         var children = includeChildren ? GetChildren(infos, info, recursive: false).ToArray() : [];
         AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -7168,6 +7182,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             messageCount = info.Session.MessageCount,
             isRunning = info.IsRunning,
             queuedPromptCount = info.QueuedPromptCount,
+            // Written by session status only.
+            transitionInProgress = holds?.TransitionInProgress,
+            queueDrainInProgress = holds?.QueueDrainInProgress,
+            heldElsewhere = holds?.HeldElsewhere,
             agentPromptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             promptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             modelSelection = ToModelSelectionPayload(CreateModelSelection(info.Session, info.Preference), info.Session.AgentPromptId),

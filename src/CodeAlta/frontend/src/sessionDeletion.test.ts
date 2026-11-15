@@ -79,6 +79,15 @@ test("an unusable title, a stale host and malformed responses never delete or re
   assert.match(sessionDeletionMessage("delete_unconfirmed"), /no retry/i);
 });
 
+test("a deletion the host refuses for a session in use says what holds the session", () => {
+  const reasons = ["run_active", "queue_draining", "transition_pending", "reattached", "held_elsewhere", "session_moved", "cloud_work"];
+  const sentences = reasons.map(sessionDeletionMessage);
+  assert.equal(new Set(sentences).size, reasons.length);
+  // None is the sentence of a deletion whose outcome is not known: the host refused, nothing was deleted.
+  assert.ok(!sentences.includes(sessionDeletionMessage("delete_unconfirmed")));
+  assert.match(sessionDeletionMessage("held_elsewhere"), /another process/i);
+});
+
 test("one in-flight deletion only, including after switching project selection", async () => {
   let settle!: (value: ReturnType<typeof reply>) => void;
   let calls = 0;

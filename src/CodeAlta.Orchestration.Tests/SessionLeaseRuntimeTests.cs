@@ -77,6 +77,8 @@ public sealed class SessionLeaseRuntimeTests
         await Assert.ThrowsExactlyAsync<SessionInUseException>(() => runtime.DeliverHostPromptAsync(session.SessionId, "a job ended", "job"));
         Assert.AreEqual("session_in_use", (await runtime.SetSessionArchivedAsync(session.SessionId, archived: true, withChildren: false)).Status);
         Assert.AreEqual("session_in_use", (await runtime.RewindSessionAsync(new SessionRewindRequest { SessionId = session.SessionId, BeforeRunId = run.Value })).Status);
+        // A deletion says that another process holds the session, not that it is at work here.
+        Assert.AreEqual("held_elsewhere", await host.Commands.DeleteCatalogSessionAsync(session.SessionId, host.CurrentProject.Id, host.CurrentProject.ProjectPath, "Held elsewhere"));
         var send = await Assert.ThrowsAsync<Exception>(() => runtime.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("refused") }));
         Assert.IsNotNull(SessionRuntimeService.FindSessionInUse(send));
         Assert.AreEqual(before, new FileInfo(journal).Length, "Nothing was written in the journal another process holds.");

@@ -100,7 +100,14 @@ export function sessionDeletionMessage(code: string): string {
     case "unconfigured": return "Deleting sessions requires an owned host.";
     case "invalid_confirmation": return "The title of this session could not be confirmed. Refresh the sessions and try again.";
     case "scope_missing": case "session_missing": return "The session, title or project changed. Refresh before deciding whether to delete.";
-    case "session_in_use": return "This session has active runtime work. Wait for it to finish and refresh before deleting.";
+    // Why the host has the session in use. The composer shows only a run: the other states leave it looking idle.
+    case "run_active": return "This session is running a turn. Stop it or wait for it to end, then delete.";
+    case "queue_draining": return "This session is starting a prompt of its queue. Wait for that turn to end, then delete.";
+    case "transition_pending": return "CodeAlta is still attaching or detaching this session. Try again in a moment; if this goes on, restart CodeAlta.";
+    case "reattached": return "This session was attached again while it was being deleted. Try again.";
+    case "held_elsewhere": return "Another process runs this session. Delete it once that ends.";
+    case "session_moved": return "This session moved to another machine, or is moving there. It cannot be deleted here.";
+    case "cloud_work": return "This session is being brought back from the cloud, or sent a message there. Wait for that to end, then delete.";
     case "has_children": return "This session has child sessions, and Delete removes one session only. Its menu shows them, with the choice to delete them with it.";
     case "stale_epoch": return "The host changed. Reload before deleting.";
     case "busy": return "A session operation is in progress. Nothing was deleted.";

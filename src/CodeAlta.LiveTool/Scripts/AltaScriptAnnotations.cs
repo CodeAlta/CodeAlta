@@ -496,6 +496,12 @@ internal static class AltaScriptAnnotations
           type: "alta.session.status";
           childCount: number;
           childSessionIds: string[];
+          /** Whether the session is being attached, replaced or detached: it cannot be deleted, archived or moved meanwhile. */
+          transitionInProgress?: boolean;
+          /** Whether a prompt of its queue is being sent, until the turn it starts ends. */
+          queueDrainInProgress?: boolean;
+          /** The other process that holds the session (altacli, another instance), when one does. */
+          heldElsewhere?: { ownerKind?: string; processId?: number };
         }
 
         interface SessionSummary extends AltaRecord { type: "alta.session.summary"; count: number; truncated: boolean; }

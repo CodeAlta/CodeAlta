@@ -1,11 +1,14 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class SessionRuntimeService
 {
+    private static readonly Logger DeletionLog = LogManager.GetLogger("CodeAlta.SessionDeletion");
+
     /// <summary>
     /// Raised with the identifier of a session after it was deleted on purpose, by the user or by a command. It is
     /// not raised for a session that automatic retention removed.
@@ -169,11 +172,26 @@ public sealed partial class SessionRuntimeService
             || string.Equals(SessionLineage.CreatorLink(metadata), id, StringComparison.OrdinalIgnoreCase)
             || string.Equals(metadata.ViewState?.ParentSessionId, id, StringComparison.OrdinalIgnoreCase);
 
+    // oneOfSeveral: the session is deleted with others (a tree) though it is validated as one, without projectSessions.
     private async Task<string> DeleteOwnedCatalogSessionBodyAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
-        IReadOnlySet<string>? projectSessions = null)
+        IReadOnlySet<string>? projectSessions = null, bool oneOfSeveral = false)
     {
-        // A session another process runs is not deleted under it.
-        if (!TryHoldForWrite(sessionId, out var lease)) return "session_in_use";
+        // The deletion of one session says why the session is in use. A deletion of several says session_in_use, with the
+        // session that stopped it. Both log why: of these states, the window shows only a run.
+        string Refuse(string reason, string detail)
+        {
+            if (LogManager.IsInitialized) DeletionLog.Warn($"Deletion of session {sessionId} refused ({reason}): {detail}");
+            return projectSessions is not null || oneOfSeveral ? "session_in_use" : reason;
+        }
+
+        // A session another process runs is not deleted under it, nor one that moved to another machine.
+        IDisposable lease;
+        try { lease = HoldForWrite(sessionId); }
+        catch (SessionInUseException inUse)
+        {
+            return Refuse(inUse.HolderKind == SessionInUseException.MovedKind ? "session_moved" : "held_elsewhere", inUse.Message);
+        }
+
         using var held = lease;
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         async Task<string> ValidateAsync(CancellationToken token)
@@ -205,12 +223,17 @@ public sealed partial class SessionRuntimeService
         var actor = GetActorForWork(sessionId);
         var preparation = await actor.QueryAsync(_ =>
         {
+            static ValueTask<(string? Refusal, Task? Work)> Answer(string? refusal, Task? work = null) => ValueTask.FromResult((refusal, work));
+            if (_transitions.ContainsKey(sessionId))
+                return Answer(Refuse("transition_pending", "its attachment is being attached, replaced or retired."));
             // A cloud session being brought here, or a message being sent to it, holds the session as a run does.
-            if (_transitions.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId)) return ValueTask.FromResult((Busy: true, Work: (Task?)null));
-            if (!_entries.TryGetValue(sessionId, out var entry)) return ValueTask.FromResult((Busy: false, Work: (Task?)null));
-            if (entry.HasActiveRun || entry.QueueDrainInProgress || projectSessions is not null
-                && (_remoteControlWanted.ContainsKey(sessionId) || entry.BackgroundTasks.Any(task => task.Outcome is null)))
-                return ValueTask.FromResult((Busy: true, Work: (Task?)null));
+            if (_cloudWork.ContainsKey(sessionId)) return Answer(Refuse("cloud_work", "it is being brought back from the cloud, or sent a message there."));
+            if (!_entries.TryGetValue(sessionId, out var entry)) return Answer(null);
+            if (entry.HasActiveRun) return Answer(Refuse("run_active", $"run {entry.ActiveRunId?.Value} is in flight."));
+            if (entry.QueueDrainInProgress) return Answer(Refuse("queue_draining", "a prompt of its queue is being sent."));
+            if (projectSessions is not null && _remoteControlWanted.ContainsKey(sessionId)) return Answer(Refuse("remote_control", "Remote Control is on."));
+            if (projectSessions is not null && entry.BackgroundTasks.Any(task => task.Outcome is null))
+                return Answer(Refuse("background_running", "its provider works in the background."));
             var retirement = _forwarding.RetireAsync(entry.Attachment);
             var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Task? ticket = null;
@@ -234,13 +257,16 @@ public sealed partial class SessionRuntimeService
             _transitions[sessionId] = work;
             ticket = work;
             launch.TrySetResult();
-            return ValueTask.FromResult((Busy: false, Work: (Task?)work));
+            return Answer(null, work);
         }, CancellationToken.None).ConfigureAwait(false);
-        if (preparation.Busy) return "session_in_use";
+        if (preparation.Refusal is not null) return preparation.Refusal;
         if (preparation.Work is not null) await preparation.Work.ConfigureAwait(false);
         var outcome = await actor.QueryAsync(async token =>
         {
-            if (_transitions.ContainsKey(sessionId) || _entries.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId)) return "session_in_use";
+            // Something attached the session, or started to, since its attachment was retired.
+            if (_transitions.ContainsKey(sessionId) || _entries.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId))
+                return Refuse("reattached", $"transition={_transitions.ContainsKey(sessionId)}, attachment={_entries.ContainsKey(sessionId)}, "
+                    + $"cloud work={_cloudWork.ContainsKey(sessionId)} once its attachment was retired.");
             var checkedScope = await ValidateAsync(token).ConfigureAwait(false);
             if (checkedScope != "ok") return checkedScope;
             return await _agentSessionCatalog.DeleteSessionAsync(sessionId, token).ConfigureAwait(false)

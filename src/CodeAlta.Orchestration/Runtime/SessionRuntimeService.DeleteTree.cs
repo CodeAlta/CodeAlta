@@ -76,7 +76,7 @@ public sealed partial class SessionRuntimeService
 
             // The session itself as Delete deletes it: its title and scope are checked again, and a child that came
             // in the meantime keeps it.
-            var last = await DeleteOwnedCatalogSessionBodyAsync(root.SessionId, projectId, workspacePath, confirmedTitle).ConfigureAwait(false);
+            var last = await DeleteOwnedCatalogSessionBodyAsync(root.SessionId, projectId, workspacePath, confirmedTitle, oneOfSeveral: true).ConfigureAwait(false);
             if (last != "ok") return new(deleted.Count == 0 ? last : "delete_partial", deleted, root.SessionId);
             deleted.Add(root.SessionId);
             return new("ok", deleted, null);

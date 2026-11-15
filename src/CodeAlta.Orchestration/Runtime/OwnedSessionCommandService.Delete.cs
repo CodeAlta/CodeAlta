@@ -53,7 +53,12 @@ public sealed partial class OwnedSessionCommandService
     /// <param name="projectId">Exact project identity, or null for global scope.</param>
     /// <param name="workspacePath">Exact catalog workspace path.</param>
     /// <param name="confirmedTitle">User-confirmed current title.</param>
-    /// <returns>ok, busy, closed, session_in_use, session_missing, has_children, or delete_unconfirmed.</returns>
+    /// <returns>
+    /// ok, busy, closed, session_missing, has_children or delete_unconfirmed; or why the runtime has the session in use:
+    /// held_elsewhere (another process holds its lease), session_moved (it moved or moves to another machine),
+    /// transition_pending (its attachment is being attached, replaced or retired), cloud_work, run_active (a run this
+    /// owner did not start), queue_draining, or reattached (attached again while the deletion retired its attachment).
+    /// </returns>
     /// <exception cref="ArgumentException">A required identity or confirmation is blank.</exception>
     public Task<string> DeleteCatalogSessionAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle)
     {
