@@ -211,7 +211,7 @@ public sealed class SessionSandboxTests
         var backend = new InProcessBackend();
         var scopes = new List<CodeAlta.Catalog.Secrets.SecretScope>();
         var secrets = new Dictionary<string, string> { ["NPM_TOKEN"] = "npm-value" };
-        await using var f = await Fixture.CreateAsync(backend, variables: scope =>
+        await using var f = await Fixture.CreateAsync(backend, variables: (scope, _) =>
         {
             lock (scopes) scopes.Add(scope);
             return new(static _ => null, [new Secrets(secrets)]);
@@ -784,6 +784,44 @@ public sealed class SessionSandboxTests
         Assert.IsNull(router.ProcessHost, "out of the sandbox, the process is a child of CodeAlta again");
     }
 
+    // The process of an agent keeps the variables it started with: when a secret its profile sets changes, the next run
+    // starts another process, as for another profile. The worker of the built-in tools follows its policy by itself.
+    [TestMethod]
+    public async Task TheProcessOfAnAgent_IsAnotherOne_WhenASecretItsProfileSetsGetsAnotherValue()
+    {
+        var secrets = new Dictionary<string, string>();
+        await using var f = await Fixture.CreateAsync(new InProcessBackend(), registry =>
+            registry.RegisterOrReplace(new ModelProviderDescriptor(new ModelProviderId("claude"), "Claude", "claude-code"), () => throw new InvalidOperationException("Not started.")),
+            variables: (_, _) => new(static _ => null, [new Secrets(secrets)]));
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("""
+            [sandbox]
+            all_sessions = "tools"
+
+            [sandbox.profiles.tools]
+            extends = "strict"
+            env = ["NPM_TOKEN=${secret:NPM_TOKEN}"]
+            """);
+        var router = f.Runtime.CreateSandboxToolRouter("s", "claude", [f.Project.ProjectPath]);
+        async Task<string> KeyAsync()
+        {
+            Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None));
+            return router.ProcessHost!.Key;
+        }
+
+        var missing = await KeyAsync();
+        secrets["NPM_TOKEN"] = "npm-value-1";
+        var set = await KeyAsync();
+        Assert.AreNotEqual(missing, set, "the secret was set: the process that starts has it");
+        Assert.AreEqual(set, await KeyAsync(), "the same values are the same process");
+        Assert.DoesNotContain("npm-value-1", set, "the key holds no value");
+
+        // The session attaches again (its values are read again then) after the secret was rotated.
+        secrets["NPM_TOKEN"] = "npm-value-2";
+        f.Runtime.ForgetSandboxVariables("s");
+        Assert.AreNotEqual(set, await KeyAsync());
+    }
+
     [TestMethod]
     public async Task AnAcpAgent_StartsInTheSandbox_InAHomeOfItsOwn_AndReachesThePortOfTheToolsOfCodeAlta()
     {
@@ -961,7 +999,7 @@ public sealed class SessionSandboxTests
         public CatalogOptions Options { get; }
 
         public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null, string? defaultSandbox = null,
-            Func<IReadOnlyCollection<int>>? reservedPorts = null, Func<CodeAlta.Catalog.Secrets.SecretScope, CodeAlta.Catalog.Secrets.SecretReferenceResolver>? variables = null)
+            Func<IReadOnlyCollection<int>>? reservedPorts = null, Func<CodeAlta.Catalog.Secrets.SecretScope, CodeAlta.Catalog.Secrets.SecretScope?, CodeAlta.Catalog.Secrets.SecretReferenceResolver>? variables = null)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
             var registry = new ModelProviderRegistry();

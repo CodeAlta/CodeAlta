@@ -261,17 +261,30 @@ public sealed class SessionIdentityResolver
     /// <exception cref="ArgumentNullException"><paramref name="attachment"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    public async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+    public Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
         SessionSecretAttachment attachment, CancellationToken stopWaiting, CancellationToken cancellationToken)
+        => ResolveForAttachmentAsync(recordedSpaceId, projectId, sessionId, parentSessionId, attachment, null, stopWaiting, cancellationToken);
+
+    // As above, for a session that reads other secrets as it attaches (the variables its sandbox profile sets): `alsoBuilt` is
+    // called after each build of the environment, with the scope of the attachment, so that what it reads is asked for and
+    // waited for with the secrets of the identity, in the same prompt.
+    internal async Task<SessionIdentity> ResolveForAttachmentAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId,
+        SessionSecretAttachment attachment, Action<SecretScope>? alsoBuilt, CancellationToken stopWaiting, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(attachment);
         if (await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false) is not { } read) return SessionIdentity.Usual;
-        if (Confirmations is not { } confirmations) return Of(read.Space, read.Profiles, read.Scope);
+        if (Confirmations is not { } confirmations)
+        {
+            alsoBuilt?.Invoke(read.Scope);
+            return Of(read.Space, read.Profiles, read.Scope);
+        }
+
         // Told before the first build: it decides which secrets the user is asked for.
         confirmations.Begin(read.Scope, attachment);
         var identity = Of(read.Space, read.Profiles, read.Scope);
-        if (identity.Identity is null) return identity;
+        alsoBuilt?.Invoke(read.Scope);
+        if (identity.Identity is null && alsoBuilt is null) return identity;
         using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopWaiting))
         {
             // Built again for the secrets the user confirmed: nothing was given for them before. A build can ask for a secret the
@@ -281,6 +294,7 @@ public sealed class SessionIdentityResolver
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 identity = Of(read.Space, read.Profiles, read.Scope);
+                alsoBuilt?.Invoke(read.Scope);
             }
         }
 

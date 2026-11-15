@@ -717,9 +717,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ReservedLocalPorts = options.ReservedLocalPorts,
                 SandboxWithheldValues = shellSecrets.Given,
                 // The variables a sandbox profile sets read their references as the shell of the session does, masked as they are
-                // given. A secret that asks before use is given for a use the user confirmed: a tool call waits for nobody.
-                SandboxVariables = scope => SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                    scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, credentials.WithoutAsking(recorded: false), ShellUseOf(scope)),
+                // given. A secret that asks before use is asked for as the session attaches, with those of its identity; a read at
+                // a tool call waits for nobody, and gets it only for a use the user confirmed.
+                SandboxVariables = (scope, attachment) => SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
+                    scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain,
+                    attachment is null ? credentials.WithoutAsking(recorded: false) : shellConfirmations.SecretsOf(attachment), ShellUseOf(scope)),
                 DefaultSandbox = options.DefaultSandbox,
                 ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,
                 Leases = options.SessionLeaseOwner is { } leaseOwner

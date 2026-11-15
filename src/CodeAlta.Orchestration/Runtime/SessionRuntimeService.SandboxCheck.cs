@@ -57,7 +57,7 @@ public sealed partial class SessionRuntimeService
         try
         {
             // The variables the profile sets are read as for a session of no space and no project: a secret that is not set fails the start.
-            var (withValues, variableProblem) = ResolveSandboxVariables(profile!, SandboxVariableResolver(SecretScope.None));
+            var (withValues, variableProblem) = ResolveSandboxVariables(profile!, SandboxVariableResolver(SecretScope.None, null));
             var start = new SessionSandboxStart(sessionId, "check", withValues, new SandboxSessionFolders { WorkingDirectory = folder }, [], CommandGuard: false)
             {
                 VariableProblem = variableProblem,

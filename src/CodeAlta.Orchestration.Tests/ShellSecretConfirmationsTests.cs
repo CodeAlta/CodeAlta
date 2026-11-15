@@ -16,6 +16,7 @@ public sealed class ShellSecretConfirmationsTests
     private const string Value = "local-deploy-value-1";
     private const string RegistryValue = "local-registry-value-1";
     private const string SigningValue = "local-signing-value-1";
+    private const string SandboxOnlyValue = "local-sandbox-value-1";
 
     [TestMethod]
     public async Task TheShell_WaitsForTheConfirmation_ThenGetsTheValue_InEachVariableThatNamesIt()
@@ -41,6 +42,38 @@ public sealed class ShellSecretConfirmationsTests
         await fixture.AwaitedAsync("shell of the session session-1");
         fixture.Broker.Decline("DEPLOY", "shell of the session session-1");
         Assert.IsNull((await again.WithinAsync(TestTime.Seconds(30))).Environment.Get("DEPLOY_TOKEN"));
+    }
+
+    // The variables the sandbox profile of a session sets are read as it attaches, after each build of its environment: a
+    // secret of theirs that asks before use is asked for with those of the identity, and read once the user confirmed it.
+    [TestMethod]
+    public async Task ASecretOnlyTheSandboxProfileNames_IsAskedForAsTheSessionAttaches_AndReadOnceConfirmed()
+    {
+        using var fixture = await Fixture.CreateAsync(SecretAskDurations.EachUse, sandboxOnly: true);
+        const string use = "shell of the session session-20";
+        var reads = new List<string?>();
+
+        var attaching = fixture.AttachAsync("session-20", attachment =>
+        {
+            // As the host reads the variables of a sandbox profile: the values of the machine, the confirmations of the attachment.
+            var resolver = SecretReferenceResolver.ForScope(fixture.GlobalRoot, new SecretScope(null, null, null) { RunId = attachment.RunId }, shell: true, null, null,
+                fixture.Confirmations.SecretsOf(attachment), CodeAltaHost.ShellUseOf(attachment));
+            lock (reads) reads.Add(resolver.TryResolve("${secret:SANDBOX_ONLY}", out var value, out _) ? value : null);
+        });
+        await fixture.AwaitedAsync(use, "SANDBOX_ONLY");
+        Assert.IsFalse(attaching.IsCompleted, "the session waits for the secret of its sandbox as for those of its identity");
+        await fixture.Broker.ConfirmAsync("DEPLOY", use);
+        await fixture.Broker.ConfirmAsync("SANDBOX_ONLY", use);
+        var identity = await attaching.WithinAsync(TestTime.Seconds(30));
+
+        lock (reads)
+        {
+            Assert.IsNull(reads[0], "nothing is given before the user confirms");
+            Assert.AreEqual(SandboxOnlyValue, reads[^1], "the last build has the value, which the session keeps while it is attached");
+        }
+
+        Assert.IsEmpty(identity.SecretProblems);
+        Assert.IsEmpty(fixture.Broker.ListPending());
     }
 
     [TestMethod]
@@ -305,8 +338,11 @@ public sealed class ShellSecretConfirmationsTests
         private readonly SessionIdentityResolver _resolver;
         private readonly string _spaceId;
 
-        private Fixture(TempDirectory temp, CredentialBroker broker, CodeAltaHost.ShellBoundSecrets secrets, Verifier verifier, SessionIdentityResolver resolver, string spaceId)
+        private Fixture(TempDirectory temp, CredentialBroker broker, CodeAltaHost.ShellBoundSecrets secrets, Verifier verifier, SessionIdentityResolver resolver, string spaceId,
+            CodeAltaHost.ShellSecretConfirmations confirmations, string globalRoot)
         {
+            Confirmations = confirmations;
+            GlobalRoot = globalRoot;
             _temp = temp;
             Broker = broker;
             Secrets = secrets;
@@ -317,11 +353,15 @@ public sealed class ShellSecretConfirmationsTests
 
         public CodeAltaHost.ShellBoundSecrets Secrets { get; }
 
+        public CodeAltaHost.ShellSecretConfirmations Confirmations { get; }
+
+        public string GlobalRoot { get; }
+
         public CredentialBroker Broker { get; }
 
         public Verifier Verifier { get; }
 
-        public static async Task<Fixture> CreateAsync(string askBeforeUse, TimeSpan? timeout = null, bool canPrompt = true, bool second = false, bool compound = false)
+        public static async Task<Fixture> CreateAsync(string askBeforeUse, TimeSpan? timeout = null, bool canPrompt = true, bool second = false, bool compound = false, bool sandboxOnly = false)
         {
             var temp = new TempDirectory();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "global") };
@@ -343,6 +383,13 @@ public sealed class ShellSecretConfirmationsTests
                 store.Bindings.SetAskBeforeUse("SIGNING", askBeforeUse);
             }
 
+            // A secret no variable of the identity names: only the sandbox profile of the session does.
+            if (sandboxOnly)
+            {
+                store.SetSecret("SANDBOX_ONLY", SandboxOnlyValue, "alice");
+                store.Bindings.SetAskBeforeUse("SANDBOX_ONLY", askBeforeUse);
+            }
+
             var verifier = new Verifier();
             var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = options.GlobalRoot, Verifier = verifier, CanPrompt = canPrompt });
             var spaces = new SpaceCatalog(new ProjectCatalog(options));
@@ -361,10 +408,14 @@ public sealed class ShellSecretConfirmationsTests
             {
                 Confirmations = confirmations,
             };
-            return new Fixture(temp, broker, secrets, verifier, resolver, space.Id);
+            return new Fixture(temp, broker, secrets, verifier, resolver, space.Id, confirmations, options.GlobalRoot);
         }
 
         public Task<SessionIdentity> AttachAsync(string sessionId) => _resolver.ResolveForAttachmentAsync(_spaceId, null, sessionId, null, CancellationToken.None);
+
+        // A session that reads other secrets as it attaches: the variables its sandbox profile sets.
+        public Task<SessionIdentity> AttachAsync(string sessionId, Action<SecretScope> alsoBuilt)
+            => _resolver.ResolveForAttachmentAsync(_spaceId, null, sessionId, null, SessionSecretAttachment.Attended, alsoBuilt, CancellationToken.None, CancellationToken.None);
 
         public Task<SessionIdentity> AttachAsync(string sessionId, SessionSecretAttachment attachment, CancellationToken stopWaiting = default)
             => _resolver.ResolveForAttachmentAsync(_spaceId, null, sessionId, null, attachment, stopWaiting, CancellationToken.None);

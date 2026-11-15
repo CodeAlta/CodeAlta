@@ -106,7 +106,7 @@ The programs of a sandbox start with an environment of their own: the variables 
 
 A profile that extends another gets its variables too, and an entry of the same name replaces the one of its base. While a secret a profile names is not set, or its vault is closed, the sandbox runs no command and says which one is missing.
 
-The secrets and variables a profile names are those of this computer, the same for every session of the profile, not those of a space, a project or an [environment](../secrets/readme.md). Nobody is asked when a sandbox starts: name a secret that does not [ask before use](../secrets/vaults.md).
+The secrets and variables a profile names are those of this computer, the same for every session of the profile, not those of a space, a project or an [environment](../secrets/readme.md). A session reads them when it starts and keeps them while it runs: a secret that [asks before use](../secrets/vaults.md) is asked for then, with those of the identity of its space. For a profile chosen while the session runs, nobody is asked: such a secret is given only if its use is still confirmed.
 
 The folders of the sandbox (`HOME`, `TEMP`, the caches of the package managers) stay its own, whatever a profile sets.
 

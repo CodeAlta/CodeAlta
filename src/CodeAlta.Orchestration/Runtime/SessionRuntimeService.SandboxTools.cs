@@ -426,7 +426,7 @@ public sealed partial class SessionRuntimeService
     {
         SessionSandboxWorkers? workers;
         lock (_sandboxGate) workers = _sandboxWorkers;
-        _sandboxVariables.TryRemove(sessionId, out _);
+        ForgetSandboxVariables(sessionId);
         if (workers is not null) _ = workers.StopIfUnusedAsync(sessionId);
     }
 
@@ -446,13 +446,15 @@ public sealed partial class SessionRuntimeService
     internal string? ProviderTypeOf(string providerKey) => SelectionProviderOf(providerKey)?.ProviderType;
 
     // Starts the process of an agent that runs its own tools in the sandbox of its session.
-    private sealed class AgentProcessHost(SessionRuntimeService runtime, string sessionId, string providerId, ResolvedSandboxProfile profile, IReadOnlyList<string> projectRoots)
-        : IAgentProcessHost
+    // variables: the variables of the profile with the values it sets, which only the key reads.
+    private sealed class AgentProcessHost(SessionRuntimeService runtime, string sessionId, string providerId, ResolvedSandboxProfile profile, IReadOnlyList<string> projectRoots,
+        IReadOnlyList<string> variables) : IAgentProcessHost
     {
-        // What the container of the process is made of: another profile is another process.
+        // What the container of the process is made of: another profile is another process, and so is another value of a
+        // variable it sets (a secret that changed), which the process keeps from its start. The key is a hash: it holds no value.
         public string Key { get; } = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join('\u001F',
             [profile.Name, profile.Network.ToString(), profile.Outside.ToString(), .. profile.Hosts, "|", .. profile.Write, "|", .. profile.Read, "|", .. profile.Deny, "|",
-             .. profile.LocalPorts.Select(static port => port.ToString(System.Globalization.CultureInfo.InvariantCulture)), "|", .. profile.Env, "|", .. profile.McpServers]))), 0, 8);
+             .. profile.LocalPorts.Select(static port => port.ToString(System.Globalization.CultureInfo.InvariantCulture)), "|", .. variables, "|", .. profile.McpServers]))), 0, 8);
 
         public async Task<IAgentHostedProcess> StartAsync(AgentProcessLaunch launch, CancellationToken cancellationToken)
         {
@@ -535,7 +537,8 @@ public sealed partial class SessionRuntimeService
                        "Choose another provider, or turn the sandbox off for this session.";
             // The agent reaches the service of its vendor even with a profile without network.
             if (runtime.GetSandboxAvailability().Refusal(profile.Network == SandboxNetwork.Off ? SandboxNetwork.Hosts : profile.Network) is { } refusal) return refusal;
-            Volatile.Write(ref _processHost, new AgentProcessHost(runtime, sessionId, providerId, profile, projectRoots));
+            var (withValues, _) = await runtime.SandboxVariablesOfAsync(sessionId, profile, cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref _processHost, new AgentProcessHost(runtime, sessionId, providerId, profile, projectRoots, withValues.Env));
             return null;
         }
 

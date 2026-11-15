@@ -2293,8 +2293,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             // Nobody is asked for a session nobody is in front of, and a session another one started takes the answers of that one.
             var secretAttachment = await SecretAttachmentOfAsync(session, cancellationToken).ConfigureAwait(false);
             using var secretWait = _secretWaits.Begin(session.SessionId);
+            // The variables its sandbox profile sets are read with it: a secret of theirs that asks before use is asked for in the same prompt.
+            var sandboxVariables = await SandboxVariablesAtAttachmentAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
             identity = await Identities.ResolveForAttachmentAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId,
-                secretAttachment, secretWait.Token, cancellationToken).ConfigureAwait(false);
+                secretAttachment, sandboxVariables, secretWait.Token, cancellationToken).ConfigureAwait(false);
         }
 
         if (identity.SecretProblems.Count > 0 && !_disposed && !string.IsNullOrWhiteSpace(session.SessionId))
