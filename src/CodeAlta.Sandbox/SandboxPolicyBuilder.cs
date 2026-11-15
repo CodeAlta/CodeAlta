@@ -45,6 +45,9 @@ public static class SandboxPolicyBuilder
     // the profile names it.
     private static readonly string[] SecretNameParts = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "API_KEY", "APIKEY", "PRIVATE_KEY", "ACCESS_KEY"];
 
+    /// <summary>The variable every program of a sandbox gets, with the name of its profile.</summary>
+    public const string SandboxVariableName = "CODEALTA_SANDBOX";
+
     /// <summary>Builds the policy of one session.</summary>
     /// <param name="profile">The profile of the session.</param>
     /// <param name="folders">The folders the session works in.</param>
@@ -274,7 +277,7 @@ public static class SandboxPolicyBuilder
         // without it on macOS: it is the temporary folder of the sandbox there.
         if (OperatingSystem.IsMacOS()) environment["CLAUDE_CODE_TMPDIR"] = temp;
         if (File.Exists(userGitConfig)) environment["GIT_CONFIG_GLOBAL"] = userGitConfig;
-        environment["CODEALTA_SANDBOX"] = profile.Name;
+        environment[SandboxVariableName] = profile.Name;
         return environment;
     }
 

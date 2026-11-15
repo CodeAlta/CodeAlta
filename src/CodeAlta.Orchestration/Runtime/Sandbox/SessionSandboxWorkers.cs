@@ -93,7 +93,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
                     if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, reserved, CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
                     var client = await SandboxWorkerClient.StartAsync(_backend, policy, _commandLine(), proxy?.Endpoint,
                         new SandboxWorkerInit(start.SessionId, start.ProviderId, policy.WorkingDirectory, [policy.WorkingDirectory, .. start.Folders.Writable],
-                            start.Folders.Scratchpad, Host().HomeDirectory, start.CommandGuard), cancellationToken).ConfigureAwait(false);
+                            start.Folders.Scratchpad, Host().HomeDirectory, start.CommandGuard) { TemporaryFolders = [policy.Temp] }, cancellationToken).ConfigureAwait(false);
                     slot.Current = new Running(client, proxy, key, policy);
                 }
                 catch

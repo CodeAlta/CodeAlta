@@ -216,6 +216,7 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
             WorkingDirectory = init.WorkingDirectory,
             WritableRoots = [.. init.WritableRoots],
             Scratchpad = init.Scratchpad,
+            TemporaryFolders = [.. init.TemporaryFolders],
             Home = init.Home,
             CommandGuard = init.CommandGuard,
         }, cancellationToken).ConfigureAwait(false);
@@ -388,4 +389,11 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
 /// <param name="Scratchpad">Its scratchpad folder, or null.</param>
 /// <param name="Home">The home folder of the user, whose settings the file tools do not write; null for none.</param>
 /// <param name="CommandGuard">Whether commands go through the guard of the host before any permission.</param>
-public sealed record SandboxWorkerInit(string SessionId, string ProviderId, string WorkingDirectory, IReadOnlyList<string> WritableRoots, string? Scratchpad, string? Home, bool CommandGuard);
+public sealed record SandboxWorkerInit(string SessionId, string ProviderId, string WorkingDirectory, IReadOnlyList<string> WritableRoots, string? Scratchpad, string? Home, bool CommandGuard)
+{
+    /// <summary>
+    /// Gets the temporary folders of the sandbox its file tools write in, as its commands do: the one of the session
+    /// (<see cref="SandboxPolicy.Temp"/>).
+    /// </summary>
+    public IReadOnlyList<string> TemporaryFolders { get; init; } = [];
+}

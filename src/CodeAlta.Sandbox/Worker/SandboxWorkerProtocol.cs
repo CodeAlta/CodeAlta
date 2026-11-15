@@ -26,6 +26,8 @@ internal sealed record SandboxWorkerMessage
 
     public string? Scratchpad { get; init; }
 
+    public List<string>? TemporaryFolders { get; init; }
+
     public string? Home { get; init; }
 
     public bool CommandGuard { get; init; }

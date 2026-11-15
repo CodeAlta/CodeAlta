@@ -97,6 +97,23 @@ public sealed class AgentWriteGuardTests
         Assert.DoesNotContain("shell_command", sandbox.CheckTree(project)!, "nor when a folder is kept");
     }
 
+    // The instructions of a session name a scratchpad file in the folder of CodeAlta, which a sandbox does not reach: the
+    // refusal names the scratchpad folder of the session, which it writes.
+    [TestMethod]
+    public void TheGuardOfASandbox_NamesTheScratchpadOfTheSession_WhenAWriteIsOutsideItsFolders()
+    {
+        using var temp = new Temp();
+        var project = temp.Folder("project");
+        var shared = temp.Folder("home", ".alta", "scratchpad");
+        var own = Path.Combine(shared, "sandbox", "s1");
+        var guard = new AgentWriteGuard([project], [], [own, temp.Folder("sandbox-temp")], temp.Folder("home")) { InSandbox = true, Scratchpad = own };
+
+        StringAssert.Contains(guard.Check(Path.Combine(shared, "2026-11-15-notes-0a1b2c.md")), $"Its scratchpad is the folder '{own}'.");
+        Assert.IsNull(guard.Check(Path.Combine(own, "2026-11-15-notes.md")));
+        Assert.IsNull(guard.Check(Path.Combine(temp.Path, "sandbox-temp", "build.log")), "its temporary folder is its own too");
+        Assert.DoesNotContain("scratchpad", guard.Check(Path.Combine(project, ".vscode", "tasks.json"))!, "another refusal says nothing of it");
+    }
+
     [TestMethod]
     public void TheGuard_OfASessionThatWorksInTheHomeFolder_RefusesTheSettingsOfTheUser()
     {

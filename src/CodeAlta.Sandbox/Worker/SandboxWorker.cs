@@ -119,12 +119,26 @@ public static class SandboxWorker
                 CommandGuard = init.CommandGuard ? CheckCommandAsync : null,
                 // The file tools keep the rules of a session without shell inside the sandbox too: what the container
                 // already refuses, and the settings of git, CodeAlta and the coding agents inside the working tree.
-                WriteGuard = new AgentWriteGuard(init.WritableRoots is { Count: > 0 } roots ? roots : [workingDirectory], [],
-                    init.Scratchpad is { } scratchpad ? [scratchpad] : [], init.Home) { InSandbox = true },
+                WriteGuard = new AgentWriteGuard(init.WritableRoots is { Count: > 0 } roots ? roots : [workingDirectory], [], OwnFolders(init), init.Home)
+                {
+                    InSandbox = true,
+                    Scratchpad = init.Scratchpad,
+                },
             };
             return AgentBuiltInToolFactory.CreateDefaultTools(options)
                 .Where(static tool => Tools.Contains(tool.Spec.Name))
                 .ToDictionary(static tool => tool.Spec.Name, StringComparer.Ordinal);
+        }
+
+        // The folders of the sandbox itself, which the file tools write as the commands do: the scratchpad of the session
+        // and its temporary folders. Windows gives the programs of a container a temporary folder of its own (TEMP),
+        // whatever the policy sets: it is the one of this process when it runs in a sandbox.
+        private static List<string> OwnFolders(SandboxWorkerMessage init)
+        {
+            var folders = new List<string>(init.TemporaryFolders ?? []);
+            if (init.Scratchpad is { } scratchpad) folders.Add(scratchpad);
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(SandboxPolicyBuilder.SandboxVariableName))) folders.Add(Path.GetTempPath());
+            return folders;
         }
 
         private async Task InvokeAsync(SandboxWorkerMessage message, CancellationToken cancellationToken)

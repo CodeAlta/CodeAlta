@@ -241,6 +241,77 @@ public sealed class CliSandboxWorkerTests
         }
     }
 
+    // The scratchpad and the temporary folders of a sandboxed session are written by its commands and by its file tools
+    // alike; the scratchpad files of the other sessions, in the folder of CodeAlta, stay out of its reach.
+    [TestMethod]
+    public async Task TheWorkerInAContainer_WritesItsScratchpadAndItsTemporaryFolders_WithItsFileToolsAsWithItsCommands()
+    {
+        var backend = new MxcSandboxBackend();
+        if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "scratch-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        var alta = Directory.CreateDirectory(Path.Combine(root, "alta")).FullName;
+        var shared = Directory.CreateDirectory(Path.Combine(alta, "scratchpad")).FullName;
+        var other = Path.Combine(shared, "2026-11-15-another-session-0a1b2c.md");
+        File.WriteAllText(other, "the-notes-of-another-session");
+        var scratchpad = Path.Combine(shared, "sandbox", "s1");
+        try
+        {
+            var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Strict, []),
+                new SandboxSessionFolders { WorkingDirectory = project, Scratchpad = scratchpad }, SandboxHostDiscovery.Current(Path.Combine(root, "data"), [alta]), [], "s1");
+            var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
+            await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", null,
+                new SandboxWorkerInit("s1", "test", project, [project], scratchpad, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false)
+                {
+                    TemporaryFolders = [policy.Temp],
+                }, CancellationToken.None).WithinAsync(Deadline);
+            var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
+            var windows = OperatingSystem.IsWindows();
+            async Task<AgentToolResult> ShellAsync(string command)
+                => await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WithinAsync(Deadline);
+            async Task<AgentToolResult> WriteAsync(string path)
+                => await worker.InvokeAsync(Call("write_file", new { path, content = "by-the-file-tool" }), host, CancellationToken.None).WithinAsync(Deadline);
+
+            // Its scratchpad folder: a command and the file tool write it.
+            var byCommand = Path.Combine(scratchpad, "by-command.md");
+            await ShellAsync(windows ? $"Set-Content -Path '{byCommand}' -Value by-command" : $"echo by-command > '{byCommand}'");
+            Assert.IsTrue(File.Exists(byCommand), "a command writes the scratchpad of the session");
+            var byTool = await WriteAsync(Path.Combine(scratchpad, "by-tool.md"));
+            Assert.IsTrue(byTool.Success, Text(byTool));
+
+            // The temporary folder of the session, and the one the container gives its programs (TEMP on Windows).
+            var temporary = (await ShellAsync(windows ? "'tmpdir=' + $env:TMPDIR; 'temp=' + [IO.Path]::GetTempPath()" : "echo \"tmpdir=$TMPDIR\"; echo \"temp=${TMPDIR}\""));
+            var folders = Text(temporary).Split('\n', StringSplitOptions.TrimEntries).Where(static line => line.StartsWith("tmpdir=", StringComparison.Ordinal) || line.StartsWith("temp=", StringComparison.Ordinal))
+                .Select(static line => line[(line.IndexOf('=') + 1)..]).Where(static folder => folder.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            Assert.IsTrue(folders.Count > 0, Text(temporary));
+            foreach (var folder in folders)
+            {
+                var file = Path.Combine(folder, "by-tool-" + Guid.NewGuid().ToString("N")[..6] + ".txt");
+                var written = await WriteAsync(file);
+                Assert.IsTrue(written.Success, $"{folder}: {Text(written)}");
+                Assert.AreEqual("by-the-file-tool", File.ReadAllText(file));
+            }
+
+            // The scratchpad of the other sessions: neither read nor written, by a command or by the file tools.
+            var leaked = Path.Combine(shared, "left-by-the-sandbox.md");
+            var reach = await ShellAsync(windows ? $"Get-Content '{other}'; Set-Content -Path '{leaked}' -Value leaked; 'done'" : $"cat '{other}'; echo leaked > '{leaked}'; echo done");
+            Assert.DoesNotContain("the-notes-of-another-session", Text(reach));
+            Assert.IsFalse(File.Exists(leaked), "a command leaves nothing in the scratchpad of the other sessions");
+            Assert.IsFalse((await WriteAsync(leaked)).Success, "nor does the file tool");
+            Assert.IsFalse(File.Exists(leaked));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
     private static bool OnPath(string program)
         => (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Any(folder => File.Exists(Path.Combine(folder, program)));
 

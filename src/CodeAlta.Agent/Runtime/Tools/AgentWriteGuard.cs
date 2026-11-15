@@ -62,6 +62,12 @@ public sealed class AgentWriteGuard
     /// </summary>
     public bool InSandbox { get; init; }
 
+    /// <summary>
+    /// Gets the scratchpad folder of the session, which the refusal of a write outside its folders names: a sandboxed
+    /// session is told a scratchpad file it does not reach, and writes this folder instead. Null names none.
+    /// </summary>
+    public string? Scratchpad { get; init; }
+
     /// <summary>Gets the folders the session may write in, with their links resolved.</summary>
     public IReadOnlyList<string> WritableRoots => _writableRoots;
 
@@ -102,7 +108,8 @@ public sealed class AgentWriteGuard
         // `<project>/.alta/worktrees` is the session's own, whatever is above it.
         if (_writableRoots.Where(candidate => IsInside(candidate, real)).OrderByDescending(static candidate => candidate.Length).FirstOrDefault() is not { } root)
         {
-            return $"'{path}' is outside the folders this session works in. {Because("writes only in its own folders")}";
+            return $"'{path}' is outside the folders this session works in. {Because("writes only in its own folders")}" +
+                   (Scratchpad is null ? string.Empty : $" Its scratchpad is the folder '{Scratchpad}'.");
         }
 
         if (_protectedRoots.Any(@protected => IsInside(root, @protected) && IsInside(@protected, real)) || IsProtectedHomeEntry(root, real))
