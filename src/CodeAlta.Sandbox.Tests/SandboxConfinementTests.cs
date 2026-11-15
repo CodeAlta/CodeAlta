@@ -53,6 +53,20 @@ public sealed class SandboxConfinementTests
 
     // A floor crosses machines whose file systems may tell case apart (Linux) or not: folders that differ only by case are
     // taken as different ones, which refuses rather than gives what the floor does not.
+    // A confinement goes to other machines, as the floor of what a session starts there: it names the variables, and the
+    // values a profile sets stay on its machine.
+    [TestMethod]
+    public void AConfinementNamesTheVariablesOfAProfile_WithoutTheValuesItSets()
+    {
+        var profile = SandboxProfiles.Resolve("env", [new SandboxProfile { Name = "env", Extends = "workspace", Env = ["GH_TOKEN", "NPM_TOKEN=npm-value", "GH_TOKEN=gh-value"] }]);
+
+        var confinement = SandboxConfinement.Of(profile);
+
+        CollectionAssert.AreEqual(new[] { "GH_TOKEN", "NPM_TOKEN" }, confinement.Env.ToArray());
+        StringAssert.Contains(confinement.WeakerThan(confinement with { Env = ["GH_TOKEN"] }), "NPM_TOKEN");
+        Assert.IsNull(confinement.WeakerThan(SandboxConfinement.Of(profile with { Env = ["NPM_TOKEN", "GH_TOKEN"] })), "the same variables, passed on or set");
+    }
+
     [TestMethod]
     public void FoldersThatDifferOnlyByCase_AreDifferentFolders_InTheStricterDirection()
     {

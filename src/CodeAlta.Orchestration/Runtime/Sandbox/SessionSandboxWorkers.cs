@@ -14,7 +14,14 @@ namespace CodeAlta.Orchestration.Runtime.Sandbox;
 /// <param name="Environment">The variables of the session (its identity and markers).</param>
 /// <param name="CommandGuard">Whether its commands go through the guard of the host.</param>
 internal sealed record SessionSandboxStart(string SessionId, string ProviderId, ResolvedSandboxProfile Profile, SandboxSessionFolders Folders,
-    IReadOnlyList<KeyValuePair<string, string>> Environment, bool CommandGuard);
+    IReadOnlyList<KeyValuePair<string, string>> Environment, bool CommandGuard)
+{
+    /// <summary>
+    /// Gets why a variable the profile sets has no value (a secret that is not set, a vault that is closed); null when
+    /// each has one. Nothing starts in the sandbox then: a program never runs without a variable its profile sets.
+    /// </summary>
+    public string? VariableProblem { get; init; }
+}
 
 /// <summary>
 /// The sandbox workers of the sessions of a runtime: one per sandboxed session, started on its first tool call,
@@ -64,6 +71,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
     /// <exception cref="SandboxUnavailableException">The sandbox or its worker did not start.</exception>
     public async Task<Lease> AcquireAsync(SessionSandboxStart start, CancellationToken cancellationToken)
     {
+        if (start.VariableProblem is { } problem) throw new SandboxUnavailableException(problem);
         var policy = PolicyOf(start);
         var reserved = _reservedPorts();
         var key = KeyOf(policy) + "\u001D" + string.Join(',', reserved.Order());
@@ -116,6 +124,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
     public async Task<CodeAlta.Agent.Runtime.IAgentHostedProcess> StartAgentProcessAsync(SessionSandboxStart start, CodeAlta.Agent.Runtime.AgentProcessLaunch launch,
         CancellationToken cancellationToken)
     {
+        if (start.VariableProblem is { } problem) throw new SandboxUnavailableException(problem);
         var profile = AgentProfile(start.Profile, launch);
         var environment = launch.Environment.Where(static pair => pair.Value is not null).Select(static pair => new KeyValuePair<string, string>(pair.Key, pair.Value!))
             .Concat(start.Environment).DistinctBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -156,7 +165,9 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         LocalPorts = [.. profile.LocalPorts.Union(launch.LocalPorts)],
         Write = [.. profile.Write, .. launch.ReadWriteFolders],
         Read = [.. profile.Read, .. launch.ReadOnlyFolders],
-        Env = [.. profile.Env.Union(launch.PassedVariables, StringComparer.OrdinalIgnoreCase)],
+        // A variable the profile sets keeps its value: the launch passes on only what the profile does not set.
+        Env = [.. profile.Env.Union(launch.PassedVariables.Where(name => !profile.Env.Any(entry => SandboxVariable.TryGetValue(entry, out _)
+            && string.Equals(SandboxVariable.NameOf(entry), name, StringComparison.OrdinalIgnoreCase))), StringComparer.OrdinalIgnoreCase)],
     };
 
     /// <summary>Gets the hosts the proxy of a session refused last, for the note of a failed command.</summary>

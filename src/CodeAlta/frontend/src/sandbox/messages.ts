@@ -44,6 +44,8 @@ export const sandboxMessages = {
   "Add a folder or a file": ["Añadir una carpeta o un archivo", "Ajouter un dossier ou un fichier", "Ordner oder Datei hinzufügen", "フォルダーまたはファイルを追加", "添加文件夹或文件"],
   "Local ports": ["Puertos locales", "Ports locaux", "Lokale Ports", "ローカルポート", "本地端口"],
   "Add a port": ["Añadir un puerto", "Ajouter un port", "Port hinzufügen", "ポートを追加", "添加端口"],
+  "A name passes that variable of your environment on. NAME=value sets one: its value can name a secret, as ${secret:NAME}.": ["Un nombre transmite esa variable de su entorno. NAME=valor define una: su valor puede nombrar un secreto, como ${secret:NAME}.", "Un nom transmet cette variable de votre environnement. NAME=valeur en définit une : sa valeur peut nommer un secret, comme ${secret:NAME}.", "Ein Name gibt diese Variable Ihrer Umgebung weiter. NAME=Wert setzt eine: Ihr Wert kann ein Geheimnis nennen, etwa ${secret:NAME}.", "名前だけなら、お使いの環境のその変数を渡します。NAME=値 は変数を設定します。値には ${secret:NAME} のようにシークレットを指定できます。", "只写名称会传递您环境中的该变量。NAME=值 会设置一个变量：其值可以引用机密，例如 ${secret:NAME}。"],
+  "NAME or NAME=value": ["NAME o NAME=valor", "NAME ou NAME=valeur", "NAME oder NAME=Wert", "NAME または NAME=値", "NAME 或 NAME=值"],
   "Add an MCP server": ["Añadir un servidor MCP", "Ajouter un serveur MCP", "MCP-Server hinzufügen", "MCP サーバーを追加", "添加 MCP 服务器"],
   "Run outside": ["Ejecutar fuera", "Exécuter hors du bac à sable", "Außerhalb ausführen", "外で実行", "在外部运行"],
   "Ask me": ["Preguntarme", "Me demander", "Mich fragen", "確認する", "询问我"],

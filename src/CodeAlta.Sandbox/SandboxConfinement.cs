@@ -13,7 +13,7 @@ namespace CodeAlta.Sandbox;
 /// <param name="Write">The folders it writes beyond those of its session, as written (<c>~</c> for the home folder).</param>
 /// <param name="Read">The folders it reads beyond those of its session, as written.</param>
 /// <param name="Deny">The folders and files it never reads, as written.</param>
-/// <param name="Env">The names of the variables of the user's environment it receives.</param>
+/// <param name="Env">The names of the variables it receives, passed on or set.</param>
 /// <param name="McpServers">The MCP servers its sessions may use.</param>
 /// <param name="Outside">Whether a command may be asked to run outside the sandbox.</param>
 /// <param name="Fleet">Whether its sessions may start or drive work on other machines.</param>
@@ -37,8 +37,9 @@ public sealed record SandboxConfinement(
     public static SandboxConfinement Of(ResolvedSandboxProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        return new(profile.Name, profile.Network, profile.Hosts, profile.LocalPorts, profile.Write, profile.Read, profile.Deny, profile.Env, profile.McpServers,
-            profile.Outside, profile.Fleet);
+        // The variables by name: a value a profile sets stays on its machine.
+        return new(profile.Name, profile.Network, profile.Hosts, profile.LocalPorts, profile.Write, profile.Read, profile.Deny,
+            [.. profile.Env.Select(SandboxVariable.NameOf).Distinct(StringComparer.Ordinal)], profile.McpServers, profile.Outside, profile.Fleet);
     }
 
     /// <summary>

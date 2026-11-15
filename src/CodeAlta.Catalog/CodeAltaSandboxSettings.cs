@@ -45,7 +45,7 @@ public sealed class CodeAltaSandboxProfileDocument
     [JsonPropertyName("local_ports")]
     public List<int>? LocalPorts { get; set; }
 
-    /// <summary>Gets or sets the names of the variables of the user's environment it receives.</summary>
+    /// <summary>Gets or sets the variables it receives: a name of the user's environment, or <c>NAME=value</c> to set one.</summary>
     [JsonPropertyName("env")]
     public List<string>? Env { get; set; }
 
@@ -96,7 +96,7 @@ public sealed record CodeAltaSandboxSettings(string? AllSessions, IReadOnlyList<
 /// <param name="Network">The network: <c>off</c>, <c>hosts</c> or <c>on</c>.</param>
 /// <param name="Hosts">The hosts of the <c>hosts</c> network.</param>
 /// <param name="LocalPorts">The ports of this computer it may reach.</param>
-/// <param name="Env">The names of the variables of the user's environment it receives.</param>
+/// <param name="Env">The variables it receives: a name of the user's environment, or <c>NAME=value</c> to set one.</param>
 /// <param name="McpServers">The MCP servers its sessions may use.</param>
 /// <param name="Outside">Whether a command may be asked to run outside the sandbox: <c>ask</c> or <c>never</c>.</param>
 /// <param name="Fleet">Whether its sessions may start or drive work on other machines: <c>allow</c> or <c>never</c>.</param>

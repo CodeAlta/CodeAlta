@@ -227,11 +227,15 @@ public static class SandboxPolicyBuilder
                 && !withheld.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
         }
 
-        // What the profile passes on, by name, secrets included: the user named them.
+        // What the profile passes on by name, secrets included, and what it sets (`NAME=value`): the user named them. A
+        // later entry of the same name wins, so a profile changes what the one it extends gives.
         // A session of a vault never enters a sandbox, even named: it opens the whole vault.
-        foreach (var name in profile.Env)
+        foreach (var entry in profile.Env)
         {
-            if (!IsVaultSessionName(name) && Lookup(host.Environment, name) is { } value) environment[name] = value;
+            var name = SandboxVariable.NameOf(entry);
+            if (name.Length == 0 || IsVaultSessionName(name)) continue;
+            if (SandboxVariable.TryGetValue(entry, out var set)) environment[name] = set;
+            else if (Lookup(host.Environment, name) is { } value) environment[name] = value;
         }
 
         environment["HOME"] = sandboxHome;

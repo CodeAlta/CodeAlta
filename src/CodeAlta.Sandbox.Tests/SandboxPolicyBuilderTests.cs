@@ -455,6 +455,33 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void AProfileSetsVariables_OverWhatItPassesOn_ButNeverTheHomeOfTheSandboxNorTheSessionOfAVault()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var profile = SandboxProfiles.Resolve("env",
+        [
+            new SandboxProfile { Name = "base", Extends = "workspace", Env = ["MY_FEED_TOKEN", "TOOL_MODE=base", "NOT_SET_HERE"] },
+            new SandboxProfile
+            {
+                Name = "env",
+                Extends = "base",
+                Env = ["TOOL_MODE=ci", "CONNECTION=Server=db;Password=a=b", "EMPTY=", "MY_FEED_TOKEN=mine", "HOME=/elsewhere", "BW_SESSION=open", "NOT_SET_HERE"],
+            },
+        ]);
+
+        var policy = Build(temp, profile, project, new Dictionary<string, string> { ["TOOL_MODE"] = "session" });
+
+        Assert.AreEqual("ci", policy.Environment["TOOL_MODE"], "the profile over the one it extends, and over the session");
+        Assert.AreEqual("Server=db;Password=a=b", policy.Environment["CONNECTION"], "the value is what follows the first '='");
+        Assert.AreEqual(string.Empty, policy.Environment["EMPTY"]);
+        Assert.AreEqual("mine", policy.Environment["MY_FEED_TOKEN"], "a value set later replaces the variable passed on");
+        Assert.AreEqual(policy.Home, policy.Environment["HOME"], "the folders of the sandbox stay its own");
+        Assert.IsFalse(policy.Environment.ContainsKey("BW_SESSION"), "the session of a vault never enters a sandbox");
+        Assert.IsFalse(policy.Environment.ContainsKey("NOT_SET_HERE"), "a variable passed on that the computer does not set");
+    }
+
+    [TestMethod]
     public void ASecretKeptInAVault_NeverEntersTheSandbox_WhateverTheNameOfItsVariable()
     {
         using var temp = new TempTree();

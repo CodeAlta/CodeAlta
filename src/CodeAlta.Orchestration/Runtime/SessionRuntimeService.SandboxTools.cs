@@ -314,7 +314,8 @@ public sealed partial class SessionRuntimeService
             Readable = await ToolOutputGrantAsync(sessionId, cancellationToken).ConfigureAwait(false),
             SkillFolders = await SkillFoldersOfAsync(sessionId, cancellationToken).ConfigureAwait(false),
         };
-        return new SessionSandboxStart(sessionId, providerId, profile, folders, environment?.Variables ?? [], commandGuard);
+        var (withValues, problem) = await SandboxVariablesOfAsync(sessionId, profile, cancellationToken).ConfigureAwait(false);
+        return new SessionSandboxStart(sessionId, providerId, withValues, folders, environment?.Variables ?? [], commandGuard) { VariableProblem = problem };
     }
 
     // What the project of a session adds to its sandbox: the folder of the repository a sub-project writes when the session
@@ -425,6 +426,7 @@ public sealed partial class SessionRuntimeService
     {
         SessionSandboxWorkers? workers;
         lock (_sandboxGate) workers = _sandboxWorkers;
+        _sandboxVariables.TryRemove(sessionId, out _);
         if (workers is not null) _ = workers.StopIfUnusedAsync(sessionId);
     }
 

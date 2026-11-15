@@ -17,7 +17,7 @@ In a sandboxed session:
 - **Skill folders are read-only**: your own (`~/.alta/skills`, `~/.agents/skills`, `~/.copilot/skills`) and the [folders you added](../workspace/settings.md#skill-folders), so that an agent reads the files of a skill it uses. One inside the folder the session works in stays as it is; a folder of secrets, your home folder or a whole disk is never opened this way.
 - **Files that run programs later stay read-only**, even inside the project: `.git/config`, git hooks, the `.alta` settings and plugins, the settings of editors and of other coding agents. On Windows, CodeAlta holds them open while the sandbox runs, so that nothing replaces, deletes or moves them: in that time, git cannot change the configuration of the repository either (`git config`, `git push -u`, a new branch that tracks a remote, a worktree created in a repository with submodules), nor a `git checkout` or `git pull` in the same folder change one of those files. CodeAlta's own settings are saved as usual.
 - **The network** is what the profile says: the package registries only, nothing, or the internet. This computer and its local network are never reached.
-- **The environment** has no secret of yours, unless the profile names it.
+- **The environment** has no secret of yours, unless the profile names it or sets it.
 
 It does not protect against what you allow: a command you let run outside the sandbox runs with your rights. The model provider still receives what the session sends it.
 
@@ -66,6 +66,7 @@ Three profiles come with CodeAlta:
 - **Folders**: more folders to read and write, to read only, or never to reach.
 - **Network**: **Allowed hosts** (`*.example.com` for the subdomains of a domain, `example.com` for the domain itself), **Off** or **On**.
 - **Local ports**: ports of this computer it may reach, such as a local database.
+- **Environment**: the variables its programs get. A name, such as `GH_TOKEN`, passes that variable of your environment on; `NAME=value` sets one. See [Environment variables](#environment-variables).
 - **MCP servers**: the servers a sandboxed session may use. Others are not offered to it.
 - **Run outside**: **Ask me**, or **Never**.
 - **Other machines**: **Allow** or **Never**: whether its agents start or drive sessions on the other machines of your [fleet](../fleet/readme.md).
@@ -80,6 +81,7 @@ all_sessions = "workspace"
 extends = "workspace"
 hosts = ["pkgs.dev.azure.com", "*.company.com"]
 local_ports = [5432]
+env = ["GH_TOKEN", "DOTNET_CLI_UI_LANGUAGE=en", "NPM_TOKEN=${secret:NPM_TOKEN}"]
 mcp_servers = ["docs"]
 fleet = "never"
 
@@ -88,6 +90,25 @@ sandbox = "strict"
 ```
 
 A `[sandbox]` table in the `.alta/config.toml` of a repository is ignored: a repository does not choose its own sandbox.
+
+## Environment variables
+
+The programs of a sandbox start with an environment of their own: the variables they need to run and those of the session, never the rest of yours. The **Environment** of a profile adds to it, one entry per variable:
+
+- `GH_TOKEN`: the variable of that name in your environment is passed on, with its value. A variable that is not set is left out.
+- `DOTNET_CLI_UI_LANGUAGE=en`: the variable is set to that value, in the sandboxed sessions only.
+- `NPM_TOKEN=${secret:NPM_TOKEN}`: the value is read from your [secrets](../secrets/readme.md) when the sandbox starts. `${var:NAME}` names a variable of the store and `${env:NAME}` a variable of your environment, also inside a longer value.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-sandbox-environment.webp" alt="A sandbox profile in Settings > Sandbox: its Environment passes GH_TOKEN on, sets DOTNET_CLI_UI_LANGUAGE and reads NPM_TOKEN from a secret" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The <strong>Environment</strong> of a profile: a variable passed on, one set to a value, and one read from a secret.</figcaption>
+</figure>
+
+A profile that extends another gets its variables too, and an entry of the same name replaces the one of its base. While a secret a profile names is not set, or its vault is closed, the sandbox runs no command and says which one is missing.
+
+The secrets and variables a profile names are those of this computer, the same for every session of the profile, not those of a space, a project or an [environment](../secrets/readme.md). Nobody is asked when a sandbox starts: name a secret that does not [ask before use](../secrets/vaults.md).
+
+The folders of the sandbox (`HOME`, `TEMP`, the caches of the package managers) stay its own, whatever a profile sets.
 
 ## Run a command outside
 

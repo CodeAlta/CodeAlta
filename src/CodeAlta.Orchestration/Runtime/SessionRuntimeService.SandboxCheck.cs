@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
+using CodeAlta.Catalog.Secrets;
 using CodeAlta.Orchestration.Runtime.Sandbox;
 using CodeAlta.Sandbox;
 
@@ -55,7 +56,12 @@ public sealed partial class SessionRuntimeService
         var sessionId = "sandbox-check-" + Guid.NewGuid().ToString("N");
         try
         {
-            var start = new SessionSandboxStart(sessionId, "check", profile!, new SandboxSessionFolders { WorkingDirectory = folder }, [], CommandGuard: false);
+            // The variables the profile sets are read as for a session of no space and no project: a secret that is not set fails the start.
+            var (withValues, variableProblem) = ResolveSandboxVariables(profile!, SandboxVariableResolver(SecretScope.None));
+            var start = new SessionSandboxStart(sessionId, "check", withValues, new SandboxSessionFolders { WorkingDirectory = folder }, [], CommandGuard: false)
+            {
+                VariableProblem = variableProblem,
+            };
             var stopwatch = Stopwatch.StartNew();
             var (lease, failure) = await TryAcquireCheckWorkerAsync(start, cancellationToken).ConfigureAwait(false);
             yield return new("start", lease is not null, lease is null ? failure! : $"{stopwatch.ElapsedMilliseconds} ms");

@@ -63,6 +63,12 @@ public sealed class SandboxProfileTests
         Assert.Contains("does not exist", Assert.ThrowsExactly<SandboxProfileException>(() => SandboxProfiles.Resolve("a", [new SandboxProfile { Name = "a", Extends = "missing" }])).Message);
         Assert.Contains("'*'", Assert.ThrowsExactly<SandboxProfileException>(() => SandboxProfiles.Resolve("a", [new SandboxProfile { Name = "a", Hosts = ["*"] }])).Message);
         Assert.Contains("port", Assert.ThrowsExactly<SandboxProfileException>(() => SandboxProfiles.Resolve("a", [new SandboxProfile { Name = "a", LocalPorts = [70000] }])).Message);
+        Assert.Contains("the variable ''", Assert.ThrowsExactly<SandboxProfileException>(() => SandboxProfiles.Resolve("a", [new SandboxProfile { Name = "a", Env = ["=value"] }])).Message);
+        var unnamed = Assert.ThrowsExactly<SandboxProfileException>(() => SandboxProfiles.Resolve("a", [new SandboxProfile { Name = "a", Env = ["MY NAME=a-literal-token"] }])).Message;
+        Assert.Contains("'MY NAME'", unnamed);
+        Assert.DoesNotContain("a-literal-token", unnamed, "the value a profile sets is never in a message");
+        CollectionAssert.AreEqual(new[] { "TOKEN=AbC", "TOKEN=abc" }, SandboxProfiles.Resolve("a",
+            [new SandboxProfile { Name = "base", Env = ["TOKEN=AbC"] }, new SandboxProfile { Name = "a", Extends = "base", Env = ["TOKEN=abc"] }]).Env.ToArray(), "a value that differs by case is another value");
         Assert.ThrowsExactly<SandboxProfileException>(() => SandboxProfiles.Resolve("off", [new SandboxProfile { Name = "off" }]));
     }
 

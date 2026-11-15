@@ -45,7 +45,7 @@ folders of the session and the computer (`SandboxHost`) into a `SandboxPolicy`:
   denied, rather than missing (the `config.worktree` git reads with `extensions.worktreeConfig`), is made empty before
   the start, so that it is read-only.
 - **Denied**: the user's secrets wherever a grant would reach them.
-- **Environment**: built from scratch. Variables named like a secret pass only when the profile names them.
+- **Environment**: built from scratch. Variables named like a secret pass only when the profile names them. A profile also sets variables; the references of their values (a secret, a variable of the store) are read on the host from the values of the machine, the same for every session of a profile since they share its home folder, and nothing starts in the sandbox while one has no value.
 
 ## The mxc backend
 

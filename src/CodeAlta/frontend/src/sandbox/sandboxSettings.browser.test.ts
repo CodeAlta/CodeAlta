@@ -68,6 +68,11 @@ test("a profile of CodeAlta is read-only and starts a profile of the user, which
     await page.type("api.example.com");
     await page.key("Enter", 13, "\r");
     await page.until(`[...document.querySelectorAll('.sandbox-profile .bp6-tag')].some(tag => tag.textContent === 'api.example.com')`, "the added host");
+    // A variable it sets, whose value names a secret: written as it is, and read where a sandbox starts.
+    await page.click("#sandbox-profile-env");
+    await page.type("NPM_TOKEN=${secret:NPM_TOKEN}");
+    await page.key("Enter", 13, "\r");
+    await page.until(`[...document.querySelectorAll('.sandbox-profile .bp6-tag')].some(tag => tag.textContent === 'NPM_TOKEN=\${secret:NPM_TOKEN}')`, "the added variable");
     await page.click('input[name="sandbox-outside"][value="never"]');
     // Its sessions start nothing on other machines, where those of workspace do with their sandbox as a floor.
     assert.equal(await page.evaluate(`document.querySelector('input[name="sandbox-fleet"][value=""]').checked && document.querySelector('input[name="sandbox-fleet"][value=""]').parentElement.textContent`),
@@ -76,7 +81,8 @@ test("a profile of CodeAlta is read-only and starts a profile of the user, which
     await page.clickText(".sandbox-profile-actions button", "Save");
     await page.until(`sandboxFixture.savedProfiles.length === 1 && document.querySelector('[data-sandbox-profile="my-workspace"][aria-selected="true"]')`, "the saved profile, shown");
     assert.deepEqual(await page.evaluate(`(() => { const saved = sandboxFixture.savedProfiles[0]; return [saved.originalName, saved.profile.name, saved.profile.extends, saved.profile.network,
-      saved.profile.outside, saved.profile.fleet, saved.profile.hosts.join(','), saved.profile.builtIn]; })()`), [null, "my-workspace", "workspace", null, "never", "never", "api.example.com", false]);
+      saved.profile.outside, saved.profile.fleet, saved.profile.hosts.join(','), saved.profile.env.join(','), saved.profile.builtIn]; })()`),
+      [null, "my-workspace", "workspace", null, "never", "never", "api.example.com", "NPM_TOKEN=${secret:NPM_TOKEN}", false]);
     // Saved, it has nothing to save until it changes.
     const save = `[...document.querySelectorAll('.sandbox-profile-actions button')].find(button => button.textContent === 'Save')`;
     assert.equal(await page.evaluate(`${save}.disabled`), true);

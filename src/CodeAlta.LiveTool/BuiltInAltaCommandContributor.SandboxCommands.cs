@@ -44,7 +44,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddHelpText(command,
             "`write` and `read` are the folders the profile adds to every sandbox (`~` is the home folder); `deny` are never read, even inside them.",
             "`network` is `off`, `hosts` or `on`. `hosts` are reached with `hosts`, through a proxy of CodeAlta (`*.example.org` for its subdomains); `on` reaches the internet, never this computer nor its network. `localPorts` are ports of this computer it reaches.",
-            "`env` names the variables of the user it receives (their values are not shown); `mcpServers` the MCP servers its sessions may use; `outside` is `ask` when a command may ask the user to run outside the sandbox, `never` otherwise.",
+            "`env` names the variables it receives, those of the user it passes on and those it sets (their values are not shown); `mcpServers` the MCP servers its sessions may use; `outside` is `ask` when a command may ask the user to run outside the sandbox, `never` otherwise.",
             "Examples: `alta sandbox show workspace`; `alta sandbox show` (the profile of this session).");
         return command;
     }
@@ -206,7 +206,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         record["write"] = resolved.Write;
         record["read"] = resolved.Read;
         record["deny"] = resolved.Deny;
-        record["env"] = resolved.Env;
+        // By name: a value a profile sets is not shown.
+        record["env"] = resolved.Env.Select(SandboxVariable.NameOf).Distinct(StringComparer.Ordinal).ToArray();
         record["mcpServers"] = resolved.McpServers;
         return record;
     }

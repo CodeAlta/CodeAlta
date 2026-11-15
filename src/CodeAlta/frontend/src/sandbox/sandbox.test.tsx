@@ -53,14 +53,14 @@ test("the summary of a session's sandbox, its choices and the scopes the host li
 
 test("a profile of the user resolves over its base as the host resolves it", () => {
   const profiles = [
-    profile({ name: "workspace", builtIn: true, network: "hosts", outside: "ask", fleet: "allow", hosts: ["nuget.org"], write: ["~/.nuget"] }),
-    profile({ name: "mine", extends: "workspace", hosts: ["github.com", "nuget.org"], localPorts: [5432] }),
+    profile({ name: "workspace", builtIn: true, network: "hosts", outside: "ask", fleet: "allow", hosts: ["nuget.org"], write: ["~/.nuget"], env: ["GH_TOKEN"] }),
+    profile({ name: "mine", extends: "workspace", hosts: ["github.com", "nuget.org"], localPorts: [5432], env: ["TOOL_MODE=ci"] }),
     profile({ name: "closed", extends: "mine", network: "off", outside: "never", fleet: "never" }),
     profile({ name: "alone" }),
     profile({ name: "loop", extends: "again" }), profile({ name: "again", extends: "loop" }),
   ];
   assert.deepEqual(resolveSandboxProfile("mine", profiles), { network: "hosts", outside: "ask", fleet: "allow", hosts: ["nuget.org", "github.com"], write: ["~/.nuget"], read: [], deny: [],
-    localPorts: [5432], mcpServers: [] });
+    localPorts: [5432], env: ["GH_TOKEN", "TOOL_MODE=ci"], mcpServers: [] });
   assert.deepEqual([resolveSandboxProfile("closed", profiles)?.network, resolveSandboxProfile("closed", profiles)?.outside, resolveSandboxProfile("closed", profiles)?.fleet,
     resolveSandboxProfile("closed", profiles)?.hosts], ["off", "never", "never", ["nuget.org", "github.com"]]);
   assert.deepEqual([resolveSandboxProfile("alone", profiles)?.network, resolveSandboxProfile("alone", profiles)?.outside, resolveSandboxProfile("alone", profiles)?.fleet],

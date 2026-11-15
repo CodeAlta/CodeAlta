@@ -206,6 +206,74 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task TheVariablesAProfileSets_ReachItsWorkerWithTheValuesOfTheirSecrets_AndNothingRunsWithoutOne()
+    {
+        var backend = new InProcessBackend();
+        var scopes = new List<CodeAlta.Catalog.Secrets.SecretScope>();
+        var secrets = new Dictionary<string, string> { ["NPM_TOKEN"] = "npm-value" };
+        await using var f = await Fixture.CreateAsync(backend, variables: scope =>
+        {
+            lock (scopes) scopes.Add(scope);
+            return new(static _ => null, [new Secrets(secrets)]);
+        });
+        await f.CreateSessionAsync("s");
+        var tools = f.RoutedTools("s");
+        f.WriteConfig("""
+            [sandbox]
+            all_sessions = "tools"
+
+            [sandbox.profiles.tools]
+            extends = "strict"
+            env = ["TOOL_MODE=ci", "NPM_TOKEN=${secret:NPM_TOKEN}"]
+
+            [sandbox.profiles.deploy]
+            extends = "tools"
+            env = ["DEPLOY_KEY=${secret:DEPLOY_KEY}"]
+            """);
+
+        Assert.IsTrue((await tools.CallAsync("write_file", new { path = "a.txt", content = "a" })).Success);
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "a.txt" })).Success);
+        Assert.HasCount(1, backend.Starts, "the same values are the same worker");
+        Assert.AreEqual("ci", backend.Starts[0].Environment["TOOL_MODE"]);
+        Assert.AreEqual("npm-value", backend.Starts[0].Environment["NPM_TOKEN"]);
+        Assert.HasCount(1, scopes, "the secrets are read once for the calls of a session, not at each of them");
+        Assert.AreEqual(("s", null, null, null), (scopes[0].RunId, scopes[0].SpaceId, scopes[0].ProjectId, scopes[0].Environment),
+            "the values of the machine, the same for every session of the profile, which share its home folder");
+
+        // A secret that is not set: nothing runs in the sandbox, which never starts a program without a variable its profile sets.
+        f.WriteConfig(File.ReadAllText(Path.Combine(f.Options.GlobalRoot, "config.toml")).Replace("all_sessions = \"tools\"", "all_sessions = \"deploy\""));
+        var refused = await tools.CallAsync("read_file", new { path = "a.txt" });
+        Assert.IsFalse(refused.Success);
+        Assert.Contains("sets the variable DEPLOY_KEY, which has no value: The secret DEPLOY_KEY is not set on this machine.", refused.Error!);
+        Assert.HasCount(1, backend.Starts);
+        var steps = new List<SandboxCheckStep>();
+        await foreach (var step in f.Runtime.CheckSandboxAsync("deploy").WithCancellation(CancellationToken.None)) steps.Add(step);
+        Assert.AreEqual(("start", false), (steps[^1].Id, steps[^1].Passed), "the check of the profile says it too");
+        Assert.Contains("DEPLOY_KEY", steps[^1].Detail);
+
+        // Set, it is read at the next call: what failed is not kept.
+        secrets["DEPLOY_KEY"] = "deploy-value";
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "a.txt" })).Success);
+        Assert.AreEqual("deploy-value", backend.Starts[^1].Environment["DEPLOY_KEY"]);
+        Assert.AreEqual("npm-value", backend.Starts[^1].Environment["NPM_TOKEN"], "with the variables of the profile it extends");
+    }
+
+    private sealed class Secrets(Dictionary<string, string> values) : CodeAlta.Catalog.Secrets.ISecretLookup
+    {
+        public string Scope => "machine";
+
+        public bool TryGetSecret(string name, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value) => values.TryGetValue(name, out value);
+
+        public bool TryGetVariable(string name, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value)
+        {
+            value = null;
+            return false;
+        }
+
+        public IReadOnlyCollection<string> GetSecretValues() => values.Values;
+    }
+
+    [TestMethod]
     public async Task NoSandbox_ReachesThePortTheMcpServerOfTheWindowListensOn_WhicheverItIs()
     {
         var backend = new InProcessBackend();
@@ -893,7 +961,7 @@ public sealed class SessionSandboxTests
         public CatalogOptions Options { get; }
 
         public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null, string? defaultSandbox = null,
-            Func<IReadOnlyCollection<int>>? reservedPorts = null)
+            Func<IReadOnlyCollection<int>>? reservedPorts = null, Func<CodeAlta.Catalog.Secrets.SecretScope, CodeAlta.Catalog.Secrets.SecretReferenceResolver>? variables = null)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
             var registry = new ModelProviderRegistry();
@@ -908,6 +976,7 @@ public sealed class SessionSandboxTests
             {
                 SandboxBackend = backend,
                 ReservedLocalPorts = reservedPorts,
+                SandboxVariables = variables,
                 DefaultSandbox = defaultSandbox,
                 SandboxDataRoot = Path.Combine(temp, "sandbox"),
                 ScratchpadRoot = Path.Combine(temp, "scratchpad"),

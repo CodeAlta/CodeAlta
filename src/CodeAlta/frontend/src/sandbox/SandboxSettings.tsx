@@ -300,7 +300,7 @@ function ProfileEditor({ draft, saved, problem = null, profiles, networks, busy,
   </div>;
 }
 
-// The values of a profile: its network and its hosts, its folders, its local ports, its MCP servers, and whether a
+// The values of a profile: its network and its hosts, its folders, its local ports, its variables, its MCP servers, and whether a
 // command may run outside it. With a base, a list adds to the one of the base, and an unset choice is the base's.
 function ProfileFields({ values, resolved, base, networks, disabled = false, readOnly = false, onChange }: {
   values: ProfileDraft; resolved: Resolved | null; base: string | null; networks: readonly string[];
@@ -354,6 +354,11 @@ function ProfileFields({ values, resolved, base, networks, disabled = false, rea
     <Field label={t("Local ports")} htmlFor="sandbox-profile-ports" notice={inherited(values.localPorts, resolved?.localPorts)}>
       {list("sandbox-profile-ports", t("Local ports"), values.localPorts.map(String), t("Add a port"),
         items => set({ localPorts: [...new Set(items.map(Number).filter(port => Number.isInteger(port) && port > 0 && port < 65536))] }))}
+    </Field>
+    <Field label={t("Environment")} htmlFor="sandbox-profile-env" notice={<>
+      {!readOnly && <p className="settings-field-help">{t("A name passes that variable of your environment on. NAME=value sets one: its value can name a secret, as ${secret:NAME}.")}</p>}
+      {inherited(values.env, resolved?.env)}</>}>
+      {list("sandbox-profile-env", t("Environment"), values.env, t("NAME or NAME=value"), env => set({ env }))}
     </Field>
     <Field label={t("MCP servers")} htmlFor="sandbox-profile-mcp" notice={inherited(values.mcpServers, resolved?.mcpServers)}>
       {list("sandbox-profile-mcp", t("MCP servers"), values.mcpServers, t("Add an MCP server"), mcpServers => set({ mcpServers }))}

@@ -59,7 +59,10 @@ public sealed record SandboxProfile
     /// <summary>Gets the ports of this computer it may reach, through the proxy.</summary>
     public IReadOnlyList<int>? LocalPorts { get; init; }
 
-    /// <summary>Gets the names of the variables of the user's environment it receives.</summary>
+    /// <summary>
+    /// Gets the variables it receives: a name passes the variable of the user's environment, and <c>NAME=value</c> sets
+    /// one (<see cref="SandboxVariable"/>).
+    /// </summary>
     public IReadOnlyList<string>? Env { get; init; }
 
     /// <summary>Gets the MCP servers the sessions of the profile may use.</summary>
@@ -93,7 +96,7 @@ public enum SandboxFleet
 /// <param name="Network">What the network reaches.</param>
 /// <param name="Hosts">The hosts of <see cref="SandboxNetwork.Hosts"/>.</param>
 /// <param name="LocalPorts">The ports of this computer it may reach.</param>
-/// <param name="Env">The names of the variables of the user's environment it receives.</param>
+/// <param name="Env">The variables it receives: a name of the user's environment, or <c>NAME=value</c> (<see cref="SandboxVariable"/>).</param>
 /// <param name="McpServers">The MCP servers its sessions may use.</param>
 /// <param name="Outside">Whether a command may be asked to run outside the sandbox.</param>
 /// <param name="Fleet">Whether its sessions may start or drive work on other machines.</param>
@@ -219,7 +222,9 @@ public static class SandboxProfiles
             result = new(written.Name,
                 Union(basis.Write, written.Write), Union(basis.Read, written.Read), Union(basis.Deny, written.Deny),
                 written.Network ?? basis.Network, Union(basis.Hosts, written.Hosts), [.. basis.LocalPorts.Union(written.LocalPorts ?? [])],
-                Union(basis.Env, written.Env), Union(basis.McpServers, written.McpServers), written.Outside ?? basis.Outside,
+                // By case: a value a profile sets may differ from the one of its base by case alone.
+                written.Env is null or { Count: 0 } ? basis.Env : [.. basis.Env.Concat(written.Env).Distinct(StringComparer.Ordinal)],
+                Union(basis.McpServers, written.McpServers), written.Outside ?? basis.Outside,
                 written.Fleet is { } fleet ? fleet == SandboxFleet.Allow : basis.Fleet);
         }
         else
@@ -249,10 +254,48 @@ public static class SandboxProfiles
         {
             if (port is < 1 or > 65535) throw new SandboxProfileException($"The sandbox profile '{profile.Name}' lists the port {port}, which is not a port.");
         }
+
+        foreach (var variable in profile.Env)
+        {
+            if (SandboxVariable.NameOf(variable) is not { Length: > 0 } name || name.Any(char.IsWhiteSpace))
+                // By its name alone: the value it sets may be a secret, and this message is shown.
+                throw new SandboxProfileException($"The sandbox profile '{profile.Name}' lists the variable '{SandboxVariable.NameOf(variable)}', which is not a name or a name, '=' and a value.");
+        }
     }
 
     private static IReadOnlyList<string> Union(IReadOnlyList<string> basis, IReadOnlyList<string>? added)
         => added is null or { Count: 0 } ? basis : [.. basis.Concat(added).Distinct(StringComparer.OrdinalIgnoreCase)];
+}
+
+/// <summary>
+/// An entry of the <c>env</c> of a profile: a name, which passes the variable of the user's environment, or
+/// <c>NAME=value</c>, which sets the variable to that value.
+/// </summary>
+public static class SandboxVariable
+{
+    /// <summary>Gets the name of the variable of an entry.</summary>
+    /// <param name="entry">The entry, <c>NAME</c> or <c>NAME=value</c>.</param>
+    /// <returns>The name; empty for an entry that has none.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entry"/> is null.</exception>
+    public static string NameOf(string entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var equals = entry.IndexOf('=');
+        return (equals < 0 ? entry : entry[..equals]).Trim();
+    }
+
+    /// <summary>Gets the value an entry sets.</summary>
+    /// <param name="entry">The entry, <c>NAME</c> or <c>NAME=value</c>.</param>
+    /// <param name="value">The value, as written after the first <c>=</c>.</param>
+    /// <returns>True for an entry that sets a value; false for one that passes a variable on.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entry"/> is null.</exception>
+    public static bool TryGetValue(string entry, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var equals = entry.IndexOf('=');
+        value = equals < 0 ? null : entry[(equals + 1)..];
+        return value is not null;
+    }
 }
 
 /// <summary>A sandbox profile that cannot be used: unknown, invalid, or extending itself.</summary>

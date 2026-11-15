@@ -291,6 +291,11 @@ public sealed class SessionIdentityResolver
             : identity with { SecretProblems = outcome.Problems, SecretAnswers = outcome.Answers };
     }
 
+    // The work of a session, for the references another part of its environment resolves (the variables its sandbox profile
+    // sets); null when this host applies no identity, or when the catalog cannot be read.
+    internal async Task<SecretScope?> ScopeOfAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId, CancellationToken cancellationToken)
+        => (await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false))?.Scope;
+
     // The space, the profiles of the project and the scope of a session; null when the catalog cannot be read.
     private async Task<(SpaceDescriptor Space, IReadOnlyList<SpaceCliProfile> Profiles, SecretScope Scope)?> ReadAsync(string? recordedSpaceId, string? projectId,
         string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
