@@ -91,6 +91,26 @@ public sealed class SkillCatalogTests
     }
 
     [TestMethod]
+    public async Task SkillCatalog_ListAsync_AcceptsTheVersionOfASkill()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        // A skill that gives its version as a field of its own, as other skill tools write it.
+        Directory.CreateDirectory(Path.Combine(userHome, ".agents", "skills", "simple-english"));
+        await File.WriteAllTextAsync(Path.Combine(userHome, ".agents", "skills", "simple-english", "SKILL.md"),
+            "---\nname: simple-english\nversion: 1.2.0\ndescription: Writes technical text in simple English.\n---\n# Simple English\n");
+
+        var descriptors = await new SkillCatalog().ListAsync(new SkillCatalogQuery
+        {
+            Discovery = new SkillDiscoveryContext { ProjectRoots = [], UserCodeAltaRoot = Path.Combine(userHome, ".alta"), UserProfileRoot = userHome },
+        });
+
+        var english = descriptors.Single(static skill => skill.Name == "simple-english");
+        Assert.IsTrue(english.IsValid && english.IsModelVisible, string.Join("; ", english.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.AreEqual(0, english.Diagnostics.Count);
+    }
+
+    [TestMethod]
     public async Task SkillCatalog_ListAsync_KeepsTheTextEntriesOfMetadata_AndIgnoresTheOthersWithAWarning()
     {
         using var temp = TempDirectory.Create();

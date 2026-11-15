@@ -40,6 +40,7 @@ public sealed class SkillCatalog
         "disable-model-invocation",
         "context",
         "triggers",
+        "version",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     // Beyond this number of roots the cache starts again empty, so that roots no longer asked about do not stay forever.
