@@ -293,7 +293,10 @@ public sealed class ScratchpadStartupCleanupTests
         Assert.Throws<CodeAltaAlreadyRunningException>(() => CodeAltaSingleInstanceGuard.Acquire(path));
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow - TimeSpan.FromHours(1)); // not a limit
         using var guard = CodeAltaSingleInstanceGuard.Acquire(path);
-        Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), File.ReadAllText(path).Trim());
+        // The guard keeps a writable handle: the reader must share writes on Windows.
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), reader.ReadToEnd().Trim());
     }
 
     [TestMethod]
