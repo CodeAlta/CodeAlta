@@ -102,7 +102,7 @@ public sealed class CheckoutUsageScanner
 
     /// <summary>Creates a scanner over the git on the path, or over <paramref name="run"/>.</summary>
     /// <param name="run">Runs git; null runs <see cref="GitWorktreeService.RunGitAsync(string, IReadOnlyList{string}, TimeSpan, CancellationToken)"/>.</param>
-    public CheckoutUsageScanner(GitRunner? run = null) => _run = run ?? GitWorktreeService.RunGitAsync;
+    public CheckoutUsageScanner(GitRunner? run = null) => _run = run ?? GitCheckoutReads.RunAsync;
 
     /// <summary>Measures a checkout.</summary>
     /// <param name="checkoutRoot">The folder of the checkout.</param>

@@ -162,7 +162,7 @@ public sealed class GitCheckoutStateReader
 
     /// <summary>Creates a reader over the git on the path, or over <paramref name="run"/>.</summary>
     /// <param name="run">Runs git; null runs <see cref="GitWorktreeService.RunGitAsync(string, IReadOnlyList{string}, TimeSpan, CancellationToken)"/>.</param>
-    public GitCheckoutStateReader(GitRunner? run = null) => _run = run ?? GitWorktreeService.RunGitAsync;
+    public GitCheckoutStateReader(GitRunner? run = null) => _run = run ?? GitCheckoutReads.RunAsync;
 
     /// <summary>Reads the state of a checkout.</summary>
     /// <param name="checkoutRoot">The folder of the checkout: the top of a project folder or of a worktree.</param>

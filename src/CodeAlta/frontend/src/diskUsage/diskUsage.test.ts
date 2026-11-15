@@ -52,6 +52,18 @@ test("a project in two spaces is in each, and the total counts it once: the one 
   assert.equal(usageTree({ ...measurementView(value), done: { ...value, totalPartial: true } }, spaces).size.state, "atLeast");
 });
 
+test("the default space holds every project, including projects without explicit memberships", () => {
+  const value = measurement();
+  const projects = value.projects.map((project, index) => index === 0 ? { ...project, spaces: [] } : project);
+  const root = usageTree(measurementView({ ...value, projects }), [{ id: "default", name: "All projects" }, ...spaces]);
+  const all = child(root, "space:default");
+  assert.deepEqual(all.children.map(node => node.project?.id), value.projects.map(project => project.id));
+  assert.equal(root.children.some(node => node.id === "space:"), false, "every project belongs to Default");
+  assert.equal(child(root, "space:work").children.some(node => node.project?.id === value.projects[0].id), false,
+    "other spaces still require explicit membership");
+  assert.deepEqual(root.size, { bytes: Number(value.totalBytes), state: "exact" }, "the total still counts projects once");
+});
+
 test("a project that shares a repository names the one measured with it and adds only its sessions", () => {
   const root = usageTree(measurementView(measurement()), spaces);
   const beta = child(child(root, "space:work"), "space:work/project:beta");

@@ -13,6 +13,24 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class CheckoutUsageTests
 {
     [TestMethod]
+    public async Task DefaultReaders_DoNotRefreshTheGitIndex()
+    {
+        using var checkout = Checkout.Create();
+        var index = checkout.At(".git/index");
+        foreach (var measure in new[] { true, false })
+        {
+            // Change a tracked file's stat data without changing its contents: ordinary status writes the index.
+            File.SetLastWriteTimeUtc(checkout.At("readme.md"), DateTime.UtcNow.AddDays(measure ? -2 : -3));
+            var before = File.ReadAllBytes(index);
+            if (measure)
+                Assert.IsTrue((await new CheckoutUsageScanner().ScanAsync(checkout.Root, CancellationToken.None)).GitKnown);
+            else
+                Assert.IsNotNull(await new GitCheckoutStateReader().ReadAsync(checkout.Root, GitCheckoutScope.Repository, CancellationToken.None));
+            CollectionAssert.AreEqual(before, File.ReadAllBytes(index), "A disk usage read must leave the index unchanged.");
+        }
+    }
+
+    [TestMethod]
     public void FolderUsage_CountsTheFiles_WithoutFollowingALinkToAnotherFolder()
     {
         var root = Directory.CreateTempSubdirectory("codealta-folder-usage-");

@@ -280,12 +280,16 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     }
 
     // Whether a lock found at the path may be taken over, by the rule of IsAbandoned below.
-    private static bool IsAbandoned(int? processId, string lockFilePath)
+    internal static bool IsAbandoned(int? processId, string lockFilePath)
     {
         if (processId is { } pid) return !IsProcessRunning(pid);
         try
         {
-            return IsAbandoned(null, File.GetLastWriteTimeUtc(lockFilePath), DateTime.UtcNow);
+            // A failed read is not an incomplete PID. Re-read before reclaiming: a writer may have finished meanwhile.
+            if (TryReadRunningProcessId(lockFilePath, out var currentPid, out var readable)) return !IsProcessRunning(currentPid);
+            if (!readable) return false;
+            var file = new FileInfo(lockFilePath);
+            return file.Exists && IsAbandoned(null, file.LastWriteTimeUtc, DateTime.UtcNow);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -379,7 +383,7 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     {
         for (var attempt = 0; attempt < PidReadRetryCount; attempt++)
         {
-            if (TryReadRunningProcessId(lockFilePath, out var processId))
+            if (TryReadRunningProcessId(lockFilePath, out var processId, out _))
             {
                 return processId;
             }
@@ -390,14 +394,16 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
         return null;
     }
 
-    private static bool TryReadRunningProcessId(string lockFilePath, out int processId)
+    private static bool TryReadRunningProcessId(string lockFilePath, out int processId, out bool readable)
     {
         processId = 0;
+        readable = false;
         try
         {
             using var stream = new FileStream(lockFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             var text = reader.ReadToEnd().Trim();
+            readable = true;
             return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out processId);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

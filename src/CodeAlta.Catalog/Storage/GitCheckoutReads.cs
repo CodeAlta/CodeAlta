@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using CodeAlta.Catalog.Worktrees;
 
 namespace CodeAlta.Catalog.Storage;
@@ -6,6 +7,15 @@ namespace CodeAlta.Catalog.Storage;
 // cut by the runner is not known: callers never read it as "nothing there".
 internal static class GitCheckoutReads
 {
+    private static readonly FrozenDictionary<string, string> ReadEnvironment = new Dictionary<string, string>
+    {
+        ["GIT_OPTIONAL_LOCKS"] = "0",
+    }.ToFrozenDictionary();
+
+    // Status may otherwise refresh the index and briefly prevent an agent or the user from writing to it.
+    internal static Task<GitRun> RunAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+        => GitWorktreeService.RunGitAsync(folder, arguments, timeout, ReadEnvironment, cancellationToken);
+
     /// <summary>
     /// Gets how the volume of a checkout compares names, found out on the checkout itself rather than from the system (a
     /// volume of macOS can tell case apart): without case when its <c>.git</c> is also found under another case.

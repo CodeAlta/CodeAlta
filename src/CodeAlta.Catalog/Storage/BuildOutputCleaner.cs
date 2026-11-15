@@ -116,7 +116,7 @@ public sealed class BuildOutputCleaner
     public BuildOutputCleaner(GitRunner? run = null)
     {
         _run = run ?? GitWorktreeService.RunGitAsync;
-        _scanner = new CheckoutUsageScanner(_run);
+        _scanner = new CheckoutUsageScanner(run);
     }
 
     // Git for Windows before 2.23 followed junctions in `git clean`; the tests ask for the check elsewhere too.

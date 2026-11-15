@@ -224,10 +224,10 @@ public sealed class SessionUsageScannerTests
         {
             var scanner = new SessionUsageScanner(profile.Options)
             {
-                EntryEnumerated = (path, isDirectory) =>
+                FolderTaken = path =>
                 {
-                    // Once 2026/11/10 is listed, 2026 goes outside the profile and a link takes its place.
-                    if (!isDirectory || Path.GetFileName(path) != "10" || !Directory.Exists(year) || new DirectoryInfo(year).LinkTarget is not null) return;
+                    // After listing, release the enumeration handle before moving its ancestor: Windows keeps it open.
+                    if (Path.GetFileName(path) != "10" || !Directory.Exists(year) || new DirectoryInfo(year).LinkTarget is not null) return;
                     Directory.Move(year, outside);
                     Directory.CreateSymbolicLink(year, outside);
                 },

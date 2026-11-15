@@ -54,6 +54,7 @@ public sealed class SessionUsageScanner
     private readonly string _root;
 
     internal Action<string, bool>? EntryEnumerated { get; init; }
+    internal Action<string>? FolderTaken { get; init; }
 
     /// <summary>Captures the sessions folder of the instance the options describe.</summary>
     /// <param name="options">The options whose <see cref="CatalogOptions.SessionsRoot"/> is measured.</param>
@@ -106,6 +107,7 @@ public sealed class SessionUsageScanner
         while (folders.TryPop(out var folder))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            FolderTaken?.Invoke(folder);
             try
             {
                 // The folder, or one above it, may have become a link since it was listed: it is not entered then.

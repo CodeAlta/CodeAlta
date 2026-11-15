@@ -23,7 +23,7 @@ The view goes from the whole to the parts. Click a name, or a segment of the don
 {.table}
 | Level | Holds |
 | --- | --- |
-| **Everything** | Your spaces. |
+| **Everything** | Your spaces. **Default** holds every project, including projects with no additional space. |
 | A space | Its projects. A project in several spaces is in each; the total at the top counts it once. |
 | A project | Its project folder, **Worktrees**, and **Sessions**. |
 | **Worktrees** | Every worktree git lists for the repository, with the marks of the [Worktrees window](worktrees.md#manage-worktrees): **In use**, **Locked**, **Folder gone**, **Holds a worktree**. |

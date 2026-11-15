@@ -2,6 +2,7 @@ import type { diskUsage, DiskUsageCheckout, DiskUsageCleanResponse, DiskUsageGit
 import type { MessageKey } from "../localization";
 import { seriesColorCount } from "../charts/palette";
 import { storageBytes, storageSize } from "../storage/storage";
+import { defaultSpaceId } from "../spaces/spaces";
 
 /** The calls of the tab to the host. */
 export type DiskUsageApi = Pick<typeof diskUsage, "last" | "scan" | "clean">;
@@ -181,9 +182,10 @@ export type SpaceName = Readonly<{ id: string; name: string }>;
  */
 export function usageTree(view: DiskUsageView, spaces: readonly SpaceName[]): UsageNode {
   const names = new Map(view.projects.map(project => [project.id, project.name]));
-  const known = new Set(spaces.map(space => space.id));
-  const groups = [...spaces.map(space => ({ id: space.id, name: space.name, projects: view.projects.filter(project => project.spaces.includes(space.id)) })),
-    { id: "", name: "", projects: view.projects.filter(project => !project.spaces.some(space => known.has(space))) }].filter(group => group.projects.length > 0);
+  // Default contains every project implicitly; project records name only their additional spaces.
+  const belongs = (project: DiskUsageProject, space: SpaceName) => space.id === defaultSpaceId || project.spaces.includes(space.id);
+  const groups = [...spaces.map(space => ({ id: space.id, name: space.name, projects: view.projects.filter(project => belongs(project, space)) })),
+    { id: "", name: "", projects: view.projects.filter(project => !spaces.some(space => belongs(project, space))) }].filter(group => group.projects.length > 0);
   const spaceNodes = groups.map((group): UsageNode => {
     const prefix = `space:${group.id}`;
     const children = group.projects.map(project => projectNode(project, prefix, names));
