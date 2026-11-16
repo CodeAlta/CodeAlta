@@ -11,7 +11,7 @@ import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } fr
 import type { Ask, TimelineEvent, WorkflowFacts } from "./contract";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
 import { tapMenuItem } from "./phoneBrowser";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
@@ -161,7 +161,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     });
     const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(10_000), `the answer to ${method}`))); }, testLimit(10_000));
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -170,7 +170,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails));
       return reply.result?.value as T;
     };
-    const waitFor = async (expression: string, what: string, timeout = testLimit(8000)) => {
+    const waitFor = async (expression: string, what: string, timeout = pageWaitLimit) => {
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await evaluate<boolean>(`!!(${expression})`)) return;

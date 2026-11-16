@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -47,7 +47,7 @@ test("what is typed goes to the editor that has the keyboard, also after a focus
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -59,7 +59,7 @@ test("what is typed goes to the editor that has the keyboard, also after a focus
     // What the page shows once it has settled on the expected state, or what it shows instead.
     const settled = async (expected: State) => {
       const text = JSON.stringify(expected);
-      await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(5000)};const tick=()=>{
+      await evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{
         if(JSON.stringify(editorFocusFixture.state())===${JSON.stringify(text)}||Date.now()>end)resolve(true);else setTimeout(tick,20)};tick()})`);
       return state();
     };
@@ -78,7 +78,7 @@ test("what is typed goes to the editor that has the keyboard, also after a focus
     for (const [variant, input] of [["", "div"], ["#textarea", "textarea"]]) {
       await command("Page.navigate", { url: "about:blank" });
       await command("Page.navigate", { url: pathToFileURL(page).href + variant });
-      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(15000)};const tick=()=>{
+      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{
         if(window.editorFocusFixture)resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true, variant);
 
       // A focus the browser announces: one editor has it, and what is typed is written there.

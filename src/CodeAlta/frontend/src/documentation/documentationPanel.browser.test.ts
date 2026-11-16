@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 import { isSanitizerParseReport } from "../sanitizerParseReport";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -39,7 +39,7 @@ test("the Documentation tab shows the guide under the policy of the application:
     const pending = new Map<number, (reply: { result?: any; error?: unknown }) => void>();
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
+      const timer = setTimeout(() => { pending.delete(id); reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       pending.set(id, reply => { clearTimeout(timer); if (reply.error) reject(Error(JSON.stringify(reply.error))); else resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -71,7 +71,7 @@ test("the Documentation tab shows the guide under the policy of the application:
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails));
       return reply.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = pageWaitLimit) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const expect = async (expression: string, message?: string) => assert.equal(await wait(expression), true, message ?? expression);
     // A click of the user, which is what a link of rendered Markdown follows.

@@ -10,7 +10,7 @@ import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } fr
 import type { TimelineEvent } from "./contract";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
 import { tapMenuItem } from "./phoneBrowser";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 test("the phone opens a session on its latest messages, says when they were written, and reads older ones as it scrolls up", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-history-"));
@@ -53,7 +53,7 @@ test("the phone opens a session on its latest messages, says when they were writ
       if (data.method === "Runtime.exceptionThrown") failures.push(JSON.stringify(data.params.exceptionDetails));
     });
     const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(10_000), `the answer to ${method}`))); }, testLimit(10_000));
+      const id = ++sequence, timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -63,7 +63,7 @@ test("the phone opens a session on its latest messages, says when they were writ
       return reply.result?.value as T;
     };
     const waitFor = async (expression: string) => {
-      const deadline = Date.now() + testLimit(10_000);
+      const deadline = Date.now() + pageWaitLimit;
       while (Date.now() < deadline) { if (await evaluate<boolean>(`!!(${expression})`)) return; await new Promise(resolve => setTimeout(resolve, 50)); }
       assert.fail(`Not seen: ${expression}`);
     };

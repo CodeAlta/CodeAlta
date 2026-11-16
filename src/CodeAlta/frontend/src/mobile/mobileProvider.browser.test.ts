@@ -3,7 +3,7 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { fixtureChoices, session } from "./fixtureServer";
 import { openPhone } from "./phoneBrowser";
-import { testLimit } from "../testTime";
+import { pageWaitLimit, testLimit } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
@@ -71,7 +71,7 @@ test("the options of a session move it to another provider of its space while it
   }
 
   async function waitUntil(condition: () => boolean, what: string) {
-    const deadline = Date.now() + testLimit(8000);
+    const deadline = Date.now() + pageWaitLimit;
     while (!condition()) {
       if (Date.now() > deadline) assert.fail(`${what}: not seen`);
       await new Promise(resolve => setTimeout(resolve, 50));

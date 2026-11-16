@@ -3,7 +3,7 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { session } from "./fixtureServer";
 import { openPhone, tapMenuItem } from "./phoneBrowser";
-import { testLimit } from "../testTime";
+import { pageWaitLimit, testLimit } from "../testTime";
 
 // Drags the card of a session to the right past the threshold and releases it; gives the card's transform after the release.
 const swipeAway = (id: string) => `(() => {
@@ -24,7 +24,7 @@ test("archiving asks about descendants even outside the loaded page and restores
   // toast says nothing of what the server received (and the toast of an archive undone keeps its text while hidden).
   const archivesOf = async (id: string, count: number) => {
     const archives = () => server.requests.filter(r => r.path === `/api/sessions/${id}/archive`);
-    for (const deadline = Date.now() + testLimit(8000); archives().length < count && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 25));
+    for (const deadline = Date.now() + pageWaitLimit; archives().length < count && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(archives().length, count, `archive request ${count} of ${id}`);
     return archives();
   };

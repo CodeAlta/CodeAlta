@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -68,7 +68,7 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = pageWaitLimit) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("window.previewFixture"), true);

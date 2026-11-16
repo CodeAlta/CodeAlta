@@ -9,7 +9,7 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import type { TimelineEvent } from "./contract";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
@@ -80,7 +80,7 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
       if (data.method === "Runtime.exceptionThrown") failures.push(JSON.stringify(data.params.exceptionDetails));
     });
     const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(10_000), `the answer to ${method}`))); }, testLimit(10_000));
+      const id = ++sequence, timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -90,7 +90,7 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
       return reply.result?.value as T;
     };
     const waitFor = async (expression: string) => {
-      const deadline = Date.now() + testLimit(10_000);
+      const deadline = Date.now() + pageWaitLimit;
       while (Date.now() < deadline) { if (await evaluate<boolean>(`!!(${expression})`)) return; await new Promise(resolve => setTimeout(resolve, 50)); }
       assert.fail(`Not seen: ${expression}`);
     };

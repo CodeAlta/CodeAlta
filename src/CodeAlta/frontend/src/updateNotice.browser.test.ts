@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 test("the update notice survives ordinary toast traffic, replaces old versions, and respects dismissal", { skip: !browserExecutable, timeout: testLimit(60_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-update-notice-"));
@@ -26,7 +26,7 @@ test("the update notice survives ordinary toast traffic, replaces old versions, 
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))), devToolsAnswerLimit);
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -39,7 +39,7 @@ test("the update notice survives ordinary toast traffic, replaces old versions, 
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value;
     };
-    const until = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
+    const until = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + ${pageWaitLimit}; (function check() {
       if (${condition}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`);
     await command("Page.enable");
     await command("Page.navigate", { url: pathToFileURL(page).href });

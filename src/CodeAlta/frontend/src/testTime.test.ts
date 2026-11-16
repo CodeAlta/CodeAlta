@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { readScale, testLimit, testLimitRanOut, testTimeCiScale, testTimeScale } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, readScale, testLimit, testLimitRanOut, testTimeCiScale, testTimeScale } from "./testTime";
 
 // Keeps every time limit of the frontend tests in testTime.ts, longer on CI: it reads the tests and their helpers and
 // names each line that writes a limit as a bare number. src/CodeAlta.Tests/TestTimeGuardTests.cs does the same for .NET.
@@ -120,6 +120,11 @@ test("a limit is scaled by the factor of the run, and a time that is no limit st
   assert.equal(testLimit(-5), -5);
   assert.equal(testLimit(Infinity), Infinity);
   assert.ok(Number.isNaN(testLimit(NaN)));
+});
+
+test("the answer to a DevTools command has longer than the wait in the page it can carry", () => {
+  assert.equal(pageWaitLimit, testLimit(20_000));
+  assert.ok(devToolsAnswerLimit > pageWaitLimit, `${devToolsAnswerLimit} ms for a command that can wait ${pageWaitLimit} ms in the page`);
 });
 
 test("a limit that ran out says how long it was and for what", () => {

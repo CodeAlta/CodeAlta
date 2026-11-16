@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 const preferencesKey = "codealta.desktop.newSessionPreferences.v1";
@@ -60,7 +60,7 @@ test("a new session is created from a form beside the row of its project or of t
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -68,7 +68,7 @@ test("a new session is created from a form beside the row of its project or of t
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
     const until = async (condition: string, what: string) => {
-      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true,
+      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true,
         `${what}; ${exceptions.join("\n")}; form: ${await evaluate(`document.querySelector(${JSON.stringify(form)})?.textContent`)}`);
     };
     const text = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`) as Promise<string | null>;

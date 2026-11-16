@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 /** A folder to keep a picture of each width in, for a person to look at; none by default. */
@@ -68,14 +68,14 @@ test("the prompt surface keeps one row above and one below the editor at every w
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(8000)};const tick=()=>{if(${condition})resolve(true);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{if(${condition})resolve(true);
       else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
     const size = (width: number) => command("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
     const theme = (name: "dark" | "light") => evaluate(`document.documentElement.dataset.theme='${name}';document.documentElement.classList.toggle('bp6-dark',${name === "dark"})`);

@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 type Layout = { pane: Box; area: Box; notes: Box; window: Box; timestamp: Box; tasks: Box | null; collapsed: string; stored: string | null };
@@ -49,7 +49,7 @@ test("mounted production Notes and proposal overlays cooperate without replacing
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))), devToolsAnswerLimit);
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -61,11 +61,11 @@ test("mounted production Notes and proposal overlays cooperate without replacing
       const result = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result?.value;
     };
-    const wait = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};function check(){if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(-1200));else setTimeout(check,20)}check()})`), true, condition);
+    const wait = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};function check(){if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(-1200));else setTimeout(check,20)}check()})`), true, condition);
     // ResizeObserver and react-rnd both commit geometry on animation frames. Wait for stable measured
     // rectangles, rather than sleeping or providing the desired geometry in the fixture.
     const layout = async () => {
-      await evaluate(`new Promise((resolve,reject)=>{let previous='',stable=0;const end=Date.now()+${testLimit(7000)};function check(){const value=JSON.stringify(${inspect});if(value===previous)stable++;else stable=0;previous=value;if(stable===4)resolve();else if(Date.now()>end)reject(Error('layout did not settle'));else requestAnimationFrame(check)}requestAnimationFrame(check)})`);
+      await evaluate(`new Promise((resolve,reject)=>{let previous='',stable=0;const end=Date.now()+${pageWaitLimit};function check(){const value=JSON.stringify(${inspect});if(value===previous)stable++;else stable=0;previous=value;if(stable===4)resolve();else if(Date.now()>end)reject(Error('layout did not settle'));else requestAnimationFrame(check)}requestAnimationFrame(check)})`);
       return await evaluate(inspect) as Layout;
     };
     const reset = async (options: object) => {

@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -51,7 +51,7 @@ test("comment threads can live in the view zones of both sides of the diff edito
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -59,7 +59,7 @@ test("comment threads can live in the view zones of both sides of the diff edito
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
     // An expression of the page once it is true, or a failure that says what it was.
-    const until = async (expression: string, timeout = testLimit(8000)) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${timeout}; (function check() {
+    const until = async (expression: string, timeout = pageWaitLimit) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${timeout}; (function check() {
       if (${expression}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`), true, `waited for ${expression} (limit ${timeout} ms)`);
     // A few frames, for Monaco to render what it was told.
     const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50))))");

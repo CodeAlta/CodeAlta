@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 export type Point = Readonly<{ x: number; y: number }>;
 /** CDP modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8. */
@@ -75,7 +75,7 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
         opened.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { opened.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { opened.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       opened.addEventListener("message", reply); opened.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -84,7 +84,7 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
     };
     const value = async <T>(expression: string) => JSON.parse(await evaluate(`JSON.stringify(${expression}) ?? "null"`)) as T;
     // An expression of the page once it is true, or a failure that says what it was and what `show` shows then.
-    const until = async (expression: string, show = "null", timeout = testLimit(8000)) => {
+    const until = async (expression: string, show = "null", timeout = pageWaitLimit) => {
       const done = await evaluate(`new Promise(resolve => { const end = Date.now() + ${timeout}; (function check() {
         if (${expression}) resolve(true); else if (Date.now() > end) resolve(JSON.stringify(${show})); else setTimeout(check, 20); })(); })`);
       assert.equal(done, true, `waited for ${expression} (limit ${timeout} ms); ${show}: ${done}`);

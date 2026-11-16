@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
@@ -80,7 +80,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -88,7 +88,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
     // Resolves to true, or to what the page shows when the condition never held.
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(8000)};const tick=()=>{if(${condition})resolve(true);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{if(${condition})resolve(true);
       else if(Date.now()>end)resolve({rows:fixture.rows(),sends:fixture.sendCalls.map(call=>call.text),steers:fixture.steerCalls.map(call=>call.text),
         run:fixture.run(),status:document.querySelector('.composer-status-line')?.textContent,prompt:promptText()});else setTimeout(tick,20)};tick()})`);
     const key = async (key: string, code: string, virtual: number, ctrl = false) => {

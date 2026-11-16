@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { build } from "esbuild";
 import { browserExecutable, browserBaseArgs, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 test("the real shell publishes hidden-space/draft IDs and refuses to mount a saved editor before protection acknowledgement", { skip: !browserExecutable, timeout: testLimit(60_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-retention-"));
@@ -59,14 +59,14 @@ test("the real shell publishes hidden-space/draft IDs and refuses to mount a sav
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined); return value.result?.value;
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{
       if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
     // FlexLayout selects tabs on a pointer gesture, not HTMLElement.click(). Exercise the same
     // input sequence as a user, including reselecting an already active tab while admission waits.

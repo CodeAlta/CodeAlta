@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
-import { testLimit } from "../../testTime";
+import { pageWaitLimit, testLimit } from "../../testTime";
 
 const options = { entry: "../fleet/access/fleetAccess.mount.tsx", fixture: "fleetAccessFixture", rpcFixture: "../demo-api.ts",
   styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/access/fleetAccess.css", "../fleet/console/fleetConsole.css"], width: 1300, height: 1000, reducedMotion: true } as const;
@@ -36,7 +36,7 @@ test("at home the page shows people and machines, invites a person with a code, 
     await page.shot("fleet-access-invitation");
     assert.deepEqual((await page.evaluate(calls) as unknown[])[0], { invite: { name: "Dana", role: "member" } });
     // The person invited is listed at once, not at the next read of the page (15 seconds) or after Reload.
-    assert.equal(await page.evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(3000)}; (function check() {
+    assert.equal(await page.evaluate(`new Promise(resolve => { const end = Date.now() + ${pageWaitLimit}; (function check() {
       if (document.querySelector('[data-person=Dana]')) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`), true,
       "the person invited is listed without a reload");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('[data-person=Dana] .fleet-secret-tags .bp6-tag')].map(tag => tag.textContent)`), ["Invited"]);

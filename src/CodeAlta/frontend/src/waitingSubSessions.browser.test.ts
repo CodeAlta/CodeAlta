@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
@@ -27,7 +27,7 @@ test("a request of a sub-session answered on the session above it reaches that s
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))), devToolsAnswerLimit);
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -40,7 +40,7 @@ test("a request of a sub-session answered on the session above it reaches that s
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value;
     };
-    const until = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
+    const until = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + ${pageWaitLimit}; (function check() {
       if (${condition}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`);
     // The card of a session, by its place among the sessions that wait, and its first choice once it can be answered.
     const card = (index: number) => `document.querySelectorAll(".waiting-sub-session")[${index}]`;

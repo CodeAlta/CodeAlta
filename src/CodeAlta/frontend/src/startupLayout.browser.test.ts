@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
@@ -64,16 +64,14 @@ test("empty owned startup opens usable provider settings and a guide without Res
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    // A browser on a new profile can hold the first text of a page for seconds, and longer beside other work (see
-    // `until` in sessionWindowHarness.ts): a wait has 20 s, and the answer to a command more than that.
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(20_000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({settings:document.querySelector('.settings-dialog')?.open,focus:document.activeElement?.outerHTML.slice(0,200),prompt:document.querySelector('#catalog-prompt .view-lines')?.textContent,errors:window.startupErrors});else setTimeout(tick,25)};tick()})`);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({settings:document.querySelector('.settings-dialog')?.open,focus:document.activeElement?.outerHTML.slice(0,200),prompt:document.querySelector('#catalog-prompt .view-lines')?.textContent,errors:window.startupErrors});else setTimeout(tick,25)};tick()})`);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true)))))");
     const stable = async (stage: string) => {
       // Under load the browser can start Blueprint's transition after a Node-side delay has elapsed.

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 import { workletFile } from "./workletFile";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 // Mounts the production microphone button, prompt editor, download notice and Speech settings page in headless
 // Edge, under StrictMode and the page's production content security policy, over a host and a microphone the
@@ -72,7 +72,7 @@ async function withPage(entry: string, fixture: string, body: (page: Page) => Pr
     const problems: string[] = [], requested: string[] = [];
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       waiting.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -94,7 +94,7 @@ async function withPage(entry: string, fixture: string, body: (page: Page) => Pr
       const reply = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
-    const until = async (expression: string, what: string, milliseconds = testLimit(10_000)) => {
+    const until = async (expression: string, what: string, milliseconds = pageWaitLimit) => {
       const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${milliseconds}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 25); })(); })`);
       if (!found) assert.fail(`waited for ${what} (limit ${milliseconds} ms); ${problems.join(" | ")}\n${await evaluate<string>("document.body.innerText.slice(0, 900)").catch(() => "")}`);
     };

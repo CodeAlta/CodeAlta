@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -38,7 +38,7 @@ test("a rendered Markdown page finds in itself with Ctrl+F, beside another page 
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))), testLimit(30_000));
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))), devToolsAnswerLimit);
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -53,7 +53,7 @@ test("a rendered Markdown page finds in itself with Ctrl+F, beside another page 
       return result.result?.value as T;
     };
     const expect = async (expression: string, message?: string) => {
-      const ok = await evaluate<boolean>(`new Promise(resolve=>{const end=Date.now()+${testLimit(8000)};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
+      const ok = await evaluate<boolean>(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
       assert.equal(ok, true, message ?? expression);
     };
     const findModifier = process.platform === "darwin" ? 4 : 2;

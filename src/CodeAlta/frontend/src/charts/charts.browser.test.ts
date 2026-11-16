@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 const origin = "https://charts.invalid", pageUrl = `${origin}/index.html`;
@@ -52,7 +52,7 @@ async function withGallery(body: (page: Page) => Promise<void>, options: { reduc
     const problems: string[] = [];
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(testLimit(20_000), `the answer to ${method}`))); }, testLimit(20_000));
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       waiting.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -74,7 +74,7 @@ async function withGallery(body: (page: Page) => Promise<void>, options: { reduc
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
     const until = async (expression: string, what: string) => {
-      const limit = testLimit(12000), found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${limit}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
+      const limit = pageWaitLimit, found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${limit}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
       if (!found) {
         const summary = await evaluate<string>(`[...document.querySelectorAll('[data-chart]')].map(box => box.dataset.chart + ':' + (box.querySelector('svg, canvas') ? 'drawn' : 'empty') + (box.querySelector('.chart-failure') ? '!' + box.querySelector('.chart-failure').textContent : '')).join(' ')`);
         assert.fail(`waited for ${what} (limit ${limit} ms): ${summary}; ${problems.join(" | ")}`);

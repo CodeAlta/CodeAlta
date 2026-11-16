@@ -9,7 +9,7 @@ import { build } from "esbuild";
 import { blueprintPaletteVariables } from "../../blueprintPalette";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../../browserTarget";
 import type { MobileStatus } from "./status";
-import { testLimit, testLimitRanOut } from "../../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../../testTime";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
@@ -55,7 +55,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
     });
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
+      const timer = setTimeout(() => { pending.delete(id); reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       pending.set(id, message => { pending.delete(id); clearTimeout(timer); if (message.error) reject(Error(JSON.stringify(message.error))); else resolve(message.result); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -64,7 +64,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = async (expression: string, what: string, milliseconds = testLimit(8_000)) => assert.equal(await evaluate<boolean>(
+    const wait = async (expression: string, what: string, milliseconds = pageWaitLimit) => assert.equal(await evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`), true, what);
     const text = (selector: string) => evaluate<string[]>(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(e=>e.textContent)`);
     const press = (selector: string, label: string) => evaluate<boolean>(

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 import { isSanitizerParseReport } from "./sanitizerParseReport";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
@@ -35,7 +35,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     const pending = new Map<number, (reply: { result?: Reply; error?: unknown }) => void>();
     const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(8000), `the answer to ${method}`))); }, testLimit(8000));
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });

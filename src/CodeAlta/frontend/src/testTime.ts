@@ -26,6 +26,21 @@ export function testLimit(milliseconds: number): number {
   return Number.isFinite(milliseconds) && milliseconds > 0 ? Math.round(milliseconds * testTimeScale) : milliseconds;
 }
 
+/**
+ * How long a browser test waits until its page shows something, in milliseconds: every such wait takes this limit, in
+ * the page or in Node. It is several times what a page takes, because a browser on a new profile can hold the first
+ * text it lays out for seconds (Edge on Windows answers no font until about 4 s after its start, in one start out of
+ * two), and longer beside other work.
+ */
+export const pageWaitLimit = testLimit(20_000);
+
+/**
+ * How long a browser test waits for the answer to a DevTools command, in milliseconds. A command can carry a wait of
+ * {@link pageWaitLimit} inside the page: this limit is above it, so that the wait says what was missing before the
+ * command fails without saying it.
+ */
+export const devToolsAnswerLimit = testLimit(30_000);
+
 /** Says that a limit ran out: how long, the factor of this run, and for what. */
 export function testLimitRanOut(milliseconds: number, what: string): string {
   const scale = testTimeScale === 1 ? "" : ` (${testTimeScale} times the limit of a developer machine${testTimeOnCi ? ", on CI" : ""})`;

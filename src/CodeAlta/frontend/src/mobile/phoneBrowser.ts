@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import { pageFiles, startFixtureServer } from "./fixtureServer";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 /**
  * A JavaScript expression that taps an item of the menu of "⋯" in the top bar, as a person does: it opens the menu, taps the
@@ -66,7 +66,7 @@ export async function openPhone(prepare: (server: PhoneFixture) => void, shots: 
   });
   const command = (method: string, params: object = {}) => new Promise<Reply>((resolve, reject) => {
     const id = ++sequence;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(testLimit(10_000), `the answer to ${method}`))); }, testLimit(10_000));
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
     pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
     socket!.send(JSON.stringify({ id, method, params }));
   });
@@ -75,7 +75,7 @@ export async function openPhone(prepare: (server: PhoneFixture) => void, shots: 
     assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails));
     return reply.result?.value as T;
   };
-  const waitFor = async (expression: string, what: string, timeout = testLimit(8000)) => {
+  const waitFor = async (expression: string, what: string, timeout = pageWaitLimit) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (await evaluate<boolean>(`!!(${expression})`)) return;

@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
-import { testLimit, testLimitRanOut } from "./testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 test("issues checked in the picker opened by the attach menu are attached, and # inserts issues, tasks, plans and sessions", { skip: !browserExecutable, timeout: testLimit(60_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-issue-picker-"));
@@ -29,7 +29,7 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))), devToolsAnswerLimit);
       const receive = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", receive); clearTimeout(timer);
@@ -42,7 +42,7 @@ test("issues checked in the picker opened by the attach menu are attached, and #
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
     // The page waits until what is asked holds, or gives up: the focus is taken a moment after the question is shown.
-    const until = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(5000)}; (function check() {
+    const until = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + ${pageWaitLimit}; (function check() {
       if (${condition}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`);
     const key = async (key: string, code: string, virtual: number, modifiers = 0) => {
       await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: virtual, modifiers });

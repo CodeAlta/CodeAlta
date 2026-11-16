@@ -10,7 +10,7 @@ import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../brows
 import { blueprintPaletteVariables } from "../blueprintPalette";
 import { defaultTimelineEmphasis, timelineEmphasisKey, timelineEntryTypeLabel, timelineEntryTypes } from "./timelineEmphasis";
 import { translate } from "../localization";
-import { testLimit, testLimitRanOut } from "../testTime";
+import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const shots = process.env.CODEALTA_SHOTS ?? "";
 
@@ -51,7 +51,7 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         if (message.error) reject(Error(`${method}: ${JSON.stringify(message.error)}`)); else resolve(message.result ?? {});
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(Error(testLimitRanOut(devToolsAnswerLimit, `the answer to ${method}`))); }, devToolsAnswerLimit);
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async <T,>(expression: string): Promise<T> => {
@@ -59,7 +59,7 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (condition: string) => evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
+    const wait = (condition: string) => evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${pageWaitLimit}; (function check() {
       if (${condition}) resolve(true); else if (Date.now() > end) resolve(false); else requestAnimationFrame(check); })(); })`);
     const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
     const screenshot = async (name: string) => {
