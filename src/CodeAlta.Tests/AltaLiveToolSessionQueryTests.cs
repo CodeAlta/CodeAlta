@@ -156,6 +156,76 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionList_WritesTheSandboxOfEachSessionAsItsInfo_AndReadsTheSettingsOncePerListing()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("sandboxes");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId));
+        await using var _ = runtime.ConfigureAwait(false);
+        var catalog = new SessionViewCatalog(options);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+        var execution = new SessionExecutionOptions
+        {
+            ProviderId = providerId, ProviderKey = providerId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var plain = await runtime.CreateGlobalSessionAsync(execution, "Plain").ConfigureAwait(false);
+        var attached = await runtime.CreateGlobalSessionAsync(execution, "Attached").ConfigureAwait(false);
+        var stored = await runtime.CreateGlobalSessionAsync(execution, "Stored").ConfigureAwait(false);
+        var elsewhere = await runtime.CreateGlobalSessionAsync(execution, "Elsewhere").ConfigureAwait(false);
+        await runtime.SetOwnedSandboxAsync(attached, "strict").ConfigureAwait(false);
+        await runtime.SetOwnedSandboxAsync(stored, "strict").ConfigureAwait(false);
+        Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(stored.SessionId).ConfigureAwait(false));
+        Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(elsewhere.SessionId).ConfigureAwait(false));
+        // Another process chooses the sandbox of a stored session: it writes its journal, not the database of this one.
+        await AppendJournalStateAsync(new SessionViewCatalog(options), elsewhere, new SessionViewLocalState { Sandbox = "workspace" }).ConfigureAwait(false);
+
+        async Task<Dictionary<string, System.Text.Json.JsonElement>> ListAsync()
+        {
+            var reads = runtime.SandboxScopeReadCount;
+            var listed = await dispatcher.InvokeAsync(["session", "list", "--state", "all", "--limit", "100"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Stdout + listed.Stderr);
+            Assert.AreEqual(reads + 1, runtime.SandboxScopeReadCount, "a listing reads the settings, the projects and the spaces once, not once for each session");
+            return ReadJsonLines(listed.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.item")
+                .ToDictionary(static line => line.GetProperty("sessionId").GetString()!, static line => line);
+        }
+
+        // Each row has the sandbox `session info` gives the session, which reads it alone.
+        async Task AssertSandboxesAsync(Dictionary<string, System.Text.Json.JsonElement> rows, params (SessionViewDescriptor Session, string? Profile, string Source)[] expected)
+        {
+            foreach (var (session, profile, source) in expected)
+            {
+                var sandbox = rows[session.SessionId].GetProperty("sandbox");
+                var info = await dispatcher.InvokeAsync(["session", "info", session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+                var single = ReadJsonLines(info.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.info").GetProperty("sandbox");
+                Assert.AreEqual(single.GetRawText(), sandbox.GetRawText(), session.Title);
+                Assert.AreEqual(profile, sandbox.TryGetProperty("profile", out var value) ? value.GetString() : null, session.Title);
+                Assert.AreEqual(source, sandbox.GetProperty("source").GetString(), session.Title);
+            }
+        }
+
+        var rows = await ListAsync().ConfigureAwait(false);
+        Assert.HasCount(4, rows);
+        await AssertSandboxesAsync(rows, (plain, null, "none"), (attached, "strict", "session"), (stored, "strict", "session"), (elsewhere, "workspace", "session")).ConfigureAwait(false);
+
+        // A change of the settings applies from the next listing.
+        await File.WriteAllTextAsync(Path.Combine(root.Path, "config.toml"), "[sandbox]\nall_sessions = \"workspace\"\n").ConfigureAwait(false);
+        rows = await ListAsync().ConfigureAwait(false);
+        await AssertSandboxesAsync(rows, (plain, "workspace", "all_sessions"), (attached, "strict", "session"), (stored, "strict", "session")).ConfigureAwait(false);
+
+        // Renamed, archived and deleted sessions are listed as they are now.
+        Assert.IsTrue(await runtime.RenameOwnedSessionAsync(stored.SessionId, projectId: null, root.Path, "Renamed").ConfigureAwait(false));
+        await AppendJournalStateAsync(catalog, elsewhere, new SessionViewLocalState { Sandbox = "workspace", Archived = true, ArchivedAt = DateTimeOffset.UtcNow }).ConfigureAwait(false);
+        Assert.IsTrue(await runtime.DeleteSessionAsync(plain).ConfigureAwait(false));
+        rows = await ListAsync().ConfigureAwait(false);
+        Assert.IsFalse(rows.ContainsKey(plain.SessionId), "a deleted session is not listed");
+        Assert.AreEqual("Renamed", rows[stored.SessionId].GetProperty("title").GetString());
+        Assert.AreEqual("archived", rows[elsewhere.SessionId].GetProperty("state").GetString());
+        await AssertSandboxesAsync(rows, (attached, "strict", "session"), (stored, "strict", "session"), (elsewhere, "workspace", "session")).ConfigureAwait(false);
+    }
+
+    [TestMethod]
     public async Task SessionStatus_ShowsTheSizeOfContextTheSessionChose()
     {
         using var root = TempDirectory.Create();
@@ -1049,6 +1119,8 @@ public sealed partial class AltaLiveToolTests
             ("info <parent session>", ["session", "info", parentId!], 15),
             ("children <parent session>", ["session", "children", parentId!], 15),
             ("list --limit 20", ["session", "list", "--limit", "20"], 15),
+            ("list --state all --limit 13", ["session", "list", "--state", "all", "--limit", "13"], 15),
+            ("list --state all --limit 120", ["session", "list", "--state", "all", "--limit", "120"], 15),
         })
         {
             var times = new List<double>();

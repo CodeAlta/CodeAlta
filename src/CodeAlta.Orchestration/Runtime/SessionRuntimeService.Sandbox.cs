@@ -125,28 +125,113 @@ public sealed partial class SessionRuntimeService
     public async Task<SessionSandbox> GetSessionSandboxAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        string? own;
-        string? providerKey;
-        string? modelId;
+        SandboxSubject subject;
         if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated)
         {
-            own = entry.OwnSandbox;
-            providerKey = entry.ProviderKey;
-            modelId = entry.Model;
+            subject = SandboxSubject.Of(entry);
         }
         else if (await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } session)
         {
-            own = session.Sandbox;
-            providerKey = session.ResolvedProviderKey;
-            modelId = session.ModelId;
+            subject = SandboxSubject.Of(session);
         }
         else
         {
             return SessionSandbox.None;
         }
 
-        var record = await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        return await ResolveSandboxAsync(own, providerKey, modelId, record?.ProjectId, record?.SpaceId, cancellationToken).ConfigureAwait(false);
+        var scopes = await ReadSandboxScopesAsync(cancellationToken).ConfigureAwait(false);
+        return await ResolveSandboxAsync(scopes, subject, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Gets the sandbox of each of some listed sessions, as <see cref="GetSessionSandboxAsync"/> gives it, for a listing:
+    /// a session this runtime attached by what it was attached with, another by what its listed descriptor records,
+    /// without reading it again. The settings, the providers, the projects and the spaces are read once for all of them.
+    /// </summary>
+    /// <param name="sessions">The sessions, as <see cref="ListRecoverableSessionsAsync(CancellationToken)"/> lists them.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The sandboxes, in the order of <paramref name="sessions"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sessions"/> or one of them is null.</exception>
+    public async Task<IReadOnlyList<SessionSandbox>> GetSessionSandboxesAsync(IReadOnlyList<SessionViewDescriptor> sessions, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sessions);
+        if (sessions.Count == 0) return [];
+        var scopes = await ReadSandboxScopesAsync(cancellationToken).ConfigureAwait(false);
+        var sandboxes = new SessionSandbox[sessions.Count];
+        for (var index = 0; index < sessions.Count; index++)
+        {
+            var session = sessions[index] ?? throw new ArgumentNullException(nameof(sessions), "A session is null.");
+            var subject = _entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated ? SandboxSubject.Of(entry) : SandboxSubject.Of(session);
+            sandboxes[index] = await ResolveSandboxAsync(scopes, subject, cancellationToken).ConfigureAwait(false);
+        }
+
+        return sandboxes;
+    }
+
+    // What decides the sandbox of one session: its own choice, its provider and model, its project and its space.
+    private readonly record struct SandboxSubject(string? Own, string? ProviderKey, string? ModelId, string? ProjectId, string? SpaceId)
+    {
+        // An attached session has what it was attached with: it never changes while it runs (see GetSessionSpaceAsync).
+        public static SandboxSubject Of(RuntimeSessionEntry entry) => new(entry.OwnSandbox, entry.ProviderKey, entry.Model, entry.ProjectId, entry.SpaceId);
+
+        public static SandboxSubject Of(SessionViewDescriptor session) => new(session.Sandbox, session.ResolvedProviderKey, session.ModelId, session.ProjectRef, session.SpaceId);
+    }
+
+    // What the scopes of a sandbox read beyond the session (the settings and the providers of the user, the spaces, the
+    // projects and their files), read once for one call however many sessions it resolves, and again at the next call,
+    // so that a change of the settings applies from the next command of a session.
+    private sealed class SandboxScopeInputs(
+        string? allSessions,
+        IReadOnlyList<SandboxProfile> profiles,
+        IReadOnlyDictionary<string, CodeAltaProviderDocument>? providers,
+        IReadOnlyList<SpaceDescriptor> spaces,
+        ProjectCatalog projectCatalog,
+        Func<string?, bool> projectSetsSandbox)
+    {
+        private IReadOnlyList<ProjectDescriptor>? _projects;
+        private Dictionary<string, bool>? _projectSetsSandbox;
+
+        public string? AllSessions => allSessions;
+
+        public IReadOnlyList<SandboxProfile> Profiles => profiles;
+
+        public IReadOnlyList<SpaceDescriptor> Spaces => spaces;
+
+        public async Task<ProjectDescriptor?> GetProjectAsync(string projectId, CancellationToken cancellationToken)
+        {
+            _projects ??= await projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            return _projects.FirstOrDefault(project => string.Equals(project.Id, projectId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public bool ProjectSetsSandbox(string projectPath)
+        {
+            _projectSetsSandbox ??= new(StringComparer.Ordinal);
+            if (!_projectSetsSandbox.TryGetValue(projectPath, out var sets)) _projectSetsSandbox[projectPath] = sets = projectSetsSandbox(projectPath);
+            return sets;
+        }
+
+        // The sandbox of a provider, and of a model of it, as the user's configuration sets them.
+        public (string? Provider, string? Model) ProviderSandbox(string? providerKey, string? modelId)
+        {
+            if (string.IsNullOrWhiteSpace(providerKey) || providers is null || !providers.TryGetValue(providerKey, out var provider)) return (null, null);
+            var model = !string.IsNullOrWhiteSpace(modelId) && provider.ModelOverrides is { } overrides && overrides.TryGetValue(modelId, out var modelOverride)
+                ? modelOverride.Sandbox
+                : null;
+            return (provider.Sandbox, model);
+        }
+    }
+
+    // How many times the scopes of a sandbox were read, for tests that bound the reads of a listing.
+    internal int SandboxScopeReadCount => Volatile.Read(ref _sandboxScopeReadCount);
+
+    private int _sandboxScopeReadCount;
+
+    private async Task<SandboxScopeInputs> ReadSandboxScopesAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _sandboxScopeReadCount);
+        var (allSessions, profiles) = ReadSandboxSettings();
+        var spaces = await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        return new SandboxScopeInputs(allSessions, profiles, ReadSandboxProviders(), spaces, _projectCatalog, _configStore.ProjectSetsSandbox);
     }
 
     /// <summary>
@@ -162,20 +247,24 @@ public sealed partial class SessionRuntimeService
     /// <returns>The sandbox.</returns>
     public async Task<SessionSandbox> ResolveSandboxAsync(string? own, string? providerKey, string? modelId, string? projectId, string? spaceId, CancellationToken cancellationToken = default)
     {
-        var (allSessions, profiles) = ReadSandboxSettings();
-        var project = string.IsNullOrWhiteSpace(projectId) ? null : await _projectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
-        var resolvedSpace = SpaceCatalog.ResolveSessionSpace(spaceId, project, await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
-        var space = (await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
-            .FirstOrDefault(candidate => string.Equals(candidate.Id, resolvedSpace, StringComparison.OrdinalIgnoreCase));
-        var (providerSandbox, modelSandbox) = ProviderSandbox(providerKey, modelId);
+        var scopes = await ReadSandboxScopesAsync(cancellationToken).ConfigureAwait(false);
+        return await ResolveSandboxAsync(scopes, new SandboxSubject(own, providerKey, modelId, projectId, spaceId), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SessionSandbox> ResolveSandboxAsync(SandboxScopeInputs scopes, SandboxSubject subject, CancellationToken cancellationToken)
+    {
+        var project = string.IsNullOrWhiteSpace(subject.ProjectId) ? null : await scopes.GetProjectAsync(subject.ProjectId, cancellationToken).ConfigureAwait(false);
+        var resolvedSpace = SpaceCatalog.ResolveSessionSpace(subject.SpaceId, project, scopes.Spaces);
+        var space = scopes.Spaces.FirstOrDefault(candidate => string.Equals(candidate.Id, resolvedSpace, StringComparison.OrdinalIgnoreCase));
+        var (providerSandbox, modelSandbox) = scopes.ProviderSandbox(subject.ProviderKey, subject.ModelId);
         var choice = SandboxScopes.Resolve(new SandboxScopeValues
         {
-            Session = own,
+            Session = subject.Own,
             Model = modelSandbox,
             Provider = providerSandbox,
             Project = project?.EffectiveSandbox,
             Space = space?.Settings.NewSessions?.Sandbox,
-            AllSessions = allSessions,
+            AllSessions = scopes.AllSessions,
         });
         // The policy of the organization requires the sandbox: a session that no scope sandboxes, or whose scope turns
         // it off, runs in the profile CodeAlta sandboxes sessions with by default; where the sandbox cannot run, it runs
@@ -183,11 +272,11 @@ public sealed partial class SessionRuntimeService
         var policy = _managedPolicies.Current;
         if (policy.SandboxRequired && choice.Profile is null && (policy.SandboxUnavailableBlocks || SandboxCanRun()))
             choice = new(SandboxProfiles.Workspace, SandboxScope.Organization);
-        var projectSetsSandbox = project is not null && _configStore.ProjectSetsSandbox(project.ProjectPath);
+        var projectSetsSandbox = project is not null && scopes.ProjectSetsSandbox(project.ProjectPath);
         if (choice.Profile is not { } name) return new(choice, null, null, projectSetsSandbox);
         try
         {
-            var resolved = SandboxProfiles.Resolve(name, profiles);
+            var resolved = SandboxProfiles.Resolve(name, scopes.Profiles);
             // Nor may a command leave it, when the policy says so, whatever the profile allows.
             if (policy.RunOutsideSandboxDisallowed && resolved.Outside != SandboxOutside.Never) resolved = resolved with { Outside = SandboxOutside.Never };
             return new(choice, resolved, null, projectSetsSandbox);
@@ -279,26 +368,19 @@ public sealed partial class SessionRuntimeService
         return scoped.IsSandboxed ? null : wanted;
     }
 
-    // The sandbox of a provider, and of a model of it, as the user's configuration sets them.
-    private (string? Provider, string? Model) ProviderSandbox(string? providerKey, string? modelId)
+    // The providers of the user's configuration, for the sandbox each sets; the last ones read while it cannot be read.
+    private IReadOnlyDictionary<string, CodeAltaProviderDocument>? ReadSandboxProviders()
     {
-        if (string.IsNullOrWhiteSpace(providerKey)) return (null, null);
-        IReadOnlyDictionary<string, CodeAltaProviderDocument>? providers;
         try
         {
-            providers = _configStore.LoadGlobal().Providers;
-            Volatile.Write(ref _lastSandboxProviders, providers ?? new Dictionary<string, CodeAltaProviderDocument>());
+            var providers = _configStore.LoadGlobal().Providers ?? new Dictionary<string, CodeAltaProviderDocument>();
+            Volatile.Write(ref _lastSandboxProviders, providers);
+            return providers;
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            providers = Volatile.Read(ref _lastSandboxProviders);
+            return Volatile.Read(ref _lastSandboxProviders);
         }
-
-        if (providers is null || !providers.TryGetValue(providerKey, out var provider)) return (null, null);
-        var model = !string.IsNullOrWhiteSpace(modelId) && provider.ModelOverrides is { } overrides && overrides.TryGetValue(modelId, out var modelOverride)
-            ? modelOverride.Sandbox
-            : null;
-        return (provider.Sandbox, model);
     }
 
     private static SandboxProfile ToSandboxProfile(CodeAltaSandboxProfileSettings settings) => new()
