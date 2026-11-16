@@ -1898,9 +1898,13 @@ dialog.global-search > .app-window > .app-window-body > .global-search-results {
 .global-search-icon { display: inline-flex; flex: none; justify-content: center; width: 18px; }
 .global-search-title { flex: 0 1 auto; min-width: 0; max-width: 64%; overflow: hidden; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .global-search-detail { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.global-search-row[data-kind="session"] .global-search-detail { flex: 0 1 auto; margin-left: auto; text-align: right; }
+.global-search-row:is([data-kind="session"], [data-kind="claude-code"]) .global-search-detail { flex: 0 1 auto; margin-left: auto; text-align: right; }
 .global-search-meta { display: inline-flex; flex: none; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-.global-search-row[data-kind="session"] .global-search-meta { justify-content: flex-end; min-width: 76px; }
+.global-search-row:is([data-kind="session"], [data-kind="claude-code"]) .global-search-meta { justify-content: flex-end; min-width: 76px; }
+/* A Claude Code session started elsewhere, not a session of CodeAlta yet: dimmed as in the list of the sessions, readable once chosen. */
+.global-search-row[data-kind="claude-code"] .global-search-icon { opacity: .55; }
+.global-search-row[data-kind="claude-code"] .global-search-title { color: var(--muted); font-weight: 400; }
+.global-search-row[data-kind="claude-code"][aria-selected="true"] .global-search-title { color: var(--text); }
 .global-search-row mark { padding: 0; border-radius: 2px; color: inherit; background: color-mix(in srgb, var(--bp-palette-gold-4, #f0b726) 36%, transparent); }
 .global-search-slash { margin-left: 9px; padding: 0; border: 0; color: var(--accent); background: transparent; font: 400 11.5px var(--code-font); }
 /* A skill is named as it is invoked, with what goes with it to the session. */

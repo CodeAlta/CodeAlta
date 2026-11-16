@@ -10,6 +10,7 @@ import { fileAppearance, splitProjectPath } from "../fileAppearance";
 import { KeyGesture } from "../KeyGesture";
 import type { MessageKey } from "../localization";
 import { searchPluginCommands, type PluginCommandView } from "../pluginUi";
+import { ProviderIcon } from "../ProviderIcon";
 import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
@@ -356,7 +357,7 @@ function SearchRow({ result, words, id, selected, enabled, reason = null, locale
   onHover: () => void; onOpen: () => void;
 }) {
   const { t } = useShellLanguage();
-  let icon: IconName, tone: string, title: ReactNode, detail: ReactNode = null, meta: ReactNode = null, hint: string;
+  let icon: IconName, tone: string, title: ReactNode, detail: ReactNode = null, meta: ReactNode = null, hint: string, logo: ReactNode = null;
   if (result.kind === "project") {
     const { project } = result;
     icon = project.archived ? "archive" : "folder"; tone = project.archived ? "muted" : "gold"; hint = `${project.name}\n${project.path}`;
@@ -378,17 +379,18 @@ function SearchRow({ result, words, id, selected, enabled, reason = null, locale
     const time = sessionTime(at, locale, Math.max(now, Date.parse(at) || 0));
     meta = <>{result.archived && <span className="global-search-tag">{t("Restore")}</span>}<time dateTime={time.dateTime} title={time.title}>{time.label}</time></>;
   } else if (result.kind === "claude-code") {
+    // Laid out as a session, its logo and title dimmed as in the list of the sessions, and tagged as an archived one is.
     const { conversation, project } = result;
     icon = "assistant"; tone = "muted";
+    logo = <ProviderIcon providerKey={result.providerId} size={15} fallback="assistant" />;
     const name = plainTitle(conversation.title);
     const where = project ? project.name : t("Not in a project");
     const folder = conversation.tag ?? (project ? null : conversation.startDirectory);
     hint = `${name}\n${t("From Claude Code")} · ${where}${conversation.startDirectory ? `\n${conversation.startDirectory}` : ""}`;
     title = <Marked text={name} words={words} />;
-    detail = <><span className="global-search-tag">{t("From Claude Code")}</span> <Marked text={where} words={words} />
-      {folder && <> · <Marked text={folder} words={words} /></>}</>;
+    detail = <><Marked text={where} words={words} />{folder && <> · <Marked text={folder} words={words} /></>}</>;
     const time = sessionTime(conversation.lastChangedAt, locale, Math.max(now, Date.parse(conversation.lastChangedAt) || 0));
-    meta = <time dateTime={time.dateTime} title={time.title}>{time.label}</time>;
+    meta = <><span className="global-search-tag">{t("From Claude Code")}</span><time dateTime={time.dateTime} title={time.title}>{time.label}</time></>;
   } else if (result.kind === "file") {
     const look = fileAppearance(result.path, false), { name, parent } = splitProjectPath(result.path);
     icon = look.icon; tone = look.tone; hint = result.path;
@@ -427,7 +429,7 @@ function SearchRow({ result, words, id, selected, enabled, reason = null, locale
   }
   return <div role="option" id={id} aria-selected={selected} aria-disabled={!enabled} className="global-search-row" data-kind={result.kind} title={hint}
     onMouseMove={onHover} onClick={onOpen}>
-    <span className="global-search-icon" data-file-tone={tone}><AppIcon name={icon} size={15} /></span>
+    <span className="global-search-icon" data-file-tone={tone}>{logo ?? <AppIcon name={icon} size={15} />}</span>
     <span className="global-search-title">{title}</span>
     <span className="global-search-detail">{detail}</span>
     <span className="global-search-meta">{meta}</span>
