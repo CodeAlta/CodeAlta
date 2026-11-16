@@ -490,14 +490,17 @@ public sealed class DesktopShellTests
     [TestMethod]
     public void LinuxEntry_StartsTheInstalledTool()
     {
-        var entry = DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", "/home/me/.local/share/CodeAlta/desktop/integration/alta.png");
+        var entry = DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", "/home/me/.local/share/CodeAlta/desktop/integration/alta.png", null);
         Assert.IsTrue(entry.StartsWith("[Desktop Entry]\nType=Application\nName=CodeAlta\n", StringComparison.Ordinal));
         StringAssert.Contains(entry, "Exec=\"/home/me/.dotnet/tools/alta\"\n");
         StringAssert.Contains(entry, "Icon=/home/me/.local/share/CodeAlta/desktop/integration/alta.png\n");
         StringAssert.Contains(entry, "Terminal=false\n");
         // The window's identifier is the entry's file name: the dock finds the icon by it.
         StringAssert.Contains(entry, "StartupWMClass=" + DesktopIntegration.LinuxApplicationId + "\n");
-        Assert.IsFalse(DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", null).Contains("Icon=", StringComparison.Ordinal));
+        Assert.IsFalse(DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", null, null).Contains("Icon=", StringComparison.Ordinal));
+        // A .NET of the user (~/.dotnet, where the install script puts it) is not found by the tool in a desktop session: the entry names it.
+        StringAssert.Contains(DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", null, "/home/me/.dotnet"),
+            "Exec=env \"DOTNET_ROOT=/home/me/.dotnet\" \"/home/me/.dotnet/tools/alta\"\n");
         // Characters the entry's syntax reserves are escaped.
         Assert.AreEqual("\"/home/a b/50%%/\\$x/alta\"", DesktopIntegration.DesktopEntryArgument("/home/a b/50%/$x/alta"));
     }

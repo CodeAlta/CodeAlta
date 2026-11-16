@@ -106,6 +106,8 @@ internal static class DesktopIntegration
             // The icon of the macOS bundle depends on the system: an upgrade of macOS writes the bundle again.
             var bundleIcon = OperatingSystem.IsMacOS() ? MacBundleIconFile(OperatingSystem.IsMacOSVersionAtLeast(26)) : null;
             var current = version + "\n" + start + (bundleIcon is null ? string.Empty : "\n" + bundleIcon);
+            // The Linux entry names the .NET installation the tool runs on: another one writes the entry again.
+            if (OperatingSystem.IsLinux()) current += "\n" + DotnetRoot();
             var target = EntryPath();
             if (target is null) return default;
             MacBundle? macBundle = null;
@@ -263,7 +265,14 @@ internal static class DesktopIntegration
     }
 
     /// <summary>The Linux desktop entry.</summary>
-    internal static string LinuxDesktopEntry(string launcher, string? icon)
+    /// <param name="launcher">The installed tool the entry starts.</param>
+    /// <param name="icon">The icon of the entry; null for none.</param>
+    /// <param name="dotnetRoot">
+    /// The .NET installation the tool runs on, given to it as <c>DOTNET_ROOT</c>: a desktop session reads no shell
+    /// profile, and the tool finds by itself only an installation of the system, not one of the user (<c>~/.dotnet</c>).
+    /// Null to give none.
+    /// </param>
+    internal static string LinuxDesktopEntry(string launcher, string? icon, string? dotnetRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(launcher);
         var entry = new StringBuilder();
@@ -272,7 +281,9 @@ internal static class DesktopIntegration
         entry.Append("Name=CodeAlta\n");
         entry.Append("GenericName=Coding agent workspace\n");
         entry.Append("Comment=Work with coding agents across your projects\n");
-        entry.Append("Exec=").Append(DesktopEntryArgument(launcher)).Append('\n');
+        entry.Append("Exec=");
+        if (!string.IsNullOrWhiteSpace(dotnetRoot)) entry.Append("env ").Append(DesktopEntryArgument("DOTNET_ROOT=" + dotnetRoot)).Append(' ');
+        entry.Append(DesktopEntryArgument(launcher)).Append('\n');
         if (!string.IsNullOrWhiteSpace(icon)) entry.Append("Icon=").Append(icon).Append('\n');
         entry.Append("Terminal=false\n");
         entry.Append("Categories=Development;IDE;\n");
@@ -362,7 +373,7 @@ internal static class DesktopIntegration
     private static void WriteLinuxEntry(string path, string launcher, string? icon)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, LinuxDesktopEntry(launcher, icon), new UTF8Encoding(false));
+        File.WriteAllText(path, LinuxDesktopEntry(launcher, icon, DotnetRoot()), new UTF8Encoding(false));
     }
 
     /// <summary>
