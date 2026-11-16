@@ -111,7 +111,11 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
 
     await command("Page.enable");
     await command("Runtime.enable");
+    // The system of the scenario, for every part of the page: the application reads the platform, the editor of the prompt the user
+    // agent. With one of them left as the machine of the test has it, the editor waits for the shortcuts of another system.
     await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'platform',{get:()=>${JSON.stringify(mac ? "MacIntel" : "Win32")}});
+      { const agent=navigator.userAgent.replace(/\\([^)]*\\)/,${JSON.stringify(mac ? "(Macintosh; Intel Mac OS X 10_15_7)" : "(Windows NT 10.0; Win64; x64)")});
+        Object.defineProperty(navigator,'userAgent',{get:()=>agent}); }
       window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ');
       ${side ? "localStorage.setItem('codealta.desktop.timeline.emphasis.v1',JSON.stringify({enabled:true,types:{prompt:{dim:true,opacity:50,hoverOpacity:50},answer:{dim:true,opacity:60,hoverOpacity:60}}}));" : ""}
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}

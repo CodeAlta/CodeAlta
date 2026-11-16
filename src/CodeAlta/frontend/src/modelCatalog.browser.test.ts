@@ -22,9 +22,10 @@ test("Models refreshes only the chosen provider, replacing retired models and re
     assert.equal(await page.evaluate(`document.querySelector('.model-catalog-grid').textContent.includes('first-retired')`), false);
     assert.equal(await page.evaluate(`document.querySelector('.model-catalog-grid').textContent.includes('second-retired')`), true);
     assert.equal(await page.evaluate(`catalogFixture.reads.filter(id => id === 'second').length`), 1, "another provider is not read again");
-    await page.click('[aria-label="Refresh provider"]');
-    await page.key('End', 35);
-    await page.key('Enter', 13);
+    // The list of a native select is drawn and driven by the system, each in its own way: the option is chosen as the list does it.
+    await page.evaluate(`(() => { const select = document.querySelector('[aria-label="Refresh provider"]');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'second');
+      select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     await page.until(`document.querySelector('[aria-label="Refresh provider"]').value === 'second'`, "chosen second provider");
     await page.evaluate(`catalogFixture.hold = false`);
     await page.clickText('button', 'Refresh models');
