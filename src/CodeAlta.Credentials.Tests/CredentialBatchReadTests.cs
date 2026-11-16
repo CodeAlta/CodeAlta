@@ -14,6 +14,19 @@ public sealed class CredentialBatchReadTests
     private const string Notes = "first line\nsecond line\n";
 
     [TestMethod]
+    public void The_fake_vault_calls_can_be_read_while_its_program_appends_the_log()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows enforces the sharing of reads with an open writer.");
+        using var vault = new FakeVault();
+        using var stream = new FileStream(Path.Combine(vault.Bin, "fake-vault.log"), FileMode.Append, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream);
+        writer.WriteLine("account list --format json");
+        writer.Flush();
+
+        CollectionAssert.AreEqual(new[] { "account list --format json" }, vault.Calls().ToArray());
+    }
+
+    [TestMethod]
     public async Task The_secrets_of_1Password_are_read_with_one_call_after_the_unlock()
     {
         using var vault = OnePassword();

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Credentials.Tests;
 
@@ -70,7 +71,13 @@ internal sealed class FakeVault : IDisposable
     public IReadOnlyList<string> Calls()
     {
         var log = Path.Combine(Bin, "fake-vault.log");
-        return File.Exists(log) ? File.ReadAllLines(log) : [];
+        // The startup checks are still running when a test reads the calls they append.
+        using var stream = StagedFileReplacement.OpenReplacedFile(log, FileShare.ReadWrite | FileShare.Delete);
+        if (stream is null) return [];
+        using var reader = new StreamReader(stream);
+        var calls = new List<string>();
+        while (reader.ReadLine() is { } line) calls.Add(line);
+        return calls;
     }
 
     public void WriteConfig(string toml) => File.WriteAllText(ConfigPath, toml);
