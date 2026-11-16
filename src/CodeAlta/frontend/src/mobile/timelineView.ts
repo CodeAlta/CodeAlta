@@ -28,6 +28,8 @@ export type TimelineViewOptions = Readonly<{
   fill: (element: HTMLElement, text: string, redraw: () => void, seq?: number) => boolean;
   /** The session the timeline shows. */
   session: () => string | null;
+  /** What the machine of the session offers (`linked-files`...); absent: everything. */
+  offers?: (feature: string) => boolean;
   /** The title of a session, when the page knows it. */
   sessionTitle: (id: string) => string | null;
   /** Opens a session on the phone. */
@@ -102,7 +104,7 @@ export function createTimelineView(options: TimelineViewOptions) {
   function dressLinkedImages(content: HTMLElement, block: MessageBlock) {
     const session = options.session();
     const links = Array.from(content.querySelectorAll<HTMLAnchorElement>("a:has(> img.markdown-local-image)"));
-    if (!session || !links.length || !block.images?.length || block.seq === undefined) return;
+    if (!session || !links.length || !block.images?.length || block.seq === undefined || options.offers?.("linked-files") === false) return;
     const matched = matchLinkedImages(links.map(link => link.getAttribute("href")), block.images);
     const items: ImageItem[] = [];
     links.forEach((link, index) => {

@@ -23,15 +23,15 @@ public sealed partial class FleetNodeService
         On(caller, FleetNodeMethods.ControlPeopleGet, access, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetNodePeopleInfo,
             (_, _, _) => Task.FromResult(People.Read()), optionalParams: true);
         On(caller, FleetNodeMethods.ControlPeopleSet, access, FleetNodeJsonContext.Default.FleetNodePeopleChange, FleetNodeJsonContext.Default.FleetNodePeopleInfo,
-            (_, change, _) =>
+            async (_, change, _) =>
             {
                 try
                 {
                     var info = People.Set(change);
                     // A machine that lets a person in serves no phone any more: a phone has no person attached to its key.
-                    _ = StopMobileForOthersAsync();
+                    await StopMobileForOthersAsync().ConfigureAwait(false);
                     LogInfo($"The people of the machine changed: {change.PersonId} {(change.Permissions is { Count: > 0 } names ? string.Join(",", names) : change.Refuse ? "refused" : "removed")}.");
-                    return Task.FromResult(info);
+                    return info;
                 }
                 catch (ArgumentException exception)
                 {
@@ -113,6 +113,7 @@ public sealed partial class FleetNodeService
             if (caller.Trust.IsRevoked(caller.Fingerprint)) await caller.Connection.CloseAsync(FleetErrorCodes.Revoked).ConfigureAwait(false);
         }
 
+        await StopMobileForOthersAsync().ConfigureAwait(false);
         if (stopped.Count > 0) LogInfo($"The sessions of suspended people were stopped: {string.Join(", ", stopped)}.");
         return stopped;
     }

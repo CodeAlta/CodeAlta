@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 
 function worker() {
   const handlers = new Map<string, (event: unknown) => void>();
-  const notifications: { title: string; options: { data: { sessionId: string }; tag: string; body: string } }[] = [];
+  const notifications: { title: string; options: { data: { sessionId: string; machineId?: string }; tag: string; body: string } }[] = [];
   const opened: string[] = [], navigated: string[] = [];
   let focused = 0, closed = 0;
   const state = { windows: [] as { url: string; navigate: (url: string) => Promise<unknown> }[] };
@@ -24,7 +24,7 @@ function worker() {
   }
   return { notifications, opened, navigated, state, client, focused: () => focused, closed: () => closed,
     push: (data: unknown) => fire("push", { data: { json: () => data } }),
-    click: (sessionId: string) => fire("notificationclick", { notification: { data: { sessionId }, close: () => { closed++; } } }) };
+    click: (sessionId: string, machineId?: unknown) => fire("notificationclick", { notification: { data: { sessionId, ...(machineId === undefined ? {} : { machineId }) }, close: () => { closed++; } } }) };
 }
 
 test("push wakes the worker without a page and shows completion, failure, question/review and permission notifications", async () => {
@@ -56,4 +56,26 @@ test("tapping opens a new app window when none exists, or when an existing windo
   await w.click("s-2");
   await w.click("//evil.example");
   assert.deepEqual(w.opened, ["https://desk.example/#/session/s-1", "https://desk.example/#/session/s-2"]);
+});
+
+test("a notification of a session of another machine names its machine, and a tap opens that session there", async () => {
+  const w = worker();
+  await w.push({ sessionId: "s-1", kind: "completed" });
+  await w.push({ sessionId: "s-1", machineId: "local", kind: "completed" });
+  await w.push({ sessionId: "s-1", machineId: "node-7", kind: "answer" });
+  // The data of a notification is made in the context of the worker: it is compared as JSON.
+  assert.deepEqual(JSON.parse(JSON.stringify(w.notifications.map(n => [n.options.tag, n.options.data]))), [
+    ["alta-session-s-1", { sessionId: "s-1" }], ["alta-session-s-1", { sessionId: "s-1" }],
+    ["alta-session-node-7-s-1", { sessionId: "s-1", machineId: "node-7" }],
+  ], "the same id on two machines is two notifications; this computer is named as before");
+  await w.push({ sessionId: "s-1", machineId: "../evil/#", kind: "completed" });
+  await w.push({ sessionId: "s-1", machineId: 7, kind: "completed" });
+  assert.equal(w.notifications.length, 3, "A machine that cannot be read is not taken for this computer.");
+
+  w.state.windows = [w.client];
+  await w.click("s-1", "node-7");
+  await w.click("s-1", "local");
+  await w.click("s-1", "a/b");
+  assert.deepEqual(w.navigated, ["https://desk.example/#/machine/node-7/session/s-1", "https://desk.example/#/session/s-1"]);
+  assert.deepEqual(w.opened, []);
 });

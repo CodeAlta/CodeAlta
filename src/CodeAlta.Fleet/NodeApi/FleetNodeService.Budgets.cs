@@ -51,7 +51,7 @@ public sealed partial class FleetNodeService
     // A send of the node API as it is kept while a budget holds it.
     private static FleetHeldSend HeldSendOf(string runId, string sessionId, string text, string? title, OwnedSessionSelection? selection)
         => new(runId, sessionId, text, title, System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
-            selection?.ProviderKey, selection?.AgentPromptId, selection?.ModelId, selection?.ReasoningEffort?.ToString(), DateTimeOffset.UtcNow);
+            selection?.ProviderKey, selection?.AgentPromptId, selection?.ModelId, selection?.ReasoningEffort?.ToString(), DateTimeOffset.UtcNow) { PermissionMode = selection?.PermissionMode };
 
     // The send a held one makes once admitted: the owned command of its session, with its retry key. A send held is kept until
     // the runtime started its run (its prompt is in the journal then) or refused it: a process that ends before takes it again.
@@ -59,7 +59,7 @@ public sealed partial class FleetNodeService
     {
         OwnedSessionSelection? selection = held.ProviderKey is { } provider && held.AgentPromptId is { } prompt
             ? new OwnedSessionSelection(provider, prompt, held.ModelId,
-                Enum.TryParse<CodeAlta.Agent.AgentReasoningEffort>(held.ReasoningEffort, ignoreCase: true, out var effort) ? effort : null)
+                Enum.TryParse<CodeAlta.Agent.AgentReasoningEffort>(held.ReasoningEffort, ignoreCase: true, out var effort) ? effort : null) { PermissionMode = held.PermissionMode }
             : null;
         var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(held.RunId, held.SessionId, held.Text) { Selection = selection }, CancellationToken.None);
         if (admission is { Kind: OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay, Receipt: { } receipt })

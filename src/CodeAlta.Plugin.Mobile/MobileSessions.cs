@@ -9,7 +9,7 @@ namespace CodeAlta.Plugin.Mobile;
 /// out, read with <c>alta session list</c>, <c>alta session status</c> and <c>alta session events</c>. A session of another
 /// space is not found, so the phone can neither read it nor act on it.
 /// </summary>
-internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceService spaces, MobileLive live)
+internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceService spaces, MobileLive live, bool strictSpaces = false)
 {
     /// <summary>The sessions of a page when the phone does not say.</summary>
     internal const int DefaultPageSize = 6;
@@ -53,10 +53,11 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     /// <param name="limit">The sessions of the page.</param>
     /// <param name="projectIds">The projects the phone keeps to (the first <see cref="MaximumProjects"/>), or null or none for every project.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    internal async Task<JsonObject> ListAsync(int offset, int limit, IReadOnlyList<string>? projectIds, CancellationToken cancellationToken)
+    /// <param name="maximumPageSize">The bounded internal window for a merged machine list; public pages remain small.</param>
+    internal async Task<JsonObject> ListAsync(int offset, int limit, IReadOnlyList<string>? projectIds, CancellationToken cancellationToken, int maximumPageSize = MaximumPageSize)
     {
         offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, MaximumPageSize);
+        limit = Math.Clamp(limit, 1, maximumPageSize);
         var assigned = Spaces;
         var projects = (projectIds ?? []).Where(MobileApi.IsId).Distinct(StringComparer.Ordinal).Take(MaximumProjects).ToArray();
         var sessions = new List<JsonObject>();
@@ -71,10 +72,10 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             List<string> args = ["session", "list", "--limit", wanted];
             if (project is not null) args.AddRange(["--project", project]);
             if (space is not null) args.AddRange(["--space", space]);
-            var result = await MobileAlta.RunAsync(alta, args, null, cancellationToken).ConfigureAwait(false);
+            var result = await MobileAlta.RunLongAsync(alta, args, 3 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
             error ??= result.Error;
             foreach (var item in result.OfType("alta.session.item"))
-                if (MobileAlta.Text(item, "sessionId") is { } id && !IsArchived(item) && seen.Add(id)) sessions.Add(item);
+                if (MobileAlta.Text(item, "sessionId") is { } id && !IsArchived(item) && VisibleSpace(item, assigned) && seen.Add(id)) sessions.Add(item);
         }
 
         var ordered = sessions.OrderByDescending(LastActivity).ThenBy(static item => MobileAlta.Text(item, "title"), StringComparer.OrdinalIgnoreCase).ToList();
@@ -160,8 +161,15 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         if (result.OfType("alta.session.status").FirstOrDefault() is not { } status) return null;
         var assigned = Spaces;
         // A session written before sessions had a space is in every space of its project.
-        return assigned.Count == 0 || MobileAlta.Text(status, "spaceId") is not { } space || assigned.Contains(space, StringComparer.OrdinalIgnoreCase) ? status : null;
+        return VisibleSpace(status, assigned) ? status : null;
     }
+
+    /// <summary>Whether a session is in the spaces of the phone, by the rule its own read follows.</summary>
+    internal bool IsVisible(JsonObject item) => VisibleSpace(item, Spaces);
+
+    private bool VisibleSpace(JsonObject item, IReadOnlyList<string> assigned)
+        => assigned.Count == 0 || (MobileAlta.Text(item, "spaceId") is { } space
+            ? assigned.Contains(space, StringComparer.OrdinalIgnoreCase) : !strictSpaces);
 
     /// <summary>
     /// The timeline of a session after a sequence number, read with <c>alta session events</c> a page at a time, from the
@@ -379,6 +387,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             // The last folder of the path, whatever the system that wrote it.
             ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? worktree.TrimEnd('\\', '/').Split('\\', '/')[^1] : null,
             ["parentId"] = parentId,
+            ["parentMachineId"] = MobileAlta.Text(item, "parentMachineId"),
             // The title of the parent, which a sub-agent shown without it names.
             ["parentTitle"] = parentId is not null && parentTitles?.GetValueOrDefault(parentId) is { } parentTitle ? parentTitle : null,
             ["summary"] = PlainSummary(MobileAlta.Text(item, "latestSummary")),

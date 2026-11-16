@@ -55,6 +55,9 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly TimeSpan _promptPatience = promptPatience ?? DefaultPromptPatience;
 
+    internal IPluginAltaService Alta => alta;
+    internal MobileApi Rebind(IPluginAltaService service, MobileSessions page) => new(service, page, _attachmentsDirectory, _clock, _promptPatience);
+
     /// <summary>Whether a text is the id of a session or the value of an option, which alta receives as one argument.</summary>
     internal static bool IsId(string? value) => value is { Length: > 0 and <= 200 } && !value.StartsWith('-') && !value.Any(char.IsControl);
 
@@ -405,7 +408,7 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
             if (children.Error is not null || children.Truncated || !children.OfType("alta.session.children.summary").Any())
                 return new JsonObject { ["ok"] = false, ["error"] = children.Error ?? "The child sessions could not be read completely." };
             // A child archived before is left as it is: only those the archive changes must be the phone's.
-            if (children.OfType("alta.session.item").Any(item => !IsArchivedChild(item) && MobileAlta.Text(item, "spaceId") is { } space && !sessions.Spaces.Contains(space, StringComparer.OrdinalIgnoreCase)))
+            if (children.OfType("alta.session.item").Any(item => !IsArchivedChild(item) && !sessions.IsVisible(item)))
                 return new JsonObject { ["ok"] = false, ["error"] = "A child session is outside the spaces available to this phone." };
         }
         List<string> args = ["session", "archive", id];

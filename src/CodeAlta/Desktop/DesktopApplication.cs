@@ -523,6 +523,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var pluginIdentities = new DesktopPluginIdentities();
             var pluginAsks = new DesktopPluginAsks();
             var pluginPermissions = new PluginPermissionServiceBridge();
+            var pluginMachines = new Fleet.DesktopPluginMachines();
             // The values of the settings plugins declare, in config.toml: a setting of each project is in the file of its project.
             var settingsProjects = new ProjectCatalog(catalog);
             var pluginSettingsStore = new PluginSettingsStore(catalog.ConfigPath,
@@ -622,7 +623,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost, options.Profile), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore,
-                    privateNetworks),
+                    privateNetworks, pluginMachines),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
@@ -884,6 +885,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version, privateNetworks: privateNetworks,
                     modelServers: localModelHost);
                 fleet = fleetStartup.Fleet;
+                pluginMachines.Attach(fleet, host);
                 remoteChildren = fleetStartup.RemoteChildren;
                 fleetServers = fleetStartup.Servers;
                 desktopNode = fleetStartup.Node;

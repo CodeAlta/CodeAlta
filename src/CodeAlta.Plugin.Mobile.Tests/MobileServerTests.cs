@@ -8,7 +8,7 @@ using CodeAlta.Plugins.Abstractions;
 namespace CodeAlta.Plugin.Mobile.Tests;
 
 [TestClass]
-public sealed class MobileServerTests
+public sealed partial class MobileServerTests
 {
     [TestMethod]
     public async Task ArchiveChildren_RequiresPairing_AndPassesTheChoiceToAlta()
@@ -851,7 +851,7 @@ public sealed class MobileServerTests
         /// <summary>The pairing token of the QR code.</summary>
         internal string Token => Access.PairingToken!;
 
-        internal static async Task<Fixture> StartAsync()
+        internal static async Task<Fixture> StartAsync(IPluginMachineService? machines = null, Func<bool>? enabled = null, FakeSpaces? scope = null)
         {
             var port = FreePort.Next();
             var alta = new FakeAlta();
@@ -860,19 +860,25 @@ public sealed class MobileServerTests
                 .Add("assets/mobile-abc.js", "export {};", "text/javascript; charset=utf-8", immutable: true)
                 .Add("mobile/sw.js", "self.addEventListener('fetch', () => {});", "text/javascript; charset=utf-8");
             var live = new MobileLive();
-            var sessions = new MobileSessions(alta, new FakeSpaces(), live);
+            var spaces = scope ?? new FakeSpaces();
+            var sessions = new MobileSessions(alta, spaces, live);
             var asks = new FakeAsks();
             var permissions = new FakePermissions();
             var state = new MobileSettingsTests.MemoryState();
             var access = await MobileAccess.LoadAsync(state, CancellationToken.None);
             var push = await MobilePush.LoadAsync(state, access, default);
             await access.PairAsync(CancellationToken.None);
+            var api = new MobileApi(alta, sessions);
+            var mobileAsks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50));
+            var mobilePermissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50), alta);
+            var router = machines is null ? null : new MobileMachines(machines, spaces,
+                new(new PluginMachine("local", "Desktop", "online", null, null, ["view", "drive", "start"], [], 0),
+                    sessions, api, mobileAsks, mobilePermissions), live, new MobilePushEvents(), enabled ?? (() => true));
             var server = new MobileServer(new MobileServerOptions
             {
                 Port = port, Access = access, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
                 // An answer the session takes long to take is said pending at once: no test waits the seconds of a phone.
-                Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)),
-                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50), alta), Live = live, Push = push, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
+                Api = api, Asks = mobileAsks, Permissions = mobilePermissions, Live = live, Push = push, Machines = router, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
             });
             await server.StartAsync(default);
             var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };

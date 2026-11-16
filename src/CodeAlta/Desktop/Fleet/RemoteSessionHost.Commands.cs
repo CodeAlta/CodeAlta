@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
@@ -242,19 +243,31 @@ internal sealed partial class RemoteSessionHost
         }
 
         var previous = _asks.TryGetValue(sessionId, out var known) ? known.Latest : null;
-        _asks[sessionId] = new OwnedAskPage(list.Ask is { } ask ? new OwnedAskHead(AskHandle(sessionId, ask), ToRequest(ask), ask.State) : null, previous, list.HasMore);
+        _asks[sessionId] = new OwnedAskPage(list.Ask is { } ask ? HeadOf(sessionId, ask) : null, previous, list.HasMore);
     }
 
-    private OwnedAskHandle AskHandle(string sessionId, FleetAsk ask)
-        => new(StableId(MachineId + "/" + sessionId + "/" + ask.AskId), _instance, 1, "fleet", sessionId, ask.RunId, ask.AskId, 0);
+    /// <summary>
+    /// The ask of a machine as the window shows it. Only an ask the machine says is made of questions is shown: a review request is answered with a
+    /// verdict the node API does not carry, and an ask of an older machine, which does not say what it is, is not known to be a question. Both are answered
+    /// on the machine.
+    /// </summary>
+    internal OwnedAskHead? HeadOf(string sessionId, FleetAsk ask)
+        => ask.Kind == FleetAsk.KindQuestions ? new OwnedAskHead(AskHandle(sessionId, ask), ToRequest(ask), ask.State) { Immediate = ask.Immediate } : null;
 
-    private static AltaAskRequest ToRequest(FleetAsk ask) => new()
+    private OwnedAskHandle AskHandle(string sessionId, FleetAsk ask)
+        => new(StableId(MachineId + "/" + sessionId + "/" + ask.AskId), _instance, 1, "fleet", sessionId, ask.RunId, ask.AskId, ResponseGeneration(ask.Revision));
+
+    // The revision of an ask is the node's text of its response generation; one that is not a number is 0, which the node then rejects on its own.
+    internal static long ResponseGeneration(string? revision)
+        => long.TryParse(revision, NumberStyles.None, CultureInfo.InvariantCulture, out var generation) ? generation : 0;
+
+    internal static AltaAskRequest ToRequest(FleetAsk ask) => new()
     {
         Questions = [.. ask.Questions.Select(static question => new AltaAskQuestion
         {
             Title = question.Title, Question = question.Question, Description = question.Description,
             Choices = [.. question.Choices.Select(static choice => new AltaAskChoice { Title = choice.Title, Description = choice.Description })],
-            Freeform = question.AllowsText ? new AltaAskFreeform() : null,
+            Freeform = question.AllowsText ? new AltaAskFreeform { Title = question.FreeformTitle, Placeholder = question.FreeformPlaceholder } : null,
         })],
     };
 
@@ -285,8 +298,9 @@ internal sealed partial class RemoteSessionHost
         string? run = null;
         try
         {
-            var result = await RequireClient().AnswerAskAsync(new FleetAskAnswerParams(handle.SessionId, handle.AskId, answers, cancel), action.ActionId.ToString("N"),
-                cancellationToken).ConfigureAwait(false);
+            // The revision the person read goes with the answer: the machine rejects it when the ask changed since.
+            var result = await RequireClient().AnswerAskAsync(new FleetAskAnswerParams(handle.SessionId, handle.AskId, answers, cancel)
+                { Revision = handle.ResponseGeneration.ToString(CultureInfo.InvariantCulture) }, action.ActionId.ToString("N"), cancellationToken).ConfigureAwait(false);
             (status, run) = (result.Status, result.RunId);
         }
         catch (FleetException exception)
@@ -312,11 +326,18 @@ internal sealed partial class RemoteSessionHost
         return new SessionOwnedPermissionPage([.. list.Requests.Select(request =>
         {
             var attempt = new SessionPermissionHandle(sessionId, request.RunId, request.Id.ToString("N"), request.Id);
-            return new SessionOwnedPermissionSnapshot(new SessionOwnedPermissionHandle(request.Id, _instance, 1, attempt),
-                new SessionPermissionSnapshot(attempt, new ModelProviderId("fleet"), request.Timestamp, request.Kind, request.Command, request.WorkingDirectory,
-                    request.Reason, request.GrantRoot));
+            return new SessionOwnedPermissionSnapshot(new SessionOwnedPermissionHandle(request.Id, _instance, 1, attempt), ToSnapshot(attempt, request));
         })], list.HasMore);
     }
+
+    internal static SessionPermissionSnapshot ToSnapshot(SessionPermissionHandle attempt, FleetPermissionRequest request) => new(attempt, new ModelProviderId("fleet"),
+        request.Timestamp, request.Kind, request.Command, request.WorkingDirectory, request.Reason, request.GrantRoot)
+    {
+        Shortened = request.Shortened,
+        OutsideSandbox = request.OutsideSandbox,
+        // The node names the skill and its server only: what it would load is not known here, so it is allowed once at most, as a skill a server generates is.
+        Skill = request.SkillName is { Length: > 0 } skill ? new SessionPermissionSkill(request.SkillServer ?? "", skill, "", 0, 0, Dynamic: true) : null,
+    };
 
     /// <inheritdoc />
     public async ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, CancellationToken cancellationToken)

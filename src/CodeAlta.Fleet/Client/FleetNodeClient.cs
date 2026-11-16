@@ -15,7 +15,7 @@ namespace CodeAlta.Fleet.Client;
 /// the sessions it watches. Side-effecting calls take a retry key: the same key again is the same command (a retry after
 /// a lost reply gets the first receipt), so a caller that retries passes the key it used.
 /// </summary>
-public sealed partial class FleetNodeClient : IAsyncDisposable
+public sealed partial class FleetNodeClient : IAsyncDisposable, IFleetSessionAccess
 {
     private static readonly TimeSpan AddressTimeout = TimeSpan.FromSeconds(5);
     private readonly FleetChannel _channel;
@@ -508,7 +508,8 @@ public sealed partial class FleetNodeClient : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(parameters);
         return CallAsync(FleetSessionReads.IsAction(parameters) ? FleetNodeMethods.SessionsAct : FleetNodeMethods.SessionsRead, parameters,
-            FleetNodeJsonContext.Default.FleetSessionReadParams, FleetNodeJsonContext.Default.FleetSessionReadResult, null, cancellationToken);
+            FleetNodeJsonContext.Default.FleetSessionReadParams, FleetNodeJsonContext.Default.FleetSessionReadResult,
+            FleetSessionReads.IsAction(parameters) ? parameters.ActionId ?? NewRetryKey() : null, cancellationToken);
     }
 
     /// <summary>The owner's local control, or a paired device that manages the node: whether the node serves the page of the phones.</summary>

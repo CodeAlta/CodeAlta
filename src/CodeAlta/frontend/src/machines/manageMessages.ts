@@ -3,6 +3,7 @@
 type Row = readonly [string, string, string, string, string];
 
 export const machineManageMessages = {
+  "Phone settings": ["Ajustes del teléfono", "Réglages du téléphone", "Telefoneinstellungen", "スマートフォンの設定", "手机设置"],
   "Preparing…": ["Preparando…", "Préparation…", "Wird vorbereitet…", "準備中…", "正在准备…"],
   "Not ready": ["No está listo", "Pas prêt", "Nicht bereit", "未準備", "未就绪"],
   "Its key is the secret {name} of the machine, which is not set.": ["Su clave es el secreto {name} de la máquina, que no está definido.", "Sa clé est le secret {name} de la machine, qui n’est pas défini.",
@@ -241,4 +242,22 @@ export const machineManageMessages = {
     "{name} hat am {date} gebeten, diese Maschine zu nutzen.", "{name} が {date} にこのマシンの使用を求めました。", "{name} 于 {date} 请求使用此机器。"],
   "Let in": ["Dejar entrar", "Laisser entrer", "Zulassen", "許可", "允许"],
   "Add a person…": ["Añadir una persona…", "Ajouter une personne…", "Person hinzufügen…", "ユーザーを追加…", "添加人员…"],
+  "Connect a phone": ["Conectar un teléfono", "Connecter un téléphone", "Telefon verbinden", "スマートフォンを接続", "连接手机"],
+  "Serve the sessions of {name} to a phone: scan its code with the phone, within a few minutes. {name} serves the page itself, through its own private network.": [
+    "Ofrece las sesiones de {name} a un teléfono: escanea su código con el teléfono en unos minutos. {name} sirve la página por sí misma, a través de su propia red privada.",
+    "Proposer les sessions de {name} à un téléphone : scannez son code avec le téléphone, en quelques minutes. {name} sert la page elle-même, par son propre réseau privé.",
+    "Die Sitzungen von {name} einem Telefon anbieten: Scannen Sie den Code innerhalb weniger Minuten mit dem Telefon. {name} stellt die Seite selbst über sein eigenes privates Netzwerk bereit.",
+    "{name} のセッションをスマートフォンに提供します。数分以内にスマートフォンでコードをスキャンしてください。ページは {name} 自身が独自のプライベート ネットワークで提供します。",
+    "向手机提供 {name} 的会话：几分钟内用手机扫描其代码。页面由 {name} 通过其自己的专用网络提供。"],
+  "Serve the phone page": ["Servir la página del teléfono", "Servir la page du téléphone", "Telefonseite bereitstellen", "スマートフォン用ページを提供", "提供手机页面"],
+  "This machine does not serve the page of the phones: update CodeAlta Node there.": ["Esta máquina no sirve la página de los teléfonos: actualiza CodeAlta Node allí.",
+    "Cette machine ne sert pas la page des téléphones : mettez-y à jour CodeAlta Node.", "Diese Maschine stellt die Telefonseite nicht bereit: Aktualisieren Sie dort CodeAlta Node.",
+    "このマシンはスマートフォン用ページを提供していません。そこで CodeAlta Node を更新してください。", "此机器不提供手机页面：请在那里更新 CodeAlta Node。"],
+  "This machine cannot serve the page of the phones.": ["Esta máquina no puede servir la página de los teléfonos.", "Cette machine ne peut pas servir la page des téléphones.",
+    "Diese Maschine kann die Telefonseite nicht bereitstellen.", "このマシンはスマートフォン用ページを提供できません。", "此机器无法提供手机页面。"],
+  "The page of the phones is off on this machine.": ["La página de los teléfonos está desactivada en esta máquina.", "La page des téléphones est désactivée sur cette machine.",
+    "Die Telefonseite ist auf dieser Maschine ausgeschaltet.", "このマシンではスマートフォン用ページがオフです。", "此机器上的手机页面已关闭。"],
+  "This machine lets other people in, so it does not serve the page of the phones.": ["Esta máquina deja entrar a otras personas, así que no sirve la página de los teléfonos.",
+    "Cette machine laisse entrer d’autres personnes : elle ne sert donc pas la page des téléphones.", "Diese Maschine lässt andere Personen zu und stellt daher die Telefonseite nicht bereit.",
+    "このマシンは他のユーザーを受け入れているため、スマートフォン用ページを提供しません。", "此机器允许其他人使用，因此不提供手机页面。"],
 } as const satisfies Record<string, Row>;

@@ -68,6 +68,7 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
     private volatile MobileSettings _settings = new();
     private volatile MobileAccess? _access;
     private MobileServer? _server;
+    private volatile MobileMachines? _machines;
     // The port the server listens on now: a change of it starts the server again.
     private int? _listeningPort;
     // The network of now and what publishes the view through it.
@@ -218,6 +219,7 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
             HttpsPort = IsPort(settings.HttpsPort) ? settings.HttpsPort : DefaultHttpsPort,
             // A network this computer has not now stays chosen: the plugin that brings it may start later.
             Mode = IsNetworkId(settings.Mode) ? settings.Mode : DefaultProvider,
+            ShowOtherMachines = Context.Host.Frontend == PluginFrontends.Desktop && settings.ShowOtherMachines,
         };
         if (valid != settings) await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, valid, cancellationToken).ConfigureAwait(false);
         return valid;
@@ -237,11 +239,20 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
         var attachments = Path.Combine(Context.Host.UserDataDirectory, "plugin-data", "mobile");
         Directory.CreateDirectory(attachments);
         MobileApi.RemoveStaleAttachments(attachments);
+        var api = new MobileApi(Services.Alta, sessions, attachments);
+        var asks = new MobileAsks(Services.Asks, sessions);
+        var permissions = new MobilePermissions(Services.Permissions, sessions, null, Services.Alta);
+        IReadOnlyList<string> features = Context.Host.Frontend == PluginFrontends.Node
+            ? ["sessions.read", "provider", "archive", "jobs", "jobs.stop", "permissions"]
+            : ["sessions.read", "provider", "archive", "jobs", "jobs.stop", "questions", "permissions", "attachments", "linked-files", "reviews", "takeover", "worktree-choice"];
+        var machine = new PluginMachine(MobileMachines.Local, Environment.MachineName, "online", null, null, ["view", "drive", "start"], features, 0);
+        var machines = new MobileMachines(Services.Machines, Services.Spaces, new(machine, sessions, api, asks, permissions), _live, _pushEvents, () => _settings.ShowOtherMachines);
+        _machines = machines;
         var server = new MobileServer(new MobileServerOptions
         {
             Port = port, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
-            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
-            Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions, null, Services.Alta), Live = _live, Push = _push, Logger = Logger,
+            Files = Services.AppFiles, Sessions = sessions, Api = api,
+            Asks = asks, Permissions = permissions, Live = _live, Push = _push, Machines = machines, Logger = Logger,
         });
         try
         {
@@ -412,6 +423,7 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
         try
         {
             if (_access is { } access) await access.ResetAsync(cancellationToken).ConfigureAwait(false);
+            _machines?.Invalidate();
             _server?.Disconnect();
             Logger.Info("Mobile: the access was reset; the phones have to scan the new code.");
         }
@@ -450,13 +462,16 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
     internal async Task<MobileSettingsView> SetAsync(MobileSettingsChange request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (!IsPort(request.Port)) return Settings() with { Error = $"The port on this computer must be a number from {MinimumPort} to {MaximumPort}." };
+        // The switch of the other machines, on the tab, names nothing else: the port in use is kept.
+        var scopeAlone = request is { Provider: null, Port: null, HttpsPort: null, ShowOtherMachines: not null };
+        if (!scopeAlone && !IsPort(request.Port)) return Settings() with { Error = $"The port on this computer must be a number from {MinimumPort} to {MaximumPort}." };
         var id = request.Provider ?? _settings.Mode;
         var chosen = NetworkOf(id);
         if (chosen is null) return Settings() with { Error = "Phones connect through " + string.Join(" or ", Networks().Select(static network => network.DisplayName)) + "." };
         if (chosen.Capabilities.HasFlag(PrivateNetworkCapabilities.PublicPort) && request.HttpsPort is { } asked && !IsPort(asked))
             return Settings() with { Error = $"The port of {chosen.DisplayName} must be a number from {MinimumPort} to {MaximumPort}." };
         MobileSettingsView view;
+        var scopeOnly = false;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -464,42 +479,56 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
             var old = _settings;
             var next = old with
             {
-                Mode = chosen.Id, Port = request.Port!.Value, HttpsPort = request.HttpsPort ?? old.HttpsPort,
+                Mode = chosen.Id, Port = request.Port ?? old.Port, HttpsPort = request.HttpsPort ?? old.HttpsPort,
+                ShowOtherMachines = Context.Host.Frontend == PluginFrontends.Desktop && (request.ShowOtherMachines ?? old.ShowOtherMachines),
             };
             if (next == old && _provider is not null) return Settings();
-            // What was published goes first, with the settings it was published with; then the settings of now.
-            if (_provider is null || !string.Equals(_network?.Id, chosen.Id, StringComparison.OrdinalIgnoreCase))
+            if (_provider is not null && next == old with { ShowOtherMachines = next.ShowOtherMachines })
             {
-                if (Create(chosen) is not { } created) return Settings() with { Error = $"{chosen.DisplayName} cannot publish the view." };
-                await ReplaceAsync(created).ConfigureAwait(false);
+                // Only what the phones see changed: the page stays published where it is.
+                _settings = next;
+                _machines?.ReconcileScope();
+                await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
+                scopeOnly = true;
+                view = Settings();
             }
             else
             {
-                await _provider.UnpublishAsync(CancellationToken.None).ConfigureAwait(false);
-            }
+                // What was published goes first, with the settings it was published with; then the settings of now.
+                if (_provider is null || !string.Equals(_network?.Id, chosen.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (Create(chosen) is not { } created) return Settings() with { Error = $"{chosen.DisplayName} cannot publish the view." };
+                    await ReplaceAsync(created).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _provider.UnpublishAsync(CancellationToken.None).ConfigureAwait(false);
+                }
 
-            _settings = next;
-            await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
-            Logger.Info($"Mobile: phones now connect through {chosen.Id}, to port {next.Port} of this computer.");
-            if (_server is null || next.Port != _listeningPort)
-            {
-                // The phones that were connected reconnect to the new address once they scan it.
-                await StopServerAsync().ConfigureAwait(false);
-                _state = _state with { Server = "starting", ServerDetail = null };
-                await StartServerAsync(CancellationToken.None).ConfigureAwait(false);
-            }
+                _settings = next;
+                _machines?.ReconcileScope();
+                await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
+                Logger.Info($"Mobile: phones now connect through {chosen.Id}, to port {next.Port} of this computer.");
+                if (_server is null || next.Port != _listeningPort)
+                {
+                    // The phones that were connected reconnect to the new address once they scan it.
+                    await StopServerAsync().ConfigureAwait(false);
+                    _state = _state with { Server = "starting", ServerDetail = null };
+                    await StartServerAsync(CancellationToken.None).ConfigureAwait(false);
+                }
 
-            _state = _state with { Provider = Publishing };
-            // The answer is the state of the change itself, read before the provider publishes: one that answers at once would otherwise
-            // give the outcome of the publication to some calls and not to others.
-            view = Settings();
+                _state = _state with { Provider = Publishing };
+                // The answer is the state of the change itself, read before the provider publishes: one that answers at once would otherwise
+                // give the outcome of the publication to some calls and not to others.
+                view = Settings();
+            }
         }
         finally
         {
             _gate.Release();
         }
 
-        _ = Tasks.Run("mobile-publish", async ct => await RetryAsync(ct, startServer: false).ConfigureAwait(false), new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view." });
+        if (!scopeOnly) _ = Tasks.Run("mobile-publish", async ct => await RetryAsync(ct, startServer: false).ConfigureAwait(false), new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view." });
         await ChangedAsync().ConfigureAwait(false);
         return view;
     }
@@ -515,6 +544,7 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
             {
                 var asks = await ReadAskingAsync(cancellationToken).ConfigureAwait(false);
                 var permissions = await ReadApprovingAsync(cancellationToken).ConfigureAwait(false);
+                _machines?.ReconcileScope();
                 _live.Flush(asks, permissions);
                 if (_push is not null) _pushEvents.Pending(asks, permissions);
                 if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
@@ -536,7 +566,15 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
             {
                 try
                 {
-                    if (_push is { } push) await push.SendAsync(notice, sessions, cancellationToken).ConfigureAwait(false);
+                    if (notice.Generation != _pushEvents.Generation) continue;
+                    var target = sessions;
+                    if (notice.MachineId is { } id)
+                    {
+                        if (_machines is not { } machines || await machines.OpenAsync(id, cancellationToken).ConfigureAwait(false) is not { } page || page.Machine.State != "online") continue;
+                        target = page.Sessions;
+                    }
+                    if (_push is { } push) await push.SendAsync(notice, target, cancellationToken,
+                        () => notice.Generation == _pushEvents.Generation && (notice.MachineId is null || _machines?.Enabled == true)).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException && (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
                 {
@@ -619,6 +657,8 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
         {
             Served = url, Phones = _access?.PhoneCount ?? 0, PairsOnce = _access?.PairsOnce == true,
             PairingSeconds = connect is not null && _access?.PairingEndsIn is { } left ? Math.Max(1, (int)Math.Ceiling(left.TotalSeconds)) : null,
+            HasOtherMachines = Context.Host.Frontend == PluginFrontends.Desktop && Services.Machines.HasMachines,
+            ShowOtherMachines = _settings.ShowOtherMachines,
         };
     }
 
@@ -678,6 +718,8 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
         var settings = _settings;
         return new MobileSettingsView(settings.Port, settings.HttpsPort, ServedUrl(state), state.Server, state.ServerDetail, View(state))
         {
+            HasOtherMachines = Services.Machines.HasMachines,
+            ShowOtherMachines = settings.ShowOtherMachines,
             Providers = [.. Networks().Select(static network => new MobileNetworkView(network.Id, network.DisplayName, network.Description,
                 network.Capabilities.HasFlag(PrivateNetworkCapabilities.PublicPort)))],
         };
@@ -762,6 +804,7 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await PairedAsync(() => RetryAsync(ct), ct).ConfigureAwait(false));
                 // The actions a state of the provider offers (a sign-in); their outcome comes with the changes.
                 canvas.Rpc.Handle<MobileAction, MobileStatus>("mobile.act", async (request, ct) => await PairedAsync(() => ActAsync(request.Action, ct), ct).ConfigureAwait(false));
+                canvas.Rpc.Handle<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", async (request, ct) => await SetAsync(request, ct).ConfigureAwait(false));
                 Track(canvas, _open);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(AppModule) });
             },
@@ -881,6 +924,9 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
 /// <summary>What the plugin keeps between starts, in its state of the user.</summary>
 internal sealed record MobileSettings
 {
+    /// <summary>Gets whether phones may act through this computer on its other machines. Existing phones remain local-only by default.</summary>
+    public bool ShowOtherMachines { get; init; }
+
     /// <summary>
     /// Gets the access token a file of before kept itself. It is read once, its hash taken over by <see cref="MobileAccess"/>,
     /// and never written again: the file keeps no secret.
@@ -943,6 +989,12 @@ internal sealed record MobileNetworkView(string Id, string Name, string Descript
 /// <param name="Qr">The QR code of <paramref name="ConnectUrl"/>, one string of <c>0</c> and <c>1</c> per row.</param>
 internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileProviderView Provider, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr)
 {
+    /// <summary>Gets whether this desktop reaches other machines it can lend to its phones.</summary>
+    public bool HasOtherMachines { get; init; }
+
+    /// <summary>Gets whether the owner explicitly allowed its phones to reach those machines.</summary>
+    public bool ShowOtherMachines { get; init; }
+
     /// <summary>Gets the address of the page while it is served, without a token, also when there is no code to show.</summary>
     public string? Served { get; init; }
 
@@ -985,7 +1037,8 @@ public interface IMobileHostControl
 /// <param name="Provider">The id of the provider; null keeps the one of now.</param>
 /// <param name="Port">The port of the server on this computer.</param>
 /// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale; null keeps the one of now.</param>
-internal sealed record MobileSettingsChange(string? Provider, int? Port, int? HttpsPort);
+/// <param name="ShowOtherMachines">Whether to lend phones this computer's remote access; null keeps the explicit choice.</param>
+internal sealed record MobileSettingsChange(string? Provider, int? Port, int? HttpsPort, bool? ShowOtherMachines = null);
 
 /// <summary>What the settings page shows.</summary>
 /// <param name="Port">The port of the server on this computer.</param>
@@ -996,6 +1049,12 @@ internal sealed record MobileSettingsChange(string? Provider, int? Port, int? Ht
 /// <param name="Provider">What the provider does.</param>
 internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Address, string Server, string? ServerDetail, MobileProviderView Provider)
 {
+    /// <summary>Gets whether this host can offer access to other machines; nodes never do.</summary>
+    public bool HasOtherMachines { get; init; }
+
+    /// <summary>Gets whether the user explicitly lent the phone this computer's remote access.</summary>
+    public bool ShowOtherMachines { get; init; }
+
     /// <summary>Gets why the settings that were asked for are refused, or null.</summary>
     public string? Error { get; init; }
 

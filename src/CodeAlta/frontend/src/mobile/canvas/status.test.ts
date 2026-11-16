@@ -26,6 +26,12 @@ test("a status is read as the plugin sends it, and what is not one is refused", 
   assert.equal(readStatus({ ...serving(), qr: ["1x", "01"] })?.qr, null);
 });
 
+test("a desktop's other machines are hidden unless explicitly lent to its phones", () => {
+  assert.equal(readStatus(serving({ hasOtherMachines: true }))?.showOtherMachines, false);
+  assert.equal(readStatus(serving({ hasOtherMachines: true, showOtherMachines: true }))?.showOtherMachines, true);
+  assert.equal(readStatus(serving({ hasOtherMachines: false }))?.hasOtherMachines, false);
+});
+
 test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sign-in offered, and each state said", () => {
   const tunnel = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}) => serving({
     connectUrl: "https://abc-2584.euw.devtunnels.ms/?k=secret", address: "https://abc-2584.euw.devtunnels.ms", ...overrides },
@@ -176,4 +182,27 @@ test("a network a plugin brings, which the tab has no words for, shows its own l
   assert.deepEqual(problem.actions, [{ action: "acme-login", text: "Sign in to Acme", primary: true }]);
   assert.equal(readStatus({ ...serving(), provider: { ...serving().provider, actions: [{ action: "x", label: "y".repeat(81) }, { action: "ok", label: "Fine" }] } })?.provider.actions.length, 1,
     "a label too long is left out");
+});
+
+test("what a node says of its phones is read, and a desktop's status carries none of it", () => {
+  const node = readStatus({ ...serving({ connectUrl: null, address: null, qr: null }), served: "https://pc.tail1.ts.net:8443", phones: 2, pairsOnce: true, pairingSeconds: 0 });
+  assert.equal(node?.pairsOnce, true);
+  assert.equal(node?.served, "https://pc.tail1.ts.net:8443");
+  assert.equal(node?.phones, 2);
+  assert.equal(node?.pairingSeconds, null, "a code that ended says no time");
+  assert.equal(readStatus({ ...serving(), pairsOnce: true, pairingSeconds: 290.7 })?.pairingSeconds, 290);
+  // A standing code has no life: nothing of a node is read from a status that does not say it is one.
+  assert.deepEqual(readStatus(JSON.parse(JSON.stringify({ ...serving(), phones: 3, served: "https://x" }))), serving());
+});
+
+test("a host without a window gives a code when it is asked for: pair answers with the status", async () => {
+  const calls: string[] = [];
+  const rpc: AltaRpc = {
+    invoke: async name => { calls.push(name); return serving(); },
+    stream: async () => { throw new Error("not used"); },
+    subscribe: async () => () => { },
+    generation: { value: 0, subscribe: () => () => { } },
+  };
+  assert.deepEqual(await createMobileApi(rpc).pair(), serving());
+  assert.deepEqual(calls, ["mobile.pair"]);
 });

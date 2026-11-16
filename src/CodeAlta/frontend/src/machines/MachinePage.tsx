@@ -12,6 +12,7 @@ import { parseLabels } from "../fleet/fleetSecrets";
 import { MachineProviders } from "./MachineProviders";
 import { MachineModelServers } from "../modelServers/MachineModelServers";
 import { MachineSignIns } from "./MachineSignIns";
+import { MachineMobile } from "./MachineMobile";
 import { formatSize } from "../search/SearchSettings";
 import { loadParts, maxSessionLimit, parseSessionLimit, queuedSince } from "./seats";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
@@ -22,7 +23,7 @@ export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePerm
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
   | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "limits" | "setLimits" | "seats" | "startSeat" | "cancelSeat" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
   | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut" | "joinServer" | "providerOffers" | "addProvider" | "updateProvider"
-  | "providerOperationWait"> & Partial<Pick<typeof machines, "openSignInPage">>;
+  | "providerOperationWait" | "mobile" | "mobileEnable" | "mobileInvoke"> & Partial<Pick<typeof machines, "openSignInPage">>;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -108,6 +109,8 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
     {/* A computer that manages the machine sees each provider, why it is not ready, and gives it a key or signs it in; the others see the ready ones. */}
     {view?.status === "ok" && <MachineProviders epoch={epoch} machine={machine} api={api} />}
     {view?.status === "ok" && <MachineSignIns epoch={epoch} machine={machine} api={api} />}
+    {/* A phone connects to the machine itself: its own page of the phones, which a computer that manages it turns on and shows the code of. */}
+    {view?.status === "ok" && <MachineMobile epoch={epoch} machine={machine} api={api} />}
     {view?.status === "not_manager" && <ProvidersSection view={view} machine={machine} />}
     {/* Its llama.cpp servers, for a computer that may view the machine: Settings > Fleet > Model servers changes them. */}
     {view && <MachineModelServers epoch={epoch} machine={machine} />}

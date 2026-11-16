@@ -28,6 +28,14 @@ export function createMobileApi(rpc: AltaRpc, options: Readonly<{ retryMilliseco
     status: () => status("mobile.status"),
     /** Asks the provider again. */
     retry: () => status("mobile.retry"),
+    /** Asks a host without a window for a code that connects one phone: the status of now, with the code. */
+    pair: () => status("mobile.pair"),
+    /** Lends this desktop's machines to its phones only when the owner explicitly asks. */
+    otherMachines: async (showOtherMachines: boolean) => {
+      const result = await rpc.invoke("mobile.settings.set", { showOtherMachines }) as { error?: string | null };
+      if (result?.error) throw new Error(result.error);
+      return status("mobile.status");
+    },
     /** Runs an action of the provider (a sign-in): the status of now; what it does comes with the changes. */
     act: (action: string) => status("mobile.act", { action }),
     /**

@@ -862,3 +862,21 @@ body.session-finding :is(#composer, #ask) { display: none !important; }
 ::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
 :root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }
 :root[data-theme="light"] ::highlight(find-in-page-current) { background-color: #f0b726; color: #111; }
+
+/* ---- Machines: the chip that says where the phone is, its sheet, the machine of a card and of a session ---- */
+.machine-chip { display: inline-flex; align-items: center; gap: .3rem; min-height: 32px; max-width: 100%; margin-left: -.375rem; padding: 0 .5rem; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); font: inherit; font-size: .75rem; cursor: pointer; }
+.machine-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.machine-chip .scope-machine { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-chip .ico { margin: 0; }
+.machine-chip .machine-chip-chevron svg { transform: rotate(90deg); }
+.machine-chip.machine-offline, .machine-chip.machine-unauthorized { color: var(--muted); }
+.meta-machine { color: var(--text); font-weight: 600; }
+.meta-machine.machine-offline, .meta-machine.machine-connecting, .meta-machine.machine-unauthorized { color: var(--yellow); }
+#machine-list button[aria-pressed] { position: relative; padding-right: 2.25rem; }
+#machine-list button[aria-pressed="true"]::after { content: "✓"; position: absolute; top: 50%; right: .75rem; transform: translateY(-50%); font-weight: 700; }
+#machine-list button:disabled { opacity: .55; cursor: default; }
+.machine-row-name { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; overflow-wrap: anywhere; }
+.machine-row-status { display: block; }
+.readonly-note { display: none; margin: 0; padding: .625rem .75rem; border-radius: 8px; background: var(--panel-2); color: var(--muted); font-size: .8125rem; overflow-wrap: anywhere; }
+#composer[data-readonly="1"] .readonly-note { display: block; }
+#composer[data-readonly="1"] :is(#prompt, .composer-actions, #suggestion, #attach-strip, #attach-note) { display: none; }

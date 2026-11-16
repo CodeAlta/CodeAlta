@@ -7,12 +7,14 @@ import { createApprovalPanel } from "./approvalPanel";
 import { createWaitingRuns } from "./waitingRuns";
 import { createAskPanel } from "./askPanel";
 import { createBackgroundJobs } from "./backgroundJobs";
-import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
+import { isBusy, type Live, type Machine, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
 import { setUpNotifications } from "./notifications";
 import { createLiveStream, type LinkState } from "./liveStream";
+import { abilityOf, allMachines, eventsUrl, isLocalMachine, keyIn, localKey, localMachineId, machineOf, parseSessionHash, qualifyLive, sessionHash, sessionKey, splitKey, validSelection, type MachineHints } from "./machines";
+import { allMachinesLabel, createMachineSheet } from "./machineSheet";
 import { createMarkdownView, linkedFileName, linksLine, linksMarkdown } from "./markdownView";
 import type { ChartData } from "../vegaLite/vegaLite";
 import {
@@ -48,6 +50,11 @@ export function startMobile(window: Window & typeof globalThis) {
   const drafts = createDrafts(store);
   const sessions = createSessionStore();
   let signedOut = false;
+  // The machines this computer reaches (itself first), read with the list; none when the computer reaches no other or is an older CodeAlta.
+  let machines: readonly Machine[] = [];
+  const hintsOf = (view: SessionView | null | undefined): MachineHints | null => view ? { machine: view.machine, state: view.machineState, can: view.can, features: view.features } : null;
+  /** What the phone may do with a session, from its machine (everything on this computer). */
+  const abilityFor = (key: string | null | undefined) => abilityOf(key, key ? hintsOf(sessions.view(key)) : null, machines, Date.now());
   const api = createApi({ fetch: (input, init) => window.fetch(input, init), store, onSignedOut: message => showSignedOut(message) });
   const host = window.location.host;
 
@@ -134,11 +141,12 @@ export function startMobile(window: Window & typeof globalThis) {
   const list = $<HTMLUListElement>("sessions"), moreButton = $<HTMLButtonElement>("more");
   // A link to a session is a chip with the state the page knows of it: a session it has not read yet is a plain chip, which opens it all the same.
   const markdown = createMarkdownView({ window, upload: body => api.diagram(body), installed: () => installedApp(window), note: text => noteHere(text),
-    describeSession: id => {
-      const view = sessions.view(id);
+    describeSession: raw => {
+      // A session an answer links is of the machine of the session that links it.
+      const view = sessions.view(keyIn(detail.id, raw));
       return { title: view?.title ?? "", scope: view?.project ?? null, state: isBusy(view?.live?.live) ? "running" : "idle", updatedAt: view?.lastActivity ?? null };
     },
-    openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; } });
+    openSession: id => { window.location.hash = sessionHash(keyIn(detail.id, id)); } });
 
   // The facts of a session, compact: the dot (with a word while it works), then its space, project, worktree, model and effort, agent and
   // whether it is a sub-agent; at most two lines, the time on the right.
@@ -167,7 +175,14 @@ export function startMobile(window: Window & typeof globalThis) {
     return line;
   }
 
-  const sessionList = createSessionList({ window, list, sessions, store, visible: () => !$("home").hidden });
+  const sessionList = createSessionList({ window, list, sessions, store, visible: () => !$("home").hidden,
+    // The machine of a card, when the list holds the sessions of several: on the cards of the others, never on those of this computer.
+    machine: view => {
+      if (isLocalMachine(machineOf(view.id)) || sessions.scope !== allMachines) return null;
+      const ability = abilityFor(view.id);
+      return { name: ability.name ?? view.machine ?? machineOf(view.id), state: ability.state };
+    },
+    canArchive: view => { const ability = abilityFor(view.id); return ability.local || (ability.offers("archive") && ability.canDrive); } });
   // The runs that wait for the person, read with the list: of this computer, and of the machines of their servers.
   const waitingRuns = createWaitingRuns({ document, root: $("waiting"), api, host });
   function renderList() {
@@ -185,11 +200,11 @@ export function startMobile(window: Window & typeof globalThis) {
     try {
       let offset = 0, append = false;
       for (const size of readSizes(sessions.count)) {
-        const page = await api.sessions(offset, size, filter);
+        const page = await api.sessions(offset, size, filter, sessions.scope);
         if (filter !== sessions.filter) return;
         sessions.applyPage(page, startedAt, append);
         listError = page.error ?? null;
-        if (page.machine && page.machine !== link.machine) { link.machine = page.machine; showLink(); }
+        showMachineName(page.machine);
         append = true;
         offset = page.next;
         if (!page.hasMore) break;
@@ -197,6 +212,7 @@ export function startMobile(window: Window & typeof globalThis) {
       if (!await readOn(filter, startedAt, pageSize)) return;
       renderList();
       void waitingRuns.read();
+      void refreshMachines();
       showScope();
       if (!sessions.list().length) note.textContent = listError
         || (filter.length > 1 ? "No sessions in these projects." : filter.length ? "No sessions in this project." : "No sessions yet.");
@@ -209,7 +225,7 @@ export function startMobile(window: Window & typeof globalThis) {
   // until it shows `cards` cards. False when the filter changed meanwhile.
   async function readOn(filter: readonly string[], startedAt: number, cards: number): Promise<boolean> {
     for (let read = 0; read < 4 && sessions.hasMore && topLevelCount(sessions.list()) < cards; read++) {
-      const page = await api.sessions(sessions.next, pageSize, filter);
+      const page = await api.sessions(sessions.next, pageSize, filter, sessions.scope);
       if (filter !== sessions.filter) return false;
       sessions.applyPage(page, startedAt, true);
     }
@@ -224,7 +240,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const filter = sessions.filter, startedAt = sessions.beginRead();
     try {
       const cards = topLevelCount(sessions.list()) + pageSize;
-      const page = await api.sessions(sessions.next, pageSize, filter);
+      const page = await api.sessions(sessions.next, pageSize, filter, sessions.scope);
       if (filter === sessions.filter) { sessions.applyPage(page, startedAt, true); if (await readOn(filter, startedAt, cards)) renderList(); }
     } catch (error) {
       if (!(error instanceof SignedOutError)) showToast(`Not loaded: ${failureText(error, host)}`);
@@ -235,25 +251,76 @@ export function startMobile(window: Window & typeof globalThis) {
     }
   });
 
+  // ---- The machines: the chip that says where the phone is, its sheet, and the machine the list shows ----
+  const selectionKey = "alta.machine";
+  /** The name the footer gives the list: every machine, the one chosen, or what the computer called itself. */
+  function showMachineName(named?: string | null) {
+    const scope = sessions.scope;
+    const name = scope === allMachines ? allMachinesLabel : scope && !isLocalMachine(scope) ? machines.find(m => m.id === scope)?.name ?? scope : named || sessions.machine;
+    if (name && name !== link.machine) { link.machine = name; showLink(); }
+  }
+  // Reads the machines again (with each read of the list): their states, the machines that came or went, and what the sessions on screen may do.
+  // The list is read again when the machine it shows is gone, or the first time there are several.
+  async function readMachines(readList = true): Promise<boolean> {
+    let read: readonly Machine[] = [];
+    try { read = (await api.machines()).machines ?? []; }
+    catch (error) { if (error instanceof SignedOutError) return false; /* An older CodeAlta has no machines: the list is this computer's own. */ }
+    const before = JSON.stringify(machines);
+    machines = read;
+    api.setLocalDevice(machines.find(m => m.this)?.deviceId);
+    const next = machines.length > 1 ? validSelection(store.get(selectionKey), machines) : null;
+    const changed = next !== sessions.scope;
+    if (changed) applyScope(next, readList);
+    return changed || before !== JSON.stringify(machines);
+  }
+  const refreshMachines = async () => {
+    if (signedOut || !await readMachines()) return;
+    renderList();
+    showScope();
+    machineSheet.refresh();
+    showAbility();
+  };
+  // The list shows the machines named: the projects it keeps to are those of that machine (none among all of them: a project is of one machine).
+  function applyScope(scope: string | null, read = true) {
+    sessions.setFilter(scope === allMachines ? [] : keptProjects(scope), scope);
+    list.replaceChildren();
+    sessionList.settle();
+    showFilter();
+    showMachineName();
+    if (read && !signedOut) void readList();
+  }
+  const machineSheet = createMachineSheet({
+    document, machines: () => machines, selected: () => sessions.scope ?? localMachineId, now: () => Date.now(),
+    choose: machineId => { store.set(selectionKey, machineId); if (machineId !== sessions.scope) applyScope(machineId); },
+  });
+
   // ---- The project filter: a sheet of the projects, any of them checked, and "All projects"; the choice is kept ----
+  // This computer's choice is kept as it always was; each other machine has its own, since its projects are its own.
   const projectKey = "alta.project";
+  const projectKeyOf = (machine: string | null) => isLocalMachine(machine) ? projectKey : `${projectKey}.${machine}`;
   // The projects kept: a list, or the one project an earlier version kept.
-  function keptProjects(): string[] {
-    const raw = store.get(projectKey);
+  function keptProjects(machine: string | null = sessions.scope): string[] {
+    if (machine === allMachines) return [];
+    const raw = store.get(projectKeyOf(machine));
     if (!raw) return [];
     try {
       const value: unknown = JSON.parse(raw);
       return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && id.length > 0) : [raw];
     } catch { return [raw]; }
   }
-  let projects: ProjectList | null = null;
-  async function readProjects(): Promise<ProjectList> {
-    if (!projects) {
-      const read = await api.projects();
-      projects = { projects: read.projects ?? [], default: read.default ?? null, error: read.error ?? null };
+  // The machine whose projects the list keeps to: this computer's, or the one chosen; none while the list shows every machine.
+  const listMachine = (): string | null => sessions.scope === null ? localMachineId : sessions.scope === allMachines ? null : sessions.scope;
+  const projectLists = new Map<string, ProjectList>();
+  async function readProjects(machine: string): Promise<ProjectList> {
+    let read = projectLists.get(machine);
+    if (!read) {
+      const answer = await api.projects(machine);
+      read = { projects: answer.projects ?? [], default: answer.default ?? null, error: answer.error ?? null };
+      projectLists.set(machine, read);
     }
-    return projects;
+    return read;
   }
+  const listProjects = () => { const machine = listMachine(); return machine ? projectLists.get(machine) ?? null : null; };
   const filterButton = $<HTMLButtonElement>("filter");
   // The projects checked in the open sheet: the list keeps to them once the sheet closes.
   let checking: string[] | null = null;
@@ -262,16 +329,20 @@ export function startMobile(window: Window & typeof globalThis) {
     checking = null;
     if (chosen && (chosen.length !== sessions.filter.length || chosen.some(id => !sessions.filter.includes(id)))) chooseProjects(chosen);
   });
+  // The filter is of one machine's projects: the list that shows every machine has none.
+  let barPage: "home" | "session" | "new" = "home";
+  const showFilterButton = () => { filterButton.hidden = barPage === "session" || sessions.scope === allMachines; };
   function showFilter() {
     const chosen = sessions.filter;
-    const names = chosen.map(id => projects?.projects.find(p => p.id === id)?.name ?? id);
+    const names = chosen.map(id => listProjects()?.projects.find(p => p.id === id)?.name ?? id);
     filterButton.querySelector<HTMLElement>(".badge")!.hidden = chosen.length === 0;
     const label = chosen.length ? `Filter by project: ${names.join(", ")}` : "Filter by project";
     filterButton.setAttribute("aria-label", label);
     filterButton.title = label;
+    showFilterButton();
     showScope();
   }
-  // Where the phone is, at the top of the list: the computer and the spaces it sees.
+  // Where the phone is, at the top of the list: the computer (a chip that opens the machines when there are several) and the spaces it sees.
   const spaceMark = (space: Space) => {
     const item = make("span", "scope-space");
     const dot = make("span", "space-dot");
@@ -283,24 +354,38 @@ export function startMobile(window: Window & typeof globalThis) {
   function showScope() {
     const where = $("scope-where");
     where.replaceChildren();
-    if (!sessions.machine) return;
-    where.append(icon(document, "computer"), make("span", "scope-machine", sessions.machine));
+    if (!sessions.machine && sessions.scope === null) return;
+    const scope = sessions.scope;
+    if (scope !== null) {
+      const current = scope === allMachines ? null : machines.find(m => m.id === scope);
+      const chip = make("button", `machine-chip${current && current.state !== "online" ? ` machine-${current.state}` : ""}`);
+      chip.type = "button";
+      chip.setAttribute("aria-haspopup", "dialog");
+      const label = scope === allMachines ? allMachinesLabel : current?.name ?? sessions.machine;
+      chip.setAttribute("aria-label", `Machines: ${label}`);
+      chip.title = "Machines";
+      chip.append(icon(document, "computer"), make("span", "scope-machine", label), icon(document, "chevron", "machine-chip-chevron"));
+      chip.addEventListener("click", () => machineSheet.open());
+      where.append(chip);
+    } else where.append(icon(document, "computer"), make("span", "scope-machine", sessions.machine));
     const spaces = sessions.spaces;
     if (spaces.length) where.append(...spaces.map(spaceMark));
     else where.append(make("span", "scope-space", "All spaces"));
   }
   function chooseProjects(chosen: readonly string[]) {
-    store.set(projectKey, JSON.stringify(chosen));
+    store.set(projectKeyOf(listMachine()), JSON.stringify(chosen));
     sessions.setFilter(chosen);
     list.replaceChildren();
     sessionList.settle();
     showFilter();
-    if (window.location.hash === "#/new" && projects) updateNewProjects(newProject.value);
+    if (window.location.hash === "#/new" && listProjects()) updateNewProjects(newProject.value);
     void readList();
   }
   filterButton.addEventListener("click", async () => {
+    const machine = listMachine();
+    if (!machine) return;
     let data: ProjectList;
-    try { data = await readProjects(); }
+    try { data = await readProjects(machine); }
     catch (error) { if (!(error instanceof SignedOutError)) showToast(`Projects not read: ${failureText(error, host)}`); return; }
     checking = [...sessions.filter];
     // "All projects", then the projects checked, then the others: those checked are at hand to uncheck.
@@ -377,6 +462,7 @@ export function startMobile(window: Window & typeof globalThis) {
   function openLinkedFile(href: string, seq: number) {
     const id = detail.id;
     if (!id) return;
+    if (!abilityFor(id).offers("linked-files")) { showToast(`${abilityFor(id).name} does not hand over the files of its disk: open this file on that computer.`); return; }
     const name = document.createElement("strong");
     name.textContent = "File";
     const subject = document.createElement("span");
@@ -401,10 +487,12 @@ export function startMobile(window: Window & typeof globalThis) {
   markdown.handle(timeline, text => showToast(text), openLinkedFile);
   // The charts of a message read the data files it names, below the folder of the session: the server finds them in the message.
   const chartData = (id: string, seq: number): ChartData => ({ key: `${id}\n${seq}`, read: path => api.chartData(id, seq, path) });
+  const readsFiles = (id: string | null) => !!id && abilityFor(id).offers("linked-files");
   const blocksView = createTimelineView({
-    document, fill: (element, text, redraw, seq) => markdown.fill(element, text, redraw, seq === undefined || !detail.id ? undefined : { chartData: chartData(detail.id, seq) }), session: () => detail.id,
-    sessionTitle: id => sessions.view(id)?.title ?? null,
-    openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
+    document, fill: (element, text, redraw, seq) => markdown.fill(element, text, redraw, seq === undefined || !detail.id || !readsFiles(detail.id) ? undefined : { chartData: chartData(detail.id, seq) }), session: () => detail.id,
+    offers: feature => !detail.id || abilityFor(detail.id).offers(feature),
+    sessionTitle: id => sessions.view(keyIn(detail.id, id))?.title ?? null,
+    openSession: id => { window.location.hash = sessionHash(keyIn(detail.id, id)); },
     viewer: createImageViewer({ window }),
     outputViewer,
     readTool: (activityId, seq) => {
@@ -553,7 +641,7 @@ export function startMobile(window: Window & typeof globalThis) {
   // generation (another session, a refresh since) is dropped.
   const readDetail = coalesce(async () => {
     const id = detail.id;
-    if (!id || signedOut) return;
+    if (!id || signedOut || abilityFor(id).outdated) return;
     const generation = detail.generation, since = detail.since;
     try {
       if (detail.replace) {
@@ -583,8 +671,12 @@ export function startMobile(window: Window & typeof globalThis) {
       drawTimeline();
       if (queueToRead(id)) void readQueue();
     } catch (error) {
-      if (detail.id !== id || error instanceof SignedOutError) return;
-      detailNote.textContent = `Could not read the session: ${failureText(error, host)}`;
+      if (detail.id !== id || error instanceof SignedOutError || followMoved(id, error)) return;
+      // A machine out of reach is not a failure of the phone: the page already says why the session is only read.
+      const ability = abilityFor(id), last = sessions.view(id)?.live?.line ?? sessions.view(id)?.summary;
+      detailNote.textContent = !ability.local && ability.state !== "online"
+        ? `The messages of this session are on ${ability.name}, which is out of reach.${last ? ` It last said: ${last}` : ""}`
+        : `Could not read the session: ${failureText(error, host)}`;
     }
   });
   // The queue of the session says which queued prompts wait, also after a reload or when they come from the computer. It is
@@ -666,20 +758,64 @@ export function startMobile(window: Window & typeof globalThis) {
     if (!detail.id) return;
     const view = sessions.view(detail.id);
     $("detail-title").textContent = view?.title || "Session";
-    // Where the prompt goes: space · project · worktree · sub-agent. The chip of the composer says what it runs on.
-    const meta = view ? metaLine(view, { space: true, live: false, dot: false, when: null, now: Date.now(), selection: false }) : null;
-    $("detail-meta").replaceChildren(...(meta ? Array.from(meta.querySelector(".meta-facts")!.childNodes) : []));
+    // Where the prompt goes: machine · space · project · worktree · sub-agent. The chip of the composer says what it runs on, unless the page only reads.
+    const ability = abilityFor(detail.id);
+    const meta = view ? metaLine(view, { space: true, live: false, dot: false, when: null, now: Date.now(), selection: !!ability.readOnly }) : null;
+    const chip = ability.local ? [] : [machineChip(ability.name ?? machineOf(detail.id), ability.state)];
+    $("detail-meta").replaceChildren(...chip, ...(meta ? Array.from(meta.querySelector(".meta-facts")!.childNodes) : []));
     showComposer();
+  }
+  // The machine of a session of another machine, as the header and the cards say it.
+  function machineChip(name: string, state: Machine["state"]): HTMLElement {
+    const chip = make("span", `meta-item meta-machine machine-${state}`);
+    chip.append(icon(document, "computer"), document.createTextNode(state === "online" ? name : `${name} · ${state === "unauthorized" ? "not allowed" : state}`));
+    return chip;
+  }
+  // What the machine of the session on screen lets the page do changed (the machines were read again): the page says so, and reads what it could not.
+  let blockedId: string | null = null;
+  function showAbility() {
+    const id = detail.id;
+    if (!id) return;
+    const ability = abilityFor(id);
+    background.setSession(ability.offers("jobs") && !ability.outdated ? id : null);
+    showDetailHead();
+    if (ability.outdated) { blockedId = id; detailNote.textContent = ability.outdated; }
+    else if (blockedId === id) {
+      blockedId = null;
+      detailNote.textContent = "";
+      void readChoices(id);
+      readAsks(id);
+      void refreshDetail();
+    }
+  }
+  // The ask and the permission requests of a session, when its machine offers them to the person who may drive it.
+  function readAsks(id: string) {
+    const ability = abilityFor(id);
+    if (ability.outdated) return;
+    if (ability.offers("questions") && ability.canDrive) void askPanel.read(id);
+    if (ability.offers("permissions") && ability.canDrive) void approvalPanel.read(id);
+  }
+  // A session that the machine says is not on it (409 `not_on_this_machine`) is followed to the machine that has it.
+  function followMoved(id: string, error: unknown): boolean {
+    const to = error instanceof ApiError ? error.movedTo : null;
+    if (detail.id !== id || !to?.sessionId) return false;
+    const key = sessionKey(to.machineId, to.sessionId);
+    if (key === id) return false;
+    const where = to.machineId && !isLocalMachine(to.machineId) ? machines.find(m => m.id === to.machineId)?.name ?? to.machineId : "this computer";
+    pendingNotes.set(key, `This session moved to ${where}.`);
+    window.location.replace(`${window.location.pathname}${window.location.search}${sessionHash(key)}`);
+    return true;
   }
 
   // A session that is not in the list (filtered out, older, just created) is read alone, for its title and state.
   async function readSessionAlone(id: string) {
+    if (abilityFor(id).outdated) return;
     try {
       const session = await api.session(id);
       sessions.applySession(session);
       if (detail.id === id) { showDetailHead(); drawTimeline(); }
     } catch (error) {
-      if (detail.id !== id || error instanceof SignedOutError) return;
+      if (detail.id !== id || error instanceof SignedOutError || followMoved(id, error)) return;
       detailNote.textContent = error instanceof ApiError && error.status === 404
         ? "This session is not on this phone: it was archived, or it is in a space the Mobile plugin is not in."
         : `Could not read the session: ${failureText(error, host)}`;
@@ -710,9 +846,12 @@ export function startMobile(window: Window & typeof globalThis) {
     pendingNotes.delete(id);
     bindComposer(id);
     showDetailHead();
+    syncStream();
+    const ability = abilityFor(id);
+    if (ability.outdated) { blockedId = id; detailNote.textContent = ability.outdated; return; }
+    blockedId = null;
     void readChoices(id);
-    void askPanel.read(id);
-    void approvalPanel.read(id);
+    readAsks(id);
     if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
@@ -728,6 +867,7 @@ export function startMobile(window: Window & typeof globalThis) {
     watchOlder();
     timeline.replaceChildren();
     working = null;
+    syncStream();
   }
 
   function redrawDiagrams() {
@@ -744,6 +884,11 @@ export function startMobile(window: Window & typeof globalThis) {
   const composer = $<HTMLFormElement>("composer"), promptBox = $<HTMLTextAreaElement>("prompt");
   const sendButton = $<HTMLButtonElement>("send"), queueButton = $<HTMLButtonElement>("queue"), abortButton = $<HTMLButtonElement>("abort");
   const hint = $("composer-hint");
+  // A session that can only be read (its machine is out of reach, or the person may not drive it there) says why in place of the prompt.
+  const readOnlyNote = make("p", "readonly-note");
+  readOnlyNote.setAttribute("role", "status");
+  readOnlyNote.hidden = true;
+  $("background-status").after(readOnlyNote);
   // What the model suggests as the next prompt, as a chip over the box; for each session, the suggestion a prompt was sent after.
   const suggestionChip = $<HTMLButtonElement>("suggestion"), suggestionText = $("suggestion-text");
   const answeredSuggestions = new Map<string, string>();
@@ -766,6 +911,8 @@ export function startMobile(window: Window & typeof globalThis) {
     document, window, root: askBar, cancelSheet: $("ask-cancel-sheet"), api, host,
     current: () => detail.id,
     live: id => sessions.view(id)?.live,
+    reviews: id => abilityFor(id).offers("reviews"),
+    remote: id => !abilityFor(id).local,
     markdown: (element, text) => { const fill = () => markdown.fill(element, text, fill); fill(); },
     onChange: () => showComposer(),
     onSent: () => scheduleDetailRead(0),
@@ -773,8 +920,11 @@ export function startMobile(window: Window & typeof globalThis) {
   });
   // ---- What the session asks permission for: above the prompt, whose Stop stays, as on the desktop ----
   const approvalRoot = $("approval");
+  // A machine that does not offer the take-over of an automation's run leaves it out of the requests.
+  const approvalApi = { permissions: api.permissions, resolvePermission: api.resolvePermission,
+    get takeOver() { return !detail.id || abilityFor(detail.id).offers("takeover") ? api.takeOver : undefined; } };
   const approvalPanel = createApprovalPanel({
-    document, window, root: approvalRoot, api, host,
+    document, window, root: approvalRoot, api: approvalApi, host,
     current: () => detail.id,
     onChange: () => showComposer(),
     onSent: () => scheduleDetailRead(0),
@@ -782,10 +932,12 @@ export function startMobile(window: Window & typeof globalThis) {
   });
   const bottomBar = () => askBar.hidden ? composer : askBar;
   const backgroundRoot = $("background-status");
-  const background = createBackgroundJobs({ window, root: backgroundRoot, api, changed: padComposer });
+  // No machine but this computer stops a job for the phone, until one says it does.
+  const background = createBackgroundJobs({ window, root: backgroundRoot, api, changed: padComposer,
+    canStop: () => { const ability = abilityFor(detail.id); return ability.canDrive && ability.offers("jobs.stop"); } });
 
   function bindComposer(id: string | null) {
-    background.setSession(id);
+    background.setSession(id && abilityFor(id).offers("jobs") && !abilityFor(id).outdated ? id : null);
     if (composerFor) drafts.set(composerFor, promptBox.value);
     composerFor = id;
     promptBox.value = id ? drafts.get(id) : "";
@@ -808,6 +960,14 @@ export function startMobile(window: Window & typeof globalThis) {
     const view = id ? sessions.view(id) : null;
     const busy = isBusy(view?.live?.live);
     if (id && !busy && stopping.has(id)) endStopping(id);
+    const ability = abilityFor(id);
+    const reason = ability.outdated ?? ability.readOnly;
+    const readOnlyWas = !readOnlyNote.hidden;
+    composer.dataset.readonly = reason ? "1" : "";
+    readOnlyNote.hidden = !reason;
+    readOnlyNote.textContent = reason ?? "";
+    $("attach").hidden = !ability.offers("attachments");
+    if (readOnlyWas !== !!reason) padComposer();
     const typed = promptBox.value.trim().length > 0;
     const state = composerView(busy, typed, !!view?.live?.canSteer, queueFirst, !!id && files.get(id).length > 0);
     sendButton.hidden = state.primary === null;
@@ -967,7 +1127,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const current = choices?.current.provider ?? null, offered = choices && !choices.error ? choices.providers ?? [] : [];
     const providerList = current && !offered.some(p => p.id === current) ? [{ id: current, name: `${shown.providerName ?? current}${offered.length ? " · Unavailable" : ""}` }, ...offered] : offered;
     const switching = providerSwitch.get(id), busy = isBusy(sessions.view(id)?.live?.live);
-    $("session-provider-field").hidden = providerList.length < 2;
+    $("session-provider-field").hidden = providerList.length < 2 || !abilityFor(id).offers("provider");
     sessionProvider.replaceChildren(...providerList.map(p => option(p.id, p.name, p.id === current)));
     sessionProvider.disabled = busy || !!switching?.busy;
     $("session-provider-text").textContent = switching?.busy ? "Switching provider…" : switching?.error
@@ -1021,6 +1181,7 @@ export function startMobile(window: Window & typeof globalThis) {
 
   async function submitPrompt(mode: "send" | "steer" | "queue") {
     const id = composerFor, text = promptBox.value.trim();
+    if (id && !abilityFor(id).canDrive) return;
     // Files go with a Send or a Queue; a steer sends the text into the turn, and the files stay for the next one.
     const held = id && mode !== "steer" ? files.get(id) : [];
     if (!id || (!text && !held.length)) return;
@@ -1211,6 +1372,10 @@ export function startMobile(window: Window & typeof globalThis) {
   const modelSheet = createSheet(document, $("model-sheet"), () => { modelSheetFor = null; }), modelSearch = $<HTMLInputElement>("model-search");
   const newMoreSheet = createSheet(document, $("new-more-sheet")), promptSheet = createSheet(document, $("prompt-sheet"));
   let options: Options | null = null;
+  // The machine the new session runs on, and what each machine offered for it (its options; the projects are in `projectLists`).
+  let formMachine = localMachineId;
+  const optionsOf = new Map<string, Options>();
+  let formRead = 0;
   let choice: Choice = { tier: null, provider: "", model: "", effort: "" };
   // Images go only to a model that says it reads them. A model that does not say is treated as one that does not.
   // Null until the choices are known: a photo picked then is kept and checked when they arrive.
@@ -1222,12 +1387,16 @@ export function startMobile(window: Window & typeof globalThis) {
   // The permission mode of the new session; "" is the provider's.
   let newPermission = "";
   const allPreferences = (): Record<string, ProjectPreferences> => { try { return JSON.parse(store.get(preferencesKey) ?? "{}") ?? {}; } catch { return {}; } };
-  const projectPreferences = () => allPreferences()[newProject.value] ?? {};
+  // What is remembered of a project is its machine's: two machines can have a project of the same id.
+  const preferenceKey = () => isLocalMachine(formMachine) ? newProject.value : `${formMachine}\n${newProject.value}`;
+  const projectPreferences = () => allPreferences()[preferenceKey()] ?? {};
   function remember(preferences: ProjectPreferences) {
     const all = allPreferences();
-    all[newProject.value] = preferences;
+    all[preferenceKey()] = preferences;
     store.set(preferencesKey, JSON.stringify(all));
   }
+  const lastProjectKeyOf = () => isLocalMachine(formMachine) ? lastProjectKey : `${lastProjectKey}.${formMachine}`;
+  const lastMachineKey = "alta.newMachine";
   const option = (value: string, label: string, selected: boolean) => { const item = make("option", null, label); item.value = value; item.selected = selected; return item; };
   // The first choice of the projects: a chat, in no project. No project id has a control character.
   const chatChoice = "\u0000chat";
@@ -1294,7 +1463,7 @@ export function startMobile(window: Window & typeof globalThis) {
     $("new-prompt").setAttribute("aria-label", `Agent prompt: ${agent}`);
     const modes = offeredModes();
     // A chat has no folder to make a worktree of.
-    const worktree = newWorktree.checked && !isChat();
+    const worktree = newWorktree.checked && !isChat() && formAbility().offers("worktree-choice");
     tagsOf($("new-more-text"), [...(worktree ? [["branch", null] as const] : []), ...(newPermission ? [["shield", null] as const] : [])]);
     $("new-more").setAttribute("aria-label", ["More options", worktree && "new worktree",
       newPermission && `permissions ${modeName(newPermission, modes)}`].filter(Boolean).join(", "));
@@ -1386,7 +1555,7 @@ export function startMobile(window: Window & typeof globalThis) {
     $("new-mode-field").hidden = modes.length === 0;
     newMode.replaceChildren(option("", modeName(null), !newPermission), ...modes.map(m => option(m.id, modeName(m.id, modes), m.id === newPermission)));
     $("new-mode-text").textContent = modeDescription(newPermission || null, modes);
-    newWorktree.closest("label")!.hidden = isChat();
+    newWorktree.closest("label")!.hidden = isChat() || !formAbility().offers("worktree-choice");
   }
   $("new-more").addEventListener("click", () => {
     if (!options) return;
@@ -1415,7 +1584,7 @@ export function startMobile(window: Window & typeof globalThis) {
     // A remembered mode stays while its provider offers it.
     newPermission = remembered.permissionMode && remembered.providerKey === choice.provider && offeredModes().some(m => m.id === remembered.permissionMode) ? remembered.permissionMode : "";
     // The space the session goes to, beside its project.
-    const space = projects?.projects.find(p => p.id === newProject.value)?.space;
+    const space = formProjects()?.projects.find(p => p.id === newProject.value)?.space;
     $("new-space").replaceChildren(...(space ? [spaceMark(space)] : []));
     const agent = remembered.agentPromptId && options.prompts.some(p => p.id === remembered.agentPromptId) ? remembered.agentPromptId : options.defaults?.prompt || options.prompts[0]?.id || "";
     newAgent.value = agent;
@@ -1428,67 +1597,123 @@ export function startMobile(window: Window & typeof globalThis) {
       ? `The ${tierLabel(tier.tier)} tier is not ready: ${tier.error || "it has no model"}.` : "");
   }
 
-  // The projects of the form are "None (Chat)", first, then those the list keeps to, all of them without a filter. The one
-  // chosen is `preferred` (the project of the viewed session, or the one of the form), else the last one, while the list
-  // keeps to them; else the first one the filter keeps, or without a filter the default project.
+  // The projects of the form are those of the machine it runs on: "None (Chat)", first, then those the list keeps to, all of them without a
+  // filter (the filter is of the machine the list shows). The one chosen is `preferred` (the project of the viewed session, or the one of
+  // the form), else the last one, while the list keeps to them; else the first one the filter keeps, or without a filter the default project.
+  const formProjects = () => projectLists.get(formMachine) ?? null;
   function updateNewProjects(preferred: string | null) {
+    const projects = formProjects();
     if (!projects) return;
-    const filter = sessions.filter;
+    const filter = formMachine === listMachine() ? sessions.filter : [];
     const eligible = projects.projects.filter(p => !filter.length || filter.includes(p.id));
     const available = (id: string | null) => id && (id === chatChoice || eligible.some(p => p.id === id)) ? id : null;
-    const selected = available(preferred) ?? available(store.get(lastProjectKey))
+    const selected = available(preferred) ?? available(store.get(lastProjectKeyOf()))
       ?? (filter.length ? eligible[0]?.id : available(projects.default) ?? eligible[0]?.id);
     newProject.replaceChildren(option(chatChoice, "None (Chat)", selected === chatChoice), ...eligible.map(p => option(p.id, p.name, p.id === selected)));
     initForm();
   }
 
-  async function openCreate(activeProject: string | null = null) {
+  // "Run on": the machine the new session starts on, when the computer reaches several. A machine that is out of reach, or that does not
+  // let the person start sessions, is listed and cannot be chosen; its projects, providers and models are its own.
+  const newMachineField = make("div", "field"), newMachine = make("select");
+  const newMachineLabel = make("label", null, "Run on");
+  newMachineField.id = "new-machine-field";
+  newMachineField.hidden = true;
+  newMachine.id = "new-machine";
+  newMachineLabel.htmlFor = "new-machine";
+  newMachineField.append(newMachineLabel, newMachine);
+  $("new-form").prepend(newMachineField);
+  const startable = (machineId: string) => isLocalMachine(machineId) || machines.some(m => m.id === machineId && m.state === "online" && m.can.start);
+  const formAbility = () => abilityOf(sessionKey(formMachine, "-"), null, machines, Date.now());
+  function renderMachineField() {
+    newMachineField.hidden = machines.length < 2;
+    newMachine.replaceChildren(...machines.map(m => {
+      const item = option(m.id, `${m.name}${m.this ? " (this computer)" : ""}${m.state !== "online" ? ` · ${m.state === "unauthorized" ? "not allowed" : m.state}` : !m.can.start && !m.this ? " · cannot start sessions" : ""}`,
+        (isLocalMachine(m.id) ? localMachineId : m.id) === formMachine);
+      item.disabled = !startable(m.id);
+      return item;
+    }));
+    const ability = formAbility();
+    $("new-attach").hidden = !ability.offers("attachments");
+  }
+  function chooseFormMachine(...candidates: readonly (string | null | undefined)[]) {
+    const wanted = candidates.map(candidate => candidate && isLocalMachine(candidate) ? localMachineId : candidate).find(candidate => candidate && startable(candidate));
+    formMachine = wanted ?? localMachineId;
+  }
+
+  async function openCreate(activeProject: string | null = null, activeMachine: string | null = null) {
+    chooseFormMachine(activeMachine, sessions.scope === allMachines ? null : sessions.scope, store.get(lastMachineKey));
+    renderMachineField();
+    await loadForm(activeMachine === null || (isLocalMachine(activeMachine) ? localMachineId : activeMachine) === formMachine ? activeProject : null);
+  }
+  async function loadForm(activeProject: string | null) {
+    const machine = formMachine, token = ++formRead;
+    options = optionsOf.get(machine) ?? null;
     newNote.textContent = options ? "" : "Loading…";
     try {
-      const [, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
+      const [, read] = await Promise.all([readProjects(machine), options ? Promise.resolve(options) : api.options(machine)]);
+      if (token !== formRead) return;
       options = {
         models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null,
         permissionModes: read.permissionModes ?? {}, modelsOrders: read.modelsOrders ?? {}, error: read.error ?? null,
       };
+      optionsOf.set(machine, options);
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
       updateNewProjects(activeProject);
       files.reconcile(newSessionFiles);
       padComposer();
     } catch (error) {
-      if (!(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices: ${failureText(error, host)}`;
+      if (token === formRead && !(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices of ${formAbility().name ?? "this computer"}: ${failureText(error, host)}`;
     }
   }
-  newProject.addEventListener("change", () => { store.set(lastProjectKey, newProject.value); initForm(); });
+  newMachine.addEventListener("change", () => {
+    if (!startable(newMachine.value) || newMachine.value === formMachine) { renderMachineField(); return; }
+    formMachine = isLocalMachine(newMachine.value) ? localMachineId : newMachine.value;
+    store.set(lastMachineKey, formMachine);
+    // What the other machine offers is read for it: nothing of the last one stays in the form.
+    options = null;
+    newProject.replaceChildren();
+    newWorktree.checked = false;
+    modelSheet.close();
+    newMoreSheet.close();
+    renderMachineField();
+    void loadForm(null);
+  });
+  newProject.addEventListener("change", () => { store.set(lastProjectKeyOf(), newProject.value); initForm(); });
   newText.addEventListener("input", () => drafts.set(newSessionDraft, newText.value));
   $("new-form").addEventListener("submit", async event => {
     event.preventDefault();
     const text = newText.value.trim();
     const held = files.get(newSessionFiles);
     if ((!text && !held.length) || !newProject.value) return;
+    const ability = formAbility();
+    if (!ability.canStart) { newNote.textContent = `${ability.name ?? "This computer"} does not let you start sessions from the phone.`; return; }
+    if (held.length && !ability.offers("attachments")) { newNote.textContent = `${ability.name} does not take files from the phone: remove them to start the session there.`; return; }
     if (hasImages(held) && newSessionReadsImages(options, choice) === false) { files.note(newSessionFiles, "This model does not read images."); return; }
     const start = $<HTMLButtonElement>("new-start");
     start.disabled = true;
     newNote.textContent = "Starting…";
     try {
       const created = await api.create({
-        ...(isChat() ? { chat: true } : { project: newProject.value, worktree: newWorktree.checked }), text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
+        ...(isChat() ? { chat: true } : { project: newProject.value, ...(ability.offers("worktree-choice") ? { worktree: newWorktree.checked } : {}) }), text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
         ...(newPermission ? { permissionMode: newPermission } : {}),
         ...(held.length ? { attachments: held } : {}),
-      });
-      store.set(lastProjectKey, newProject.value);
+      }, formMachine);
+      const key = sessionKey(created.machineId ?? formMachine, created.id);
+      store.set(lastProjectKeyOf(), newProject.value);
       newText.value = "";
       files.take(newSessionFiles);
       drafts.clear(newSessionDraft);
       newNote.textContent = "";
       // A prompt that did not go is shown on the page of its session, back in its composer.
       if (created.sendError) {
-        drafts.set(created.id, text);
-        files.giveBack(created.id, held);
-        pendingNotes.set(created.id, `Created, but the prompt was not sent: ${created.sendError}`);
+        drafts.set(key, text);
+        files.giveBack(key, held);
+        pendingNotes.set(key, `Created, but the prompt was not sent: ${created.sendError}`);
       }
       scheduleListRead(0);
-      window.location.hash = `#/session/${encodeURIComponent(created.id)}`;
+      window.location.hash = sessionHash(key);
     } catch (error) {
       if (!(error instanceof SignedOutError)) newNote.textContent = `Not started: ${failureText(error, host)}`;
     } finally { start.disabled = false; padComposer(); }
@@ -1498,10 +1723,11 @@ export function startMobile(window: Window & typeof globalThis) {
   function startNew() {
     if (window.location.hash !== "#/new") { window.location.hash = "#/new"; return; }
     const all = allPreferences();
-    delete all[newProject.value];
+    delete all[preferenceKey()];
     store.set(preferencesKey, JSON.stringify(all));
     options = null;
-    projects = null;
+    projectLists.clear();
+    optionsOf.clear();
     newText.value = "";
     drafts.clear(newSessionDraft);
     newWorktree.checked = false;
@@ -1526,7 +1752,7 @@ export function startMobile(window: Window & typeof globalThis) {
   }
   list.addEventListener("pointerdown", event => {
     const element = (event.target as Element).closest<HTMLElement>(".card");
-    if (!element || event.button || swipe || (event.target as Element).closest(".card-archive")) return;
+    if (!element || event.button || swipe || (event.target as Element).closest(".card-archive") || element.closest<HTMLElement>(".row")?.dataset.archivable === "false") return;
     swipe = { row: element.parentElement!, card: element, x: event.clientX, y: event.clientY, dx: 0, dragging: false, pointer: event.pointerId };
   });
   list.addEventListener("pointermove", event => {
@@ -1587,6 +1813,8 @@ export function startMobile(window: Window & typeof globalThis) {
   function springBack(id: string) { const item = rowOf(id); if (item) place(item, 0, "spring"); }
   async function archive(id: string) {
     if (checkingArchive || archiveSheet.shown) { springBack(id); return; }
+    const ability = abilityFor(id);
+    if (!ability.offers("archive") || !ability.canDrive) { springBack(id); showToast(`${ability.name ?? "This computer"} does not archive sessions from the phone.`); return; }
     checkingArchive = true;
     try {
       const result = await api.archiveChildren(id);
@@ -1635,15 +1863,15 @@ export function startMobile(window: Window & typeof globalThis) {
     const hash = window.location.hash;
     // The link of the QR code opened in a page that already runs: sign in with it, then show the list.
     if (hash.startsWith("#k=")) { void signInFromAddress().then(ok => { if (ok) route(); }); return; }
-    const found = /^#\/session\/(.+)$/u.exec(hash);
-    let id: string | null = null;
-    if (found) { try { id = decodeURIComponent(found[1]); } catch { id = null; } }
+    // A session of this computer opens by its id, one of another machine by its machine and its id; the id of this computer in the fleet is this computer.
+    const opened = parseSessionHash(hash);
+    let id: string | null = opened === null ? null : localKey(opened, machines.find(m => m.this)?.deviceId);
     const creating = hash === "#/new" && !signedOut;
     if (signedOut) id = null;
     const returning = !id && !creating && $("home").hidden;
     // What shows changed under the menu: it closes, and the bar takes the commands of this page.
     barMenu.dismiss();
-    showBar(id ? "session" : creating ? "new" : "home");
+    showBar(id ? "session" : creating ? "new" : "home", id);
     $("home").hidden = !!id || creating;
     $("detail").hidden = !id;
     $("create").hidden = !creating;
@@ -1657,7 +1885,7 @@ export function startMobile(window: Window & typeof globalThis) {
     else if (creating) $("create-bar").append(foot);
     else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
     // The viewed session gives its project to the form, or the chats when it is one.
-    if (creating) { const viewed = detail.id ? sessions.view(detail.id) : undefined; void openCreate(viewed ? viewed.projectId ?? chatChoice : null); }
+    if (creating) { const viewed = detail.id ? sessions.view(detail.id) : undefined; void openCreate(viewed ? viewed.projectId ?? chatChoice : null, detail.id ? machineOf(detail.id) : null); }
     if (id && id !== detail.id) openDetail(id);
     if (!id && detail.id) closeDetail();
     // Back on the list, the cards are in their latest order at once.
@@ -1668,20 +1896,25 @@ export function startMobile(window: Window & typeof globalThis) {
   back.addEventListener("click", () => { window.location.hash = "#/"; });
   // The top bar of each page: on the list, the logo and its commands; on a session, Back, the state of the link, its title,
   // Find and "⋯", whose menu holds the other commands.
-  function showBar(page: "home" | "session" | "new") {
+  function showBar(page: "home" | "session" | "new", id: string | null = null) {
     const session = page === "session";
+    barPage = page;
     $("bar").dataset.page = page;
     heading.hidden = !session;
     $("detail-find").hidden = !session;
-    filterButton.hidden = plus.hidden = $("refresh").hidden = session;
+    plus.hidden = $("refresh").hidden = session;
+    showFilterButton();
     for (const item of Array.from(document.querySelectorAll<HTMLElement>("#bar-menu [data-in-session]"))) item.hidden = !session;
+    // A machine that does not archive from the phone leaves the command out.
+    if (session && id && !abilityFor(id).offers("archive")) $("menu-archive").hidden = true;
     if (!session) showWholeTitle(false);
   }
   const plus = $("new");
   window.addEventListener("hashchange", route);
 
   // ---- Live updates ----
-  function onSession(update: Live) {
+  function onSession(received: Live) {
+    const update = qualifyLive(received, machines.find(m => m.this)?.deviceId);
     link.at = new Date();
     if (link.state === "live") showLink();
     // A session that suggests nothing any more starts again: the same words, suggested after another turn, are offered.
@@ -1693,12 +1926,21 @@ export function startMobile(window: Window & typeof globalThis) {
     approvalPanel.onLive(update);
     if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
   }
-  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); void approvalPanel.read(detail.id); void background.refresh(); } }
+  function readAgain() { void readList(); if (detail.id) { void readDetail(); readAsks(detail.id); void background.refresh(); } }
+  // The one stream of the page: when a session of another machine is open it asks for that machine's display of it too, in the same stream.
+  let streamUrl = eventsUrl(null);
+  function syncStream() {
+    const next = eventsUrl(detail.id);
+    if (next === streamUrl) return;
+    streamUrl = next;
+    stream.reopen();
+  }
   const stream = createLiveStream({
-    create: () => new window.EventSource("/api/events"),
+    create: () => new window.EventSource(streamUrl),
     onSession,
     onState: state => { if (signedOut) return; link.state = state; if (state === "live") link.at = new Date(); showLink(); },
     onReconnected: readAgain,
+    onMachines: () => { void refreshMachines().then(readAgain); },
     check: async () => {
       try { await api.sessions(0, 1, []); return "ok"; }
       catch (error) { return error instanceof SignedOutError ? "signed-out" : error instanceof ApiError ? "ok" : "unreachable"; }
@@ -1724,7 +1966,7 @@ export function startMobile(window: Window & typeof globalThis) {
     try {
       if (signedOut) return;
       if (!$("home").hidden) sessionList.settle();
-      await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null, detail.id ? approvalPanel.read(detail.id) : null, background.refresh()]);
+      await Promise.all([readList(), refreshDetail(), detail.id ? readAsks(detail.id) : null, background.refresh()]);
     } finally { for (const button of turning) button.classList.remove("spin"); }
   }
   $<HTMLButtonElement>("refresh").addEventListener("click", () => void refreshAll());
@@ -1753,15 +1995,19 @@ export function startMobile(window: Window & typeof globalThis) {
 
   async function start() {
     const worker = setUpInstall(window, store);
-    sessions.setFilter(keptProjects());
+    sessions.setFilter(keptProjects(null), null);
     showFilter();
     if (!await signInFromAddress()) return;
+    // The machines first: the list, the filter and the routes are those of the machines the computer reaches.
+    await readMachines(false);
+    if (signedOut) return;
     route();
     await readList();
     if (signedOut) return;
     setUpNotifications(window, store, api, worker, text => showToast(text));
     stream.start();
-    readProjects().then(showFilter, () => { /* the filter names the ids until the projects are read */ });
+    const machine = listMachine();
+    if (machine) readProjects(machine).then(showFilter, () => { /* the filter names the ids until the projects are read */ });
   }
   void start();
 }

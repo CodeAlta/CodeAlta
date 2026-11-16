@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { useAlta } from "../../pluginScript/PluginScript";
 import { useVisible } from "../../pluginScript/codealta";
 import { useShellLanguage } from "../../shellLanguage";
 import { createMobileApi } from "./api";
-import { MobileCanvas, type MobileCanvasActions } from "./MobileCanvas";
-import type { MobileStatus } from "./status";
+import { MobileCanvas } from "./MobileCanvas";
+import { useMobileCanvas } from "./useMobileCanvas";
 
 // The module of the Mobile tab, the one the built-in Mobile plugin names with `PluginScript.App("mobile")`: it follows the status of the plugin over
 // `alta.rpc` while the tab is shown, and draws it.
@@ -15,35 +15,10 @@ export default function Canvas() {
   const visible = useVisible();
   const { t } = useShellLanguage();
   const api = useMemo(() => createMobileApi(alta.rpc), [alta]);
-  const [status, setStatus] = useState<MobileStatus | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const [watching, setWatching] = useState(0);
-  // A hidden tab follows nothing; shown again, it listens again and reads the status.
-  useEffect(() => {
-    if (!visible) return;
-    return api.watch(event => {
-      if (event.kind === "status") { setStatus(event.status); setFailure(null); } else setFailure(event.message);
-    });
-  }, [api, visible, watching]);
-  // What the actions reach is read when they run.
-  const latest = useRef({ alta, t });
-  latest.current = { alta, t };
-  const actions = useMemo<MobileCanvasActions>(() => {
-    // A call that answers with the status: the status shown, or why it failed.
-    const run = async (call: () => Promise<MobileStatus>) => {
-      try { setStatus(await call()); setFailure(null); }
-      catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
-    };
-    return {
-      retry: () => run(api.retry),
-      copy: async text => {
-        try { await navigator.clipboard.writeText(text); return true; }
-        catch { latest.current.alta.host.notify(latest.current.t("The address could not be copied."), { tone: "warning" }); return false; }
-      },
-      openLink: url => latest.current.alta.host.openLink(url),
-      reload: () => setWatching(value => value + 1),
-      act: action => run(() => api.act(action)),
-    };
-  }, [api]);
+  const host = useMemo(() => ({
+    openLink: (url: string) => alta.host.openLink(url),
+    copyFailed: () => alta.host.notify(t("The address could not be copied."), { tone: "warning" }),
+  }), [alta, t]);
+  const { status, failure, actions } = useMobileCanvas(api, host, visible);
   return <MobileCanvas status={status} failure={failure} actions={actions} />;
 }

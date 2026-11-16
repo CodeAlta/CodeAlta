@@ -1,14 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { WaitingRun } from "./contract";
+import type { Machine, WaitingRun } from "./contract";
 import type { ApprovalAutomation, ApprovalRequest, ApprovalResult, Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, QueuedPrompt, Session, SessionChoices, Space, TimelineEvent, ToolCallDetail, UnqueueResult } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /** A request the fixture received. */
-export type FixtureRequest = Readonly<{ method: string; path: string; query: string; body: unknown }>;
+export type FixtureRequest = Readonly<{ method: string; path: string; query: string; body: unknown; /** The id a command carries (`X-Alta-Request-Id`). */ requestId?: string }>;
 
 /**
  * A fake of the Mobile plugin's server for the browser test of the phone page: the files of the page and the HTTP API
@@ -32,6 +32,18 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     /** The spaces the phone sees (empty: every space). */
     spaces: [...fixtureSpaces] as Space[],
     created: 0,
+    /**
+     * The machines of `GET /api/machines`; null: an older CodeAlta, which answers 404 and lists this computer only. A session of another machine
+     * has its `machineId`; what the maps of this state hold for it is under `<machine>/<id>`, and for this computer's under its id.
+     */
+    machines: null as Machine[] | null,
+    /** The projects and the options of the machines other than this computer, by machine id; absent: those of this computer. */
+    machineProjects: new Map<string, unknown>(),
+    machineOptions: new Map<string, Options>(),
+    /** The sessions this machine says it does not have, by `<machine>/<id>` (or the id for this computer): where they are now. */
+    moved: new Map<string, Readonly<{ machineId: string; sessionId: string }>>(),
+    /** What the next `POST /api/machines/<id>/sessions` answers besides its id. */
+    machineCreateAnswer: {} as Record<string, unknown>,
     /** What the next `POST /api/sessions` answers besides its id. */
     createAnswer: {} as Record<string, unknown>,
     /** The next prompt fails with this text, once. */
@@ -96,9 +108,12 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     const text = Buffer.concat(chunks).toString("utf8");
     return text ? JSON.parse(text) as unknown : undefined;
   };
-  const sessionOf = (id: string) => state.sessions.find(s => s.id === id);
+  // A session in the maps of the state: its id, or `<machine>/<id>` for another machine's, so that two machines may share an id.
+  const keyOf = (machine: string | null | undefined, id: string) => !machine || machine === "local" ? id : `${machine}/${id}`;
+  const keyOfSession = (s: Session) => keyOf(s.machineId, s.id);
+  const sessionOf = (key: string) => state.sessions.find(s => keyOfSession(s) === key);
   // The choices of a session: those the test set, else the Codex ones, on what the session says it runs.
-  const choicesOf = (session: Session): SessionChoices => state.choices.get(session.id) ?? {
+  const choicesOf = (session: Session): SessionChoices => state.choices.get(keyOfSession(session)) ?? {
     current: {
       provider: session.model?.provider ?? "codex", providerName: session.model?.providerName ?? "Codex", model: session.model?.id ?? null, modelName: session.model?.name ?? null,
       reasoning: session.model?.reasoning ?? null, agent: session.agent?.id ?? "default", agentName: session.agent?.name ?? "Default", permissionMode: null,
@@ -108,9 +123,14 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
 
   async function handle(request: IncomingMessage, response: ServerResponse) {
     const url = new URL(request.url ?? "/", "http://fixture");
-    const path = url.pathname;
     const body = request.method === "POST" ? await readBody(request) : undefined;
-    requests.push({ method: request.method ?? "GET", path, query: url.search, body });
+    const requestId = request.headers["x-alta-request-id"];
+    requests.push({ method: request.method ?? "GET", path: url.pathname, query: url.search, body, ...(typeof requestId === "string" ? { requestId } : {}) });
+    // The routes of another machine are those of this computer, for the sessions of that machine.
+    const remote = /^\/api\/machines\/([^/]+)\/(.+)$/u.exec(url.pathname);
+    const machine = remote ? decodeURIComponent(remote[1]) : "local";
+    const path = remote ? `/api/${remote[2]}` : url.pathname;
+    const sid = (id: string) => keyOf(machine, id);
     if (!path.startsWith("/api/")) {
       const file = files[path === "/" ? "/index.html" : path];
       if (!file) return send(response, 404);
@@ -135,19 +155,33 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       request.on("close", () => streams.delete(response));
       return;
     }
+    if (path === "/api/machines") {
+      if (!state.machines) return send(response, 404, { error: "No such route." });
+      return send(response, 200, { machines: state.machines, error: null });
+    }
+    const addressed = /^\/api\/sessions\/([^/]+)/u.exec(path);
+    if (addressed && state.moved.has(sid(decodeURIComponent(addressed[1])))) {
+      const to = state.moved.get(sid(decodeURIComponent(addressed[1])))!;
+      return send(response, 409, { error: "This session is not on this machine.", code: "not_on_this_machine", ...to });
+    }
     if (path === "/api/sessions" && request.method === "GET") {
+      const listed = url.searchParams.get("machine");
       const offset = Number(url.searchParams.get("offset") ?? 0), limit = Math.min(50, Number(url.searchParams.get("limit") ?? 6));
       const projects = url.searchParams.getAll("project");
-      const all = state.sessions.filter(s => projects.length === 0 || projects.includes(s.projectId ?? "")).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
+      const all = state.sessions.filter(s => (listed === "all" || (s.machineId ?? "local") === (listed ?? "local")) && (projects.length === 0 || projects.includes(s.projectId ?? ""))).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
       // As the plugin: the parents of the sub-agents of the page that no page gave yet come with it, and a sub-agent names its parent.
-      const named = (s: Session): Session => s.parentId ? { ...s, parentTitle: sessionOf(s.parentId)?.title ?? s.parentTitle ?? null } : s;
+      const named = (s: Session): Session => {
+        const parent = s.parentId ? sessionOf(keyOf(s.parentMachineId ?? s.machineId, s.parentId)) : null;
+        // With machines the list says where this computer's sessions are as well.
+        return { ...(state.machines && !s.machineId ? { ...s, machineId: "local" } : s), ...(s.parentId ? { parentTitle: parent?.title ?? s.parentTitle ?? null } : {}) };
+      };
       const page = all.slice(offset, offset + limit).map(named);
-      const held = new Set(all.slice(0, offset + limit).map(s => s.id)), parents: Session[] = [];
+      const held = new Set(all.slice(0, offset + limit).map(keyOfSession)), parents: Session[] = [];
       for (let children = page; children.length;) {
         const next: Session[] = [];
-        for (const parent of children.map(s => all.find(p => p.id === s.parentId))) {
-          if (!parent || held.has(parent.id)) continue;
-          held.add(parent.id);
+        for (const parent of children.map(s => all.find(p => s.parentId && keyOfSession(p) === keyOf(s.parentMachineId ?? s.machineId, s.parentId)))) {
+          if (!parent || held.has(keyOfSession(parent))) continue;
+          held.add(keyOfSession(parent));
           next.push(parent);
           parents.push(named(parent));
         }
@@ -158,18 +192,18 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     if (path === "/api/sessions" && request.method === "POST") {
       const id = `new${++state.created}`;
       const { project, text } = body as { project: string; text: string };
-      state.sessions.push(session(id, `New: ${text}`, project, 0));
-      return send(response, 200, { id, ...state.createAnswer });
+      state.sessions.push(session(id, `New: ${text}`, project, 0, {}, machine === "local" ? {} : { machineId: machine, machine: state.machines?.find(m => m.id === machine)?.name ?? machine }));
+      return send(response, 200, { id, ...(machine === "local" ? state.createAnswer : state.machineCreateAnswer) });
     }
     const image = /^\/api\/sessions\/([^/]+)\/(images\/[^/]+|linked-images\/\d+\/[^/]+)$/.exec(path);
     if (image) {
-      const key = `${decodeURIComponent(image[1])}/${image[2].startsWith("images/") ? decodeURIComponent(image[2].slice("images/".length)) : `linked/${image[2].slice("linked-images/".length)}`}`;
+      const key = `${sid(decodeURIComponent(image[1]))}/${image[2].startsWith("images/") ? decodeURIComponent(image[2].slice("images/".length)) : `linked/${image[2].slice("linked-images/".length)}`}`;
       const found = state.images.get(key);
       if (!found) return send(response, 404);
       response.writeHead(200, { "Content-Type": found.type, "Cache-Control": "private, max-age=86400, immutable", "Content-Security-Policy": "default-src 'none'; sandbox" });
       return response.end(found.body);
     }
-    if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
+    if (path === "/api/projects") return send(response, 200, machine !== "local" && state.machineProjects.has(machine) ? state.machineProjects.get(machine) : { projects: state.projects, default: "p1", error: null });
     if (path === "/api/automations/waiting") return send(response, 200, { runs: state.waiting, error: null });
     if (path === "/api/automations/takeover") {
       const result = state.takeOverResult ?? { ok: true, error: null };
@@ -177,10 +211,10 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       if (result.ok) state.waiting = state.waiting.filter(run => run.runId !== (body as { runId: string }).runId);
       return send(response, 200, result);
     }
-    if (path === "/api/options") return send(response, 200, state.options);
+    if (path === "/api/options") return send(response, 200, machine !== "local" && state.machineOptions.has(machine) ? state.machineOptions.get(machine) : state.options);
     const queuePath = /^\/api\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/remove)?$/.exec(path);
     if (queuePath) {
-      const id = decodeURIComponent(queuePath[1]);
+      const id = sid(decodeURIComponent(queuePath[1]));
       if (!sessionOf(id)) return send(response, 404);
       if (!queuePath[2]) return send(response, 200, { items: state.queues.get(id) ?? [], error: null });
       const status = state.unqueueStatus;
@@ -194,7 +228,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     if (steerPath) return send(response, 200, { withdrawn: state.steers.delete(decodeURIComponent(steerPath[2])), error: null });
     const filePath = /^\/api\/sessions\/([^/]+)\/file$/.exec(path);
     if (filePath) {
-      const link = url.searchParams.get("link") ?? "", whole = state.linkedFiles.get(`${decodeURIComponent(filePath[1])}/${url.searchParams.get("seq")}/${link}`);
+      const link = url.searchParams.get("link") ?? "", whole = state.linkedFiles.get(`${sid(decodeURIComponent(filePath[1]))}/${url.searchParams.get("seq")}/${link}`);
       if (whole === undefined) return send(response, 400, { error: "This file is not there." });
       const page = 16_000, offset = url.searchParams.get("offset"), before = url.searchParams.get("before");
       const place = offset === null && before === null ? /#L(\d+)/u.exec(link) : null, lines = whole.split("\n");
@@ -206,7 +240,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     const outputPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)\/output$/.exec(path);
     if (outputPath) {
-      const key = `${decodeURIComponent(outputPath[1])}/${decodeURIComponent(outputPath[2])}`, whole = state.toolOutputs.get(key);
+      const key = `${sid(decodeURIComponent(outputPath[1]))}/${decodeURIComponent(outputPath[2])}`, whole = state.toolOutputs.get(key);
       if (whole === undefined) return send(response, 200, { error: "The output was not read." });
       const page = 16_000, offset = url.searchParams.get("offset"), before = url.searchParams.get("before");
       const start = before !== null ? Math.max(0, Number(before) - page) : offset !== null ? Number(offset) : state.tools.get(key)?.command ? Math.max(0, whole.length - page) : 0;
@@ -215,12 +249,12 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     const toolPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)$/.exec(path);
     if (toolPath) {
-      const call = state.tools.get(`${decodeURIComponent(toolPath[1])}/${decodeURIComponent(toolPath[2])}`);
+      const call = state.tools.get(`${sid(decodeURIComponent(toolPath[1]))}/${decodeURIComponent(toolPath[2])}`);
       return send(response, 200, call ?? { error: "The tool call was not read." });
     }
     const jobPath = /^\/api\/sessions\/([^/]+)\/jobs(?:\/([^/]+)(\/stop)?)?$/.exec(path);
     if (jobPath) {
-      const id = decodeURIComponent(jobPath[1]), jobId = jobPath[2] && decodeURIComponent(jobPath[2]);
+      const id = sid(decodeURIComponent(jobPath[1])), jobId = jobPath[2] && decodeURIComponent(jobPath[2]);
       if (!sessionOf(id)) return send(response, 404);
       const jobs = state.jobs.get(id) ?? [];
       if (!jobId) return send(response, 200, { jobs, error: null });
@@ -234,7 +268,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive-children|archive|restore|choices|provider|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve|takeover))?$/.exec(path);
     if (found) {
-      const id = decodeURIComponent(found[1]), action = found[2];
+      const id = sid(decodeURIComponent(found[1])), action = found[2];
       // An archived session is out of the list, and can still be restored.
       if (action === "restore") {
         const back = archived.get(id);
@@ -245,7 +279,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       }
       const target = sessionOf(id);
       if (action === "archive-children" && target) {
-        return send(response, 200, { hasChildren: state.sessions.some(s => s.parentId === id) });
+        return send(response, 200, { hasChildren: state.sessions.some(s => s.parentId && keyOf(s.parentMachineId ?? s.machineId, s.parentId) === id) });
       }
       if (!target) return send(response, 404, { error: "No such session." });
       if (!action) return send(response, 200, target);
@@ -345,10 +379,10 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         const changed = [id];
         if (url.searchParams.get("withChildren") === "true") {
           for (let i = 0; i < changed.length; i++)
-            for (const child of state.sessions) if (child.parentId === changed[i] && !changed.includes(child.id)) changed.push(child.id);
+            for (const child of state.sessions) if (child.parentId && keyOf(child.parentMachineId ?? child.machineId, child.parentId) === changed[i] && !changed.includes(keyOfSession(child))) changed.push(keyOfSession(child));
         }
-        for (const session of state.sessions) if (changed.includes(session.id)) archived.set(session.id, session);
-        state.sessions = state.sessions.filter(s => !changed.includes(s.id));
+        for (const session of state.sessions) if (changed.includes(keyOfSession(session))) archived.set(keyOfSession(session), session);
+        state.sessions = state.sessions.filter(s => !changed.includes(keyOfSession(s)));
         return send(response, 200, { ok: true, changed });
       }
       return send(response, 200, { ok: true });
@@ -369,7 +403,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     requests,
     /** Tells the open event streams of a live update (and keeps it on the session). */
     push(live: Live) {
-      const target = sessionOf(live.id);
+      const target = sessionOf(keyOf(live.machineId, live.id));
       if (target) Object.assign(target, { live, lastActivity: live.at ?? target.lastActivity });
       for (const stream of streams) stream.write(`event: session\ndata: ${JSON.stringify(live)}\n\n`);
     },
@@ -387,9 +421,34 @@ export function session(id: string, title: string, projectId: string, minutesAgo
     id, title, projectId, project: projectId === "p1" ? "parser" : "site", space: projectId === "p1" ? fixtureSpaces[0] : fixtureSpaces[1],
     model: { provider: "codex", providerName: "Codex", id: "gpt-6.1-sol", name: "GPT-6.1 Sol", reasoning: "low" }, agent: { id: "default", name: "Default" },
     worktree: null, parentId: null, summary: `Summary of ${title}`, lastActivity: at,
-    live: { id, projectId, live: "idle", kind: "assistant", line: `Last answer of ${title}`, at, activity: null, canSteer: false, ...live },
+    live: { id, projectId, live: "idle", kind: "assistant", line: `Last answer of ${title}`, at, activity: null, canSteer: false, ...(extra.machineId ? { machineId: extra.machineId } : {}), ...live },
     ...extra,
   };
+}
+
+/** What a machine other than this computer offers the phone: no files of the phone, no files of its disk, no review, no take-over, no worktree choice. */
+export const fixtureRemoteFeatures: readonly string[] = ["sessions.read", "provider", "archive", "jobs", "jobs.stop", "questions", "permissions"];
+
+/** What this computer offers. */
+export const fixtureLocalFeatures: readonly string[] = [...fixtureRemoteFeatures, "attachments", "linked-files", "reviews", "takeover", "worktree-choice"];
+
+/**
+ * The machines of a phone that reaches two others: this computer, `m2` (online, direct) and `m3` (offline since a while). `deviceId` of
+ * this computer is the id other machines name it by.
+ */
+export function fixtureMachines(): Machine[] {
+  const can = { view: true, drive: true, start: true };
+  return [
+    { id: "local", deviceId: "device-local", name: "FIXTURE-PC", this: true, state: "online", path: null, lastSeen: null, can, features: fixtureLocalFeatures, waiting: 0 },
+    { id: "m2", name: "Mac mini", this: false, state: "online", path: "direct", lastSeen: new Date().toISOString(), can, features: fixtureRemoteFeatures, waiting: 1 },
+    { id: "m3", name: "Build box", this: false, state: "offline", path: null, lastSeen: new Date(Date.now() - 25 * 60_000).toISOString(), can, features: fixtureRemoteFeatures, waiting: 0 },
+  ];
+}
+
+/** A session of another machine of the fixture: its machine, its name, and the facts of its machine. */
+export function remoteSession(machine: string, id: string, title: string, projectId: string, minutesAgo: number, live: Partial<Live> = {}, extra: Partial<Session> = {}): Session {
+  const name = machine === "m2" ? "Mac mini" : machine === "m3" ? "Build box" : machine;
+  return session(id, title, projectId, minutesAgo, { machineId: machine, ...live }, { machineId: machine, machine: name, ...extra });
 }
 
 /** What the composer of a Codex session offers in the fixture. */

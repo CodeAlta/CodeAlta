@@ -100,6 +100,7 @@ internal sealed class MobileAsks(IPluginAskService asks, MobileSessions sessions
         return new JsonObject
         {
             ["id"] = ask.AskId, ["revision"] = ask.Revision, ["state"] = ask.State, ["immediate"] = ask.Immediate, ["questions"] = questions,
+            ["kind"] = ask.Review is null ? "questions" : ask.Review.Kind == "elsewhere" ? "elsewhere" : "review",
             ["review"] = ask.Review is { } review
                 ? new JsonObject { ["kind"] = review.Kind, ["path"] = review.Path, ["title"] = review.Title, ["message"] = review.Message, ["comments"] = review.Comments }
                 : null,

@@ -27,7 +27,7 @@ public sealed class FleetMachineAlta : IPluginAltaService
     /// <summary>The code of the error of a machine that is not reached.</summary>
     public const string Unreachable = "machine.unreachable";
 
-    private readonly Func<CancellationToken, ValueTask<FleetNodeClient?>> _connect;
+    private readonly Func<CancellationToken, ValueTask<IFleetSessionAccess?>> _connect;
     private readonly string _name;
 
     /// <summary>Creates the commands of a machine.</summary>
@@ -35,6 +35,16 @@ public sealed class FleetMachineAlta : IPluginAltaService
     /// <param name="connect">Gives the open channel to it, or null while it is not reached.</param>
     /// <exception cref="ArgumentNullException">A parameter is null.</exception>
     public FleetMachineAlta(string name, Func<CancellationToken, ValueTask<FleetNodeClient?>> connect)
+        : this(name, async token => (IFleetSessionAccess?)await connect(token).ConfigureAwait(false))
+    {
+        ArgumentNullException.ThrowIfNull(connect);
+    }
+
+    /// <summary>Creates the commands of a host-local personal page, using the same typed admission as the node API.</summary>
+    /// <param name="name">The machine's name.</param>
+    /// <param name="connect">Its admitted session access.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public FleetMachineAlta(string name, Func<CancellationToken, ValueTask<IFleetSessionAccess?>> connect)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(connect);
@@ -51,13 +61,14 @@ public sealed class FleetMachineAlta : IPluginAltaService
         {
             if (await _connect(cancellationToken).ConfigureAwait(false) is not { } client) return Failed(Unreachable, $"{_name} is not reached now.");
             if (FleetSessionReads.TryParse(args, out var request))
-                return await ReadAsync(client, request! with { MaxBytes = options?.MaxOutputBytes }, cancellationToken).ConfigureAwait(false);
+                return await ReadAsync(client, request! with { MaxBytes = options?.MaxOutputBytes, ActionId = options?.RequestId,
+                    SessionId = request.SessionId ?? options?.SourceSessionId }, cancellationToken).ConfigureAwait(false);
             IReadOnlyList<string> rest = [.. args.Skip(3)];
             return args.Count switch
             {
-                >= 3 when args[0] == "session" && args[1] is "send" or "queue" or "steer" => await PromptAsync(client, args[1], args[2], rest, stdin, cancellationToken).ConfigureAwait(false),
-                >= 3 when args[0] == "session" && args[1] == "abort" => await AbortAsync(client, args[2], cancellationToken).ConfigureAwait(false),
-                >= 2 when args[0] == "session" && args[1] == "create" => await CreateAsync(client, [.. args.Skip(2)], cancellationToken).ConfigureAwait(false),
+                >= 3 when args[0] == "session" && args[1] is "send" or "queue" or "steer" => await PromptAsync(client, args[1], args[2], rest, stdin, options?.RequestId, cancellationToken).ConfigureAwait(false),
+                >= 3 when args[0] == "session" && args[1] == "abort" => await AbortAsync(client, args[2], options?.RequestId, cancellationToken).ConfigureAwait(false),
+                >= 2 when args[0] == "session" && args[1] == "create" => await CreateAsync(client, [.. args.Skip(2)], options?.RequestId, cancellationToken).ConfigureAwait(false),
                 _ => Failed(Unsupported, $"This is not done on {_name} from here yet: do it on that machine."),
             };
         }
@@ -72,7 +83,7 @@ public sealed class FleetMachineAlta : IPluginAltaService
         }
     }
 
-    private static async Task<PluginAltaCommandResult> ReadAsync(FleetNodeClient client, FleetSessionReadParams request, CancellationToken cancellationToken)
+    private static async Task<PluginAltaCommandResult> ReadAsync(IFleetSessionAccess client, FleetSessionReadParams request, CancellationToken cancellationToken)
     {
         var result = await client.ReadSessionAsync(request, cancellationToken).ConfigureAwait(false);
         // An image comes by pieces: they are put together again before the caller reads its record.
@@ -103,15 +114,14 @@ public sealed class FleetMachineAlta : IPluginAltaService
     private static int Offset(JsonElement record) => record.TryGetProperty("base64Offset", out var value) && value.TryGetInt32(out var offset) ? offset : -1;
 
     // A prompt: the selection of the phone goes with it (model, effort, agent prompt), as with a prompt of this computer.
-    private async Task<PluginAltaCommandResult> PromptAsync(FleetNodeClient client, string mode, string sessionId, IReadOnlyList<string> rest, string? stdin,
+    private async Task<PluginAltaCommandResult> PromptAsync(IFleetSessionAccess client, string mode, string sessionId, IReadOnlyList<string> rest, string? stdin, string? requestId,
         CancellationToken cancellationToken)
     {
         if (!TryOptions(rest, PromptOptions, out var options)) return Failed(Unsupported, "The prompt has an option that does not go to another machine.");
         if (options.ContainsKey("attachments")) return Failed(Unsupported, $"Files and photos do not go to a session of {_name} yet: send the text alone.");
-        if (options.ContainsKey("permission-mode")) return Failed(Unsupported, $"The permissions of a session of {_name} are changed on that machine.");
         var text = stdin ?? "";
         if (string.IsNullOrWhiteSpace(text)) return Failed("usage.missingPrompt", "A prompt is needed.");
-        var retryKey = Guid.NewGuid().ToString("N");
+        var retryKey = requestId ?? Guid.NewGuid().ToString("N");
         if (mode == "steer")
         {
             var state = await client.GetSessionStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
@@ -120,13 +130,14 @@ public sealed class FleetMachineAlta : IPluginAltaService
                 sessionId, "alta.session.steered");
         }
 
-        if (mode == "queue") return Queued(await client.QueueAsync(sessionId, text, retryKey, CancellationToken.None).ConfigureAwait(false), sessionId);
-        var selection = options.ContainsKey("model") || options.ContainsKey("reasoning") || options.ContainsKey("prompt-id")
-            ? new FleetModelSelection(null, options.GetValueOrDefault("model"), options.GetValueOrDefault("prompt-id"), options.GetValueOrDefault("reasoning")) : null;
+        var selection = options.ContainsKey("model") || options.ContainsKey("reasoning") || options.ContainsKey("prompt-id") || options.ContainsKey("permission-mode")
+            ? new FleetModelSelection(null, options.GetValueOrDefault("model"), options.GetValueOrDefault("prompt-id"), options.GetValueOrDefault("reasoning"))
+                { PermissionMode = options.GetValueOrDefault("permission-mode") } : null;
+        if (mode == "queue") return Queued(await client.QueueAsync(new FleetQueueParams(sessionId, text) { Selection = selection }, retryKey, CancellationToken.None).ConfigureAwait(false), sessionId);
         var sent = await client.SendAsync(new FleetSendParams(sessionId, text, selection), retryKey, CancellationToken.None).ConfigureAwait(false);
         // A send to a session that works is queued when the caller said so, as alta does here: never steered into a turn it did not see.
         if (sent.Status == "busy" && options.ContainsKey("queue-if-busy"))
-            return Queued(await client.QueueAsync(sessionId, text, Guid.NewGuid().ToString("N"), CancellationToken.None).ConfigureAwait(false), sessionId);
+            return Queued(await client.QueueAsync(new FleetQueueParams(sessionId, text) { Selection = selection }, retryKey + ":queue", CancellationToken.None).ConfigureAwait(false), sessionId);
         return Command(sent, sessionId, "alta.session.submitted");
     }
 
@@ -135,12 +146,12 @@ public sealed class FleetMachineAlta : IPluginAltaService
         ["stdin"] = false, ["no-wait"] = false, ["queue-if-busy"] = false, ["model"] = true, ["reasoning"] = true, ["prompt-id"] = true, ["permission-mode"] = true, ["attachments"] = true,
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
-    private async Task<PluginAltaCommandResult> AbortAsync(FleetNodeClient client, string sessionId, CancellationToken cancellationToken)
+    private async Task<PluginAltaCommandResult> AbortAsync(IFleetSessionAccess client, string sessionId, string? requestId, CancellationToken cancellationToken)
     {
         var state = await client.GetSessionStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
         // Nothing runs: the stop the person asked for is done.
         if (state.ActiveRunId is not { } runId || state.AttachmentGeneration is not { } generation) return Records(0, [Record("alta.session.aborted", sessionId)], false, null);
-        return Command(await client.AbortAsync(new FleetAbortParams(sessionId, null, state.RuntimeInstanceId, generation, runId), Guid.NewGuid().ToString("N"), CancellationToken.None)
+        return Command(await client.AbortAsync(new FleetAbortParams(sessionId, null, state.RuntimeInstanceId, generation, runId), requestId ?? Guid.NewGuid().ToString("N"), CancellationToken.None)
             .ConfigureAwait(false), sessionId, "alta.session.aborted");
     }
 
@@ -152,7 +163,7 @@ public sealed class FleetMachineAlta : IPluginAltaService
 
     // A new session: the machine gives it its project, its provider and a worktree of its own, as to any session started from
     // another computer. A tier is one of the machine: it says which model that is first.
-    private async Task<PluginAltaCommandResult> CreateAsync(FleetNodeClient client, IReadOnlyList<string> rest, CancellationToken cancellationToken)
+    private async Task<PluginAltaCommandResult> CreateAsync(IFleetSessionAccess client, IReadOnlyList<string> rest, string? requestId, CancellationToken cancellationToken)
     {
         if (!TryOptions(rest, CreateOptions, out var options)) return Failed(Unsupported, "The new session has an option that does not go to another machine.");
         var (provider, model) = (options.GetValueOrDefault("provider"), options.GetValueOrDefault("model"));
@@ -171,7 +182,7 @@ public sealed class FleetMachineAlta : IPluginAltaService
             : new FleetModelSelection(provider, model, options.GetValueOrDefault("prompt-id"), effort);
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(options.ContainsKey("global") ? null : options.GetValueOrDefault("project"),
             options.GetValueOrDefault("space"), options.GetValueOrDefault("title"), null, selection) { PermissionMode = options.GetValueOrDefault("permission-mode") },
-            Guid.NewGuid().ToString("N"), CancellationToken.None).ConfigureAwait(false);
+            requestId ?? Guid.NewGuid().ToString("N"), CancellationToken.None).ConfigureAwait(false);
         return Records(0, [Record("alta.session.created", created.SessionId)], false, null);
     }
 

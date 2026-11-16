@@ -33,13 +33,16 @@ export type MobileSettingsView = Readonly<{
   serverDetail: string | null;
   /** Why the settings that were asked for are refused; null otherwise. */
   error: string | null;
+  /** Whether this desktop reaches other machines, and whether its owner lent them to its phones. */
+  hasOtherMachines?: boolean;
+  showOtherMachines?: boolean;
 }>;
 
 /** What a person chooses and types, until it is applied. */
 export type MobileSettingsDraft = Readonly<{ provider: string; port: string; httpsPort: string }>;
 
 /** What Apply sends to `mobile.settings.set`: the fields of the provider chosen, the others left as the plugin has them. */
-export type MobileSettingsChange = Readonly<{ provider: string; port: number; httpsPort?: number }>;
+export type MobileSettingsChange = Readonly<{ provider: string; port: number; httpsPort?: number; showOtherMachines?: boolean }>;
 
 const text = (value: unknown, limit: number): string | null => typeof value === "string" && value.length <= limit ? value : null;
 const isPort = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= minimumPort && value <= maximumPort;
@@ -64,6 +67,7 @@ export function readMobileSettings(value: unknown): MobileSettingsView | null {
     port: record.port, httpsPort: record.httpsPort,
     address: address && /^https:\/\//u.test(address) ? address : null, server, serverDetail: text(record.serverDetail, 600) || null,
     error: text(record.error, 600) || null,
+    ...typeof record.hasOtherMachines === "boolean" ? { hasOtherMachines: record.hasOtherMachines, showOtherMachines: record.showOtherMachines === true } : {},
   };
 }
 

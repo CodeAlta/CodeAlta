@@ -83,7 +83,7 @@ public sealed class DesktopPluginsTests
         BuiltInPluginDefinition[] definitions = [.. DesktopPlugins.BuiltIns, DesktopPlugins.MobileDefinition, DesktopLandingPlugin.Definition()];
         foreach (var definition in definitions)
         {
-            var expected = headless.Contains(definition.Id) ? PluginFrontends.All | PluginFrontends.Cli : definition.Id == "mobile" ? PluginFrontends.Desktop : PluginFrontends.All;
+            var expected = headless.Contains(definition.Id) ? PluginFrontends.All | PluginFrontends.Cli : definition.Id == "mobile" ? PluginFrontends.Desktop | PluginFrontends.Node : PluginFrontends.All;
             Assert.AreEqual(expected, definition.CreateDescriptor().Frontends, definition.Id);
             // The attribute of the plugin says the same as its definition.
             Assert.AreEqual(expected, PluginDescriptorFactory.FromType(definition.PluginType!).Frontends, definition.Id);

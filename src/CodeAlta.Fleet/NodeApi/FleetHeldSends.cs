@@ -22,6 +22,9 @@ internal sealed record FleetHeldSend(string RunId, string SessionId, string Text
     /// <summary>Gets the run the budgets admit when it is not the retry key: the session, for the first prompt of a new session.</summary>
     public string? BudgetRunId { get; init; }
 
+    /// <summary>Gets the permission mode chosen for this prompt; null keeps the session's mode.</summary>
+    public string? PermissionMode { get; init; }
+
     /// <summary>
     /// Gets why it waits: null for a budget that holds it until its owner continues it (its session waits for a person), or
     /// <see cref="QueueReason"/> for a seat of the machine (its session waits for its turn, for nobody).

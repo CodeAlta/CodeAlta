@@ -1,5 +1,7 @@
 import { approvalWaiting } from "./approval";
-import { askWaiting } from "./ask";
+import { askMarkElsewhere, askWaiting } from "./ask";
+import type { MachineState } from "./contract";
+import { sessionHash } from "./machines";
 import { createCalmOrder, type CalmClock, type CalmTiming } from "./calmOrder";
 import { activityLine, el, icon } from "./dom";
 import { safeColor, sessionMeta, showSpaces } from "./sessionMeta";
@@ -19,6 +21,10 @@ export function createSessionList(options: Readonly<{
   store: FoldStore;
   /** Whether the list is on screen: a touch or a scroll elsewhere does not hold its order. */
   visible: () => boolean;
+  /** The machine chip of a card: the name and the state of its machine; null for none (this computer, or a list of one machine). */
+  machine?: (view: SessionView) => Readonly<{ name: string; state: MachineState }> | null;
+  /** Whether the machine of a session lets the phone archive it: a card that does not has no swipe and no archive button. Absent: it does. */
+  canArchive?: (view: SessionView) => boolean;
   clock?: CalmClock;
   timing?: CalmTiming;
 }>) {
@@ -43,12 +49,14 @@ export function createSessionList(options: Readonly<{
     const space = showSpaces(sessions.spaces) && !sameProject;
     const meta = sessionMeta(view, { space, live: true, project: !sameProject, child: false });
     const lineText = live?.line ?? view.summary;
-    const version = JSON.stringify([state, waiting, approving, view.title, ago(when, now), live?.kind, lineText, live?.activity, meta, row.parentElsewhere,
+    const chip = options.machine?.(view) ?? null, archivable = options.canArchive?.(view) !== false;
+    const elsewhere = !approving && askMarkElsewhere(live?.asking);
+    const version = JSON.stringify([chip, archivable, elsewhere, state, waiting, approving, view.title, ago(when, now), live?.kind, lineText, live?.activity, meta, row.parentElsewhere,
       row.subAgents && [summaryVersion(row.subAgents, now), row.open]]);
 
     const element = make("div", `card ${state}${waiting ? " waiting" : ""}`);
     const anchor = make("a", "card-link");
-    anchor.href = `#/session/${encodeURIComponent(view.id)}`;
+    anchor.href = sessionHash(view.id);
     if (row.parentElsewhere) {
       const from = make("div", "parent-line");
       from.append(icon(document, "child"), make("span", null, row.parentElsewhere.title ? `Sub-agent of ${row.parentElsewhere.title}` : "Sub-agent"));
@@ -61,6 +69,11 @@ export function createSessionList(options: Readonly<{
     const facts = make("div", "meta");
     facts.title = dotLabels[state];
     facts.append(make("span", "dot"));
+    if (chip) {
+      const mark = make("span", `meta-item meta-machine machine-${chip.state}`);
+      mark.append(icon(document, "computer"), document.createTextNode(chip.state === "online" ? chip.name : `${chip.name} · ${chip.state === "unauthorized" ? "not allowed" : chip.state}`));
+      facts.append(document.createTextNode(" "), mark);
+    }
     for (const item of meta) {
       const span = make("span", `meta-item meta-${item.kind}`);
       if (item.kind === "space") {
@@ -77,7 +90,7 @@ export function createSessionList(options: Readonly<{
     anchor.append(facts);
     if (waiting) {
       const badge = make("span", "waiting-badge");
-      badge.append(icon(document, approving ? "shield" : "ask"), make("span", null, approving ? "Waits for your approval" : "Waits for your answer"));
+      badge.append(icon(document, approving ? "shield" : elsewhere ? "chat" : "ask"), make("span", null, approving ? "Waits for your approval" : elsewhere ? "Review it on a computer" : "Waits for your answer"));
       anchor.append(badge);
     }
     if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
@@ -91,7 +104,8 @@ export function createSessionList(options: Readonly<{
     archive.type = "button";
     archive.setAttribute("aria-label", `Archive “${view.title || "untitled session"}”`);
     archive.append(icon(document, "archive"));
-    element.append(anchor, archive);
+    element.append(anchor);
+    if (archivable) element.append(archive);
     if (row.subAgents) element.append(summaryRow(view.id, row.subAgents, row.open, now));
     return { element, version };
   }
@@ -153,6 +167,7 @@ export function createSessionList(options: Readonly<{
     under.append(action);
     const { element, version } = card(row, now);
     item.dataset.version = version;
+    item.dataset.archivable = String(options.canArchive?.(row.view) !== false);
     item.append(under, element);
     return item;
   }
@@ -194,6 +209,7 @@ export function createSessionList(options: Readonly<{
           current.className = fresh.element.className + (current.classList.contains("springing") ? " springing" : "");
           current.replaceChildren(...Array.from(fresh.element.childNodes));
           item.dataset.version = fresh.version;
+          item.dataset.archivable = String(options.canArchive?.(row.view) !== false);
         }
       }
       rails(item, row);

@@ -219,3 +219,6 @@
 .machine-seat-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-seat-since { margin-left: 10px; font-size: 12px; }
 .fleet-machine-load { display: block; font-size: 11px; }
+/* The Mobile tab of a machine inside its section: it grows with its content, in the width of the page. */
+.machine-mobile .mobile-canvas { height: auto; overflow: visible; padding: 8px 0 0; }
+.machine-mobile-switch { margin: 0; }

@@ -103,14 +103,17 @@ internal sealed class MobilePush : IDisposable
     }
 
     /// <summary>Delivers an encrypted session link, with no prompt, answer, title, command or other session content.</summary>
-    internal async Task SendAsync(MobilePushNotice notice, MobileSessions sessions, CancellationToken cancellationToken)
+    internal async Task SendAsync(MobilePushNotice notice, MobileSessions sessions, CancellationToken cancellationToken, Func<bool>? allowed = null)
     {
         MobilePushPhone[] phones;
         lock (_gate) phones = [.. _file.Phones.Where(phone => _access.IsPhoneHash(phone.Phone))];
-        if (phones.Length == 0 || await sessions.GetAsync(notice.SessionId, cancellationToken).ConfigureAwait(false) is null) return;
-        var payload = Encoding.UTF8.GetBytes(new JsonObject { ["sessionId"] = notice.SessionId, ["kind"] = notice.Kind }.ToJsonString());
+        if (phones.Length == 0 || allowed?.Invoke() == false || await sessions.GetAsync(notice.SessionId, cancellationToken).ConfigureAwait(false) is null || allowed?.Invoke() == false) return;
+        var content = new JsonObject { ["sessionId"] = notice.SessionId, ["kind"] = notice.Kind };
+        if (notice.MachineId is { } machineId) content["machineId"] = machineId;
+        var payload = Encoding.UTF8.GetBytes(content.ToJsonString());
         foreach (var phone in phones)
         {
+            if (allowed?.Invoke() == false) break;
             if (!_access.IsPhoneHash(phone.Phone)) continue;
             lock (_gate) { if (!_file.Phones.Contains(phone)) continue; }
             try

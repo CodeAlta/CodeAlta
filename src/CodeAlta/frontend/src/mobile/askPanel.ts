@@ -1,5 +1,5 @@
 import { ApiError, failureText, SignedOutError, type Api } from "./api";
-import { askAnswer, askDraftKey, askMarkKey, askMode, askSettled, newAskDraft, newAskLocal, type AskDraft, type AskLocal } from "./ask";
+import { askAnswer, askDraftKey, askElsewhere, askMarkKey, askMode, askSettled, newAskDraft, newAskLocal, type AskDraft, type AskLocal } from "./ask";
 import { createAskView } from "./askView";
 import type { Ask, AskResult, Live } from "./contract";
 import { createSheet } from "./sheet";
@@ -23,6 +23,10 @@ export function createAskPanel(options: Readonly<{
   current: () => string | null;
   /** What the live stream says of a session now. */
   live: (id: string) => Live | null | undefined;
+  /** Whether the machine of a session hands its review requests to the phone; absent: it does. One it does not is told as "Review it on a computer". */
+  reviews?: (id: string) => boolean;
+  /** Whether a session is of another machine: its ask must say what it is (an older CodeAlta there does not) to be answered here. */
+  remote?: (id: string) => boolean;
   /** Fills an element with Markdown, as the timeline does. */
   markdown: (element: HTMLElement, text: string) => void;
   /** The ask of a session changed: the page shows its bottom bar again. */
@@ -69,6 +73,8 @@ export function createAskPanel(options: Readonly<{
       if (error instanceof ApiError && error.status === 404) ask = null; else return;
     }
     if (reads.get(id) !== count) return;
+    // A review the machine does not hand over, or a kind of ask this page does not know, is read on a computer: it has nothing to answer here.
+    if (ask && (askElsewhere(ask) || (ask.review && options.reviews?.(id) === false) || (ask.kind == null && options.remote?.(id) === true))) ask = { ...ask, kind: "elsewhere", questions: [], review: null };
     asks.set(id, ask);
     const local = localOf(id);
     if (local.submitted && !local.sending) {

@@ -25,6 +25,10 @@ internal static class MobileAlta
     internal static Task<MobileAltaResult> RunAsync(IPluginAltaService alta, IReadOnlyList<string> args, string? stdin, CancellationToken cancellationToken)
         => RunAsync(alta, args, stdin, ForTheUser, cancellationToken);
 
+    /// <summary>Reads or acts on a resource whose owning session is not a positional argument, such as a background job.</summary>
+    internal static Task<MobileAltaResult> RunSessionAsync(IPluginAltaService alta, string sessionId, IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunAsync(alta, args, null, ForTheUser with { SourceSessionId = sessionId }, cancellationToken);
+
     /// <summary>Runs one read of the user that may give more than a command usually does.</summary>
     internal static Task<MobileAltaResult> RunLongAsync(IPluginAltaService alta, IReadOnlyList<string> args, int maximumBytes, CancellationToken cancellationToken)
         => RunAsync(alta, args, null, new PluginAltaInvocationOptions { OnBehalfOfUser = true, MaxOutputBytes = maximumBytes }, cancellationToken);

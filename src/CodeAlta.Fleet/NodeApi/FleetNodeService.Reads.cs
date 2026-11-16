@@ -14,7 +14,7 @@ public sealed partial class FleetNodeService
         On(caller, FleetNodeMethods.SessionsRead, Access.View, FleetNodeJsonContext.Default.FleetSessionReadParams, FleetNodeJsonContext.Default.FleetSessionReadResult,
             (call, parameters, token) => ReadSessionAsync(call, parameters, acts: false, token));
         On(caller, FleetNodeMethods.SessionsAct, Access.Drive, FleetNodeJsonContext.Default.FleetSessionReadParams, FleetNodeJsonContext.Default.FleetSessionReadResult,
-            (call, parameters, token) => ReadSessionAsync(call, parameters, acts: true, token));
+            (call, parameters, token) => Once(call, FleetNodeJsonContext.Default.FleetSessionReadResult, () => ReadSessionAsync(call, parameters, acts: true, CancellationToken.None)));
     }
 
     private async Task<FleetSessionReadResult> ReadSessionAsync(FleetNodeCall call, FleetSessionReadParams parameters, bool acts, CancellationToken cancellationToken)
@@ -89,11 +89,66 @@ public sealed partial class FleetNodeService
             }
 
             if (spec.ListsSessions && Text(record, "sessionId") is { } listed && !await MaySeeAsync(call, listed, cancellationToken).ConfigureAwait(false)) continue;
-            records.Add(image ? ImagePiece(record, parameters.Options) : record);
+            records.Add(image ? ImagePiece(record, parameters.Options) : SessionParent(await VisibleChildrenAsync(call, record, cancellationToken).ConfigureAwait(false)));
         }
 
         if (acts) LogInfo($"{Capitalized(Who(call))} ran {spec.Name} on the session {parameters.SessionId}.");
         return new FleetSessionReadResult(result.ExitCode, records, result.Truncated, result.ExitCode == 0 ? null : error ?? result.Error ?? "The command failed.");
+    }
+
+    // The sessions a record names below its own (the status of a session lists its sub-agents) are checked one by one: a
+    // Private one, or one of another person, is not shown to exist by its parent either.
+    private async Task<JsonElement> VisibleChildrenAsync(FleetNodeCall call, JsonElement record, CancellationToken cancellationToken)
+    {
+        if (!record.TryGetProperty("childSessionIds", out var children) || children.ValueKind != JsonValueKind.Array) return record;
+        var visible = new List<string>();
+        var hidden = false;
+        foreach (var child in children.EnumerateArray())
+        {
+            if (child.ValueKind == JsonValueKind.String && await MaySeeAsync(call, child.GetString()!, cancellationToken).ConfigureAwait(false)) visible.Add(child.GetString()!);
+            else hidden = true;
+        }
+
+        if (!hidden) return record;
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            foreach (var property in record.EnumerateObject())
+            {
+                if (property.NameEquals("childSessionIds"))
+                {
+                    writer.WriteStartArray("childSessionIds");
+                    foreach (var id in visible) writer.WriteStringValue(id);
+                    writer.WriteEndArray();
+                }
+                else if (property.NameEquals("childCount")) writer.WriteNumber("childCount", visible.Count);
+                else property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(buffer.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    // The machine of a remote sub-agent's parent is recorded by its admitted agent request, not guessed from its id.
+    private JsonElement SessionParent(JsonElement record)
+    {
+        if (Text(record, "sessionId") is not { } sessionId || _agents.Find(sessionId) is not { ParentDeviceId: { } parentMachine } request) return record;
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            foreach (var property in record.EnumerateObject())
+                if (!property.NameEquals("parentMachineId") && !property.NameEquals("parentMachineName")) property.WriteTo(writer);
+            writer.WriteString("parentMachineId", parentMachine);
+            writer.WriteString("parentMachineName", request.ParentMachineName);
+            writer.WriteEndObject();
+        }
+        using var document = JsonDocument.Parse(buffer.ToArray());
+        return document.RootElement.Clone();
     }
 
     // A job is read and stopped only through its session: another session's job is not shown to exist.

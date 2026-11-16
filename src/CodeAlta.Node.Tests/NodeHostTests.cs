@@ -92,8 +92,8 @@ public sealed class NodeHostTests
         Assert.IsFalse(options.ReadOnlyGlobalState, "A node owns its profile.");
         Assert.AreEqual(SessionLeaseOwner.NodeKind, options.SessionLeaseOwner);
         Assert.IsTrue(options.FollowExternalSessions);
-        Assert.AreEqual(PluginFrontends.Cli, options.PluginFrontend, "Only the plugins made for hosts without a window start.");
-        Assert.IsTrue(options.PluginBuiltIns.All(static plugin => plugin.Frontends.HasFlag(PluginFrontends.Cli)));
+        Assert.AreEqual(PluginFrontends.Node, options.PluginFrontend, "The node identifies its enduring host, not an ephemeral CLI run.");
+        Assert.IsTrue(options.PluginBuiltIns.All(static plugin => plugin.Frontends.Supports(PluginFrontends.Node)));
         Assert.IsNotNull(options.StartupScratchpadCleanup);
     }
 

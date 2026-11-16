@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Callout, Spinner } from "@blueprintjs/core";
+import { Button, Callout, Spinner, Switch } from "@blueprintjs/core";
 import { AppIcon } from "../../AppIcon";
 import { useShellLanguage } from "../../shellLanguage";
 import { mobileView, type MobileProblem, type MobileStatus } from "./status";
@@ -16,6 +16,10 @@ export type MobileCanvasActions = Readonly<{
   reload(): void;
   /** Runs an action of the provider (a sign-in); its outcome comes through `status`. */
   act(action: string): Promise<void>;
+  /** Asks the machine for a code that connects one phone (a node makes it when it is asked for); it comes through `status`. Absent where the code is always shown. */
+  pair?(): Promise<void>;
+  /** Changes the owner's opt-in for the machines this desktop reaches. */
+  otherMachines?(enabled: boolean): Promise<void>;
 }>;
 
 /**
@@ -27,6 +31,8 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
   const view = useMemo(() => status ? mobileView(status) : null, [status]);
   const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [pairing, setPairing] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(copiedTimer.current), []);
 
@@ -40,6 +46,11 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
   const retry = async () => {
     setRetrying(true);
     try { await actions.retry(); } finally { setRetrying(false); }
+  };
+
+  const pair = async () => {
+    setPairing(true);
+    try { await actions.pair?.(); } finally { setPairing(false); }
   };
 
   if (!view) {
@@ -80,7 +91,24 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
         <p className="mobile-instruction">{t(view.instruction)}</p>
       </figcaption>
     </figure>}
+    {status?.pairsOnce && status.served && <div className="mobile-pairing">
+      <p className="mobile-instruction" data-phones={status.phones ?? 0}>
+        {view.code && status.pairingSeconds ? t("The code connects one phone, within {minutes} min.", { minutes: Math.max(1, Math.ceil(status.pairingSeconds / 60)) })
+          : t("A code connects one phone. Ask for one when a phone is ready.")}
+        {" "}{status.phones ? t(status.phones === 1 ? "{count} phone is connected." : "{count} phones are connected.", { count: status.phones }) : t("No phone is connected yet.")}
+      </p>
+      {actions.pair && <Button size="small" intent={view.code ? "none" : "primary"} icon={<AppIcon name="refresh" size={14} />} loading={pairing} onClick={() => void pair()}>
+        {view.code ? t("New code") : t("Show a code")}</Button>}
+    </div>}
     {view.waiting && <div className="mobile-waiting" role="status"><Spinner size={16} /><span>{t(view.waiting)}</span></div>}
+    {status?.hasOtherMachines && actions.otherMachines && <div className="mobile-sharing">
+      <Switch label={t("Show my other machines on the phone")} checked={status.showOtherMachines === true} disabled={sharing}
+        onChange={event => {
+          setSharing(true);
+          void actions.otherMachines!(event.currentTarget.checked).finally(() => setSharing(false));
+        }} />
+      <p className="settings-field-help">{t("Every connected phone can use the machines this computer reaches, with this computer's permissions.")}</p>
+    </div>}
     {view.problems.map(problem)}
     {failure && <Callout className="mobile-problem" intent="warning" title={t("The Mobile plugin does not answer.")}><p>{failure}</p></Callout>}
   </div>;

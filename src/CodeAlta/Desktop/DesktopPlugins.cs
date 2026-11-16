@@ -149,7 +149,7 @@ internal static class DesktopPlugins
     {
         Id = "mobile", DisplayName = "Mobile",
         Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.",
-        EnabledByDefault = false, Frontends = PluginFrontends.Desktop,
+        EnabledByDefault = false, Frontends = PluginFrontends.Desktop | PluginFrontends.Node,
         PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
     };
 
@@ -257,7 +257,7 @@ internal static class DesktopPlugins
 /// </remarks>
 internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
     IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, PluginPermissionServiceBridge? permissions = null,
-    PluginSettingsStore? settings = null, IPluginPrivateNetworkService? privateNetworks = null) : IPluginServices
+    PluginSettingsStore? settings = null, IPluginPrivateNetworkService? privateNetworks = null, IPluginMachineService? machines = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -281,6 +281,8 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
     public IPluginTaskService Tasks => _inner.Tasks;
 
     public IPluginAltaService Alta { get; } = alta;
+
+    public IPluginMachineService Machines { get; } = machines ?? NoopPluginMachineService.Instance;
 
     // The tabs plugins provide; a host started without them has no window to show any.
     public IPluginCanvasService Canvases { get; } = (IPluginCanvasService?)canvases ?? NoopPluginCanvasService.Instance;

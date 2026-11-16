@@ -718,7 +718,11 @@ public sealed record FleetWatchEnded(string WatchId, string Reason);
 /// <param name="ModelId">The model.</param>
 /// <param name="AgentPromptId">The agent prompt (<c>default</c> when null).</param>
 /// <param name="ReasoningEffort">The reasoning effort (<c>Low</c>, <c>Medium</c>, <c>High</c>...).</param>
-public sealed record FleetModelSelection(string? ProviderKey = null, string? ModelId = null, string? AgentPromptId = null, string? ReasoningEffort = null);
+public sealed record FleetModelSelection(string? ProviderKey = null, string? ModelId = null, string? AgentPromptId = null, string? ReasoningEffort = null)
+{
+    /// <summary>Gets the session permission mode chosen for the next prompt; null keeps the session's mode.</summary>
+    public string? PermissionMode { get; init; }
+}
 
 /// <summary>The parameters of <c>sessions.create</c>. The request's idempotency key makes a retry the same creation.</summary>
 /// <param name="ProjectId">The project; null for a session outside a project.</param>
@@ -786,6 +790,8 @@ public sealed record FleetSendParams(string SessionId, string Text, FleetModelSe
 /// <param name="Text">The prompt to send after the running turn.</param>
 public sealed record FleetQueueParams(string SessionId, string Text)
 {
+    /// <summary>Gets the next prompt's model, effort and agent prompt; null keeps the session's selection.</summary>
+    public FleetModelSelection? Selection { get; init; }
     /// <summary>Gets the signed request of the agent that queues it (<see cref="Protocol.FleetAgentRequestKinds.Queue"/>); null for a person's prompt.</summary>
     public Protocol.FleetSignedAgentRequest? Agent { get; init; }
 }

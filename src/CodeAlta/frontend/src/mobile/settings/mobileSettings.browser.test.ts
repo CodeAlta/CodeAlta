@@ -60,6 +60,14 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     // A narrow Settings: every card fits, nothing scrolls sideways.
     assert.equal(await evaluate("[...document.querySelectorAll('.mobile-settings, .mobile-settings .bp6-card')].every(element => element.scrollWidth <= element.clientWidth)"), true);
     assert.equal(await evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), true);
+    // Existing phones gain no other machines until their owner explicitly opts in.
+    assert.equal(await evaluate("document.querySelector('#mobile-settings-access').parentElement.querySelector('input[type=checkbox]')"), null);
+    await evaluate("mobileSettingsFixture.change({ hasOtherMachines: true, showOtherMachines: false })");
+    assert.equal(await wait("document.querySelector('#mobile-settings-access')?.parentElement.querySelector('input[type=checkbox]')"), true);
+    assert.equal(await evaluate("document.querySelector('#mobile-settings-access').parentElement.querySelector('input[type=checkbox]').checked"), false);
+    await evaluate("document.querySelector('#mobile-settings-access').parentElement.querySelector('input[type=checkbox]').click()");
+    assert.equal(await wait("mobileSettingsFixture.state.calls.includes('other-machines:true')"), true);
+    await evaluate("mobileSettingsFixture.change({ hasOtherMachines: false })");
 
     // A port out of range says so and cannot be applied; a port in range is applied, and the page shows what the plugin answers.
     await type("mobile-settings-port", "80");

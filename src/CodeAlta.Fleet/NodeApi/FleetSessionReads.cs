@@ -19,6 +19,9 @@ public sealed record FleetSessionReadParams(string Read, string? SessionId = nul
 
     /// <summary>Gets the most bytes of records the caller takes; null for the default. The node keeps it within what one answer holds.</summary>
     public int? MaxBytes { get; init; }
+
+    /// <summary>Gets the stable id of a small action; null for a fresh action or for a read.</summary>
+    public string? ActionId { get; init; }
 }
 
 /// <summary>
@@ -123,7 +126,7 @@ public static class FleetSessionReads
         new("job.status", ["job", "status"], Target.Job),
         new("job.output", ["job", "output"], Target.Job) { Options = Options(("lines", Kind.Number)) },
         new("automation.current", ["automation", "current"], Target.SessionOption),
-        new("project.list", ["project", "list"], Target.Machine) { Options = Options(("detailed", Kind.Flag), ("all", Kind.Flag)) },
+        new("project.list", ["project", "list"], Target.Machine) { Options = Options(("detailed", Kind.Flag), ("all", Kind.Flag), ("space", Kind.Id)) },
         new("space.list", ["space", "list"], Target.Machine),
         new("model.list", ["model", "list"], Target.Machine) { Options = Options(("detailed", Kind.Flag), ("provider", Kind.Id)) },
         new("model.resolve", ["model", "resolve"], Target.Machine) { Options = Options(("tier", Kind.Id)) },

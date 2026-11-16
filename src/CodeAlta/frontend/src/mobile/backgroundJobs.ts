@@ -20,8 +20,10 @@ export function jobFacts(job: BackgroundJob, now: number): string {
 }
 
 /** Background jobs above the phone's prompt: a count, a running/recent sheet, and the live output of a job. */
-export function createBackgroundJobs({ window, root, api, changed }: {
+export function createBackgroundJobs({ window, root, api, changed, canStop = () => true }: {
   window: Window & typeof globalThis; root: HTMLElement; api: Pick<Api, "jobs" | "job" | "stopJob">; changed: () => void;
+  /** Whether a job of the session shown can be stopped from the phone: not on a machine that takes no stop. */
+  canStop?: () => boolean;
 }) {
   const document = window.document;
   const make = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => el(document, tag, cls, text);
@@ -54,7 +56,7 @@ export function createBackgroundJobs({ window, root, api, changed }: {
     back.hidden = false; list.hidden = true; output.hidden = false;
     command.textContent = job.command; folder.textContent = job.folder;
     facts.textContent = jobFacts(job, Date.now());
-    stopOutput.hidden = job.state !== "running"; stopOutput.disabled = stopping.has(job.id);
+    stopOutput.hidden = job.state !== "running" || !canStop(); stopOutput.disabled = stopping.has(job.id);
   }
   function draw() {
     const listed = listedJobs(jobs, Date.now()), running = listed.filter(job => job.state === "running").length;
@@ -92,7 +94,7 @@ export function createBackgroundJobs({ window, root, api, changed }: {
             showOutput(job); back.focus(); void refresh();
           });
           row.append(open);
-          if (job.state === "running") {
+          if (job.state === "running" && canStop()) {
             const stop = make("button", "icon-btn"); stop.type = "button";
             stop.dataset.jobAction = `stop:${job.id}`;
             stop.setAttribute("aria-label", `Stop job · ${name(job)}`); stop.append(timelineIcon(document, "stop"));
@@ -116,7 +118,7 @@ export function createBackgroundJobs({ window, root, api, changed }: {
   }
   async function stopJob(jobId: string) {
     const id = session, revision = generation;
-    if (!id || stopping.has(jobId)) return;
+    if (!id || stopping.has(jobId) || !canStop()) return;
     stopping.add(jobId); draw(); note.textContent = "";
     try {
       const result = await api.stopJob(id, jobId);

@@ -87,6 +87,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     private IReadOnlySet<string> _listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset? _lastSeen;
     private FleetNodeInfoRead? _readInfo;
+    private long _connections;
 
     /// <summary>Creates the host of a paired machine; <see cref="Start"/> starts its connection.</summary>
     /// <param name="machine">The machine.</param>
@@ -131,6 +132,9 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
 
     /// <summary>Gets the client of the machine while it is online; null otherwise.</summary>
     internal FleetNodeClient? CurrentClient { get { lock (_gate) return _client; } }
+
+    /// <summary>Gets how many connections the machine answered on since the host started: a follower that sees it change knows the machine was reached again, whatever states it saw.</summary>
+    internal long Connections { get { lock (_gate) return _connections; } }
 
     /// <summary>
     /// Gets whether this computer paired with the machine; false for a machine of an organization it reaches through the
@@ -341,6 +345,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
             _client = client;
             if (client is not null)
             {
+                _connections++;
                 _online.TrySetResult(client);
             }
             else if (_online.Task.IsCompleted)

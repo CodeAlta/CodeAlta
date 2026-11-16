@@ -2,6 +2,7 @@
 // in the records of the session, never by a path), which files of a message are images, and which picture of the disk
 // that an answer shows is which image of its event.
 import type { EventImage } from "./contract";
+import { sessionBase } from "./machines";
 
 /** An image the timeline shows: what names it, its alternative text, and where the page reads it. */
 export type ImageItem = Readonly<{ key: string; title: string; url: string }>;
@@ -12,12 +13,12 @@ const imageTypes = /^image\/(png|jpe?g|gif|webp|bmp|\*)$/iu;
 /** Whether a file of a message is an image the page can show. */
 export const isShownImage = (mediaType: string | null | undefined): boolean => imageTypes.test(mediaType ?? "");
 
-/** The address of a saved copy of a session: a file of a prompt, an image a tool gave the model. */
-export const savedImageUrl = (sessionId: string, id: string): string => `/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(id)}`;
+/** The address of a saved copy of a session (`sessionId` is the name of the session in the page, with its machine): a file of a prompt, an image a tool gave the model. */
+export const savedImageUrl = (sessionId: string, id: string): string => `${sessionBase(sessionId)}/images/${encodeURIComponent(id)}`;
 
 /** The address of a picture of the disk that an answer shows, by the sequence number of the answer and the position of the picture. */
 export const linkedImageUrl = (sessionId: string, seq: number, position: string | number): string =>
-  `/api/sessions/${encodeURIComponent(sessionId)}/linked-images/${seq}/${encodeURIComponent(String(position))}`;
+  `${sessionBase(sessionId)}/linked-images/${seq}/${encodeURIComponent(String(position))}`;
 
 /** The files of a message as the page shows them: its images as pictures (once the journal gave their ids), the others as chips. */
 export function splitFiles<T extends Readonly<{ title: string; mediaType: string; id?: string | null }>>(files: readonly T[]): { images: (T & { id: string })[]; others: T[] } {

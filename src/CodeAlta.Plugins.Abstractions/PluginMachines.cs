@@ -9,6 +9,15 @@ public interface IPluginMachineService
     /// <summary>Gets whether this host can reach other machines.</summary>
     bool HasMachines { get; }
 
+    /// <summary>Gets this computer's fleet device id, when it already has one, to recognize a cross-machine parent as local.</summary>
+    string? LocalDeviceId => null;
+
+    /// <summary>Reads the local sessions this host has given away, with their recorded destinations; never guesses from a session id.</summary>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>Relinquished local sessions only. An unknown destination has no machine id and must not be guessed by name.</returns>
+    ValueTask<IReadOnlyDictionary<string, PluginSessionMove>> LocalSessionMovesAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IReadOnlyDictionary<string, PluginSessionMove>>(System.Collections.Frozen.FrozenDictionary<string, PluginSessionMove>.Empty);
+
     /// <summary>Lists machines, including their last known state while offline.</summary>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The other machines of this computer; never this computer itself.</returns>
@@ -45,6 +54,11 @@ public interface IPluginMachineService
 /// <param name="Waiting">How many of its listed sessions wait for the person.</param>
 public sealed record PluginMachine(string Id, string Name, string State, string? Path, DateTimeOffset? LastSeen,
     IReadOnlyList<string> Permissions, IReadOnlyList<string> Features, int Waiting);
+
+/// <summary>The recorded destination of a local session this computer has relinquished.</summary>
+/// <param name="MachineId">Its exact destination device id, or null when the old record does not identify it.</param>
+/// <param name="Machine">Its display name, never an identity.</param>
+public sealed record PluginSessionMove(string? MachineId, string? Machine);
 
 /// <summary>
 /// The services of one machine, with the same plugin contracts used locally. Its alta service only accepts the typed

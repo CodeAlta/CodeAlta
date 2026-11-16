@@ -31,6 +31,8 @@ export function createLiveStream(options: Readonly<{
   onSession: (live: Live) => void;
   onState: (state: LinkState) => void;
   onReconnected: () => void;
+  /** The machines changed: read them again. */
+  onMachines?: () => void;
   check: () => Promise<"ok" | "signed-out" | "unreachable">;
   setTimer: (callback: () => void, ms: number) => unknown;
   clearTimer: (timer: unknown) => void;
@@ -65,6 +67,8 @@ export function createLiveStream(options: Readonly<{
       try { live = JSON.parse(String(event.data)) as Live; } catch { return; }
       if (live && typeof live.id === "string") options.onSession(live);
     });
+    // A machine the computer reaches came back, or the computer reaches it differently.
+    events.addEventListener("machines", () => { if (source === events) { watchSilence(); options.onMachines?.(); } });
     events.addEventListener("error", () => {
       if (source !== events) return;
       lost = true;
@@ -104,6 +108,8 @@ export function createLiveStream(options: Readonly<{
 
   return {
     start() { if (!stopped) return; stopped = false; connect(); },
+    /** The address of the stream changed (a session of another machine opened or closed): opens it again on the new address, at once, without reading anything again. */
+    reopen() { if (!stopped) connect(); },
     /** The page is shown again, or the phone is online again: open the stream now if it is not open. */
     wake() {
       if (stopped) return;

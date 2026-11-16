@@ -64,6 +64,8 @@ public sealed class NodeHost : IAsyncDisposable
     /// <summary>Gets the ports of this machine no sandboxed session reaches; the fleet part of the node adds its listener.</summary>
     internal NodeReservedPorts? ReservedPorts { get; private init; }
 
+    internal Plugins.NodePluginServices? PluginServices { get; private init; }
+
     /// <summary>Gets the catalog of models the providers of the node are started with.</summary>
     internal ModelsDevCatalogService ModelCatalog => _modelsDev;
 
@@ -203,6 +205,7 @@ public sealed class NodeHost : IAsyncDisposable
             {
                 ProviderConfiguration = providerConfiguration,
                 ReservedPorts = reserved,
+                PluginServices = pluginServices,
             };
         }
         catch

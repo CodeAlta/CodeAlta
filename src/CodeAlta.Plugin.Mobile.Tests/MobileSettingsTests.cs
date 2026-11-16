@@ -34,10 +34,29 @@ public sealed class MobileSettingsTests
         var (tab, tabView) = await fixture.OpenAsync(MobilePlugin.CanvasId);
         var (page, pageView) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
 
-        CollectionAssert.AreEquivalent(new[] { "mobile.status", "mobile.retry", "mobile.act" }, tab.Names.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "mobile.status", "mobile.retry", "mobile.act", "mobile.settings.set" }, tab.Names.ToArray());
         CollectionAssert.AreEquivalent(new[] { "mobile.settings.get", "mobile.settings.set", "mobile.reset" }, page.Names.ToArray());
         Assert.AreEqual(MobilePlugin.AppModule, tabView.Script?.AppModule);
         Assert.AreEqual(MobilePlugin.SettingsModule, pageView.Script?.AppModule);
+    }
+
+    [TestMethod]
+    public async Task TheOtherMachinesOptIn_SurvivesStartupBeforeTheFleetExists_AndIsNeverEnabledOnANode()
+    {
+        var state = new MemoryState();
+        await state.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Port = FreePort.Next(), ShowOtherMachines = true });
+        await using (var desktop = new Fixture(new FakeTailscaleCli(installed: false), state))
+        {
+            await desktop.StartAsync(2584, 2584, write: false);
+            Assert.IsTrue(desktop.Plugin.Settings().ShowOtherMachines, "The fleet attaches after plugins start; it must not erase the owner's opt-in.");
+            var (tab, _) = await desktop.OpenAsync(MobilePlugin.CanvasId);
+            var changed = await tab.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new(null, null, null, false));
+            Assert.IsFalse(changed.ShowOtherMachines, "The tab can turn the same setting off.");
+        }
+        await state.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Port = FreePort.Next(), ShowOtherMachines = true });
+        await using var node = new Fixture(new FakeTailscaleCli(installed: false), state) { Frontend = PluginFrontends.Node };
+        await node.StartAsync(2584, 2584, write: false);
+        Assert.IsFalse(node.Plugin.Settings().ShowOtherMachines, "A node never becomes a gateway, even if old settings ask it to.");
     }
 
     [TestMethod]

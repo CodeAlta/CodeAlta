@@ -13,17 +13,22 @@ public sealed partial class FleetNodeService
     // A creation is not deduplicated by the runtime: the key of the request makes a retry return the first session.
     private Task<FleetCreateSessionResult> CreateSessionAsync(FleetNodeCall call, FleetCreateSessionParams parameters, CancellationToken cancellationToken)
     {
+        ValidateCreation(parameters, call.Device!.Permissions);
+        if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
+        var retryKey = RetryKey(call);
+        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(call.Device, retryKey, parameters)));
+    }
+
+    private void ValidateCreation(FleetCreateSessionParams parameters, Identity.DevicePermissions permissions)
+    {
         RequireWork();
         RequireNotHalted();
         if (parameters.Prompt is { } prompt && (string.IsNullOrWhiteSpace(prompt) || prompt.Length > MaxPromptLength))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A prompt has 1 to {MaxPromptLength} characters.");
-        if (parameters.Prompt is not null && (call.Device!.Permissions & Identity.DevicePermissions.Drive) == 0)
+        if (parameters.Prompt is not null && (permissions & Identity.DevicePermissions.Drive) == 0)
             throw new FleetException(FleetErrorCodes.Forbidden, null, "This device may start sessions but not send them prompts.");
         if (parameters.Title is { } title && (string.IsNullOrWhiteSpace(title) || title.Length > MaxTitleLength || title.Any(char.IsControl)))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
-        if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
-        var retryKey = RetryKey(call);
-        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(call.Device, retryKey, parameters)));
     }
 
     // A session started through a team membership is its person's: recorded before its result returns, so that their next call finds it.
@@ -86,6 +91,8 @@ public sealed partial class FleetNodeService
 
         // Work of the fleet: a stop of the kill switch and the longest time of a policy reach it.
         Work.Record(session.SessionId, parameters.SpaceId, "remote", _options.TimeProvider.GetUtcNow());
+        // A draft without a first prompt keeps the chosen model and prompt too; a phone sends its first prompt separately.
+        await KeepSelectionAsync(session, Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId)).ConfigureAwait(false);
         // The sandbox the person chose holds the policy already; without one, the policy gives its own.
         if (sandbox is not null)
         {
@@ -127,8 +134,12 @@ public sealed partial class FleetNodeService
     // A session whose worktree was removed while it was not used (FleetSessionWorktreeCleanup) works in a new one before its
     // prompt: from the branch that kept its commits, else from the commit the checkout is on.
     private async Task<SessionViewDescriptor> RequireWorktreeAsync(SessionViewDescriptor session)
+        => await RequireWorktreeAsync(session, isolate: false).ConfigureAwait(false);
+
+    private async Task<SessionViewDescriptor> RequireWorktreeAsync(SessionViewDescriptor session, bool isolate)
     {
-        if (session.WorktreeDirectory is not { Length: > 0 } folder || Directory.Exists(folder) || session.ProjectRef is not { } projectId) return session;
+        if (session.ProjectRef is not { } projectId || session.WorktreeDirectory is { Length: > 0 } folder && Directory.Exists(folder)
+            || !isolate && string.IsNullOrEmpty(session.WorktreeDirectory)) return session;
         var project = await _host.ProjectCatalog.GetByIdAsync(projectId).ConfigureAwait(false);
         if (project is null || project.Archived || !Directory.Exists(project.ProjectPath))
             throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The node has no project '{projectId}' any more.");
@@ -268,7 +279,7 @@ public sealed partial class FleetNodeService
 
     private static OwnedSessionSelection? Selection(FleetModelSelection? selection, string sessionProvider, string? sessionPrompt)
     {
-        if (selection is null || selection.ModelId is null && selection.ReasoningEffort is null && selection.AgentPromptId is null) return null;
+        if (selection is null || selection.ModelId is null && selection.ReasoningEffort is null && selection.AgentPromptId is null && selection.PermissionMode is null) return null;
         AgentReasoningEffort? effort = null;
         if (selection.ReasoningEffort is { } text)
         {
@@ -277,13 +288,15 @@ public sealed partial class FleetNodeService
             effort = parsed;
         }
 
-        return new OwnedSessionSelection(selection.ProviderKey ?? sessionProvider, selection.AgentPromptId ?? sessionPrompt ?? "default", selection.ModelId, effort);
+        return new OwnedSessionSelection(selection.ProviderKey ?? sessionProvider, selection.AgentPromptId ?? sessionPrompt ?? "default", selection.ModelId, effort)
+            { PermissionMode = selection.PermissionMode };
     }
 
     // A send is the owned command of the desktop: the key of the request is its client retry key, so a retry after a lost
     // reply returns the first receipt and never sends twice.
     private async Task<FleetCommandResult> SendAsync(FleetNodeCall call, FleetSendParams parameters, CancellationToken cancellationToken)
     {
+        if (parameters.Agent is null) return await SendPersonAsync(RetryKey(call), parameters, isolate: false, cancellationToken).ConfigureAwait(false);
         RequireWork();
         RequireNotHalted();
         var retryKey = RetryKey(call);
@@ -303,13 +316,13 @@ public sealed partial class FleetNodeService
             }).ConfigureAwait(false);
         }
 
-        var selection = Selection(parameters.Selection, session.ResolvedProviderKey, session.AgentPromptId);
-        // A send the runtime knows already (a retry) is answered as it was; a new one starts a run the budgets admit first.
-        return await WithinBudgetAsync(session, null, HeldSendOf(retryKey, session.SessionId, text, null, selection)).ConfigureAwait(false);
+        throw new InvalidOperationException("The signed agent prompt was not admitted.");
     }
 
     private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)
     {
+        if (parameters.Agent is null)
+            return await Once(call, FleetNodeJsonContext.Default.FleetQueueResult, () => QueuePersonAsync(parameters, isolate: false)).ConfigureAwait(false);
         RequireWork();
         RequireNotHalted();
         RequirePrompt(parameters.Text);
@@ -327,6 +340,7 @@ public sealed partial class FleetNodeService
 
     private async Task<FleetCommandResult> SteerAsync(FleetNodeCall call, FleetSteerParams parameters, CancellationToken cancellationToken)
     {
+        if (parameters.Agent is null) return await SteerPersonAsync(RetryKey(call), parameters, cancellationToken).ConfigureAwait(false);
         RequireWork();
         RequireNotHalted();
         var retryKey = RetryKey(call);
@@ -350,8 +364,10 @@ public sealed partial class FleetNodeService
     }
 
     private async Task<FleetCommandResult> AbortAsync(FleetNodeCall call, FleetAbortParams parameters, CancellationToken cancellationToken)
+        => await AbortPersonAsync(RetryKey(call), parameters, cancellationToken).ConfigureAwait(false);
+
+    private async Task<FleetCommandResult> AbortPersonAsync(string retryKey, FleetAbortParams parameters, CancellationToken cancellationToken)
     {
-        var retryKey = RetryKey(call);
         var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         if (parameters.OperationId is { } operation)
         {
@@ -363,6 +379,75 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "Stopping names the operation of a send, or the runtime, attachment and run of sessions.state.");
         return Admit(_host.Commands.AdmitAbortRun(new OwnedAbortRunRequest(retryKey, sessionId, runtime,
             parameters.AttachmentGeneration.Value, parameters.RunId), cancellationToken));
+    }
+
+    // The same work admission for the node API and the page the personal node serves.
+    private async Task<FleetCommandResult> SendPersonAsync(string retryKey, FleetSendParams parameters, bool isolate, CancellationToken cancellationToken)
+    {
+        RequireWork();
+        RequireNotHalted();
+        RequirePrompt(parameters.Text);
+        var session = await RequireWorktreeAsync(await RequireSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false), isolate).ConfigureAwait(false);
+        RequirePolicySelection(session, parameters.Selection);
+        var selection = await CheckedSelectionAsync(session, parameters.Selection, cancellationToken).ConfigureAwait(false);
+        Work.Record(session.SessionId, session.SpaceId, "remote", _options.TimeProvider.GetUtcNow());
+        return await WithinBudgetAsync(session, null, HeldSendOf(retryKey, session.SessionId, parameters.Text, null, selection)).ConfigureAwait(false);
+    }
+
+    private async Task<FleetQueueResult> QueuePersonAsync(FleetQueueParams parameters, bool isolate)
+    {
+        RequireWork();
+        RequireNotHalted();
+        RequirePrompt(parameters.Text);
+        var session = await RequireWorktreeAsync(await RequireSessionAsync(parameters.SessionId, CancellationToken.None).ConfigureAwait(false), isolate).ConfigureAwait(false);
+        RequirePolicySelection(session, parameters.Selection);
+        await KeepSelectionAsync(session, await CheckedSelectionAsync(session, parameters.Selection, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
+        Work.Record(session.SessionId, session.SpaceId, "remote", _options.TimeProvider.GetUtcNow());
+        var item = await _host.RuntimeService.QueuePromptAsync(session, parameters.Text, "queue", null, CancellationToken.None).ConfigureAwait(false);
+        return new FleetQueueResult("queued", item.QueueItemId);
+    }
+
+    private async Task<FleetCommandResult> SteerPersonAsync(string retryKey, FleetSteerParams parameters, CancellationToken cancellationToken)
+    {
+        RequireWork();
+        RequireNotHalted();
+        RequirePrompt(parameters.Text);
+        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        if (parameters.RuntimeInstanceId == Guid.Empty || parameters.AttachmentGeneration <= 0 || string.IsNullOrWhiteSpace(parameters.RunId))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "Steering is bound to the runtime, attachment and run of sessions.state.");
+        return Admit(_host.Commands.AdmitSteer(new OwnedTextSteerRequest(retryKey, sessionId, parameters.RuntimeInstanceId,
+            parameters.AttachmentGeneration, parameters.RunId, parameters.Text), cancellationToken));
+    }
+
+    private async Task<OwnedSessionSelection?> CheckedSelectionAsync(SessionViewDescriptor session, FleetModelSelection? requested, CancellationToken cancellationToken)
+    {
+        var selection = Selection(requested, session.ResolvedProviderKey, session.AgentPromptId);
+        if (selection is null) return null;
+        if (requested?.ProviderKey is { } provider && provider != session.ResolvedProviderKey)
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "Change the session's provider before sending its prompt.");
+        if (selection.PermissionMode is { } mode)
+            _ = RequestedPermissionMode(mode == OwnedSessionSelection.ProviderPermissionMode ? _host.RuntimeService.GetNewSessionPermissionMode(session.ResolvedProviderKey) : mode,
+                session.ResolvedProviderKey, Policy?.RulesFor(session.SpaceId)?.PermissionMode);
+        var check = await _host.Commands.CheckSelectionAsync(session.SessionId, selection.ModelId, selection.ReasoningEffort,
+            selection.AgentPromptId, selection.PermissionMode, cancellationToken).ConfigureAwait(false);
+        if (check.Status != OwnedSelectionCheck.Ok) throw new FleetException(FleetErrorCodes.InvalidParams, null, $"The session did not accept the selection ({check.Status}).");
+        return check.Selection;
+    }
+
+    private async Task KeepSelectionAsync(SessionViewDescriptor session, OwnedSessionSelection? selection)
+    {
+        if (selection is null) return;
+        if (selection.PermissionMode is { } mode && (await _host.Commands.SetPermissionModeAsync(session.SessionId, mode).ConfigureAwait(false)).Status != "ok")
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "The session did not accept the permission mode.");
+        if (selection.ModelId is { } model)
+        {
+            await _host.RuntimeService.SetActiveSessionModelAsync(session.SessionId, model, selection.ReasoningEffort).ConfigureAwait(false);
+            session.ModelId = model;
+            session.ReasoningEffort = selection.ReasoningEffort;
+        }
+        await _host.RuntimeService.SetActiveSessionAgentPromptIdAsync(session.SessionId, selection.AgentPromptId).ConfigureAwait(false);
+        session.AgentPromptId = selection.AgentPromptId;
+        await _host.RuntimeService.PersistSessionLocalStateAsync(session).ConfigureAwait(false);
     }
 
     private static void RequirePrompt(string? text)

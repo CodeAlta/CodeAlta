@@ -205,9 +205,34 @@ const api: MachinePageApi = {
   signOut: async request => { calls.push(JSON.stringify({ signOut: [request.kind, request.key] })); return { status: "ok", item: null, message: null }; },
   labels: async () => ({ status: "ok", message: null, labels: [...labels] }),
   setLabels: async request => { calls.push(JSON.stringify({ labels: request.labels })); labels = [...request.labels]; return { status: "ok", message: null }; },
+  // The page of the phones of the node, as `altanode mobile` runs it: off until it is turned on; a code is made when asked for, connects one phone and ends.
+  mobile: async () => nodeMobile.state(),
+  mobileEnable: async request => {
+    calls.push(JSON.stringify({ mobileEnable: request.enabled }));
+    // A machine that began to let other people in since the page read it refuses, and says why.
+    if (nodeMobile.enableRefused) return { status: "policy.refused", message: "This machine lets other people in.", available: false, enabled: false, running: false, refusal: null };
+    nodeMobile.enabled = request.enabled;
+    return nodeMobile.state();
+  },
+  mobileInvoke: async request => {
+    calls.push(JSON.stringify({ mobileInvoke: [request.method, request.payload] }));
+    if (!nodeMobile.enabled) return { status: "unavailable", message: "The page of the phones is turned off on this machine.", json: null };
+    if (request.method === "mobile.pair") nodeMobile.code = true;
+    return { status: "ok", message: null, json: JSON.stringify(nodeMobile.status()) };
+  },
   joinServer: async request => { calls.push(JSON.stringify({ joinServer: [request.machineId, request.linkId] })); return { status: "ok", name: "build-box", words: "apple river stone cloud amber tiger", message: null }; },
 };
 let labels: string[] = ["gpu"];
+// A QR code as the plugin sends it: a pattern is enough to draw.
+const qrRows = Array.from({ length: 25 }, (_, y) => Array.from({ length: 25 }, (_, x) => ((x * 7 + y * 3) % 5 < 2) || (x < 7 && y < 7) ? "1" : "0").join(""));
+const nodeMobile = {
+  enabled: false, enableRefused: false, code: false, phones: 0, refusal: null as string | null, available: true,
+  state: () => ({ status: "ok", message: null, available: nodeMobile.available, enabled: nodeMobile.enabled, running: nodeMobile.enabled, refusal: nodeMobile.refusal }),
+  status: () => ({ server: "listening", port: 2584, serverDetail: null, provider: { id: "tailscale", state: "serving", url: "https://build-box.tail1a2b.ts.net:2584", detail: "Published.", fixUrl: null,
+      working: false, name: "Tailscale", actions: [] },
+    connectUrl: nodeMobile.code ? "https://build-box.tail1a2b.ts.net:2584/#k=secret" : null, address: nodeMobile.code ? "https://build-box.tail1a2b.ts.net:2584" : null,
+    qr: nodeMobile.code ? qrRows : null, served: "https://build-box.tail1a2b.ts.net:2584", phones: nodeMobile.phones, pairsOnce: true, pairingSeconds: nodeMobile.code ? 290 : null }),
+};
 let signInWaits = 0;
 let operationWaits = 0;
 // A node of an older version, which does not know the offers.
@@ -230,7 +255,11 @@ function setSecret(name: string, value: string) {
 
 function Fixture() {
   const [shown, setShown] = useState("managed");
-  Object.assign(window, { machineFixture: { calls, show: setShown, oldNode: () => { oldNode = true; } } });
+  Object.assign(window, { machineFixture: { calls, show: setShown, oldNode: () => { oldNode = true; },
+    // The phone scanned the code: it connected and the code ended; the page reads it at its next poll.
+    phoneConnects: () => { nodeMobile.phones++; nodeMobile.code = false; },
+    refuseEnable: () => { nodeMobile.enableRefused = true; },
+    shareMachine: () => { nodeMobile.refusal = "This machine lets other people in: a phone would see the sessions of all of them, so it does not serve the page of the phones."; } } });
   // A node whose connection to a server it joined fails after its .NET runtime was replaced under it: only the node knows why.
   managedServers = shown === "joinable" ? [{ name: "Work", state: "disconnected",
     message: "transport_error Could not load file or assembly 'System.Net.WebSockets.Client, Version=10.0.0.0'." }] : [];

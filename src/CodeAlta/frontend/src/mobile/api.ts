@@ -1,4 +1,5 @@
-import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, LinkedFilePage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, TakeOverResult, ToolCallDetail, ToolOutputPage, ToolOutputPlace, UnqueueResult, UnsteerResult, WaitingPage, WaitingRun } from "./contract";
+import { isLocalMachine, localKey, machineOf, newRequestId, qualifyPage, qualifySession, sessionBase } from "./machines";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, LinkedFilePage, MachinePage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, TakeOverResult, ToolCallDetail, ToolOutputPage, ToolOutputPlace, UnqueueResult, UnsteerResult, WaitingPage, WaitingRun } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -51,7 +52,26 @@ export function takeAddressToken(address: Readonly<{ search: string; hash: strin
 export class ApiError extends Error {
   /** The HTTP status. */
   readonly status: number;
-  constructor(status: number, message: string) { super(message); this.name = "ApiError"; this.status = status; }
+  /** What else the server said of the failure: its `code` and the facts the code goes with (`machineId`, `sessionId`...), when it said any. */
+  readonly code: string | null;
+  readonly facts: Readonly<Record<string, unknown>>;
+  constructor(status: number, message: string, facts: Readonly<Record<string, unknown>> = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.facts = facts;
+    this.code = typeof facts.code === "string" ? facts.code : null;
+  }
+
+  /**
+   * Where the session lives, when this machine says that the session is not on it (409 `not_on_this_machine`): the machine, and the id
+   * of the session there. A session the computer gave away, or the link of a machine that never had it.
+   */
+  get movedTo(): Readonly<{ machineId: string | null; sessionId: string | null }> | null {
+    if (this.status !== 409 || this.code !== "not_on_this_machine") return null;
+    const { machineId, sessionId } = this.facts;
+    return { machineId: typeof machineId === "string" ? machineId : null, sessionId: typeof sessionId === "string" ? sessionId : null };
+  }
 }
 
 /** The server does not know this phone: it kept no token, or the kept token did not sign it in again. */
@@ -67,6 +87,9 @@ export function failureText(error: unknown, host: string): string {
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+/** The header that carries the id of a command. */
+export const requestIdHeader = "X-Alta-Request-Id";
+
 /**
  * The one way the page calls the server. A 401 (the cookie expired, or a home-screen app that never had it) signs in
  * again once with the kept token and repeats the call; when that fails too, the token is forgotten, `onSignedOut` is
@@ -76,11 +99,13 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
  */
 export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueStore; onSignedOut: (message: string) => void; onSignedIn?: () => void }>) {
   const { store } = options;
+  // The id of this computer in the fleet, once the page has read the machines: the sessions of other machines name it by that id.
+  let localDevice: string | null = null;
   let signingIn: Promise<boolean> | null = null;
 
-  const request = (method: string, path: string, body?: unknown) => options.fetch(path, {
+  const request = (method: string, path: string, body?: unknown, requestId?: string) => options.fetch(path, {
     method, credentials: "same-origin", cache: "no-store",
-    headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(requestId ? { [requestIdHeader]: requestId } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
@@ -93,7 +118,7 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     }
     if (!response.ok) {
       const said = data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string" ? (data as { error: string }).error : null;
-      throw new ApiError(response.status, said || `HTTP ${response.status}`);
+      throw new ApiError(response.status, said || `HTTP ${response.status}`, data && typeof data === "object" ? data as Record<string, unknown> : {});
     }
     return (data ?? {}) as T;
   }
@@ -122,13 +147,16 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     return signingIn ??= login(token).finally(() => { signingIn = null; });
   }
 
+  // A command (a POST) carries an id of its own in a header, made once: the request that is made again after a sign-in is the same one,
+  // so that the computer, or the machine it sends it to, takes it once. A new session and its first prompt go in one request, under one id.
   async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    let response = await request(method, path, body);
+    const requestId = method === "POST" ? newRequestId() : undefined;
+    let response = await request(method, path, body, requestId);
     if (response.status === 401) {
       const token = store.get(tokenKey);
       if (!token) signOut(notConnectedMessage);
       if (!await signInAgain(token)) signOut();
-      response = await request(method, path, body);
+      response = await request(method, path, body, requestId);
       if (response.status === 401) signOut();
     }
     return read<T>(response);
@@ -141,7 +169,10 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     return result;
   }
 
-  const session = (id: string) => `/api/sessions/${encodeURIComponent(id)}`;
+  // The routes of a session: those of this computer for a session of its own, those of its machine for another one.
+  const session = (key: string) => sessionBase(localKey(key, localDevice));
+  // The routes of a machine: this computer's own for `local` and for none (what an older CodeAlta, which has no machines, answers).
+  const machineRoute = (machine: string | null | undefined, local: string, remote: string) => isLocalMachine(machine) ? local : `/api/machines/${encodeURIComponent(machine!)}${remote}`;
   return {
     login,
     pushKey: () => call<{ publicKey: string }>("GET", "/api/push"),
@@ -154,22 +185,38 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       store.remove(tokenKey);
       return false;
     },
-    sessions: (offset: number, limit: number, projects: readonly string[]) => {
+    /** Tells the page the id of this computer in the fleet (`deviceId` of its machine), so that the sessions that name it by it are its own. */
+    setLocalDevice(deviceId: string | null | undefined) { localDevice = deviceId || null; },
+    /** The machines the computer reaches, itself first; an older CodeAlta has none of this and answers 404. */
+    machines: () => call<MachinePage>("GET", "/api/machines"),
+    /**
+     * A page of the list: of this computer when `machine` is null (an older CodeAlta, or a computer that reaches none), else `all`,
+     * `local` or a machine. The sessions come named by their machines (`machines.ts`).
+     */
+    sessions: async (offset: number, limit: number, projects: readonly string[], machine: string | null = null) => {
       const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
       for (const project of projects) query.append("project", project);
-      return call<SessionPage>("GET", `/api/sessions?${query}`);
+      if (machine !== null) query.set("machine", machine);
+      const page = await call<SessionPage>("GET", `/api/sessions?${query}`);
+      // A list of one machine does not say it on each session: the page does.
+      const single = machine !== null && machine !== "all" && !isLocalMachine(machine);
+      return qualifyPage(single ? { ...page, sessions: (page.sessions ?? []).map(s => ({ ...s, machineId: s.machineId ?? machine })), parents: page.parents?.map(s => ({ ...s, machineId: s.machineId ?? machine })) } : page, localDevice);
     },
-    session: (id: string) => call<Session>("GET", session(id)),
+    session: async (id: string) => {
+      const read = await call<Session>("GET", session(id));
+      return qualifySession(isLocalMachine(machineOf(id)) ? read : { ...read, machineId: read.machineId ?? machineOf(id) }, localDevice);
+    },
     events: (id: string, since: number) => call<EventPage>("GET", `${session(id)}/events?since=${since}`),
     /** A page of the timeline from its end: the latest events, or those before a sequence number. */
     latestEvents: (id: string, before?: number) => call<LatestEventPage>("GET", `${session(id)}/events/latest${before === undefined ? "" : `?before=${before}`}`),
     jobs: (id: string) => call<JobPage>("GET", `${session(id)}/jobs`),
     job: (id: string, jobId: string) => call<JobOutput>("GET", `${session(id)}/jobs/${encodeURIComponent(jobId)}`),
     stopJob: (id: string, jobId: string) => command<ActionResult>(`${session(id)}/jobs/${encodeURIComponent(jobId)}/stop`),
-    projects: () => call<ProjectList>("GET", "/api/projects"),
-    options: () => call<Options>("GET", "/api/options"),
-    create: async (request: NewSessionRequest) => {
-      const result = await call<NewSessionResult>("POST", "/api/sessions", request);
+    projects: (machine?: string | null) => call<ProjectList>("GET", machineRoute(machine, "/api/projects", "/projects")),
+    options: (machine?: string | null) => call<Options>("GET", machineRoute(machine, "/api/options", "/options")),
+    /** Starts a session on this computer, or on the machine named. */
+    create: async (request: NewSessionRequest, machine?: string | null) => {
+      const result = await call<NewSessionResult>("POST", machineRoute(machine, "/api/sessions", "/sessions"), request);
       if (!result.id) throw new ApiError(200, result.error || "The session was not created.");
       return result;
     },

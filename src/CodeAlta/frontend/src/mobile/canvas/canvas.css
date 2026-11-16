@@ -12,3 +12,7 @@
 .mobile-waiting .bp6-spinner { flex: none; }
 .mobile-problem p { margin: 0; overflow-wrap: anywhere; }
 .mobile-problem-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* A host without a window: how many phones are connected, and the button that asks for a code. */
+.mobile-pairing { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mobile-sharing .bp6-switch { margin-bottom: 6px; }
+.mobile-sharing .settings-field-help { margin: 0; }

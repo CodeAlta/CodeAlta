@@ -49,23 +49,36 @@ export const newAskLocal = (): AskLocal => ({ sending: false, note: "", submitte
  * An ask is shown once the run that asked has ended, as the desktop presents it, except a question of a script (`immediate`),
  * which waits for the answer while its turn runs.
  */
-export function askMode(ask: Ask | null | undefined, live: Live | null | undefined, local: AskLocal | undefined): "form" | "sending" | "unknown" | null {
-  if (!ask || (ask.questions.length === 0 && !ask.review)) return null;
-  if (local?.sending) return "sending";
+export function askMode(ask: Ask | null | undefined, live: Live | null | undefined, local: AskLocal | undefined): "form" | "sending" | "unknown" | "elsewhere" | null {
+  if (!ask) return null;
+  const elsewhere = askElsewhere(ask);
+  if (!elsewhere && ask.questions.length === 0 && !ask.review) return null;
+  if (local?.sending && !elsewhere) return "sending";
   const visible = ask.immediate === true || !isBusy(live?.live);
   if (!visible) return null;
+  if (elsewhere) return "elsewhere";
   if (ask.state === "indeterminate") return "unknown";
   // The answer this phone has on its way, until the ask read again says what became of it.
   const submitted = local?.submitted?.askId === ask.id && local.submitted.revision === ask.revision;
   return ask.state === "submitting" || submitted ? "sending" : "form";
 }
 
+/**
+ * Whether the ask is one the phone never answers: of a kind it does not know (a machine that is newer than this page, a review the
+ * machine cannot hand over), which is told as "Review it on a computer" and offers no control.
+ */
+export const askElsewhere = (ask: Pick<Ask, "kind" | "review"> | null | undefined): boolean =>
+  !!ask && (ask.review?.kind === "elsewhere" || (ask.kind != null && ask.kind !== "questions" && !(ask.kind === "review" && !!ask.review)));
+
+/** The same for what the live stream says of the ask of a session. */
+export const askMarkElsewhere = (mark: AskMark | null | undefined): boolean => !!mark?.kind && mark.kind !== "questions" && mark.kind !== "review";
+
 /** Whether the card of a session in the list says it waits for an answer: its ask waits, and is shown now. */
 export const askWaiting = (live: Live | null | undefined): boolean =>
   !!live?.asking && live.asking.state === "pending" && (live.asking.immediate || !isBusy(live.live));
 
 /** What tells the page to read the ask of a session again: it came, went, or changed its revision or its state. */
-export const askMarkKey = (mark: AskMark | null | undefined): string => mark ? `${mark.id}\n${mark.revision}\n${mark.state}\n${mark.immediate}` : "";
+export const askMarkKey = (mark: AskMark | null | undefined): string => mark ? `${mark.id}\n${mark.revision}\n${mark.state}\n${mark.immediate}\n${mark.kind ?? ""}` : "";
 
 /**
  * What the ask read again means for the answer this phone sent: `done` when the ask is gone (or another one waits), so its
@@ -91,7 +104,7 @@ export const askTextFits = (ask: Ask, draft: AskDraft): boolean =>
   [...draft.text].reduce((sum, [question, text]) => sum + (question < ask.questions.length ? text.length : 0), 0) <= askLimits.answerText;
 
 /** The badge of the card: what the agent asks for. */
-export const askBadge = (ask: Ask): string => ask.review ? "Review requested" : ask.questions.length === 1 ? "A question for you" : "Questions for you";
+export const askBadge = (ask: Ask): string => askElsewhere(ask) ? "Review requested" : ask.review ? "Review requested" : ask.questions.length === 1 ? "A question for you" : "Questions for you";
 
 /** What a review request is of: its title, the name of its file, or the changes. */
 export function askReviewWhat(review: AskReview): string {

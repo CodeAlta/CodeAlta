@@ -141,7 +141,10 @@ public sealed record PluginAskFreeform
 /// <summary>What a review request asks the user to review.</summary>
 public sealed record PluginAskReview
 {
-    /// <summary>Gets what is reviewed: <c>file</c>, <c>changes</c> (the uncommitted changes) or <c>branch</c> (the changes of the branch).</summary>
+    /// <summary>
+    /// Gets what is reviewed: <c>file</c>, <c>changes</c> (the uncommitted changes), <c>branch</c> (the changes of the branch),
+    /// or <c>elsewhere</c> for an interaction this service cannot answer, which must be opened on its computer.
+    /// </summary>
     public required string Kind { get; init; }
 
     /// <summary>Gets the file of a <c>file</c> review, relative to the folder of the session, with <c>/</c>; <see langword="null"/> otherwise.</summary>

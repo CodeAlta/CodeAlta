@@ -1,6 +1,14 @@
 // The words of the settings page of the Mobile plugin, in the five languages after English (es, fr, de, ja, zh-CN), merged into the dictionary
 // of `localization.ts`. English is the key.
 export const mobileSettingsMessages = {
+  "Other machines": ["Otras máquinas", "Autres machines", "Andere Maschinen", "他のマシン", "其他机器"],
+  "Show my other machines on the phone": ["Mostrar mis otras máquinas en el teléfono", "Afficher mes autres machines sur le téléphone", "Meine anderen Maschinen auf dem Telefon anzeigen", "他のマシンをスマートフォンに表示", "在手机上显示我的其他机器"],
+  "Every connected phone can use the machines this computer reaches, with this computer's permissions.": [
+    "Todos los teléfonos conectados pueden usar las máquinas accesibles desde este equipo, con sus permisos.",
+    "Chaque téléphone connecté peut utiliser les machines que cet ordinateur atteint, avec ses autorisations.",
+    "Jedes verbundene Telefon kann die von diesem Computer erreichbaren Maschinen mit seinen Berechtigungen nutzen.",
+    "接続したすべてのスマートフォンで、このコンピューターが接続できるマシンを、このコンピューターの権限で使用できます。",
+    "每部已连接的手机都可以使用此计算机所能访问的机器，并拥有此计算机的权限。"],
   "Phones connect through": ["Los teléfonos se conectan mediante", "Les téléphones se connectent via", "Telefone verbinden sich über", "スマートフォンの接続方法", "手机的连接方式"],
   "Phones on your tailnet open the page, signed in to Tailscale with your account. This computer and the phone need Tailscale.": [
     "Los teléfonos de tu tailnet abren la página, con sesión iniciada en Tailscale con tu cuenta. Este equipo y el teléfono necesitan Tailscale.",

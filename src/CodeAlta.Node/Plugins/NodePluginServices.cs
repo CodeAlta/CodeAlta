@@ -21,6 +21,8 @@ internal sealed class NodePluginServices(PluginAltaServiceBridge alta, IPluginAp
     /// <summary>Gets the permission requests of the sessions, attached once the host runs.</summary>
     public PluginPermissionServiceBridge PermissionBridge { get; } = permissions ?? throw new ArgumentNullException(nameof(permissions));
 
+    internal NodeMobileAlta PersonalAlta { get; } = new(alta);
+
     /// <inheritdoc />
     public Logger Logger => _inner.Logger;
 
@@ -49,7 +51,7 @@ internal sealed class NodePluginServices(PluginAltaServiceBridge alta, IPluginAp
     public IPluginTaskService Tasks => _inner.Tasks;
 
     /// <inheritdoc />
-    public IPluginAltaService Alta => AltaBridge;
+    public IPluginAltaService Alta => PersonalAlta;
 
     /// <inheritdoc />
     public IPluginAppFileService AppFiles { get; } = appFiles ?? throw new ArgumentNullException(nameof(appFiles));

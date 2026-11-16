@@ -25,10 +25,10 @@ internal sealed partial class MobileApi
     internal async Task<JsonObject?> JobAsync(string id, string jobId, bool stop, CancellationToken cancellationToken)
     {
         if (!IsId(jobId) || await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
-        var status = await MobileAlta.RunAsync(alta, ["job", "status", jobId], null, cancellationToken).ConfigureAwait(false);
+        var status = await MobileAlta.RunSessionAsync(alta, id, ["job", "status", jobId], cancellationToken).ConfigureAwait(false);
         var job = status.OfType("alta.job.status").FirstOrDefault();
         if (job is null || MobileAlta.Text(job, "sessionId") != id) return null;
-        var result = await MobileAlta.RunAsync(alta, stop ? ["job", "cancel", jobId] : ["job", "output", jobId, "--lines", "200"], null, cancellationToken).ConfigureAwait(false);
+        var result = await MobileAlta.RunSessionAsync(alta, id, stop ? ["job", "cancel", jobId] : ["job", "output", jobId, "--lines", "200"], cancellationToken).ConfigureAwait(false);
         if (result.Error is not null) return Error(result.Error);
         if (stop) return new JsonObject { ["error"] = null };
         var output = result.OfType("alta.job.output").FirstOrDefault();

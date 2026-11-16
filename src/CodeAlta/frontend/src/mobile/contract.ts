@@ -18,6 +18,35 @@ export type JobPage = Readonly<{ jobs: readonly BackgroundJob[]; error: string |
 /** A bounded tail of a job's output, read while it runs or after it ends. */
 export type JobOutput = Readonly<{ job: BackgroundJob; text: string; truncated: boolean; error: string | null }>;
 
+/** What the computer reaches of a machine now: online and answering, being reached, out of reach, or not letting this computer in. */
+export type MachineState = "online" | "connecting" | "offline" | "unauthorized";
+
+/** How a machine is reached: straight from the computer, or relayed by the server of the person. Null while it is not reached. */
+export type MachinePath = "direct" | "relayed";
+
+/** What the person may do on a machine: read its sessions, drive them, start new ones. */
+export type MachineCan = Readonly<{ view: boolean; drive: boolean; start: boolean }>;
+
+/** A machine of `GET /api/machines`: this computer (`this`, id `local`) or one it reaches. `features` lists what it offers the phone. */
+export type Machine = Readonly<{
+  id: string;
+  /** For this computer (`id` stays `local`): its id in the fleet, which the sessions of other machines name it by (`parentMachineId`). */
+  deviceId?: string | null;
+  name: string;
+  this: boolean;
+  state: MachineState;
+  path: MachinePath | null;
+  /** When the machine was last reached: what an offline machine says of itself. */
+  lastSeen: string | null;
+  can: MachineCan;
+  features: readonly string[];
+  /** How many of its sessions wait for the person. */
+  waiting: number;
+}>;
+
+/** `GET /api/machines`. */
+export type MachinePage = Readonly<{ machines: readonly Machine[]; error: string | null }>;
+
 /** What a session is doing: working, running tools, thinking, or nothing. */
 export type LiveState = "idle" | "running" | "tools" | "thinking";
 
@@ -40,6 +69,8 @@ export type ActivityFacts = Readonly<{
 /** The live state of a session, as the list and the `session` events of `/api/events` give it. */
 export type Live = Readonly<{
   id: string;
+  /** The machine of the session; absent from an older CodeAlta, which lists this computer only. */
+  machineId?: string | null;
   projectId?: string | null;
   live: LiveState;
   kind: "user" | "assistant" | "writing" | "activity" | "error" | null;
@@ -56,7 +87,7 @@ export type Live = Readonly<{
 }>;
 
 /** The ask of a session, as the live stream says it: what changes when an answer goes, or did not reach the session. */
-export type AskMark = Readonly<{ id: string; revision: string; state: Ask["state"]; immediate: boolean }>;
+export type AskMark = Readonly<{ id: string; revision: string; state: Ask["state"]; immediate: boolean; kind?: string | null }>;
 
 /** The permission requests of a session, as the live stream says them: the first one and how many were read. */
 export type ApprovalMark = Readonly<{ id: string; count: number }>;
@@ -106,6 +137,18 @@ export type SessionModel = Readonly<{ provider: string; providerName: string | n
 /** A session of the list, or one read alone. */
 export type Session = Readonly<{
   id: string;
+  /**
+   * The machine the session is on, and its display name; absent from an older CodeAlta, and for this computer (`local`).
+   * The page names a session by its machine and its id together (`machines.ts`).
+   */
+  machineId?: string | null;
+  machine?: string | null;
+  /** The machine of `parentId` when it is another one than the session's own. */
+  parentMachineId?: string | null;
+  /** What the machine of the session is now, what the person may do there and what it offers: the page prefers `GET /api/machines` when it has it. */
+  machineState?: MachineState | null;
+  can?: Partial<MachineCan> | null;
+  features?: readonly string[] | null;
   title: string | null;
   projectId: string | null;
   project: string | null;
@@ -256,8 +299,8 @@ export type NewSessionRequest = Readonly<{
   attachments?: readonly PromptAttachment[];
 }>;
 
-/** What `POST /api/sessions` answers. */
-export type NewSessionResult = Readonly<{ id: string; pending?: boolean; sendError?: string | null; error?: string | null }>;
+/** What `POST /api/sessions` answers; `machineId` says where the session was started when it was not this computer. */
+export type NewSessionResult = Readonly<{ id: string; machineId?: string | null; pending?: boolean; sendError?: string | null; error?: string | null }>;
 
 /** What the commands of a session answer. */
 export type ActionResult = Readonly<{
@@ -327,7 +370,7 @@ export type AskQuestion = Readonly<{
 
 /** What a review request asks the user to review. */
 export type AskReview = Readonly<{
-  kind: "file" | "changes" | "branch";
+  kind: "file" | "changes" | "branch" | "elsewhere";
   /** The file of a `file` review, relative to the folder of the session. */
   path: string | null;
   title: string | null;
@@ -340,6 +383,12 @@ export type AskReview = Readonly<{
 /** The ask a session waits on: the questions an agent asks the user, or a review it requests. */
 export type Ask = Readonly<{
   id: string;
+  /**
+   * What the ask is: `questions` (or nothing, as an older CodeAlta says it) to answer on the phone, `review` of a file or of
+   * changes, or `elsewhere` for any other kind of a machine that the phone does not know how to answer: that one is never
+   * offered as a question.
+   */
+  kind?: "questions" | "review" | "elsewhere" | (string & {}) | null;
   /** The revision an answer names: it changes when the ask waits again after an answer the session did not take. */
   revision: string;
   state: "pending" | "submitting" | "indeterminate";

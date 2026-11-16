@@ -20,6 +20,33 @@ public sealed class FleetNodeReadTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task AnEightMiBImage_CrossesTheFourMiBChannel_InBoundedPieces_AndReassemblesExactly()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await NodeFixture.StartAsync(token);
+        var machine = await fixture.PairViewerAsync(token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        fixture.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedNodeProvider.Answer("Done.")));
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Prompt: "Create the journal", Selection: new FleetModelSelection("scripted", ScriptedNodeProvider.Model)), "image-session", token);
+        var alta = new FleetMachineAlta("test-node", _ => ValueTask.FromResult<FleetNodeClient?>(client));
+        var store = fixture.Node.Host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var attachments = await WaitForAsync(async () => await store.GetAttachmentDirectoryAsync(created.SessionId, token), token);
+        Directory.CreateDirectory(attachments);
+        var png = new byte[8 * 1024 * 1024];
+        Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5c8AAAAASUVORK5CYII=").CopyTo(png, 0);
+        await File.WriteAllBytesAsync(Path.Combine(attachments, "large.png"), png, token);
+
+        var piece = await client.ReadSessionAsync(new FleetSessionReadParams("session.image", created.SessionId) { Arguments = ["large.png"] }, token);
+        var record = piece.Records.Single(item => Text(item, "type") == "alta.session.image");
+        Assert.IsLessThanOrEqualTo(FleetSessionReads.ImageChunk, record.GetProperty("base64").GetString()!.Length);
+        Assert.IsGreaterThan(4 * 1024 * 1024, record.GetProperty("base64Length").GetInt32(), "It really needs more than one channel frame.");
+        var whole = await alta.InvokeAsync(["session", "image", created.SessionId, "large.png"], options: new() { MaxOutputBytes = 16 * 1024 * 1024 }, cancellationToken: token);
+        Assert.AreEqual(0, whole.ExitCode, whole.Error);
+        var image = Records(whole).Single(item => Text(item, "type") == "alta.session.image");
+        CollectionAssert.AreEqual(png, Convert.FromBase64String(image.GetProperty("base64").GetString()!));
+    }
+
+    [TestMethod]
     public async Task APerson_ReadsAndDrivesASessionOfAnotherMachine_WithTheCommandsOfThatMachine()
     {
         await using var fixture = await NodeFixture.StartAsync(TestContext.CancellationToken);
@@ -126,6 +153,19 @@ public sealed class FleetNodeReadTests
         var listed = await client.ReadSessionAsync(new FleetSessionReadParams("session.list"), token);
         Assert.IsTrue(listed.Records.Any(record => Text(record, "sessionId") == shared));
         Assert.IsFalse(listed.Records.Any(record => Text(record, "sessionId") == hidden), "A Private session is not listed to another machine.");
+
+        // Nor is it named by the session it is a sub-agent of: the status of the parent lists the sessions the caller may see.
+        var child = await fixture.Node.Alta.InvokeAsync(["session", "create", "--global", "--space", "default", "--provider", "scripted", "--parent", shared],
+            caller: CodeAlta.LiveTool.AltaCallerIdentity.Cli, cancellationToken: token);
+        Assert.AreEqual(0, child.ExitCode, child.Stdout + child.Error);
+        var childId = Records(new PluginAltaCommandResult { ExitCode = 0, TranscriptJsonl = child.Stdout }).Single(static record => Text(record, "type") == "alta.session.created").GetProperty("sessionId").GetString()!;
+        JsonElement Status() => client.ReadSessionAsync(new FleetSessionReadParams("session.status", shared), token).GetAwaiter().GetResult()
+            .Records.Single(static record => Text(record, "type") == "alta.session.status");
+        CollectionAssert.Contains(Status().GetProperty("childSessionIds").EnumerateArray().Select(static id => id.GetString()).ToArray(), childId);
+        await FleetNodePrivateSessionTests.MarkPrivateAsync(fixture.Node, childId, token);
+        var parent = Status();
+        Assert.AreEqual(0, parent.GetProperty("childSessionIds").GetArrayLength(), "A Private sub-agent is not named by its parent.");
+        Assert.AreEqual(0, parent.GetProperty("childCount").GetInt32());
 
         // A device that only views reads, and changes nothing.
         fixture.Fleet.Service.TrustedDevices.Add("viewer", fixture.ViewerIdentity.Fingerprint, DevicePermissions.View);

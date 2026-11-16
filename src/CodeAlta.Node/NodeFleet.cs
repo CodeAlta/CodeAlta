@@ -220,6 +220,9 @@ internal sealed class NodeFleet : IAsyncDisposable
             // one never committed is undone. Those it gave away wait for the device that drove them to come back.
             _ = RecoverMovesAsync(service);
             var fleet = new NodeFleet(identity, service, listener, addresses, file, new Fleet.ModelServerProviderRefresh(node.Host, modelServers));
+            node.PluginServices?.PersonalAlta.Attach(service.PersonalSessions);
+            // An old enabled setting is not a way to keep serving after the machine became shared while stopped.
+            service.StopMobileForOthersAsync().GetAwaiter().GetResult();
             fleet._configurationWatch = providers.WatchConfiguration();
             // `alta provider refresh` applies the configuration with the providers that watch it.
             if (node.ProviderConfiguration is { } configuration) configuration.Providers = providers;

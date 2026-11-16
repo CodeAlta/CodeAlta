@@ -10,12 +10,13 @@ import { el, icon, iconSvg } from "./dom";
 export type AskViewState = Readonly<{ sending: boolean; note: string }>;
 
 /** What the card is: the questions to answer, or a line read-only while an answer goes or when its outcome is unknown. */
-export type AskViewMode = "form" | "sending" | "unknown";
+export type AskViewMode = "form" | "sending" | "unknown" | "elsewhere";
 
 /** What the read-only card says. */
 export const askNotices = {
   sending: "Sending your answer to the session…",
   unknown: "The answer was sent, but CodeAlta cannot tell whether the session got it. Check the session on the computer.",
+  elsewhere: "Review it on a computer",
 } as const;
 
 /** What the card says when the text answers reach their limit. */
@@ -48,7 +49,7 @@ export function createAskView(options: Readonly<{
     card.setAttribute("role", "status");
     card.setAttribute("aria-live", "polite");
     const badge = make("span", "ask-badge");
-    badge.append(icon(document, ask.review ? "chat" : "ask"), document.createTextNode(askBadge(ask)));
+    badge.append(icon(document, ask.review || mode === "elsewhere" ? "chat" : "ask"), document.createTextNode(askBadge(ask)));
     const line = make("p", "ask-notice-text");
     if (mode === "sending") line.append(make("span", "ask-notice-spinner"));
     else line.append(icon(document, "computer"));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  askAnswer, askBadge, askChoice, askCommentsText, askGo, askLimits, askMarkKey, askMode, askPrimaryLabel, askReviewWhat, askSendable, askSettled, askStep, askTextRoom,
+  askAnswer, askBadge, askChoice, askCommentsText, askElsewhere, askGo, askLimits, askMarkElsewhere, askMarkKey, askMode, askPrimaryLabel, askReviewWhat, askSendable, askSettled, askStep, askTextRoom,
   askVerdict, askWaiting, newAskDraft, newAskLocal,
 } from "./ask";
 import { maximumReviewText } from "../review/ReviewThreadCard";
@@ -122,4 +122,26 @@ test("a review defaults to changes asked when it has comments, and a comment-onl
   assert.deepEqual(askAnswer(silent, draft, "action").review, { verdict: "commented", overall: "Fine by me." });
   assert.equal(askCommentsText(2), "Your review · 2 comments to send");
   assert.equal(askCommentsText(0), "Your review · No comment yet");
+});
+
+test("an ask of a kind the phone does not know is read on a computer, never offered as a question", () => {
+  const unknown: Ask = { ...ask([question("Database", ["Postgres"])]), kind: "elsewhere" };
+  assert.equal(askElsewhere(unknown), true);
+  assert.equal(askElsewhere({ ...unknown, kind: "somethingnew" }), true, "any kind this page does not know");
+  assert.equal(askElsewhere({ ...ask([question("x")], { kind: "elsewhere", path: null, title: null, message: null, comments: null }) }), true, "a review of a kind it cannot hand over");
+  for (const known of [ask([question("x")]), { ...ask([question("x")]), kind: "questions" as const }, { ...ask([], { kind: "file", path: "a.md", title: null, message: null, comments: 0 }), kind: "review" as const }])
+    assert.equal(askElsewhere(known), false);
+  assert.equal(askElsewhere({ ...ask([]), kind: "review" }), true, "a review that carries no review is read elsewhere");
+  assert.equal(askElsewhere(null), false);
+  // It shows in place of the composer once the run ended, even with no question and no review to draw, and nothing is sent for it.
+  const none = { ...ask([]), kind: "elsewhere" };
+  assert.equal(askMode(none, live("idle"), undefined), "elsewhere");
+  assert.equal(askMode(none, live("running"), undefined), null, "while the run goes on, as any ask");
+  assert.equal(askMode({ ...none, immediate: true }, live("running"), undefined), "elsewhere");
+  assert.equal(askMode(unknown, live("idle"), { sending: true, note: "", submitted: null }), "elsewhere", "an answer in flight does not make it a form");
+  assert.equal(askBadge(none), "Review requested");
+  assert.equal(askMarkElsewhere({ ...mark, kind: "elsewhere" }), true);
+  assert.equal(askMarkElsewhere({ ...mark, kind: "questions" }), false);
+  assert.equal(askMarkElsewhere(mark), false);
+  assert.notEqual(askMarkKey({ ...mark, kind: "elsewhere" }), askMarkKey(mark), "a change of kind is read again");
 });

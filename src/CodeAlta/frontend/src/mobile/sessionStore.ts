@@ -1,4 +1,4 @@
-import { isBusy, type Live, type Session, type SessionModel, type SessionPage, type Space } from "./contract";
+import { isBusy, type Live, type MachineCan, type MachineState, type Session, type SessionModel, type SessionPage, type Space } from "./contract";
 
 /** A session as its card and its page show it: what the server said of it, with its latest live state. */
 export type SessionView = Readonly<{
@@ -12,6 +12,13 @@ export type SessionView = Readonly<{
   worktree: string | null;
   parentId: string | null;
   parentTitle?: string | null;
+  /** The machine of the session and its name: null for this computer. */
+  machineId?: string | null;
+  machine?: string | null;
+  /** What its machine said of itself with the session, for a page that has not read the list of machines. */
+  machineState?: MachineState | null;
+  can?: Partial<MachineCan> | null;
+  features?: readonly string[] | null;
   summary: string | null;
   lastActivity: string | null;
   live: Live | null;
@@ -23,6 +30,9 @@ export const maximumPageSize = 50;
 
 /** What a `session` event asks of the page: draw the card again, read the list again, or nothing. */
 export type LiveDecision = "listed" | "reload" | "none";
+
+// The machine of a session when it is not this computer (an id of `local`, or none, is this computer).
+const otherMachine = (machineId: string | null | undefined): string | null => machineId && machineId !== "local" ? machineId : null;
 
 const time = (iso: string | null | undefined) => { const value = Date.parse(iso ?? ""); return Number.isFinite(value) ? value : 0; };
 
@@ -44,6 +54,8 @@ export function createSessionStore() {
   let next = 0, hasMore = false, filter: readonly string[] = [];
   // Where the phone is: the computer, and the spaces it sees (none: every space).
   let machine = "", spaces: readonly Space[] = [];
+  // The machines the list shows (`all`, or a machine id; null when the computer reaches none): the live states of the others are not for it.
+  let scope: string | null = null;
   // Sessions out of the list that already made the list be read again: once is enough for each.
   const requested = new Set<string>();
   // Sessions swiped away, kept out of the list while their archive settles (and until a read no longer lists them).
@@ -56,6 +68,8 @@ export function createSessionStore() {
       id, title: session?.title ?? null, projectId: session?.projectId ?? state?.projectId ?? null, project: session?.project ?? null,
       space: session?.space ?? null, model: session?.model ?? null, agent: session?.agent ?? null, worktree: session?.worktree ?? null, parentId: session?.parentId ?? null,
       parentTitle: session?.parentTitle ?? (session?.parentId ? known.get(session.parentId)?.title : null) ?? null,
+      machineId: otherMachine(session?.machineId ?? state?.machineId), machine: session?.machine ?? null, machineState: session?.machineState ?? null,
+      can: session?.can ?? null, features: session?.features ?? null,
       summary: session?.summary ?? null, lastActivity: session?.lastActivity ?? null, live: state,
     };
   };
@@ -75,6 +89,8 @@ export function createSessionStore() {
     get hasMore() { return hasMore; },
     get next() { return next; },
     get machine() { return machine; },
+    /** The machines the list shows: `all`, one machine, or null when the computer reaches none and the list is its own. */
+    get scope() { return scope; },
     get spaces() { return spaces; },
     /** How many sessions the list holds, shown or not. */
     get count() { return listed.length; },
@@ -112,6 +128,7 @@ export function createSessionStore() {
       live.set(update.id, { live: merged, stamp: ++stamp });
       if (listed.includes(update.id)) return "listed";
       if (requested.has(update.id)) return "none";
+      if (scope !== null && scope !== "all" && (update.machineId || "local") !== scope) return "none";
       if (filter.length > 0 && !filter.includes(merged.projectId ?? "")) return "none";
       if (!couldShow(merged)) return "none";
       requested.add(update.id);
@@ -125,9 +142,9 @@ export function createSessionStore() {
     },
     /** Whether the list holds a session. */
     listed: (id: string) => listed.includes(id),
-    /** Filters the list on projects (none for all): the list is empty until it is read again. */
-    setFilter(projects: readonly string[]) {
-      filter = [...new Set(projects.filter(Boolean))]; listed = []; next = 0; hasMore = false; requested.clear();
+    /** Filters the list on projects (none for all) and shows the machines named (`scope`, else as it was): the list is empty until it is read again. */
+    setFilter(projects: readonly string[], machines: string | null = scope) {
+      filter = [...new Set(projects.filter(Boolean))]; scope = machines; listed = []; next = 0; hasMore = false; requested.clear();
     },
     /** Hides a session while its archive is asked for. */
     hide(id: string) { gone.add(id); settling.add(id); },

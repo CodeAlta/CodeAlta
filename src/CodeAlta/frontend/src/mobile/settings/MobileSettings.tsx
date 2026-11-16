@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { Button, Callout, Card, NumericInput, Radio, RadioGroup, type Intent } from "@blueprintjs/core";
+import { Button, Callout, Card, NumericInput, Radio, RadioGroup, Switch, type Intent } from "@blueprintjs/core";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { AppIcon } from "../../AppIcon";
 import { ConfirmPopover } from "../../ConfirmPopover";
@@ -96,6 +96,17 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     catch { setConfirming(false); say("The access could not be reset.", "danger"); }
     finally { setBusy(false); }
   }
+  async function otherMachines(showOtherMachines: boolean) {
+    if (!settings || busy) return;
+    setBusy(true); setNotice(null);
+    try {
+      const answer = await api.set({ provider: settings.provider.id, port: settings.port, showOtherMachines });
+      setSettings(answer);
+      if (answer.error) setNotice({ text: answer.error, intent: "danger" });
+      else say("Saved.", "success");
+    } catch { say("The settings could not be changed.", "danger"); }
+    finally { setBusy(false); }
+  }
   const enter = (event: KeyboardEvent) => { if (event.key === "Enter") void apply(); };
   const portField = (id: string, value: string, problem: boolean, onEdit: (text: string) => void) =>
     <NumericInput id={id} value={value} min={minimumPort} max={maximumPort} stepSize={1} minorStepSize={null} majorStepSize={10} clampValueOnBlur={false}
@@ -136,6 +147,10 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-access">
       <h2 id="mobile-settings-access">{t("Access")}</h2>
+      {settings.hasOtherMachines && <Field label={t("Other machines")} notice={<p className="settings-field-help">{t("Every connected phone can use the machines this computer reaches, with this computer's permissions.")}</p>}>
+        <Switch label={t("Show my other machines on the phone")} checked={settings.showOtherMachines === true} disabled={busy}
+          onChange={event => void otherMachines(event.currentTarget.checked)} />
+      </Field>}
       <Field label={t("Access of the phones")}>
         <span className="mobile-settings-reset">
           <Button intent="danger" variant="outlined" icon={<AppIcon name="refresh" size={15} />} text={t("Reset access")} disabled={busy} onClick={() => setConfirming(true)} />

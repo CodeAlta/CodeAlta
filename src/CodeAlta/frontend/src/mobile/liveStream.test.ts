@@ -114,3 +114,26 @@ test("a stream silent for three pings is replaced", () => {
   h.sources[1].emit("open");
   assert.equal(h.reconnected(), 1);
 });
+
+test("reopen opens the stream again on the address it has now, without reading anything again", () => {
+  const sources: FakeSource[] = [], states: LinkState[] = [], addresses: string[] = [];
+  let address = "/api/events", reconnected = 0;
+  const stream = createLiveStream({
+    create: () => { const source = new FakeSource(); sources.push(source); addresses.push(address); return source; },
+    onSession: () => { }, onState: state => states.push(state), onReconnected: () => reconnected++,
+    check: async () => "ok", setTimer: () => 0, clearTimer: () => { },
+  });
+  stream.reopen();
+  assert.equal(sources.length, 0, "a stream that was not started stays so");
+  stream.start();
+  sources[0].emit("open");
+  address = "/api/events?machine=m2&session=s1";
+  stream.reopen();
+  assert.deepEqual(addresses, ["/api/events", "/api/events?machine=m2&session=s1"]);
+  assert.equal(sources[0].closed, true, "the old one is closed");
+  sources[0].fail(true);
+  sources[1].emit("open");
+  assert.deepEqual(states, ["connecting", "live", "live"]);
+  assert.equal(reconnected, 0, "a change of address is no reconnection");
+  assert.equal(stream.open, true);
+});

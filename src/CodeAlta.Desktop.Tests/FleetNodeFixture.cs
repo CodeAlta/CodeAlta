@@ -7,6 +7,7 @@ using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
+using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 
 namespace CodeAlta.Desktop.Tests;
@@ -61,6 +62,10 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
 
     public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken) => StartAsync(cancellationToken, null);
 
+    /// <summary>Starts the node as above, answering <c>sessions.read</c> with its <c>alta</c> commands, as the node of the application does.</summary>
+    public static Task<FleetNodeFixture> StartWithReadsAsync(CancellationToken cancellationToken)
+        => StartAsync(cancellationToken, null, null, null, appliesSpaceIdentities: false, null, null, altaReads: true);
+
     /// <summary>Starts the node, with the automations it runs for its devices; null for none.</summary>
     public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations) => StartAsync(cancellationToken, automations, null);
 
@@ -89,7 +94,8 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
     public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
         Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities,
         Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment,
-        Func<ModelProviderDescriptor, bool>? isPersonalProvider, CodeAlta.ModelServers.ModelHost? modelServers = null, bool showsPromptSuggestions = false)
+        Func<ModelProviderDescriptor, bool>? isPersonalProvider, CodeAlta.ModelServers.ModelHost? modelServers = null, bool showsPromptSuggestions = false,
+        bool altaReads = false, IFleetNodeMobile? mobile = null, Func<bool>? isSharedMachine = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var provider = new ScriptedFleetProvider();
@@ -97,13 +103,24 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         var nodeFleet = Path.Combine(root, "node-fleet");
         var identity = DeviceIdentity.LoadOrCreate(nodeFleet);
         IReadOnlyList<string> addresses = [];
-        FleetNodeService Service(CodeAltaHost on) => new(new FleetNodeServiceOptions
+        // sessions.read answers with the alta commands of the node, which a node of the application gives; opt in, as most tests read nothing.
+        FleetNodeService Service(CodeAltaHost on)
+        {
+            var reads = altaReads ? HeadlessAltaTools.Attach(on, new HeadlessAltaToolsOptions { Registry = AltaCommandRegistryOptions.Node, ReadsSessionSpaces = true }) : null;
+            return new(new FleetNodeServiceOptions
         {
             Host = on, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
             PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
             AdmitEnvironment = admitEnvironment, IsPersonalProvider = isPersonalProvider,
-            ModelServers = modelServers,
+            ModelServers = modelServers, Mobile = mobile, IsSharedMachine = isSharedMachine,
+            Alta = reads is null ? null : async (args, maxBytes, token) =>
+            {
+                var (exitCode, jsonl, truncated, error) = await AltaPersonCommands.RunAsync(reads.Dispatcher, args, maxBytes, token);
+                return new FleetNodeAltaResult(exitCode, jsonl, truncated, error);
+            },
         });
+        }
+
         var service = Service(host);
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
         addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];

@@ -19,6 +19,12 @@ test("the settings of the plugin are read for what they say, and anything else i
   }
 });
 
+test("other machines require an explicit opt-in, including for phones already connected", () => {
+  assert.equal(readMobileSettings({ ...answer, hasOtherMachines: true })?.showOtherMachines, false);
+  assert.equal(readMobileSettings({ ...answer, hasOtherMachines: true, showOtherMachines: true })?.showOtherMachines, true);
+  assert.equal(readMobileSettings({ ...answer, hasOtherMachines: false })?.hasOtherMachines, false);
+});
+
 test("a port is a whole number from 1024 to 65535, and Apply sends the fields of the provider chosen only when something changes", () => {
   assert.deepEqual(["1024", " 2584 ", "65535"].map(readPort), [1024, 2584, 65535]);
   for (const bad of ["", "1023", "65536", "80", "2584.0", "-2584", "2e3", "abc", "123456"]) assert.equal(readPort(bad), null, bad);

@@ -40,6 +40,17 @@ export type MobileStatus = Readonly<{
   address: string | null;
   /** The QR code of `connectUrl`: one string of '0' and '1' per row, square. */
   qr: readonly string[] | null;
+  /** The address phones open while it is served, with no token and also when there is no code to show. */
+  served?: string | null;
+  /** How many phones are connected. */
+  phones?: number;
+  /** Whether a code connects one phone and ends by itself (a node), so that it is asked for when needed. */
+  pairsOnce?: boolean;
+  /** How many seconds the code still connects a phone; null for a standing code, or without a code. */
+  pairingSeconds?: number | null;
+  /** Whether this desktop reaches other machines, and whether its owner lent them to the phones. Absent on older hosts. */
+  hasOtherMachines?: boolean;
+  showOtherMachines?: boolean;
 }>;
 
 const serverStates: readonly MobileServerState[] = ["starting", "listening", "port-in-use", "failed", "stopped"];
@@ -65,6 +76,10 @@ export function readStatus(value: unknown): MobileStatus | null {
     provider: { id, state, url: text(provider.url), detail: text(provider.detail) ?? "", fixUrl: text(provider.fixUrl), working: provider.working === true,
       name: text(provider.name) ?? id, actions },
     connectUrl: text(value.connectUrl), address: text(value.address), qr: rows,
+    ...typeof value.hasOtherMachines === "boolean" ? { hasOtherMachines: value.hasOtherMachines, showOtherMachines: value.showOtherMachines === true } : {},
+    // What a host without a window says; the tab of a desktop never gets them, and reads none.
+    ...value.pairsOnce === true ? { pairsOnce: true, served: text(value.served), phones: typeof value.phones === "number" && value.phones > 0 ? Math.floor(value.phones) : 0,
+      pairingSeconds: typeof value.pairingSeconds === "number" && value.pairingSeconds > 0 ? Math.floor(value.pairingSeconds) : null } : {},
   };
 }
 

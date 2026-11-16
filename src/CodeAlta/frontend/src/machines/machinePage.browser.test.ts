@@ -3,7 +3,7 @@ import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
 import { testLimit } from "../testTime";
 
-const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css", "../secrets/secrets.css"],
+const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css", "../secrets/secrets.css", "../mobile/canvas/canvas.css", "../mobile/settings/settings.css"],
   width: 1100, height: 900, reducedMotion: true } as const;
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
@@ -429,6 +429,68 @@ test("the computer that manages a machine lets in the person who asked, changes 
       { person: { personId: "bea", permissions: ["view", "drive", "start"], refuse: false } },
       { person: { personId: "dan", permissions: ["view", "drive", "start"], refuse: false } },
     ]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+const mobileSection = ".machine-section[aria-label='Connect a phone']";
+
+test("the computer that manages a machine turns its phone page on, shows a code for one phone, and sees it connect", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector("${mobileSection} input[type=checkbox]")`, "the section");
+    // Off at first: no code, no tab, and nothing was asked of the phone page.
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").checked`), false);
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} .mobile-canvas")`), null);
+    await page.shot("machine-mobile-off");
+
+    await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").click()`);
+    await page.until(`document.querySelector("${mobileSection} .mobile-pairing")`, "the tab of the machine");
+    // A code is made when it is asked for, never on its own.
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} .mobile-qr")`), null);
+    assert.match(await page.evaluate(`document.querySelector("${mobileSection} .mobile-pairing").textContent`) as string, /No phone is connected yet\./);
+
+    await page.clickText(`${mobileSection} .bp6-button`, "Show a code");
+    await page.until(`document.querySelector("${mobileSection} .mobile-qr")`, "the QR code");
+    assert.match(await page.evaluate(`document.querySelector("${mobileSection} .mobile-pairing").textContent`) as string, /The code connects one phone, within 5 min\./);
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} .mobile-address code").textContent`), "https://build-box.tail1a2b.ts.net:2584");
+    await page.shot("machine-mobile-code");
+
+    // The phone scans it: the code ends and the page reads the phone at its next look.
+    await page.evaluate(`window.machineFixture.phoneConnects()`);
+    await page.until(`!document.querySelector("${mobileSection} .mobile-qr") && document.querySelector("${mobileSection} .mobile-pairing")?.textContent.includes('1 phone is connected.')`, "the phone connected");
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} .mobile-pairing .bp6-button").textContent`), "Show a code");
+
+    // Turned off: the tab goes with it.
+    await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").click()`);
+    await page.until(`!document.querySelector("${mobileSection} .mobile-canvas") && document.querySelector("${mobileSection} input[type=checkbox]").checked === false`, "turned off");
+
+    const mobile = (await calls(page)).filter(call => "mobileEnable" in call || "mobileInvoke" in call);
+    assert.deepEqual(mobile.filter(call => "mobileEnable" in call), [{ mobileEnable: true }, { mobileEnable: false }]);
+    const invoked = mobile.filter(call => "mobileInvoke" in call).map(call => call.mobileInvoke[0]);
+    assert.ok(invoked.includes("mobile.pair") && invoked.every((method: string) => ["mobile.status", "mobile.pair"].includes(method)), invoked.join());
+    assert.equal(invoked.filter((method: string) => method === "mobile.pair").length, 1, "one code asked for, by the person");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("a machine that lets other people in cannot serve the phone page, and a computer that does not manage it is offered none", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    // A machine that began to let other people in since the page read it refuses the switch, says why, and stays off.
+    await page.evaluate(`window.machineFixture.refuseEnable(); window.machineFixture.show('joinable')`);
+    await page.until(`document.querySelector("${mobileSection} input[type=checkbox]")`, "the switch");
+    await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").click()`);
+    await page.until(`document.querySelector("${mobileSection} [role=alert]")?.textContent.includes('This machine lets other people in.')`, "the refusal");
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").checked`), false);
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} .mobile-canvas")`), null);
+
+    await page.evaluate(`window.machineFixture.shareMachine(); window.machineFixture.show('managed-relayed')`);
+    await page.until(`document.querySelector("${mobileSection} .bp6-callout")`, "the refusal");
+    assert.match(await page.evaluate(`document.querySelector("${mobileSection} .bp6-callout").textContent`) as string, /lets other people in/);
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").disabled`), true, "nothing turns it on");
+
+    // A computer that does not manage the machine has no section: the phone page is the machine's own to turn on.
+    await page.evaluate(`window.machineFixture.show('other')`);
+    await page.until(`document.querySelector('.machine-section[aria-label="Manage this machine"]')`, "the page of a machine it does not manage");
+    assert.equal(await page.evaluate(`document.querySelector("${mobileSection}")`), null);
     assert.deepEqual(page.problems, []);
   }, options);
 });

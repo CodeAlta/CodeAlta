@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Mobile;
 
@@ -45,6 +46,9 @@ internal sealed record MobileServerOptions
     /// <summary>Gets Web Push delivery for installed apps; null when the host does not provide it.</summary>
     public MobilePush? Push { get; init; }
 
+    /// <summary>Gets the host's confined, opt-in machine router; null in a local-only fixture.</summary>
+    public MobileMachines? Machines { get; init; }
+
     /// <summary>Gets the log of the plugin.</summary>
     public required XenoAtom.Logging.Logger Logger { get; init; }
 }
@@ -75,6 +79,8 @@ internal sealed partial class MobileServer : IAsyncDisposable
     private readonly MobileDiagrams _diagrams = new();
     private readonly SemaphoreSlim _uploads = new(1, 1);
     private WebApplication? _app;
+    private readonly CancellationTokenSource _following = new();
+    private Task _changes = Task.CompletedTask;
 
     internal MobileServer(MobileServerOptions options)
     {
@@ -107,6 +113,17 @@ internal sealed partial class MobileServer : IAsyncDisposable
         Map(app);
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _app = app;
+        if (_options.Machines is { } machines) _changes = FollowMachinesAsync(machines);
+    }
+
+    private async Task FollowMachinesAsync(MobileMachines machines)
+    {
+        try { await machines.FollowAsync(_following.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_following.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _options.Logger.Warn("Mobile: the machine subscription ended.");
+        }
     }
 
     /// <summary>Closes the live streams: a phone that connects again signs in again, with a key of now.</summary>
@@ -135,7 +152,13 @@ internal sealed partial class MobileServer : IAsyncDisposable
         });
 
         var api = app.MapGroup("/api").AddEndpointFilter(async (invocation, next) =>
-            Authorized(invocation.HttpContext) ? await next(invocation).ConfigureAwait(false) : Results.Unauthorized());
+        {
+            var context = invocation.HttpContext;
+            if (!Authorized(context)) return Results.Unauthorized();
+            if (context.Request.Path.StartsWithSegments("/api/sessions") && context.Request.RouteValues["id"] is string id
+                && await LocalMoveAsync(id, context.RequestAborted).ConfigureAwait(false) is { } moved) return moved;
+            return await next(invocation).ConfigureAwait(false);
+        });
         api.MapGet("/push", () => _options.Push is { } push
             ? Json(new JsonObject { ["publicKey"] = push.PublicKey }) : Results.NotFound());
         api.MapPost("/push/subscription", async (HttpContext context, CancellationToken ct) =>
@@ -147,8 +170,13 @@ internal sealed partial class MobileServer : IAsyncDisposable
             return Results.NoContent();
         });
         // A project repeated for each one the phone keeps to: ?project=a&project=b.
-        api.MapGet("/sessions", async (int? offset, int? limit, string[]? project, CancellationToken ct) =>
-            Json(await _options.Sessions.ListAsync(offset ?? 0, limit ?? MobileSessions.DefaultPageSize, project, ct).ConfigureAwait(false)));
+        api.MapGet("/machines", async (CancellationToken ct) => _options.Machines is { } machines
+            ? Json(await machines.ListAsync(ct).ConfigureAwait(false)) : Results.NotFound());
+        api.MapGet("/sessions", async (string? machine, int? offset, int? limit, string[]? project, CancellationToken ct) =>
+            Json(_options.Machines is { } machines
+                ? await machines.SessionsAsync(machine, offset ?? 0, limit ?? MobileSessions.DefaultPageSize, project, ct).ConfigureAwait(false)
+                : machine is null or MobileMachines.Local ? await _options.Sessions.ListAsync(offset ?? 0, limit ?? MobileSessions.DefaultPageSize, project, ct).ConfigureAwait(false) : null));
+        MapMachines(api);
         api.MapGet("/sessions/{id}", async (string id, CancellationToken ct) => Json(await _options.Sessions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/events", async (string id, long? since, CancellationToken ct) =>
             Json(await _options.Sessions.EventsAsync(id, Math.Max(0, since ?? 0), ct).ConfigureAwait(false)));
@@ -175,10 +203,16 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapPost("/sessions/{id}/jobs/{jobId}/stop", async (string id, string jobId, CancellationToken ct) => Json(await _options.Api.JobAsync(id, jobId, true, ct).ConfigureAwait(false)));
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
-        api.MapPost("/sessions", (HttpRequest request, CancellationToken ct) =>
-            PromptBodyAsync(request, async body => await _options.Api.CreateAsync(body, ct).ConfigureAwait(false), ct));
-        api.MapPost("/sessions/{id}/prompt", (string id, HttpRequest request, CancellationToken ct) =>
-            PromptBodyAsync(request, body => _options.Api.PromptAsync(id, body, ct), ct));
+        api.MapPost("/sessions", async (HttpRequest request, CancellationToken ct) =>
+        {
+            var actions = await LocalActionsAsync(request, ct).ConfigureAwait(false);
+            return await PromptBodyAsync(request, async body => await actions.CreateAsync(body, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+        });
+        api.MapPost("/sessions/{id}/prompt", async (string id, HttpRequest request, CancellationToken ct) =>
+        {
+            var actions = await LocalActionsAsync(request, ct).ConfigureAwait(false);
+            return await PromptBodyAsync(request, body => actions.PromptAsync(id, body, ct), ct).ConfigureAwait(false);
+        });
         // A prompt that waits can be taken back: from the queue of the session, or from the run it was steered into.
         api.MapGet("/sessions/{id}/queue", async (string id, CancellationToken ct) => Json(await _options.Api.QueueAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/queue/{itemId}/remove", async (string id, string itemId, CancellationToken ct) => Json(await _options.Api.UnqueueAsync(id, itemId, ct).ConfigureAwait(false)));
@@ -222,30 +256,74 @@ internal sealed partial class MobileServer : IAsyncDisposable
         });
 
         // Server-sent events: the state of each session as it changes. The page opens the stream again when it closes.
-        api.MapGet("/events", async (HttpContext context) =>
+        api.MapGet("/events", StreamAsync);
+    }
+
+    private async Task<MobileApi> LocalActionsAsync(HttpRequest request, CancellationToken cancellationToken)
+        => _options.Machines is { } machines && await machines.OpenAsync(MobileMachines.Local, cancellationToken, ActionId(request)).ConfigureAwait(false) is { } page
+            ? page.Api : _options.Api;
+
+    private async Task<IResult?> LocalMoveAsync(string id, CancellationToken cancellationToken)
+    {
+        if (_options.Machines is not { } machines || await machines.LocalMoveAsync(id, cancellationToken).ConfigureAwait(false) is not { } moved) return null;
+        // A moved session keeps its local space boundary. Offer only its recorded device, after opt-in and a fresh
+        // check of the destination session's space. Names and duplicate ids never choose a host.
+        if (await _options.Sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return Results.NotFound();
+        var destination = machines.Enabled && moved.MachineId is { } device && await machines.OpenAsync(device, cancellationToken).ConfigureAwait(false) is { } page
+            && page.Machine.State == "online" && await page.Sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is not null ? moved.MachineId : null;
+        return Results.Json(new JsonObject
         {
-            context.Response.ContentType = "text/event-stream";
-            context.Response.Headers["X-Accel-Buffering"] = "no";
-            var channel = _options.Live.Subscribe();
-            try
+            ["code"] = "not_on_this_machine", ["error"] = "This session moved to another machine.",
+            ["machineId"] = destination, ["sessionId"] = id, ["machine"] = destination is null ? null : moved.Machine,
+        }, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    private async Task StreamAsync(HttpContext context)
+    {
+        _options.Machines?.ReconcileScope();
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+        using var following = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        var channel = _options.Live.Subscribe();
+        var machine = context.Request.Query["machine"].ToString();
+        var session = context.Request.Query["session"].ToString();
+        var display = _options.Machines is { } machines && MobileApi.IsId(machine) && MobileApi.IsId(session)
+            ? machines.FollowSessionAsync(machine, session, following.Token) : Task.CompletedTask;
+        try
+        {
+            await context.Response.WriteAsync("retry: 3000\n\n", context.RequestAborted).ConfigureAwait(false);
+            await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+            await foreach (var original in channel.Reader.ReadAllAsync(context.RequestAborted).ConfigureAwait(false))
             {
-                await context.Response.WriteAsync("retry: 3000\n\n", context.RequestAborted).ConfigureAwait(false);
-                await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
-                await foreach (var frame in channel.Reader.ReadAllAsync(context.RequestAborted).ConfigureAwait(false))
+                if (!Authorized(context)) break;
+                var frame = original;
+                if (frame.StartsWith("event: session\ndata: ", StringComparison.Ordinal))
                 {
-                    await context.Response.WriteAsync(frame, context.RequestAborted).ConfigureAwait(false);
-                    await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+                    var state = JsonNode.Parse(frame["event: session\ndata: ".Length..].Trim()) as JsonObject;
+                    if (state is null) continue;
+                    var visible = _options.Machines is { } router
+                        ? await router.MayReadFrameAsync(state, context.RequestAborted).ConfigureAwait(false)
+                        : MobileAlta.Text(state, "id") is { } id && await _options.Sessions.FindAsync(id, context.RequestAborted).ConfigureAwait(false) is not null;
+                    if (!visible) continue;
+                    state["machineId"] ??= MobileMachines.Local;
+                    frame = $"event: session\ndata: {state.ToJsonString()}\n\n";
                 }
+
+                await context.Response.WriteAsync(frame, context.RequestAborted).ConfigureAwait(false);
+                await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+        }
+        catch (OperationCanceledException) { /* The phone left. */ }
+        finally
+        {
+            await following.CancelAsync().ConfigureAwait(false);
+            _options.Live.Unsubscribe(channel);
+            try { await display.ConfigureAwait(false); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                // The phone left.
+                _options.Logger.Debug("Mobile: the remote session display ended.");
             }
-            finally
-            {
-                _options.Live.Unsubscribe(channel);
-            }
-        });
+        }
     }
 
     // A body larger than the small limit carries files: one such prompt at a time is read, written for alta and handed over,
@@ -381,6 +459,7 @@ internal sealed partial class MobileServer : IAsyncDisposable
     {
         var app = Interlocked.Exchange(ref _app, null);
         if (app is null) return;
+        await _following.CancelAsync().ConfigureAwait(false);
         _options.Live.CloseListeners();
         using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         try
@@ -393,6 +472,8 @@ internal sealed partial class MobileServer : IAsyncDisposable
         }
 
         await app.DisposeAsync().ConfigureAwait(false);
+        await _changes.ConfigureAwait(false);
+        _following.Dispose();
     }
 
     private sealed class QuietLifetime : IHostLifetime

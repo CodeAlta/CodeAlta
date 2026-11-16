@@ -49,4 +49,13 @@ export const mobileCanvasMessages = {
   "Open the page that fixes it": ["Abrir la página que lo soluciona", "Ouvrir la page qui le corrige", "Seite zur Behebung öffnen", "解決するページを開く", "打开解决此问题的页面"],
   "The Mobile plugin does not answer.": ["El complemento Mobile no responde.", "L’extension Mobile ne répond pas.", "Das Mobile-Plugin antwortet nicht.", "Mobile プラグインが応答しません。", "Mobile 插件没有响应。"],
   "The address could not be copied.": ["No se pudo copiar la dirección.", "L’adresse n’a pas pu être copiée.", "Die Adresse konnte nicht kopiert werden.", "アドレスをコピーできませんでした。", "无法复制地址。"],
+  "The code connects one phone, within {minutes} min.": ["El código conecta un teléfono, en {minutes} min.", "Le code connecte un téléphone, en {minutes} min.", "Der Code verbindet ein Telefon, innerhalb von {minutes} Min.",
+    "コードで接続できるスマートフォンは 1 台で、{minutes} 分以内に使用してください。", "该代码可连接一部手机，有效期 {minutes} 分钟。"],
+  "A code connects one phone. Ask for one when a phone is ready.": ["Un código conecta un teléfono. Pide uno cuando el teléfono esté listo.", "Un code connecte un téléphone. Demandez-en un quand le téléphone est prêt.",
+    "Ein Code verbindet ein Telefon. Fordern Sie einen an, wenn ein Telefon bereit ist.", "コードで接続できるスマートフォンは 1 台です。スマートフォンの準備ができたらコードを表示してください。", "一个代码只能连接一部手机。手机准备好后再获取代码。"],
+  "{count} phone is connected.": ["{count} teléfono está conectado.", "{count} téléphone est connecté.", "{count} Telefon ist verbunden.", "{count} 台のスマートフォンが接続されています。", "已连接 {count} 部手机。"],
+  "{count} phones are connected.": ["{count} teléfonos están conectados.", "{count} téléphones sont connectés.", "{count} Telefone sind verbunden.", "{count} 台のスマートフォンが接続されています。", "已连接 {count} 部手机。"],
+  "No phone is connected yet.": ["Aún no hay ningún teléfono conectado.", "Aucun téléphone n’est encore connecté.", "Noch ist kein Telefon verbunden.", "接続されているスマートフォンはまだありません。", "尚未连接任何手机。"],
+  "New code": ["Código nuevo", "Nouveau code", "Neuer Code", "新しいコード", "新代码"],
+  "Show a code": ["Mostrar un código", "Afficher un code", "Code anzeigen", "コードを表示", "显示代码"],
 } satisfies Record<string, Row>;

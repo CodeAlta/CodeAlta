@@ -275,8 +275,11 @@ public sealed partial class FleetNodeService
     }
 
     private async Task<FleetSessionState> SessionStateAsync(FleetNodeCall call, FleetSessionRef parameters, CancellationToken cancellationToken)
+        => await ReadSessionStateAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+
+    private async Task<FleetSessionState> ReadSessionStateAsync(string id, CancellationToken cancellationToken)
     {
-        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        var sessionId = await RequireRemoteSessionAsync(id, cancellationToken).ConfigureAwait(false);
         // The state a desktop shows, with the suggestion of the session as this node would show it (its entry's, or the one its
         // journal keeps once it has none), cut to its bound. The entry keeps what its last run suggested whatever the setting
         // says now: a node that shows none, or whose user turned them off since, carries none, and the entry keeps it.

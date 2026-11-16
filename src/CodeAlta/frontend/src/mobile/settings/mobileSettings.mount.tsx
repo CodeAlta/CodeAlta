@@ -14,6 +14,11 @@ const listeners = new Set<(settings: MobileSettingsView) => void>();
 const api: MobileSettingsApi = {
   get: async () => { state.calls.push("get"); return state.settings; },
   set: async change => {
+    if (change.showOtherMachines !== undefined) {
+      state.calls.push(`other-machines:${change.showOtherMachines}`);
+      state.settings = { ...state.settings, showOtherMachines: change.showOtherMachines };
+      return state.settings;
+    }
     state.calls.push(change.provider === "tailscale" ? `set:${change.port}:${change.httpsPort}` : `set:${change.provider}:${change.port}`);
     if (state.refuse) return { ...state.settings, error: state.refuse };
     state.settings = {
