@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using XenoAtom.CommandLine;
@@ -163,6 +164,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("chat", "Run as a chat, in no project.", value => options.Chat = value is not null);
         command.Add("store=", "Where it is written: `user` (default, the configuration of the user) or `project` (the .alta/config.toml of its project, shared with the repository).", value => options.Store = value);
         command.Add("model=", "Model ref `provider[:model][@effort]`. Defaults to the default provider and its first model.", value => options.Model = value);
+        command.Add("tier=", "In place of `--model`, the tier of models its sessions run on: `complex`, `standard` or `quick`, or `adaptive` or `adaptive:<level>` for Adaptive. Each run starts on the model the tier gives then.", value => options.Tier = value);
         command.Add("agent=", "Agent prompt id. Defaults to the default one.", value => options.Agent = value);
         command.Add("disabled", "Create it with its triggers disabled. An automation an agent creates is always disabled: a person enables it.", value => options.Disabled = value is not null);
         command.Add("catch-up", "Run what was missed while CodeAlta was closed: once for a schedule, and for each issue or pull request of a trigger.", value => options.CatchUp = value is not null);
@@ -539,6 +541,17 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.scopeConflict", "Use either --project or --chat, not both.", "alta automation create");
         }
 
+        var tier = SessionStartTier.Parse(NormalizeOptionalText(options.Tier));
+        if (tier is null && NormalizeOptionalText(options.Tier) is not null)
+        {
+            return UsageError(context, "usage.invalidTier", "`--tier` is complex, standard or quick, or adaptive, or adaptive:<level> (low, medium, high, max).", "alta automation create");
+        }
+
+        if (tier is not null && NormalizeOptionalText(options.Model) is not null)
+        {
+            return UsageError(context, "usage.modelConflict", "Use either --model or --tier, not both.", "alta automation create");
+        }
+
         if (store == "project" && projectId is null)
         {
             return UsageError(context, "usage.invalidStore", "`--store project` needs a project: a chat is kept in the configuration of the user.", "alta automation create");
@@ -580,6 +593,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ProjectId = projectId,
             StoreInProject = store == "project",
             Model = NormalizeOptionalText(options.Model),
+            Tier = tier?.Name,
             Agent = NormalizeOptionalText(options.Agent),
             // What would run unattended stays disabled until a person enables it (doc/fleet/access-control.md).
             Enabled = !options.Disabled && !IsSessionCaller(context),
@@ -706,6 +720,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         projectPath = automation.ProjectPath,
         triggers = automation.Triggers,
         model = automation.Model,
+        tier = automation.Tier,
         agent = automation.Agent,
         nextRunAt = automation.NextRunAt,
         running = automation.Running,
@@ -758,6 +773,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         public string? Store { get; set; }
 
         public string? Model { get; set; }
+
+        public string? Tier { get; set; }
 
         public string? Agent { get; set; }
 

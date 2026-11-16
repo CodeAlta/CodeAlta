@@ -2,6 +2,7 @@ using System.Globalization;
 using CodeAlta.Automations;
 using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
+using CodeAlta.Orchestration.Hosting;
 
 namespace CodeAlta.Desktop;
 
@@ -87,6 +88,8 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!AutomationModelRef.TryParse(request.Model, out var model, out var problem)) return new("refused", null, problem);
+        var tier = SessionStartTier.Parse(request.Tier);
+        if (tier is null && !string.IsNullOrWhiteSpace(request.Tier)) return new("refused", null, AutomationConfig.TierProblem);
         var triggers = new List<AutomationTrigger>();
         foreach (var text in request.Triggers)
         {
@@ -119,6 +122,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
             Enabled = request.Enabled,
             Project = request.StoreInProject ? null : folder,
             Model = model,
+            Tier = tier,
             Agent = string.IsNullOrWhiteSpace(request.Agent) ? null : request.Agent.Trim(),
             CatchUp = request.CatchUp,
             Triggers = triggers,
@@ -148,6 +152,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
             entry.Definition.Model.Format(), entry.Definition.Agent, [.. entry.Definition.Triggers.Select(AutomationTriggerText.Format)], entry.Problem,
             automations.NextDue(entry.Id), automations.IsRunning(entry.Id), automations.IsAllowed(entry))
             {
+                Tier = entry.Definition.Tier?.Name,
                 Script = entry.Definition.Script,
                 Autonomy = entry.Definition.Autonomy is { } autonomy
                     ? new(autonomy.AllowedTools, autonomy.MaxCallsPerHour, autonomy.ApprovalTimeout, autonomy.OnTimeout, autonomy.Approvers) : null,

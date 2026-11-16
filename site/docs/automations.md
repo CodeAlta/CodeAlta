@@ -85,6 +85,8 @@ On a tier, `tier` replaces `model`: `complex`, `standard`, `quick`, `adaptive` o
 tier = "quick"
 ```
 
+`alta automation create` takes `--tier` in place of `--model`.
+
 ## What starts an automation
 
 {.table}

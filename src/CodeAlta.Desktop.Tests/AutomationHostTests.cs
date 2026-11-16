@@ -395,6 +395,24 @@ public sealed class AutomationHostTests
         Assert.AreEqual(Noon.AddHours(11), (await fixture.One("alta.automation", "automation", "show", id)).GetProperty("nextRunAt").GetDateTimeOffset());
         Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.CatchUp);
 
+        // On a tier of models, or on Adaptive, in place of a model: one or the other.
+        var tiered = await fixture.One("alta.automation.created", "automation", "create", "--name", "On a tier", "--tier", "Adaptive:High", "--content", "Review.");
+        Assert.AreEqual(("adaptive:high", null), (Text(tiered, "tier"), tiered.TryGetProperty("model", out var noModel) && noModel.ValueKind != JsonValueKind.Null ? noModel.GetString() : null));
+        Assert.AreEqual("adaptive:high", fixture.Service.Snapshot.Find(Text(tiered, "id")!)!.Definition.Tier!.Name);
+        Assert.AreEqual("adaptive:high", Text(await fixture.One("alta.automation", "automation", "show", Text(tiered, "id")!), "tier"));
+        foreach (var (arguments, expected) in new (string[], string)[]
+                 {
+                     (["automation", "create", "--name", "x", "--content", "y", "--tier", "fastest"], "usage.invalidTier"),
+                     (["automation", "create", "--name", "x", "--content", "y", "--tier", "quick", "--model", "codex"], "usage.modelConflict"),
+                 })
+        {
+            var refused = await fixture.Run(arguments);
+            Assert.AreEqual(AltaExitCodes.Usage, refused.Code, string.Join(' ', arguments));
+            StringAssert.Contains(refused.Text, expected);
+        }
+
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "delete", Text(tiered, "id")!], caller: AltaCallerIdentity.Cli)).Code);
+
         // In the file of its project, from stdin, disabled, as a chat.
         var (code, records, output) = await fixture.Run(["automation", "create", "--name", "Shared", "--store", "project", "--disabled", "--stdin"], "First line.\nSecond line.\n");
         Assert.AreEqual(AltaExitCodes.Success, code, output);

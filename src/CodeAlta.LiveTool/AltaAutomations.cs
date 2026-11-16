@@ -124,6 +124,12 @@ public sealed record AltaWaitingRun(string RunId, string AutomationId, string? N
 public sealed record AltaAutomation(string Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? ProjectPath, string File,
     string? Model, string? Agent, IReadOnlyList<string> Triggers, string? Problem, DateTimeOffset? NextRunAt, bool Running, bool Allowed = true)
 {
+    /// <summary>
+    /// Gets the tier of models its sessions run on in place of a model: <c>complex</c>, <c>standard</c>, <c>quick</c>,
+    /// <c>adaptive</c> or <c>adaptive:&lt;level&gt;</c>; null when it runs on <see cref="Model"/>.
+    /// </summary>
+    public string? Tier { get; init; }
+
     /// <summary>Gets the script of the library it runs in place of a prompt; null when it sends its prompt.</summary>
     public string? Script { get; init; }
 
@@ -189,6 +195,12 @@ public sealed record AltaAutomationRequest(string Name, string Prompt)
 
     /// <summary>Gets the model it asks for, written <c>provider[:model][@effort]</c>.</summary>
     public string? Model { get; init; }
+
+    /// <summary>
+    /// Gets the tier of models its sessions run on in place of <see cref="Model"/>: <c>complex</c>, <c>standard</c>, <c>quick</c>,
+    /// <c>adaptive</c> or <c>adaptive:&lt;level&gt;</c>; null for a model.
+    /// </summary>
+    public string? Tier { get; init; }
 
     /// <summary>Gets the agent prompt it asks for.</summary>
     public string? Agent { get; init; }
