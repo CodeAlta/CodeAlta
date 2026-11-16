@@ -62,11 +62,22 @@ public sealed class HelloPlugin : PluginBase
   `IPluginPermissionRuntimeService.ForPlugin` gives it to `builtin:mobile` without a package folder and the no-op service
   to every other plugin, a host without that interface gives none, and a plugin's `alta` command has the no-op service.
   A plugin cannot allow a skill for good: that stays in the window.
-- **One contract, two applications.** Both hosts run the same runtime. `PluginAttribute.Frontends` says which
-  applications a plugin supports; a host does not activate one made for the other. The default, `All`, is the desktop
+- **Other machines are served the same way.** `Services.Machines` (`IPluginMachineService`) lists the machines the
+  desktop reaches (paired, and those of its server) with their state, how they are reached and what this computer may do
+  there, and reads, prompts, stops and starts sessions on them, by the machine and the session together, never by a
+  session id alone (a moved session exists on two machines). It acts with the desktop's device key and the node API, so
+  each machine checks `view`, `drive` and `start`, and no plugin runs a command line on another machine. As for asks and
+  permissions, `IPluginMachineRuntimeService.ForPlugin` gives it to `builtin:mobile` without a package folder and the
+  no-op service to every other plugin; a node, which is not a controller device, gives none.
+- **One contract, four applications.** All hosts run the same runtime. `PluginAttribute.Frontends` says which
+  applications a plugin supports; a host does not activate one made for another. The default, `All`, is the desktop
   and the terminal: the command-line application (`altacli`, no window and no user) is a third value, `Cli`, that a
   plugin names explicitly when its contributions for agents work without a window, so a plugin written for a window
-  never starts there by surprise. A host that names no application (`None`, tests and tools) starts every plugin.
+  never starts there by surprise. CodeAlta Node (`altanode`, no window, stays on) is a fourth, `Node`: a node starts the
+  plugins that name it and those that name `Cli`, so a plugin that serves something while its host runs (the Mobile
+  page) names `Node` and never starts in `altacli`, which ends with its prompt. A node gives its plugins the services
+  that need no window (the `alta` bridge, private networks, the page files); the asks and permissions of a node reach
+  `builtin:mobile` only, and a plugin of a folder gets the no-op services. A host that names no application (`None`, tests and tools) starts every plugin.
   Portable results carry `Text`,
   `Markdown` and `Html`: the desktop shows the richest, the terminal ignores `Html`. Desktop-only contributions
   (canvases, buttons, landing cards, scripts) are declared everywhere and drawn only by the desktop.
@@ -342,11 +353,11 @@ be delayed by static references, native resources or untracked work: collectible
 | `acp` | `CodeAlta.Plugin.Acp` | all three | The provider type `acp`, see [providers](providers.md) |
 | `landing` | desktop project | desktop | The canvas of the landing page; the cards on it are other plugins' |
 | `search` | desktop project | desktop | The canvas and landing card of the search index |
-| `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published through a private network of `Services.PrivateNetworks` (Tailscale Serve on the tailnet, a Dev Tunnel of the user hosted by the `devtunnel` command line, or a network a plugin brings), that serves the sessions of its spaces to a phone, acting through `alta` (images by an id resolved from the records of their session, never a path from the phone), and answers their asks through `Services.Asks`. It keeps no usable secret on disk, only the SHA-256 of the pairing token and of each phone's key, so a program that reads its files cannot answer as the user |
+| `mobile` | `CodeAlta.Plugin.Mobile` | desktop and node, off by default | A local server published through a private network of `Services.PrivateNetworks` (Tailscale Serve on the tailnet, a Dev Tunnel of the user hosted by the `devtunnel` command line, or a network a plugin brings), that serves the sessions of its spaces to a phone, acting through `alta` (images by an id resolved from the records of their session, never a path from the phone), and answers their asks through `Services.Asks`. It keeps no usable secret on disk, only the SHA-256 of the pairing token and of each phone's key, so a program that reads its files cannot answer as the user. A desktop lists the machines it reaches through `Services.Machines` once its person allows it; a node serves its own sessions for its owner (permission requests only, no questions, reviews or files, and not on a machine that lets other people in), admitted as a paired device's work |
 | `ui` | desktop project | desktop | On request, the tools that see and drive the window; not offered when the user reviews commands, since a session could then answer its own review |
 | `browser` | `CodeAlta.Plugin.Browser` | desktop, command line | On request, the tools of Chrome DevTools MCP over a real browser, with the same names as those of `ui`, so that a session has one set or the other; see [browser](browser.md) |
 
-"All three" is the desktop, the terminal and the command-line application (`Cli`): what these plugins give agents
+"All three" is the desktop, the terminal and the command-line application (`Cli`), and a node runs them too: what these plugins give agents
 (tools, `alta` roots, prompt parts, hooks, provider types) needs no window. Their attribute and their definitions in the
 built-in lists of the hosts say the same.
 

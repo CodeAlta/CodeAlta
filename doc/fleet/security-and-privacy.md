@@ -171,11 +171,30 @@ analysis of Matrix showed a malicious server exploiting exactly that).
 - **Between devices** (a viewer and a node, a move, a live share): TLS 1.3 inside the direct connection or the relay,
   the node's key pinned from pairing or from the signed device list, and the viewer's device proof bound to the
   channel. The relay sees ciphertext.
-- **The phone**: today, the Mobile plugin over Tailscale (unchanged). A page served by the server would let a
-  compromised server serve code that reads decrypted content or uses the phone's keys, whatever the cryptography. So,
-  in Private spaces, the phone's page comes from a machine the person owns (a node serving it, as the desktop does
-  today), or from a signed mobile application if one comes; the server serves the phone's page only for Managed spaces,
-  where trusting the organization's server is stated. Approvals from the phone follow the same rule.
+- **The phone**: the Mobile plugin, over Tailscale or a Dev Tunnel, served by a desktop or a node of the person. A page
+  served by the server would let a compromised server serve code that reads decrypted content or uses the phone's keys,
+  whatever the cryptography. So, in Private spaces, the phone's page comes from a machine the person owns (a desktop or
+  a node serving it), or from a signed mobile application if one comes; the server serves the phone's page only for
+  Managed spaces, where trusting the organization's server is stated. Approvals from the phone follow the same rule.
+  - **A phone acts as the device it is paired with.** It holds a key of its own for its host and none of the fleet. For
+    another machine, a desktop acts for it with the desktop's device key, only once the person turned on **Show my other
+    machines on the phone** (off for phones connected before), so the machine sees the desktop, checks its `view`,
+    `drive` and `start`, and records it. Nothing is relayed that the desktop's own window could not do. A lost phone
+    reaches what its desktop reaches; **Reset access** cuts it from all of it. Machines are not transitive: a node
+    serves its own sessions only and is not a gateway to others, since an execution node is not a controller device.
+  - **Spaces apply to every read and action.** With the plugin limited to spaces, sessions, asks, images,
+    live state and notifications of other machines are kept to those spaces, and a session whose space cannot be matched
+    is not shown; the choices of a new session (prompts, providers, models) are the machine's, not a space's. A change of the spaces, of the setting or of a pairing ends the open streams and drops the
+    notifications that wait.
+  - **The page of a node is personal.** A phone gets what the owner of the profile has, with no person attached to its
+    key: a node that lets other people in does not serve the page. Its pairing code (one phone, five minutes) is printed
+    by a command any process of the node's OS user can run, so the protection is confinement: a session in the `node`
+    sandbox profile reads neither the device key nor the local control and reaches neither the control port nor the
+    page, so it cannot connect a phone or allow its own request. A session without a sandbox already holds everything
+    its OS user holds, the device key included, and this does not change that; the guide says so.
+  - **Work from a phone is admitted by the machine.** A session started or prompted from a node's own page passes the
+    machine's policy, its own worktree, its budgets and seats, as a paired device's work does. A review request of another
+    machine is not answered from a phone, and the agents of a node cannot ask questions or request reviews.
 
 ## Requests before a device is known
 

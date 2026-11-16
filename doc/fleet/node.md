@@ -18,6 +18,10 @@ What it is not:
   on the same machine;
 - not a UI: it is driven from CodeAlta Desktop, the phone, or `altanode` commands for the basics.
 
+**Prerequisite.** It needs .NET 10 and its ASP.NET Core runtime, because the built-in Mobile plugin serves the phone page
+with Kestrel; a self-contained publish carries both ([deployment](deployment.md)). The plugins of `altacli` (`Cli`) and
+those that name `Node` run on a node; `altacli` never starts a plugin that names `Node` alone.
+
 ## Commands
 
 | Command | What it does |
@@ -32,15 +36,26 @@ What it is not:
 | `altanode logs [--follow] [--lines <n>]` | The node's log (`logs/altanode.log`), followed across its daily rolls. |
 | `altanode devices`, `revoke <device>`, `permissions <device> [--allow <list>] [--deny <list>]` | The devices paired with the node: name, short fingerprint, permissions (`view`, `drive`, `start`, `move`, `automate`, `manage`), paired and revoked dates. A revoked device is disconnected at once; one that loses a permission is disconnected and reconnects with what it may do. Without a running node, they change `fleet/trusted-devices.json`. |
 | `altanode projects [list]`, `add <path>`, `clone <url>`, `remove <project>` (`--space <space>`) | The projects of the node's catalog: an existing folder added, a repository cloned into `~/code/<host>/<owner>/<repo>` (the clone-on-demand of moves), a project removed from the catalog with its files left. Through the running node's local control (`control.projects.*`), which keeps a project that has sessions; otherwise on the catalog files of the profile. |
+| `altanode mobile [on \| off \| set [--network <id>] [--port <n>] [--https-port <n>] \| reset]` | The page of the phones of the node ([plugins](../plugins.md)). Alone: where it is served, a QR code that connects one phone for five minutes, or what keeps phones out and how to fix it. `on` and `off` turn the plugin on and off, `set` changes how phones connect, `reset` disconnects every phone. |
 | `altanode update [--version <v>] [--source <feed>] [--check] [--now]` | Downloads a version (the latest release, a prerelease when one runs), checks its hash, and switches to it when the node is idle; the new version runs on trial and is rolled back if it does not confirm ([deployment](deployment.md#updates)). Later: the version the fleet recommends. |
 | `altanode machines`, `connect <link>`, `remote <machine> info\|sessions\|history\|send\|create\|watch` | The client side, for testing until the desktop does it: the machines this profile paired with, pairing with a node from its link, and its sessions. They read only the device key and `fleet/paired-machines.json` (written under a lock file), so they run beside a desktop or a node on the same profile. |
 | `altanode remote <machine> move <session> [--move-id <id>] [--clone]`, `altanode moves` | A session of a paired machine moves to the node of this profile (which runs, and which the machine lets this device move sessions to it): the machine gives it through `moves.start`, the command forwards the target's methods to the node over its local control. The same `--move-id` goes on with a move that stopped. `moves` lists the move records of the profile (`fleet/moves`). |
 
-`altanode pair`, `status`, `devices`, `revoke`, `permissions` and `uninstall` are the owner's local control of the node
+`altanode pair`, `status`, `devices`, `revoke`, `permissions`, `mobile` and `uninstall` are the owner's local control of the node
 that runs on the same profile: the node writes where it listens in `fleet/node-listener.json` of its state root, and
 they open a session channel to it with the node's own device key, read from the profile. The node accepts its own key
 only from this machine, and only for the `control.*` methods (pairing offers, status, devices, a graceful stop): the key
 file, which only the owner of the profile can read, is the credential, with no token or second endpoint.
+
+**The phone page of a node** (`control.mobile.state`, `enable`, `invoke`). The node turns its Mobile plugin on and off
+itself: it writes the setting and applies it, since a plugin that is off cannot hear the request. `control.mobile.invoke`
+carries the calls the Mobile tab already makes (`mobile.status`, `pair`, `retry`, `act`, `settings.get`, `settings.set`,
+`reset`) as one method of at most 4 KiB, for the owner's local control and for a device that manages the node by pairing;
+a device trusted through an organization alone never has it. A node that lets other people in (a person it names, a
+device that sees its own sessions only, a team or organization machine) refuses to turn the page on, and stops serving
+it when it becomes one. A pairing code of a node connects one phone and lasts five minutes, never the standing code a
+desktop shows; a managing device can ask for it, unlike the pairing of devices. The port of the page is one of the ports no sandboxed session reaches, beside the node's listener
+(`ReservedLocalPorts`); the page's sessions are admitted as a paired device's work ([architecture](architecture.md#the-phone-page)).
 
 **Managing from a desktop.** A paired device with the `manage` permission calls the same `control.*` methods from
 elsewhere, pairing and stopping the node excepted: status, devices and their permissions, revocations, projects, the log

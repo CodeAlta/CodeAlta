@@ -4,7 +4,7 @@ title: Mobile plugin
 
 # Mobile plugin
 
-The built-in Mobile plugin of CodeAlta Desktop shows the sessions of your computer on a phone. You follow a session as it runs, read its timeline, answer it, steer a turn that runs, stop it, and start a new session, from the phone. The phone reaches the computer through [Tailscale](https://tailscale.com), on your own tailnet, or through a [Dev Tunnel](#without-tailscale-dev-tunnels) of Microsoft, with nothing to install on the phone.
+The built-in Mobile plugin shows the sessions of a computer on a phone. CodeAlta Desktop serves it, and so does [CodeAlta Node](../fleet/machines.md) (`altanode`) on a machine without a window; the command-line application (`altacli`) never does. You follow a session as it runs, read its timeline, answer it, steer a turn that runs, stop it, and start a new session, from the phone. The phone reaches the computer through [Tailscale](https://tailscale.com), on your own tailnet, or through a [Dev Tunnel](#without-tailscale-dev-tunnels) of Microsoft, with nothing to install on the phone.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-mobile.webp" alt="Three phones showing the sessions of CodeAlta live, the timeline of a session with its prompt, and the choice of a model and its reasoning effort" loading="lazy">
@@ -13,7 +13,7 @@ The built-in Mobile plugin of CodeAlta Desktop shows the sessions of your comput
 
 ## What you need
 
-- CodeAlta Desktop on the computer.
+- CodeAlta Desktop on the computer, or CodeAlta Node on a machine (see [On a node](#on-a-node)).
 - Tailscale on the computer and on the phone, signed in to the same tailnet. Without Tailscale, see [Dev Tunnels](#without-tailscale-dev-tunnels).
 - On the tailnet, **MagicDNS**, **HTTPS certificates** and **Tailscale Serve**. The [DNS page](https://login.tailscale.com/admin/dns) of the Tailscale admin console turns on the first two. The first time the plugin publishes the computer, Tailscale gives a link that turns on Serve: the Mobile tab shows it.
 
@@ -77,6 +77,57 @@ The computer must stay on with CodeAlta Desktop and the Mobile plugin running, a
   <figcaption class="small text-secondary mt-2">The background jobs of a session: their count above the prompt, the list, and the output of one.</figcaption>
 </figure>
 
+## On a node
+
+A machine that runs [CodeAlta Node](../fleet/machines.md) serves its own sessions to a phone, with no window and no screen: an always-on Mac mini, a Linux server. The node needs the .NET 10 ASP.NET Core runtime beside .NET (the .NET SDK has both), and the page stays off until you turn it on.
+
+```console
+$ altanode mobile on
+```
+
+It prints the address of the page and a QR code in the terminal; scan it with the phone. **The code connects one phone and lasts five minutes**: scan it, or run `altanode mobile` for a new one. A phone that is connected stays connected.
+
+| Command | What it does |
+| --- | --- |
+| `altanode mobile` | Where the page is served, a new QR code, or what keeps phones out and how to fix it |
+| `altanode mobile on` and `off` | Turns the page on or off; the phones keep their access for the next time |
+| `altanode mobile set [--network tailscale\|devtunnel] [--port n] [--https-port n]` | The settings of **Settings > Extensions > Mobile** |
+| `altanode mobile reset` | **Reset access**: disconnects every phone |
+
+The commands go through the node's local control, so they need the node running and listening. A computer that manages the node ([Manage a machine from CodeAlta Desktop](../fleet/machines.md#manage-a-machine-from-codealta-desktop)) shows **Connect a phone** on the page of the machine, with the same QR code and settings.
+
+What a node's page does:
+
+- It shows the sessions of that machine only, the way a desktop shows its own, and it **answers permission requests**. The agents of a node cannot ask questions or request reviews, so the page has none of them.
+- A session the phone starts or prompts is run as the work of a paired computer is: under the policy of the machine, in a worktree of its own, within its budgets and seats. Files and photos do not go with a prompt.
+- **A node that other people use does not serve the page.** A phone has the access of the owner of the machine, with no person attached: a node that lets other people in (a team machine, a person it invited) refuses to turn it on, and stops serving when it becomes one.
+- It reaches phones through Tailscale or a Dev Tunnel, as a desktop does; when something keeps phones out, `altanode mobile` says what and how to fix it.
+
+## Other machines
+
+A desktop can show on the phone the machines it reaches: the ones it is paired with, and the ones of its [server](../fleet/server.md), directly or relayed. It is off until you turn it on, since a lost phone then reaches more than this computer: phones connected before only reach this computer.
+
+1. Open the **Mobile** tab, or **Settings > Extensions > Mobile**.
+2. Turn on **Show my other machines on the phone**. The switch is there only when this computer reaches other machines.
+
+The line that names the computer at the top of the phone page becomes a chip that opens **Machines**: **All machines**, this computer, and each machine with its state (online, offline with when it was last seen, **Not allowed**), whether it is reached **direct** or **relayed**, and how many of its sessions wait for you. **All machines** lists the sessions of every machine, latest activity first, with the machine on the cards of the others. **Run on** in a new session chooses the machine; its projects, agent prompts, providers, models and efforts are the ones of that machine.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile-machines.webp" alt="Three phones showing the sessions of every machine with the machine on their cards, the Machines sheet with the state of each machine, and a session of another machine" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The sessions of every machine, the <strong>Machines</strong> sheet, and a session of another machine.</figcaption>
+</figure>
+
+A session of another machine has the same page, with its machine in the header. The phone does what your computer may do there: **view** reads, **drive** prompts, steers, stops, answers and changes the provider, archives and stops jobs, **start** begins a session. A machine that gives this computer **view** only is read-only on the phone.
+
+- **Offered**: the list, the timeline, the output of tool calls, images of a session, background jobs, notifications, permission requests and questions, and the prompt with its model and effort.
+- **Not offered, and not shown**: review requests (the session says **Review it on a computer**), files and photos with a prompt, files and pictures of the disk that a message links, and the choice of a worktree for a new session. A machine whose CodeAlta is too old says **Update CodeAlta on this machine**.
+- **An offline machine** keeps its last list of sessions, read-only. A machine that no longer lets this computer in shows **Not allowed**, with no sessions.
+- **A session this computer moved** to another machine says where it went and opens it there.
+- **A machine of a team**, where you are one person among others, lists and drives your sessions; a new session is started there from a computer, since the phone cannot read its projects and models.
+- **Machines are not transitive.** The phone sees the machines this computer reaches, never the machines they reach, and a node shows its own sessions only.
+
+Turning the setting off, **Reset access**, or a change of the [spaces](#spaces) ends what the phone follows of the other machines at once: its streams close and the notifications that wait are dropped.
+
 ## Other private networks
 
 A plugin can bring another VPN or tunnel (see [A private network](developers.md#a-private-network)): it is offered under **Phones connect through** beside Tailscale and Dev Tunnels, with what it needs, and the Mobile tab shows its buttons, such as its sign-in. A choice of it stays when that plugin is off; Tailscale serves the page meanwhile, and **Try again** goes back to it once the plugin runs.
@@ -94,7 +145,7 @@ CodeAlta makes the tunnel once, in your account, and keeps it, open to your acco
 
 ## Spaces
 
-With more than the Default space, the **Mobile** row of **Settings > Plugins** has a chip with its [spaces](../spaces.md#what-a-space-has). The phone then lists, opens and acts on the sessions of those spaces only, and a new session goes to one of them. A plugin in every space shows every session.
+With more than the Default space, the **Mobile** row of **Settings > Plugins** has a chip with its [spaces](../spaces.md#what-a-space-has). The phone then lists, opens and acts on the sessions of those spaces only, and a new session goes to one of them. A plugin in every space shows every session. The limit holds for the other machines too: their sessions, questions, images and notifications are kept to those spaces, and a session whose space cannot be matched is not shown. The choices of a new session (agent prompts, providers, models) are those of the machine, not of one space.
 
 ## Security
 
@@ -106,6 +157,8 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 - A file reaches the phone only when you tap a link to it in an answer or in a prompt you sent, up to 32,000 characters at a time. The server looks for that link in that message, so a file the phone reads is always named in the history of the session. It may be any text file of this computer, also outside the project, as on CodeAlta Desktop: a phone you connected can read any of them by sending a link to it, so treat it as you would this computer. A prompt from another session, a job or a reminder opens no file. A link that names another computer, such as `\\server\share\file`, is never followed, whether it is a file or a picture.
 - The plugin publishes one port of the computer on the tailnet, 2584 unless you change it, and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
 - After you rename the computer, CodeAlta publishes the page again under the new name when it starts. Tailscale can only take off the old address together with everything else it serves: CodeAlta does it when the page is all Tailscale Serve publishes, and otherwise leaves the old address, which no longer answers; `tailscale serve reset` removes it with the rest.
+- With **Show my other machines on the phone** on, a phone can do through this computer what this computer may do on those machines, and no more: each machine checks the permissions of this computer. **Reset access** cuts a phone from all of them at once. A machine reads a session for the phone only with **view**, and the prompts that wait, the images of a session and the output of its jobs reach the phone with it.
+- On a node, the five-minute code is printed by a command that any program of the same user can run. A session in the default `node` [sandbox](../sessions/sandbox.md) reaches neither the key of the node nor its local control nor the port of the page, so it cannot pair a phone or answer its own request. A session that runs without a sandbox holds everything its user holds on that machine, this included: keep sessions of a node sandboxed.
 - Turn the plugin off in **Settings > Plugins**: the page stops, and Tailscale no longer serves it.
 - Through Dev Tunnels, only the GitHub account of the tunnel reaches the page, and every request needs the key a phone gets with the QR code, as with Tailscale. The tunnel goes through the servers of Microsoft, over HTTPS, and so does the pairing token of the QR code, in the address the phone opens. Going back to Tailscale, or turning the plugin off, stops the tunnel.
 

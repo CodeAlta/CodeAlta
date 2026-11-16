@@ -73,7 +73,7 @@ The answer to [#284](https://github.com/CodeAlta/CodeAlta/issues/284), without a
 - **Desktop as a node**: a desktop can be paired by another desktop, per space (**Allow my other devices to drive the
   sessions of this machine**).
 - **Client mode**: a desktop on a machine whose profile a node holds opens it over loopback.
-- The Mobile plugin is unchanged.
+- The Mobile plugin serves the phone page from a desktop and from a node; a desktop's page also lists the machines it reaches, when its person allows it ([architecture](architecture.md#the-phone-page)).
 
 Done when: S2 works between Windows, macOS and Linux in each direction; a dropped connection never runs a command twice
 (tests through the harness with injected disconnects); S1 is unchanged (no network activity without pairing).
@@ -117,6 +117,7 @@ The coordinator, for one person or a household.
 - **Cross-machine sub-agents and messages**, with their safety rules.
 - **Replicas and takeover** for lost laptops (S8).
 - **The phone through the server** (the browser channel decided in its sub-plan).
+  M3c keeps what the Mobile plugin does not do ([architecture](architecture.md#the-phone-page)): the phone as a device with its own key, a page served by the server (Managed spaces), a signed mobile application, and a node as a gateway to other machines.
 - **Budgets and alerts**, **health** notifications, basic **audit**.
 - **`alta fleet` and the `codealta-fleet` built-in skill** ([console](console.md#agents-and-scripts)): the commands
   that map the fleet for agents, and the guidance that makes agents use machines and fleet operations efficiently.
@@ -130,7 +131,7 @@ M3 ships as three releases, each usable on its own:
 | --- | --- |
 | **M3a** | `altaserver`, identity, the device list and keys, spaces linked to a server, the REST API v1, the console's Fleet, Machines and Server canvases, relayed channels |
 | **M3b** | Personal fleet automations, fleet statistics, cross-machine sub-agents and messages, budgets and alerts |
-| **M3c** | Replicas and takeover, the phone served by a person's own machine |
+| **M3c** | Replicas and takeover, the phone as a device of the fleet |
 
 Done when: S4 to S9 work, and S10 without sharing (shares come with M4); the server can be killed at any time without
 losing or duplicating a fact (S6); a compromised server cannot read a session or start one (tests with a hostile server

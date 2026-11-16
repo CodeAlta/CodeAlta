@@ -155,10 +155,27 @@ follows carries the state.
 | `node` | `info`, `capabilities`, `readiness(space)` (identity check, providers ready) |
 | `projects` | `list`, `resolve(repositoryKey)`, `clone` |
 | `providers` | `status`, `signIn.start` (device code flows), `signIn.poll` |
-| `sessions` | `list`, `watch` (display stream), `history` (windows), `create`, `send`, `queue`, `steer`, `abort`, `answerAsk`, `answerPermission`, `jobs.list`, `jobs.output`, `jobs.stop`, `image`, `archive`, `restore`, `fork` |
+| `sessions` | `list`, `watch` (display stream), `history` (windows), `create`, `send`, `queue`, `steer`, `abort`, `read`, `act`, `answerAsk`, `answerPermission`, `jobs.list`, `jobs.output`, `jobs.stop`, `image`, `archive`, `restore`, `fork` |
 | `moves` | `offer`, `accept`, `transfer`, `commit`, `abort` |
 | `automations` | `put` (an automation as one table of `config.toml`, with the repository key of its project), `remove`, `list`, `run` (with `dryRun` for a try), `runs`: the automations a paired device assigns to the node (**Runs on**), with the `automate` permission |
 | `terminal` | `open` (a setup terminal, owner only, audited), `input`, `resize`, `close` |
+
+**`sessions.read` and `sessions.act`** (feature `sessions.read`, announced in `node.info`). A device reads a session the
+way its person reads it on the machine, in the sequence numbers of `alta session events`, `tail`, `status`, `tool`,
+`image`, `queued`, `choices` and `alta job`, which `sessions.history` does not count in (it counts in byte cursors of one
+journal revision). The request is typed: a read name from a fixed list and values checked against their kind, never a
+command line; the machine builds the command and answers with its records. `read` needs `view`; `act` needs `drive` and
+carries the few small actions that start no work (take a queued or steered prompt back, change a session's provider,
+archive and restore, stop a job), with a retry key.
+
+- Every read passes the checks of `sessions.history`: the session must be visible to the caller (own sessions only on a
+  team machine, content grants, Private sessions, spaces), a job must belong to the session of the request, a list is
+  cut to the sessions the caller may see, and archiving a session with its children needs every descendant to be visible (a team machine archives a session alone).
+- Answers are bounded: 512 KiB of records by default, 3 MiB at most (under the frame limit); an image comes in pieces of
+  1 MiB of base64 (`offset` asks for the next).
+- What `view` gains over `sessions.history`: the prompts that wait in a queue, the images a session keeps, and job output
+  ([security](security-and-privacy.md)). A machine without the feature is listed with "update CodeAlta on this machine";
+  nothing is mapped onto history for it.
 
 They map onto what the desktop's RPC services already call (owned commands, the display projection, history
 windows, asks, permissions, jobs); the node API is that surface, made remote, plus moves and readiness.

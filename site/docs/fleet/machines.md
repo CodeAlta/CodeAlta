@@ -59,14 +59,14 @@ The link works once and expires after 10 minutes. Each computer is then listed a
 
 1. Type the computer as you would after `ssh`: `user@host`, `user@host:port`, or a host of your SSH configuration. **Name** is optional: the machine's own name by default. Tick **Manage it from this computer** to change its devices, projects, secrets and updates from here. Tick **Always on** to have the node start with the machine, with nobody logged in (see [Always on](#always-on)).
 2. Click **Add the machine**. CodeAlta signs in with your SSH keys and agent (the OpenSSH client of your system, without asking for a password), then shows each step as it goes:
-   - **Connect over SSH**, and **Check the system and .NET**: Linux or macOS, x64 or Arm64, and .NET 10 there, and `sudo` with **Always on**;
+   - **Connect over SSH**, and **Check the system and .NET**: Linux or macOS, x64 or Arm64, .NET 10 and its ASP.NET Core runtime there (the .NET SDK has both), and `sudo` with **Always on**;
    - **Install CodeAlta Node**: the .NET tool in `~/.dotnet/tools`, or the package of its system where only the .NET runtime is;
    - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS; with **Always on**, a service that starts at boot;
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once (and manages the machine, when you ticked it). The six words of its key are shown.
    - **Join your server**, when this computer is connected to a [CodeAlta Server](server.md): the node joins it from itself (`altanode join`), and this computer approves the key it just paired with. Your other computers of that server then list the machine too. When this step fails, the machine stays paired: join it later from its page.
 3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). On Ubuntu 24.04 and later, its sessions need the sandbox set up once with `sudo` (see [Set up the sandbox on Linux](#set-up-the-sandbox-on-linux)): **Permissions** on that page says so.
 
-When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
+When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 and its ASP.NET Core runtime there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
 
 Where CodeAlta Desktop runs on the machine too, the node gets a profile of its own, `~/.alta-node`. **Advanced** sets the port of the node (2585), its profile, the folder it is installed in, and a folder of this computer to install the packages from.
 
@@ -83,16 +83,16 @@ Without **Always on**, on a Mac nobody is logged in to, the setup writes the Lau
 
 ## Install CodeAlta Node by hand
 
-On the machine that will run the sessions, install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then the node:
+On the machine that will run the sessions, install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) with its ASP.NET Core runtime (the .NET SDK and the installers of that page have both; on Ubuntu, `dotnet-sdk-10.0`, or `aspnetcore-runtime-10.0` where no SDK is wanted), then the node:
 
 ```sh
 dotnet tool install -g CodeAlta.Node
 altanode --help
 ```
 
-The package runs on Windows, macOS and Linux (x64 and Arm64, Alpine included). `altanode update` updates it (see [Update it](#update-it)).
+The package runs on Windows, macOS and Linux (x64 and Arm64, Alpine included). The node does not start on a machine that has .NET without the ASP.NET Core runtime: the message says which framework is missing. `altanode update` updates it (see [Update it](#update-it)).
 
-On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`), and copy the folder:
+On a machine without .NET, publish a self-contained `altanode`, which carries .NET and the ASP.NET Core runtime, from a checkout of CodeAlta on a computer that has the .NET SDK, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`), and copy the folder:
 
 ```sh
 dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o altanode-linux-x64
@@ -164,7 +164,7 @@ The service runs as you, with your sign-ins. Run `altanode install` again to cha
 altanode update
 ```
 
-The node downloads its latest version from NuGet and switches to it as soon as no session is working: meanwhile it takes no new work, for ten minutes at most, then waits for the next quiet moment. It restarts by itself as the new version, whether it runs as a service or in a terminal: nothing else to do on the machine, and no .NET SDK needed, only the .NET runtime (a self-contained copy is updated by copying a new one).
+The node downloads its latest version from NuGet and switches to it as soon as no session is working: meanwhile it takes no new work, for ten minutes at most, then waits for the next quiet moment. It restarts by itself as the new version, whether it runs as a service or in a terminal: nothing else to do on the machine, and no .NET SDK needed, only the .NET runtime with its ASP.NET Core runtime (a self-contained copy is updated by copying a new one). A node installed with the .NET runtime alone keeps the version it runs: install the ASP.NET Core runtime there (`aspnetcore-runtime-10.0`), then update again.
 
 | Option | What it does |
 | --- | --- |
@@ -289,6 +289,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Servers** | The servers it joined, and whether it is connected to each, or why not: a server only sees it offline. A server of this computer it is not on yet has **Join**: the machine joins it from itself, and this computer approves it, so that your other computers of that server see it |
 | **Start at boot** | Whether the node starts when the machine does, with nobody logged in, in the words of `altanode status`; when it does not, the command to run on the machine that makes it so |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
+| **Connect a phone** | Serve the sessions of the machine to a phone: turn on **Serve the phone page**, then scan the QR code of its Mobile tab within five minutes. Only for a machine you manage by pairing; a machine that other people use does not serve the page ([On a node](../plugins/mobile.md#on-a-node)) |
 | **Log** | **Show the log** reads its last lines |
 
 **Settings** > **Fleet** > **Machines** lists all your machines, whatever the way this computer reaches them: those paired with it, and those added through your server, marked **Through your server**. Both open their page; a machine of the server has nothing to forget here.
@@ -306,6 +307,9 @@ On the machine itself, the same is done with:
 | `altanode pair --manage` | A pairing link whose computer manages the node |
 | `altanode permission-mode` | Shows whether its sessions bypass permissions or ask first; `bypass` or `ask` changes it |
 | `altanode agents allow --space <id>` | Lets agents of other computers start sessions in a space (`deny` stops them; `--sandbox` and `--bypass` as on the page) |
+| `altanode mobile` | The page of the phones of the machine: its address and a QR code that connects one phone for five minutes; `on`, `off`, `set` and `reset` change it ([Mobile plugin](../plugins/mobile.md#on-a-node)) |
+
+A phone connected to this computer can also list and drive the sessions of the machines it reaches, when you turn that on: see [Other machines](../plugins/mobile.md#other-machines).
 
 **Forget** on the row of a machine removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the page of the machine, from a computer that manages it.
 

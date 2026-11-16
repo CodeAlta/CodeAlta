@@ -16,7 +16,7 @@ The fleet is mostly an extension of invariants the runtime already keeps. Each o
 | **History windows** of a journal with cursors (`WorkspaceHistoryRpc`) | Remote timelines read in bounded windows; a long session never crosses the network whole. |
 | **Headless faces** (`HeadlessSessionDriver`, `altacli`) | The node is the headless host that is missing: it owns a state root like Desktop does, with no window. |
 | **Following sessions another process writes** (`ExternalSessionFollower`) | The model for showing sessions whose writer is elsewhere: project what grows, never take ownership silently. |
-| **The Mobile plugin**: a remote session API over HTTP, pairing by QR code, a key per phone, only hashes on disk, Tailscale Serve | The first remote client of CodeAlta. Its API is the seed of the node API, its pairing the seed of device pairing. |
+| **The Mobile plugin**: a remote session API over HTTP, pairing by QR code, a key per phone, only hashes on disk, Tailscale Serve | The first remote client of CodeAlta. Its API is the seed of the node API, its pairing the seed of device pairing. It runs in Desktop and in Node ([the phone](#the-phone-page)). |
 | **Spaces**: a setup and an identity per group of projects; a session's space is fixed at creation | The unit of what an instance publishes, and to which server. A Work space links to the company server, a Personal space to the home server. |
 | **Space containment, no wider tools, permission modes never widened** (`alta` safety rules) | The same rules, across machines: an agent never gets more on another computer than it has on its own. |
 | **The sandbox** (mxc: ProcessContainer, Seatbelt, Bubblewrap) | Confines sessions on machines that run work for others or that an agent started remotely. |
@@ -33,7 +33,7 @@ The fleet is mostly an extension of invariants the runtime already keeps. Each o
 | CodeAlta CLI | `altacli` | Unchanged: runs beside an instance of its machine. Later, `altacli` may drive remote nodes for scripts. |
 | **CodeAlta Node** | `altanode` (new) | A headless CodeAlta host that runs as a service: the always-on machine, the build Mac, the cloud VM. Same runtime, providers, tools, plugins and sandbox, no window. |
 | **CodeAlta Server** | `altaserver` (new) | The coordinator: a complete REST API (no administration interface of its own), identity and access control, devices, directory and presence, routing and relay, session ownership, automations' schedules and runs, statistics, what people share, policies, audit, notifications. It runs **no agent** and reads **no content** it was not given. |
-| Mobile page | served by Desktop today | The phone. Served by a node today (Mobile plugin); later also by the server, to reach the whole fleet. |
+| Mobile page | served by Desktop and Node | The phone. The Mobile plugin serves it from a desktop (its own sessions, and the machines it reaches when the person allows it) and from a node (its own sessions, for its owner); never from `altacli`. Later also by the server, to reach the whole fleet. |
 
 The names are decided ([readme](readme.md#naming)).
 
@@ -50,7 +50,9 @@ by scanning a code, and talks to it directly over the LAN, Tailscale or an SSH t
 flowchart LR
     D[CodeAlta Desktop<br/>Windows PC] -- "direct TLS, paired device keys" --> N[CodeAlta Node<br/>Mac mini]
     D -- direct --> D2[CodeAlta Desktop<br/>MacBook]
-    P[Phone] -- "Tailscale (Mobile plugin, as today)" --> D
+    P[Phone] -- "Tailscale or Dev Tunnel<br/>(Mobile plugin)" --> D
+    D -. "phone's actions, with the desktop's device key" .-> N
+    P2[Phone] -- "its own page,<br/>own sessions" --> N
 ```
 
 ### 2. A home fleet with a server
@@ -190,6 +192,26 @@ moves. Not at first: the code editor, terminals and the Changes view on remote f
 
 The same registry gives **client mode**: a desktop started on a machine whose profile is held by a local node opens
 the node as a host over loopback, so sessions keep running when the window exits.
+
+## The phone page
+
+The Mobile plugin serves the phone page in two hosts. **Desktop** serves its own sessions, and, when its person turns
+on **Show my other machines on the phone**, the sessions of the machines it reaches (paired, or relayed through its
+server). **Node** serves its own sessions for its owner, through a built-in Mobile plugin that is off until the owner
+turns it on. `altacli` never serves it: it takes no profile lock and ends with its prompt.
+
+- **The phone is not a device of the fleet.** It holds the key its host gave it. For another machine, the host acts for
+  it through a plugin service (`Services.Machines`, given to the built-in Mobile plugin only) over the session hosts the
+  window already uses: the machine sees the desktop, checks its permissions, and records it. The phone is never a gateway
+  for the machines of a machine: a node serves its own sessions only.
+- **Reads are typed.** A machine owns the read of a session (`sessions.read`, [protocol](protocol.md#node-api-over-a-session-channel)),
+  so the phone reads the records of the machine's own `alta` commands, bounded, instead of mapping them onto history cursors.
+- **A phone's work on a node is a paired device's work.** Policy, worktree, budgets and seats are applied by one
+  admission that the node API and the page of that node both call; the page's side is not registered on any wire
+  protocol, and a machine that lets other people in refuses it.
+- **Live state is derived, not forwarded.** The desktop turns what its session hosts already follow into the states,
+  lines and notifications the page shows, scoped to the spaces of the plugin, and ends them when the setting, the spaces
+  or the pairing change.
 
 ## Offline and failures
 

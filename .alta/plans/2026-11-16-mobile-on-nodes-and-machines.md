@@ -212,53 +212,60 @@ is relayed that A's window could not do.
 **Part 0: what the rest stands on**
 
 - [x] 1. The page files of a node come out of the one build of the frontend: `frontend/scripts/mobile-page.mjs` copies `mobile.html` and what it reaches (129 files, 4.4 MB) with `files.json`. **Changed from the draft:** no second Vite build. `npm ci` needs the generated client package whatever is built, and two builds at once would write the same `node_modules`; `MobilePage.targets` asks the desktop project for its frontend target instead, the way its own per-runtime builds do, so MSBuild runs it once. The node references no assembly of the desktop.
-- [ ] 2. The ASP.NET Core runtime on a node: `CodeAlta.Node.csproj` and its packages, the check of `altanode` at start, the SSH setup of the desktop (**Add a machine**), `doc/fleet/deployment.md`; `altanode run` started on a machine that has the runtime alone.
-- [ ] 3. The port of the page is reserved from sandboxed sessions (`ReservedLocalPorts`, in `DesktopApplication` and `NodeHost`, following the setting); tests that a session in the `node` profile reads neither the device key nor the listener file, and reaches neither the control port nor the page.
-- [ ] 4. `sessions.read`: contract (`FleetNodeContracts.cs`), typed reads and the command each builds, handler in `FleetNodeService` with `Access.View`, `SessionIdOf` and the content-grant list extended for it, the job checked against its session, image chunks, output bounds; announced as a feature; `FleetNodeClient.ReadAsync`. Tests through the multi-host harness: an unknown read, a session of another person, a Private session, a job of another session, a device without `view`, a grant that expires, an older node.
-- [ ] 5. `FleetAsk` gains its kind and its response revision, the permission record its details (additive); `RemoteSessionHost` reads them; an ask without a kind is not answerable.
-- [ ] 6. The admission of a person's work as one seam in `src/CodeAlta.Fleet` (from `FleetNodeService.Commands.cs`: policy, worktree, work record, environment, budgets, seats), called by the node API handlers unchanged in behavior; the existing tests of the node API pass as they are.
+- [x] 2. The ASP.NET Core runtime on a node: `CodeAlta.Node.csproj` and its packages, the check of `altanode` at start, the SSH setup of the desktop (**Add a machine**), `doc/fleet/deployment.md`; `altanode run` started on a machine that has the runtime alone.
+- [x] 3. The port of the page is reserved from sandboxed sessions (`ReservedLocalPorts`, in `DesktopApplication` and `NodeHost`, following the setting); tests that a session in the `node` profile reads neither the device key nor the listener file, and reaches neither the control port nor the page.
+- [x] 4. `sessions.read`: contract (`FleetNodeContracts.cs`), typed reads and the command each builds, handler in `FleetNodeService` with `Access.View`, `SessionIdOf` and the content-grant list extended for it, the job checked against its session, image chunks, output bounds; announced as a feature; `FleetNodeClient.ReadAsync`. Tests through the multi-host harness: an unknown read, a session of another person, a Private session, a job of another session, a device without `view`, a grant that expires, an older node.
+- [x] 5. `FleetAsk` gains its kind and its response revision, the permission record its details (additive); `RemoteSessionHost` reads them; an ask without a kind is not answerable.
+- [x] 6. The admission of a person's work as one seam in `src/CodeAlta.Fleet` (from `FleetNodeService.Commands.cs`: policy, worktree, work record, environment, budgets, seats), called by the node API handlers unchanged in behavior; the existing tests of the node API pass as they are.
 
 **Part 1: the phone page on a node** (closes #456)
 
 - [x] 7. `PluginFrontends.Node` and `Supports` (`src/CodeAlta.Plugins.Abstractions/PluginFrontends.cs`); `NodeHost.CreateHostOptions` reports `Node`; every reader of `Host.Frontend == Cli` checked; `PluginFrontendTests`.
 - [x] 8. `src/CodeAlta.Plugin.Mobile/MobilePage.targets` runs the build of step 1 incrementally and copies it to `mobile-page/` of the output and of every package; `CodeAlta.Node.csproj` imports it. `FolderPluginAppFiles : IPluginAppFileService` in `src/CodeAlta.Plugins` serves only the files `files.json` lists.
 - [x] 9. `NodePluginServices` (`src/CodeAlta.Node/Plugins/`): `alta` bridge (`PluginAltaServiceBridge` over `NodeHost.Alta`), private networks, page files, Asks and Permissions for `builtin:mobile` only; a folder plugin gets the no-op ones (test).
-- [ ] 10. Mobile among the built-ins of the node (`NodeBuiltInPlugins`, off by default), declared `Desktop | Node`. On a node its new sessions and prompts go through the seam of step 6, always in a worktree of their own.
+- [x] 10. Mobile among the built-ins of the node (`NodeBuiltInPlugins`, off by default), declared `Desktop | Node`. On a node its new sessions and prompts go through the seam of step 6, always in a worktree of their own.
 - [x] 11. Turning it on and off is the node's: `control.mobile.enable` persists the setting and calls `ApplyBuiltInAsync`; refused, and turned off, on a node that lets other people in. Tests: a restart, safe mode (`--no-plugins`), a start that fails, turning it off while a phone reads.
 - [x] 12. `IMobileHostControl.InvokeAsync(method, payload)` in the plugin, one implementation for the tab, the settings page and the host. `control.mobile.invoke` in `FleetNodeService`: the owner's local control and a device that manages the node **by pairing**; its pairing code is for one phone and five minutes. Tests of who is refused.
 - [x] 13. `altanode mobile`, `on`, `off`, `set`, `reset` (`NodeCommandLine.cs`, `NodeClientCommands.cs`): the QR code drawn from the rows of `MobileStatus.Qr`, the states of the network with their fix, and what a node without a listener says.
-- [ ] 14. Desktop: **Connect a phone** on the page of a machine (`frontend/src/fleet/console`, `Desktop/Fleet`): the Mobile tab component over `control.mobile.invoke`, for a machine managed by pairing; component and browser tests.
-- [ ] 15. Packages: npm in the pack job of `CodeAlta.Node` (`.github/workflows/ci.yml`, `src/dotnet-releaser.toml`); `mobile-page/` in the tool package and in each runtime package; their size under the limit of nuget.org.
+- [x] 14. Desktop: **Connect a phone** on the page of a machine (`frontend/src/fleet/console`, `Desktop/Fleet`): the Mobile tab component over `control.mobile.invoke`, for a machine managed by pairing; component and browser tests.
+- [x] 15. Packages: npm in the pack job of `CodeAlta.Node` (`.github/workflows/ci.yml`, `src/dotnet-releaser.toml`); `mobile-page/` in the tool package and in each runtime package; their size under the limit of nuget.org.
 
 **Part 2: other machines on the phone**
 
-- [ ] 16. `IPluginMachineService`, its records and its no-op in `src/CodeAlta.Plugins.Abstractions`; `IPluginMachineRuntimeService.ForPlugin` gives it to `builtin:mobile` only; XML docs.
-- [ ] 17. `DesktopPluginMachines` (`src/CodeAlta/Desktop/Fleet/`) over `DesktopFleet.Hosts`: machines with state, path, permissions and features; sessions by page, asked of the machine past its cached list; `ReadAsync`; send, queue, steer, abort and create by `SessionReference`, never by id alone.
-- [ ] 18. Asks and permissions of other machines through the plugin services: `DesktopPluginAsks` and `DesktopPluginPermissions` take the machine of a session and route through the registry; reviews are reported as not answerable there.
-- [ ] 19. Changes of other machines (`WatchAsync`): the states of listed sessions, bounded and coalesced; the display of an open session; the baseline after a reconnection; what a revoked or narrowed pairing ends.
-- [ ] 20. Mobile plugin, reads: `/api/machines`, the machine-qualified routes, `MobileSessions` and `MobileAlta` with a machine, the merged list, the moved session that names where it went, features per machine and `409 not_on_this_machine`, the spaces rule on every read.
-- [ ] 21. Mobile plugin, writes: prompts, stop, new session, answers and permission answers of another machine, with their retry keys.
-- [ ] 22. Mobile plugin, live and push: `MobileLive` and `MobilePushEvents` take the changes of step 19; one notification per transition; the payload names the machine.
-- [ ] 23. The setting **Show my other machines on the phone** (`mobile.json`, settings page, Mobile tab), off at first; turning it off or changing the spaces ends the streams and drops waiting notifications.
-- [ ] 24. Phone page: `contract.ts`, the machine chip and sheet, the merged list, the header of a session, **Run on** in a new session, what a machine does not offer left out, an offline machine read-only with its last state, **Review it on a computer**; `fixtureServer.ts` with two machines; `mobileMachines.browser.test.ts`.
+- [x] 16. `IPluginMachineService`, its records and its no-op in `src/CodeAlta.Plugins.Abstractions`; `IPluginMachineRuntimeService.ForPlugin` gives it to `builtin:mobile` only; XML docs.
+- [x] 17. `DesktopPluginMachines` (`src/CodeAlta/Desktop/Fleet/`) over `DesktopFleet.Hosts`: machines with state, path, permissions and features; sessions by page, asked of the machine past its cached list; `ReadAsync`; send, queue, steer, abort and create by `SessionReference`, never by id alone.
+- [x] 18. Asks and permissions of other machines through the plugin services: `DesktopPluginAsks` and `DesktopPluginPermissions` take the machine of a session and route through the registry; reviews are reported as not answerable there.
+- [x] 19. Changes of other machines (`WatchAsync`): the states of listed sessions, bounded and coalesced; the display of an open session; the baseline after a reconnection; what a revoked or narrowed pairing ends.
+- [x] 20. Mobile plugin, reads: `/api/machines`, the machine-qualified routes, `MobileSessions` and `MobileAlta` with a machine, the merged list, the moved session that names where it went, features per machine and `409 not_on_this_machine`, the spaces rule on every read.
+- [x] 21. Mobile plugin, writes: prompts, stop, new session, answers and permission answers of another machine, with their retry keys.
+- [x] 22. Mobile plugin, live and push: `MobileLive` and `MobilePushEvents` take the changes of step 19; one notification per transition; the payload names the machine.
+- [x] 23. The setting **Show my other machines on the phone** (`mobile.json`, settings page, Mobile tab), off at first; turning it off or changing the spaces ends the streams and drops waiting notifications.
+- [x] 24. Phone page: `contract.ts`, the machine chip and sheet, the merged list, the header of a session, **Run on** in a new session, what a machine does not offer left out, an offline machine read-only with its last state, **Review it on a computer**; `fixtureServer.ts` with two machines; `mobileMachines.browser.test.ts`.
 
 **Part 3: documentation**
 
-- [ ] 25. User guide: `site/docs/plugins/mobile.md` (a node, other machines, the security lines), `site/docs/fleet/machines.md` (connect a phone to a machine), `site/docs/fleet/security.md` (what `view` reads, who gets a pairing code on a node).
-- [ ] 26. Architecture: `doc/fleet/architecture.md` (the Mobile page row and the first diagram, stale today), `doc/fleet/node.md` (commands, `control.mobile.*`, the prerequisite), `doc/fleet/protocol.md` (`sessions.read`), `doc/fleet/security-and-privacy.md` (the phone acts as the device it is paired with), `doc/plugins.md` (the table, `Services.Machines`, the `Node` frontend), `doc/fleet/roadmap.md` (what M3c keeps).
+- [x] 25. User guide: `site/docs/plugins/mobile.md` (a node, other machines, the security lines), `site/docs/fleet/machines.md` (connect a phone to a machine), `site/docs/fleet/security.md` (what `view` reads, who gets a pairing code on a node).
+- [x] 26. Architecture: `doc/fleet/architecture.md` (the Mobile page row and the first diagram, stale today), `doc/fleet/node.md` (commands, `control.mobile.*`, the prerequisite), `doc/fleet/protocol.md` (`sessions.read`), `doc/fleet/security-and-privacy.md` (the phone acts as the device it is paired with), `doc/plugins.md` (the table, `Services.Machines`, the `Node` frontend), `doc/fleet/roadmap.md` (what M3c keeps).
+
+**Changed from the plan, and left open** (review by Codex/GPT-6.1 Sol/Max, 2026-11-16):
+
+- Other machines also take a change of provider, archive, restore, un-queue, un-steer and the stop of a job (`sessions.act`), which the plan kept for later.
+- There is no check inside `altanode` for the ASP.NET Core runtime: the .NET host refuses the application before its code runs. The SSH setup and the staging of a self-update check it; a node older than that check rolls back without saying why.
+- The choices of a new session are not filtered by the spaces of the plugin (task `53nb`), and a person of a team machine cannot start a session there from the phone (task `8t3b`).
+- The review asked for more tests than exist: denied connections from a real sandboxed session (step 3), reads of another person's sessions and expiring grants (step 4), a session beyond the 200 of the cached list (step 17).
 
 ## How it is verified
 
-- [ ] `dotnet build -c <Configuration>` then `dotnet test -c <Configuration> --no-build` and `npm test` at the same time, and `lunet build` in `site/`: all pass.
-- [ ] A node with a temporary `--data-root`: `altanode mobile on` prints an address and a QR code; the page lists its sessions, sends a prompt, answers a permission request, starts a session in a worktree of its own. The code is refused after one phone, and after five minutes.
-- [ ] A session in the `node` sandbox on that node cannot pair a phone nor allow its own request; `altacli` on the same profile starts no Mobile server.
-- [ ] A node that lets another person in refuses `altanode mobile on`, and a node that takes one in stops serving.
-- [ ] The developer instance paired with the node, the setting on: the phone page of the desktop lists both machines, opens a session of the node, reads a tool output and an image of 8 MB, sends, steers, stops, allows a request, starts a session there. The same prompt sent twice with one retry key runs once.
-- [ ] A node reached **only through a server's relay**, never paired: the same, with **relayed** on its chip.
-- [ ] The setting off: a session of another machine is unknown to the phone (404), its stream ends, no notification comes.
-- [ ] The pairing of the desktop revoked on the node while the phone reads: the stream ends and the machine shows as not allowed. A desktop with `view` only: the phone reads, and every write is refused by the node.
-- [ ] A session moved to the node: the old link says where it went and opens it there; the node stopped: its sessions stay listed with their last state, read-only.
-- [ ] Both themes and a narrow screen for the machine sheet and the chips, through the browser tools.
+- [x] `dotnet build -c <Configuration>` then `dotnet test -c <Configuration> --no-build` and `npm test` at the same time, and `lunet build` in `site/`: all pass.
+- [ ] A node with a temporary `--data-root`: `altanode mobile on` prints an address and a QR code; the page lists its sessions, sends a prompt, answers a permission request, starts a session in a worktree of its own. The code is refused after one phone, and after five minutes. **Done in part:** `altanode mobile on` printed the address and the QR code on an isolated profile (a stand-in `tailscale`), the page signed in and went live, a second use of the code was refused, `mobile off` stopped serving; prompts, permission answers and worktrees are covered by `NodeMobileAdmissionTests`, not driven by hand.
+- [ ] A session in the `node` sandbox on that node cannot pair a phone nor allow its own request; `altacli` on the same profile starts no Mobile server. **By tests only** (`NodeHostTests`, reserved ports): no connection was attempted from a real sandboxed session.
+- [x] A node that lets another person in refuses `altanode mobile on`, and a node that takes one in stops serving. (`MachineMobileTests`, `NodeMobileAdmissionTests`.)
+- [ ] The developer instance paired with the node, the setting on: the phone page of the desktop lists both machines, opens a session of the node, reads a tool output and an image of 8 MB, sends, steers, stops, allows a request, starts a session there. The same prompt sent twice with one retry key runs once. **Not exercised live:** covered by the fixture browser tests of the phone and the C# tests against a real node.
+- [ ] A node reached **only through a server's relay**, never paired: the same, with **relayed** on its chip. **Not exercised live.**
+- [x] The setting off: a session of another machine is unknown to the phone (404), its stream ends, no notification comes. (`MobileServerTests.Machines`.)
+- [ ] The pairing of the desktop revoked on the node while the phone reads: the stream ends and the machine shows as not allowed. A desktop with `view` only: the phone reads, and every write is refused by the node. **By tests only** (`DesktopPluginMachinesTests`, `MobileServerTests.Machines`).
+- [x] A session moved to the node: the old link says where it went and opens it there; the node stopped: its sessions stay listed with their last state, read-only. (`MobileServerTests.Machines`, `mobileMachines.browser.test.ts`.)
+- [x] Both themes and a narrow screen for the machine sheet and the chips, through the browser tools.
 
 ## Decisions
 
