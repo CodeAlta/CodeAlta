@@ -1,6 +1,6 @@
 ---
 title: The phone page on CodeAlta Node, and several machines from one phone page
-status: in-progress
+status: done
 created: 2026-11-16
 summary: CodeAlta Node serves the phone page of the Mobile plugin (issue #456), and the phone page of a desktop also lists and drives the sessions of the machines that desktop reaches, paired or through its server. The CLI stays out, it is not a host.
 ---
