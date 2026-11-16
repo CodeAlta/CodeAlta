@@ -304,6 +304,9 @@ internal sealed partial class AdaptiveTurnCoordinator
     {
         try
         {
+            // A fast queued run can publish Idle before its send returns and marks its prompt submitted. Wait for that
+            // work to finish, otherwise this run's own prompt looks like more work waiting and its decision is lost.
+            await _runtime.WhenRunEndedAsync(sessionId, _closing.Token).ConfigureAwait(false);
             var (_, adaptive) = await _runtime.GetSessionModelChoiceAsync(sessionId, _closing.Token).ConfigureAwait(false);
             if (!adaptive)
             {
@@ -319,8 +322,15 @@ internal sealed partial class AdaptiveTurnCoordinator
                 return;
             }
 
-            Facts facts;
-            lock (_gate) facts = turn.Read();
+            Facts? facts;
+            lock (_gate)
+                facts = _turns.TryGetValue(sessionId, out var current) && current == turn && !turn.Active && turn.RunId == runId ? turn.Read() : null;
+            if (facts is null)
+            {
+                Tell(sessionId, runId, "a later run started");
+                return;
+            }
+
             // A failed run is the fallback's. While a review runs, a prompt waits or work of its own goes on (a job, a
             // sub-agent), the session is not done: what comes back to it starts the run that is decided next.
             var waits = facts.Failed ? "the run failed" : facts.ReviewRunning ? "a review runs" : facts.VerdictWaits ? "a verdict waits"

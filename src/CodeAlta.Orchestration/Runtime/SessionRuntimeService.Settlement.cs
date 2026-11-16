@@ -268,8 +268,8 @@ public sealed partial class SessionRuntimeService
         }
     }
 
-    // Waits for the run of a session to end after it was stopped, as the settlement does for one session.
-    private async Task WhenRunEndedAsync(string sessionId, CancellationToken cancellationToken)
+    // Waits for the run, its queue drain and its forwarded callbacks to end, after a stop or before deciding its result.
+    internal async Task WhenRunEndedAsync(string sessionId, CancellationToken cancellationToken)
     {
         while (true)
         {
