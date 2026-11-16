@@ -25,11 +25,21 @@ og_type: website
 <span class="logo-code">  ░░░░░░    ░░░░░░    ░░░░░░   ░░░░░░   </span><span class="logo-alta">░░      ░░  ░░░     ░░    ░░░░░░░░</span></pre>
   <div class="alta-install" id="install">
     <div class="alta-install-card alta-install-primary">
-      <div class="alta-install-label"><i class="bi bi-window" aria-hidden="true"></i> Install CodeAlta Desktop</div>
-      <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta
-alta</code></pre>
+      <div class="alta-install-label"><i class="bi bi-window" aria-hidden="true"></i> <span class="text-nowrap">Install CodeAlta Desktop</span>
+        <span class="alta-shots-bar alta-os-bar" role="group" aria-label="Operating system">
+          <button type="button" class="alta-shots-tab" data-alta-os-set="macos">macOS</button>
+          <button type="button" class="alta-shots-tab" data-alta-os-set="linux">Linux</button>
+          <button type="button" class="alta-shots-tab" data-alta-os-set="windows">Windows</button>
+        </span>
+      </div>
+      <div class="alta-only-unix">
+        <pre class="language-shell-session"><code>curl -fsSL https://codealta.io/install.sh | sh</code></pre>
+      </div>
+      <div class="alta-only-windows">
+        <pre class="language-powershell"><code>irm https://codealta.io/install.ps1 | iex</code></pre>
+      </div>
     </div>
-    <p class="alta-install-note">Windows, macOS &amp; Linux · Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a> · <a href="#desktop-or-tui">Prefer a terminal?</a></p>
+    <p class="alta-install-note">One command, everything included · then type <code>alta</code> · <a href="{{site.basepath}}/docs/getting-started/#install">Other ways to install</a> · <a href="#desktop-or-tui">Prefer a terminal?</a></p>
   </div>
   <h1 class="alta-hero-title" id="home-title">Your agents. <span class="alta-gradient-text">One workspace.</span><br><span class="alta-gradient-text">One fleet.</span></h1>
   <p class="alta-hero-lead">An agentic development environment, local and distributed. Run AI coding agents on your projects - on this computer, on your other machines or across a whole company - and follow them from your phone. Keep conversations, code, terminals and git changes together, with the models and tools you choose.</p>
@@ -292,16 +302,24 @@ alta</code></pre>
     <h2 id="terminal-title">The same agents.<br>A different kind of window.</h2>
     <p>Prefer the terminal? CodeAlta TUI shares the same profile, providers and sessions. Start in one app and continue in the other.</p>
     <div class="alta-install-card">
-      <div class="alta-install-label"><i class="bi bi-terminal" aria-hidden="true"></i> Install CodeAlta TUI</div>
-      <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta.Tui
-altatui</code></pre>
+      <div class="alta-install-label"><i class="bi bi-terminal" aria-hidden="true"></i> Install CodeAlta TUI <small>then, in a new terminal: <code>altatui</code></small></div>
+      <div class="alta-only-unix">
+        <pre class="language-shell-session"><code>curl -fsSL https://codealta.io/install.sh | sh -s -- --tui</code></pre>
+      </div>
+      <div class="alta-only-windows">
+        <pre class="language-powershell"><code>&amp; ([scriptblock]::Create((irm https://codealta.io/install.ps1))) -Tui</code></pre>
+      </div>
     </div>
     <a href="{{site.basepath}}/docs/desktop-and-tui/">Compare Desktop and TUI <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
     <p>No window at all? <code>altacli</code> runs the same harness from a script, a CI job or a container: a prompt to its end, with text or JSONL output and exit codes, or CodeAlta as an ACP agent for your editor. Its sessions show in CodeAlta Desktop and TUI.</p>
     <div class="alta-install-card">
-      <div class="alta-install-label"><i class="bi bi-gear-wide-connected" aria-hidden="true"></i> Install altacli</div>
-      <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta.Cli
-altacli run "Fix the failing test"</code></pre>
+      <div class="alta-install-label"><i class="bi bi-gear-wide-connected" aria-hidden="true"></i> Install altacli <small>then: <code>altacli run "Fix the failing test"</code></small></div>
+      <div class="alta-only-unix">
+        <pre class="language-shell-session"><code>curl -fsSL https://codealta.io/install.sh | sh -s -- --cli</code></pre>
+      </div>
+      <div class="alta-only-windows">
+        <pre class="language-powershell"><code>&amp; ([scriptblock]::Create((irm https://codealta.io/install.ps1))) -Cli</code></pre>
+      </div>
     </div>
     <a href="{{site.basepath}}/docs/command-line/">Run CodeAlta from the command line <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
   </div>

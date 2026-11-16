@@ -27,11 +27,11 @@ The log never holds your tokens. Sign in as the [Issues](issues.md) page says fo
 
 When the window of `alta` cannot open, CodeAlta says why and what to do: in the terminal you started it from, in a message box on Windows, or in a notification on Linux and macOS when you started it from the applications menu or the Dock. The log has the full report.
 
-- **A library is missing (Linux).** The window needs GTK 4 and WebKitGTK 6.0; the message names the missing library. On Ubuntu 24.04 or later and Debian: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`. Ubuntu 22.04 and older systems do not have WebKitGTK 6.0: use `altatui`.
+- **A library is missing (Linux).** The window needs GTK 4 and WebKitGTK 6.0; the message names the missing library. On Ubuntu 24.04 or later and Debian: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`; the [install script](getting-started.md#install) installs them, on Fedora, openSUSE and Arch Linux too. Ubuntu 22.04 and older systems do not have WebKitGTK 6.0: use `altatui`.
 - **No display (Linux).** Over SSH or in a console without an X11 or Wayland session, there is no window to open. Use `altatui`.
 - **The window aborts at once on Ubuntu 24.04 or later.** WebKitGTK's sandbox needs unprivileged user namespaces, which Ubuntu restricts for programs without an AppArmor profile, such as `alta` installed with `dotnet tool`. The terminal says so. Choose one:
   - turn the sandbox off for CodeAlta only: `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 alta`. The window loads only CodeAlta's local pages, but it is a sandbox turned off;
-  - give `alta` an AppArmor profile that allows user namespaces, as Ubuntu does for its browsers; the message gives the path of the executable;
+  - give `alta` an AppArmor profile that allows user namespaces, as Ubuntu does for its browsers: the [install script](getting-started.md#install) writes it in `/etc/apparmor.d/codealta` when you run it in a terminal, or write it yourself with the path of the executable the message gives;
   - use `altatui`, which has no web view.
 - **The WebView2 Runtime is missing (Windows).** Install or repair the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (Evergreen).
 - **The Visual C++ runtime is missing (Windows).** Install the latest [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) for your processor.

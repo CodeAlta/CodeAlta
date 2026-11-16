@@ -26,6 +26,23 @@
     window.scrollBy(0, tab.getBoundingClientRect().top - before);
   });
 
+  // macOS / Linux / Windows tabs of the install command: the script of the head chose the visitor's system.
+  var systems = ["macos", "linux", "windows"];
+  function applyOs(os) {
+    root.setAttribute("data-alta-os", os);
+    var tabs = document.querySelectorAll("[data-alta-os-set]");
+    for (var i = 0; i < tabs.length; i++) {
+      var active = tabs[i].getAttribute("data-alta-os-set") === os;
+      tabs[i].classList.toggle("active", active);
+      tabs[i].setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var tab = event.target.closest ? event.target.closest("[data-alta-os-set]") : null;
+    if (tab && systems.indexOf(tab.getAttribute("data-alta-os-set")) >= 0) applyOs(tab.getAttribute("data-alta-os-set"));
+  });
+
   // The document is the story: every chapter, link and image works without JavaScript.
   // A decorative sticky stage mirrors its pictures on roomy screens. Never intercept scrolling,
   // move focus, hide chapter text, or announce every scroll position to a screen reader.
@@ -158,6 +175,7 @@
 
   function ready() {
     applyUi(root.getAttribute("data-alta-ui") === "tui" ? "tui" : "desktop");
+    applyOs(systems.indexOf(root.getAttribute("data-alta-os")) >= 0 ? root.getAttribute("data-alta-os") : "linux");
     scrollBrand();
     document.querySelectorAll("[data-alta-story]").forEach(scrollStory);
   }

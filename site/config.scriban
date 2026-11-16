@@ -37,6 +37,9 @@ site_project_init
 # localStorage and applied before the first paint so pages do not flash the other version.
 html.head.metas.add '<script>(function(){var ui="desktop";try{if(localStorage.getItem("codealta-ui")==="tui"){ui="tui";}}catch(_){}document.documentElement.setAttribute("data-alta-ui",ui);}());</script>'
 
+# The install command shown first is the one of the visitor's system; the tabs of the home page show the others.
+html.head.metas.add '<script>(function(){var p=(navigator.platform||"")+" "+navigator.userAgent;document.documentElement.setAttribute("data-alta-os",/Win/i.test(p)?"windows":/Mac|iPhone|iPad/i.test(p)?"macos":"linux");}());</script>'
+
 with builtins
     # The marks of the tables that compare the two apps: available, partly available, not available.
     alta_yes = '<span class="alta-mark alta-mark-yes"><i class="bi bi-check-circle-fill" aria-hidden="true"></i><span class="visually-hidden">Yes</span></span>'

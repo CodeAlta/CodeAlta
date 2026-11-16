@@ -15,7 +15,7 @@ Both apps run the same agents: the same providers, tools, agent prompts, skills,
 
 ## Install
 
-`dotnet tool install -g CodeAlta` installs CodeAlta Desktop (`alta`); `dotnet tool install -g CodeAlta.Tui` installs the TUI (`altatui`). You can install both. See [Getting Started](getting-started.md#install) for the requirements and the first launch.
+The [install script](getting-started.md#install) installs CodeAlta Desktop (`alta`), and the TUI (`altatui`) with its `--tui` option. You can install both. See [Getting Started](getting-started.md#install) for the requirements and the first launch.
 
 ## Compare the two apps
 

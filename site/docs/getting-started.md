@@ -6,27 +6,51 @@ title: Getting Started
 
 ## Install
 
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first (on macOS, 10.0.13 or later), then install CodeAlta Desktop and launch it from a project folder:
+One command installs CodeAlta Desktop, the app we recommend, with everything it needs. On macOS and Linux:
 
 ```sh
-dotnet tool install -g CodeAlta
+curl -fsSL https://codealta.io/install.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://codealta.io/install.ps1 | iex
+```
+
+Then launch it from a project folder:
+
+```sh
 alta
 ```
 
-CodeAlta Desktop is the app we recommend. CodeAlta TUI runs the same agents in a terminal, on the same `~/.alta` profile:
+The script shows each step, installs for your account only, and puts `alta` on your `PATH`. Run it again to update CodeAlta. On Linux without a desktop session, such as a server over SSH, it installs CodeAlta TUI instead. [What the script installs](#what-the-script-installs) has the details.
+
+### Choose the apps
+
+CodeAlta TUI runs the same agents in a terminal, on the same `~/.alta` profile, and CodeAlta CLI runs them without a window ([Command Line](command-line.md)). Name the apps to install; `--all` installs the three:
 
 ```sh
-dotnet tool install -g CodeAlta.Tui
-altatui
+curl -fsSL https://codealta.io/install.sh | sh -s -- --desktop --tui
 ```
 
-| App | NuGet package | Command |
-| --- | --- | --- |
-| **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
-| **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
-| **CodeAlta CLI**, without a window ([Command Line](command-line.md)) | [`CodeAlta.Cli`](https://www.nuget.org/packages/CodeAlta.Cli/) | `altacli` |
+```powershell
+& ([scriptblock]::Create((irm https://codealta.io/install.ps1))) -Desktop -Tui
+```
 
-You can install both; [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) compares them. For the TUI, `dnx --yes CodeAlta.Tui` installs, updates and runs it in one command.
+| Option (`install.sh`, `install.ps1`) | Installs |
+| --- | --- |
+| `--desktop`, `-Desktop` | **CodeAlta Desktop** (`alta`) |
+| `--tui`, `-Tui` | **CodeAlta TUI** (`altatui`) |
+| `--cli`, `-Cli` | **CodeAlta CLI** (`altacli`) |
+| `--all`, `-All` | The three of them |
+| `--prerelease`, `-Prerelease` | The latest preview instead of the latest release |
+| `--version <v>`, `-Version <v>` | That version |
+| `--no-modify-path`, `-NoModifyPath` | Leaves your shell profile, or the `PATH` of your account, as it is |
+
+[Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) compares the two apps.
+
+### Profile
 
 - The folder you launch from is opened as a project.
 - CodeAlta keeps its state under `~/.alta/`: configuration, logs, provider state, sessions, agent prompts, plugins and skills.
@@ -47,11 +71,11 @@ The window shows the first folder. `--space` takes the id, the start of the id o
 
 ### Desktop requirements
 
-The desktop app uses the web view of the system:
+The desktop app uses the web view of the system. The [install script](#install) checks it, and installs what is missing on Linux and Windows:
 
 - **Windows**: WebView2, part of Windows 11 and of an up-to-date Windows 10.
 - **macOS**: macOS 11 or later.
-- **Linux**: WebKitGTK 6.0 with GTK 4, in an X11 or Wayland session. On Ubuntu 24.04 or later: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`.
+- **Linux**: WebKitGTK 6.0 with GTK 4, in an X11 or Wayland session. On Ubuntu 24.04 or later: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`, and an [AppArmor profile](troubleshooting.md#the-desktop-app-does-not-start) that lets the window open.
 
 When the window cannot start, CodeAlta says why and what to do: see [The desktop app does not start](troubleshooting.md#the-desktop-app-does-not-start).
 
@@ -61,6 +85,27 @@ On its first start, the desktop app adds itself to the Start Menu on Windows, to
 - **macOS permissions**: **System Settings > Privacy & Security** lists the app as **CodeAlta**. A permission given there usually stays across updates; started from a terminal, CodeAlta uses the permissions of that terminal. Remove the entries of older versions, listed as `alta`, with **−**.
 - **Terminal**: `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
 - **Manual update**: after `dotnet tool update -g CodeAlta`, start `alta` once from a terminal to refresh the Start Menu shortcut or the Dock entry. **Update and restart** in the app does it for you.
+
+### What the script installs
+
+- **The runtime**: CodeAlta runs on .NET 10. A .NET 10 SDK you already have, of the system or of your account, is used as it is. Without one, the script installs it for your account, in `~/.dotnet` (`%LOCALAPPDATA%\Microsoft\dotnet` on Windows), with the install script of Microsoft and without administrator rights. A .NET of the system that is too old is updated where it is, which asks for your password or your permission.
+- **The window of the desktop app**: on Linux, GTK 4 and WebKitGTK 6.0, and on Ubuntu 24.04 or later the AppArmor profile that lets the window open, with `sudo`; on Windows, the WebView2 runtime when it is missing.
+- **CodeAlta**: the latest release, as a .NET tool.
+- **`PATH`**: `~/.dotnet/tools`, where the commands are, is added to the profile of your shell (to the `PATH` of your account on Windows) when it is not there.
+
+With the [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) already installed (on macOS, 10.0.13 or later), you can also install the tools yourself:
+
+```sh
+dotnet tool install -g CodeAlta
+```
+
+| App | NuGet package | Command |
+| --- | --- | --- |
+| **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
+| **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
+| **CodeAlta CLI** | [`CodeAlta.Cli`](https://www.nuget.org/packages/CodeAlta.Cli/) | `altacli` |
+
+For the TUI, `dnx --yes CodeAlta.Tui` installs, updates and runs it in one command.
 
 ### Terminal font
 

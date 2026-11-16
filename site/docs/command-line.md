@@ -9,10 +9,14 @@ title: Command Line
 ## Install
 
 ```sh
-dotnet tool install -g CodeAlta.Cli
+curl -fsSL https://codealta.io/install.sh | sh -s -- --cli
 ```
 
-It needs the same .NET SDK as the two apps (see [Getting Started](getting-started.md#install)). It uses the providers you set up in CodeAlta Desktop or TUI; on a computer without them, see [Configuration](#configuration).
+```powershell
+& ([scriptblock]::Create((irm https://codealta.io/install.ps1))) -Cli
+```
+
+[Getting Started](getting-started.md#choose-the-apps) has the options of the install script. It uses the providers you set up in CodeAlta Desktop or TUI; on a computer without them, see [Configuration](#configuration).
 
 ## Run a prompt
 

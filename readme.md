@@ -14,44 +14,35 @@ Its agent harness holds its own against the vendors' own agents: on hard tasks o
 
 ## 🚀 Install
 
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) (on macOS, 10.0.13 or later), then install CodeAlta Desktop, the app we recommend:
+One command installs CodeAlta Desktop, the app we recommend, with everything it needs. On macOS and Linux:
 
 ```sh
-dotnet tool install -g CodeAlta
+curl -fsSL https://codealta.io/install.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://codealta.io/install.ps1 | iex
+```
+
+Then start it from a project folder:
+
+```sh
 alta
 ```
 
-CodeAlta TUI shares your profile, providers and sessions. Install both and continue your work in either:
+On first launch it opens the provider setup: sign in with a Claude, ChatGPT or GitHub Copilot subscription, or add an API key. Run the command again to update.
+
+CodeAlta TUI (`altatui`) shares your profile, providers and sessions: install both and continue your work in either. CodeAlta CLI (`altacli`) runs the same agents without a window, for scripts, CI and editors (ACP). The same script installs them with `--tui`, `--cli` or `--all`:
 
 ```sh
-dotnet tool install -g CodeAlta.Tui
-altatui
+curl -fsSL https://codealta.io/install.sh | sh -s -- --all
 ```
 
-CodeAlta CLI runs the same agents without a window, for scripts, CI and editors (ACP):
+See [Getting Started](https://codealta.io/docs/getting-started/#install) for the options, what the script installs, other ways to install and the first steps.
 
-```sh
-dotnet tool install -g CodeAlta.Cli
-altacli run "Fix the failing test"
-```
-
-Launch the app from a project folder. On first launch it opens the provider setup: sign in with a Claude, ChatGPT or GitHub Copilot subscription, or add an API key.
-
-See [Getting Started](https://codealta.io/docs/getting-started/) for requirements and the first steps.
-
-For your [fleet](https://codealta.io/docs/fleet/), CodeAlta Node runs sessions and automations on an always-on machine, a build machine or a cloud VM, driven from CodeAlta Desktop; CodeAlta Desktop can also [install it over SSH](https://codealta.io/docs/fleet/machines/):
-
-```sh
-dotnet tool install -g CodeAlta.Node
-altanode run
-```
-
-CodeAlta Server brings your people and machines together, for you alone or a whole team ([CodeAlta Server](https://codealta.io/docs/fleet/server/)); CodeAlta Desktop can also [create one for you](https://codealta.io/docs/fleet/server/#create-my-server) on this computer or over SSH:
-
-```sh
-dotnet tool install -g CodeAlta.Server
-altaserver run
-```
+For your [fleet](https://codealta.io/docs/fleet/), CodeAlta Node runs sessions and automations on an always-on machine, a build machine or a cloud VM, driven from CodeAlta Desktop, which [installs it over SSH](https://codealta.io/docs/fleet/machines/). CodeAlta Server brings your people and machines together, for you alone or a whole team: CodeAlta Desktop [creates one for you](https://codealta.io/docs/fleet/server/#create-my-server) on this computer or over SSH.
 
 ## 🛰️ Fleet
 

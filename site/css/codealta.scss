@@ -20,6 +20,25 @@
   display: none !important;
 }
 
+// The install command of the system chosen in the tabs, the visitor's at first: macOS and Linux have the same one.
+// Both commands show until the script of the head has named the system.
+:root[data-alta-os="windows"] .alta-only-unix,
+:root[data-alta-os="macos"] .alta-only-windows,
+:root[data-alta-os="linux"] .alta-only-windows,
+:root:not([data-alta-os]) .alta-os-bar {
+  display: none !important;
+}
+
+.alta-os-bar {
+  margin: 0 0 0 auto;
+}
+
+// In a narrow window the tabs go under the title of the card.
+.alta-install-label:has(.alta-os-bar) {
+  flex-wrap: wrap;
+  row-gap: .45rem;
+}
+
 .alta-shots {
   margin-inline: 0;
 }
