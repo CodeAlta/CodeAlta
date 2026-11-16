@@ -522,7 +522,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var pluginUi = new DesktopPluginUi(retentionProtection);
             var pluginIdentities = new DesktopPluginIdentities();
             var pluginAsks = new DesktopPluginAsks();
-            var pluginPermissions = new DesktopPluginPermissions();
+            var pluginPermissions = new PluginPermissionServiceBridge();
             // The values of the settings plugins declare, in config.toml: a setting of each project is in the file of its project.
             var settingsProjects = new ProjectCatalog(catalog);
             var pluginSettingsStore = new PluginSettingsStore(catalog.ConfigPath,

@@ -33,6 +33,14 @@ public enum PluginFrontends
     /// <see cref="Cli"/>: a plugin opts in to the command-line application explicitly.
     /// </summary>
     All = Terminal | Desktop,
+
+    /// <summary>
+    /// CodeAlta Node (<c>altanode</c>), a host that stays on without a window. It starts the plugins that name it, and
+    /// those made for the command-line application (<see cref="Cli"/>), which need no window either. A plugin that
+    /// serves something while its host runs (the page of the phones) names <see cref="Node"/> alone, so that the
+    /// command-line application, which ends with its prompt, never starts it.
+    /// </summary>
+    Node = 8,
 }
 
 /// <summary>
@@ -45,18 +53,22 @@ public static class PluginFrontendsExtensions
     /// </summary>
     /// <param name="supported">The applications the plugin supports.</param>
     /// <param name="host">The application of the host, or <see cref="PluginFrontends.None"/> for a host without a user interface.</param>
-    /// <returns><see langword="true"/> when the host has no user interface, or when the plugin supports the host's application.</returns>
+    /// <returns>
+    /// <see langword="true"/> when the host has no user interface, when the plugin supports the host's application, or when
+    /// the host is a node and the plugin supports the command-line application.
+    /// </returns>
     public static bool Supports(this PluginFrontends supported, PluginFrontends host)
-        => host == PluginFrontends.None || (supported & host) != 0;
+        => host == PluginFrontends.None || (supported & host) != 0 || (host == PluginFrontends.Node && (supported & PluginFrontends.Cli) != 0);
 
     /// <summary>Gets the name shown to users for one application.</summary>
     /// <param name="frontend">The application.</param>
-    /// <returns><c>desktop application</c>, <c>terminal application</c>, <c>command-line application</c>, or <c>host</c> for anything else.</returns>
+    /// <returns><c>desktop application</c>, <c>terminal application</c>, <c>command-line application</c>, <c>node</c>, or <c>host</c> for anything else.</returns>
     public static string ToDisplayName(this PluginFrontends frontend) => frontend switch
     {
         PluginFrontends.Desktop => "desktop application",
         PluginFrontends.Terminal => "terminal application",
         PluginFrontends.Cli => "command-line application",
+        PluginFrontends.Node => "node",
         _ => "host",
     };
 }

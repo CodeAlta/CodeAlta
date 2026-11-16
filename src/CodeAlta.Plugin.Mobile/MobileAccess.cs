@@ -10,6 +10,10 @@ namespace CodeAlta.Plugin.Mobile;
 /// nothing it can sign in with, and so cannot answer through the phone what CodeAlta refuses to agents. The pairing token
 /// lives in memory, to show the QR code; after a restart the Mobile tab makes a new one, and the phones keep their keys.
 /// </summary>
+/// <remarks>
+/// A host without a window (CodeAlta Node) prints its code with a command, which any program of its user can run: there a
+/// pairing token has a life (<c>pairingLife</c>) and signs one phone in, then is no token any more.
+/// </remarks>
 internal sealed class MobileAccess
 {
     /// <summary>The name of the file of the plugin's state that keeps the hashes.</summary>
@@ -19,24 +23,43 @@ internal sealed class MobileAccess
     internal const int MaximumPhones = 64;
 
     private readonly IPluginStateStore _state;
+    // How long a pairing token signs a phone in, and only one; null for the standing token of a window.
+    private readonly TimeSpan? _pairingLife;
+    private readonly TimeProvider _time;
+    private DateTimeOffset _pairingEnd;
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _saving = new(1, 1);
     private string? _pairing;
     private string? _pairingHash;
     private List<string> _phones;
 
-    private MobileAccess(IPluginStateStore state, MobileAccessFile? saved)
+    private MobileAccess(IPluginStateStore state, MobileAccessFile? saved, TimeSpan? pairingLife, TimeProvider time)
     {
         _state = state;
-        _pairingHash = IsHash(saved?.Pairing) ? saved!.Pairing : null;
+        _pairingLife = pairingLife;
+        _time = time;
+        // A token with a life does not outlive the run that made it.
+        _pairingHash = pairingLife is null && IsHash(saved?.Pairing) ? saved!.Pairing : null;
         _phones = [.. (saved?.Phones ?? []).Where(IsHash).Distinct(StringComparer.Ordinal).TakeLast(MaximumPhones)];
     }
 
-    /// <summary>Gets the pairing token the QR code shows, or null until <see cref="PairAsync"/> made one.</summary>
+    /// <summary>Gets the pairing token the QR code shows, or null until <see cref="PairAsync"/> made one, and once one with a life ended or signed its phone in.</summary>
     internal string? PairingToken
     {
-        get { lock (_gate) return _pairing; }
+        get { lock (_gate) return Expired() ? null : _pairing; }
     }
+
+    /// <summary>Gets whether a pairing token signs one phone in and ends by itself (<see cref="PairingEndsIn"/>).</summary>
+    internal bool PairsOnce => _pairingLife is not null;
+
+    /// <summary>Gets how long the pairing token of now still signs a phone in; null for a standing token, or when there is none.</summary>
+    internal TimeSpan? PairingEndsIn
+    {
+        get { lock (_gate) return _pairingLife is null || _pairing is null || Expired() ? null : _pairingEnd - _time.GetUtcNow(); }
+    }
+
+    // Whether the token of now has a life that ended; with the gate held.
+    private bool Expired() => _pairingLife is not null && _pairing is not null && _time.GetUtcNow() >= _pairingEnd;
 
     /// <summary>Gets how many phones are signed in.</summary>
     internal int PhoneCount
@@ -47,10 +70,19 @@ internal sealed class MobileAccess
     /// <summary>Reads the hashes the plugin kept.</summary>
     /// <param name="state">The state of the plugin.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    internal static async Task<MobileAccess> LoadAsync(IPluginStateStore state, CancellationToken cancellationToken)
+    internal static Task<MobileAccess> LoadAsync(IPluginStateStore state, CancellationToken cancellationToken)
+        => LoadAsync(state, null, null, cancellationToken);
+
+    /// <summary>Reads the hashes the plugin kept, for pairing tokens that have a life.</summary>
+    /// <param name="state">The state of the plugin.</param>
+    /// <param name="pairingLife">How long a pairing token signs a phone in, and one phone only; null for a standing token.</param>
+    /// <param name="time">The clock; null for that of the system.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    internal static async Task<MobileAccess> LoadAsync(IPluginStateStore state, TimeSpan? pairingLife, TimeProvider? time, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);
-        return new(state, await state.ReadJsonAsync<MobileAccessFile>(PluginStateScope.User, FileName, cancellationToken).ConfigureAwait(false));
+        return new(state, await state.ReadJsonAsync<MobileAccessFile>(PluginStateScope.User, FileName, cancellationToken).ConfigureAwait(false),
+            pairingLife, time ?? TimeProvider.System);
     }
 
     /// <summary>
@@ -75,12 +107,29 @@ internal sealed class MobileAccess
         string token;
         lock (_gate)
         {
-            if (_pairing is { } pairing) return pairing;
-            token = _pairing = MobileToken.Create();
-            _pairingHash = Hash(token);
+            if (_pairing is { } pairing && !Expired()) return pairing;
+            token = NewPairing();
         }
 
         await SaveAsync(cancellationToken).ConfigureAwait(false);
+        return token;
+    }
+
+    /// <summary>Gives a new pairing token in the place of the one of now, which signs no phone in any more.</summary>
+    internal async Task<string> RenewAsync(CancellationToken cancellationToken)
+    {
+        string token;
+        lock (_gate) token = NewPairing();
+        await SaveAsync(cancellationToken).ConfigureAwait(false);
+        return token;
+    }
+
+    // With the gate held.
+    private string NewPairing()
+    {
+        var token = _pairing = MobileToken.Create();
+        _pairingHash = Hash(token);
+        if (_pairingLife is { } life) _pairingEnd = _time.GetUtcNow() + life;
         return token;
     }
 
@@ -89,8 +138,9 @@ internal sealed class MobileAccess
     {
         lock (_gate)
         {
-            _pairing = MobileToken.Create();
-            _pairingHash = Hash(_pairing);
+            // A token with a life is made when it is asked for, never kept ready.
+            if (_pairingLife is null) NewPairing();
+            else (_pairing, _pairingHash) = (null, null);
             _phones = [];
         }
 
@@ -111,7 +161,9 @@ internal sealed class MobileAccess
         lock (_gate)
         {
             if (Contains(_phones, hash)) return given;
-            if (_pairingHash is null || !Same(hash, _pairingHash)) return null;
+            if (_pairingHash is null || !Same(hash, _pairingHash) || Expired()) return null;
+            // A token with a life signs one phone in.
+            if (_pairingLife is not null) (_pairing, _pairingHash) = (null, null);
             key = MobileToken.Create();
             _phones.Add(Hash(key));
             if (_phones.Count > MaximumPhones) _phones.RemoveRange(0, _phones.Count - MaximumPhones);
@@ -158,7 +210,7 @@ internal sealed class MobileAccess
         try
         {
             MobileAccessFile file;
-            lock (_gate) file = new() { Pairing = _pairingHash, Phones = [.. _phones] };
+            lock (_gate) file = new() { Pairing = _pairingLife is null ? _pairingHash : null, Phones = [.. _phones] };
             await _state.WriteJsonAsync(PluginStateScope.User, FileName, file, CancellationToken.None).ConfigureAwait(false);
         }
         finally

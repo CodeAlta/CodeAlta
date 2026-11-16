@@ -37,6 +37,20 @@ public sealed class PluginFrontendTests
     }
 
     [TestMethod]
+    public void Node_StartsWhatNamesItAndWhatIsMadeForTheCommandLine()
+    {
+        Assert.IsTrue(PluginFrontends.Node.Supports(PluginFrontends.Node));
+        Assert.IsTrue((PluginFrontends.Desktop | PluginFrontends.Node).Supports(PluginFrontends.Node));
+        // What needs no window runs on a node too.
+        Assert.IsTrue((PluginFrontends.All | PluginFrontends.Cli).Supports(PluginFrontends.Node));
+        Assert.IsFalse(PluginFrontends.All.Supports(PluginFrontends.Node));
+        // What serves while its host runs stays out of the command-line application, which ends with its prompt.
+        Assert.IsFalse((PluginFrontends.Desktop | PluginFrontends.Node).Supports(PluginFrontends.Cli));
+        Assert.IsFalse(PluginFrontends.Node.Supports(PluginFrontends.Desktop));
+        Assert.AreEqual("node", PluginFrontends.Node.ToDisplayName());
+    }
+
+    [TestMethod]
     public async Task Start_InTheCommandLineApplication_StartsOnlyThePluginsThatSupportIt()
     {
         using var temp = new TestTempDirectory();

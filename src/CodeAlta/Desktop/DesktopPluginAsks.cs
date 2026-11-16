@@ -15,7 +15,7 @@ namespace CodeAlta.Desktop;
 internal sealed class DesktopPluginAsks : IPluginAskRuntimeService
 {
     /// <summary>The runtime key of the plugin that answers asks: the built-in Mobile plugin, for the page of the phones.</summary>
-    internal const string MobileRuntimeKey = "builtin:mobile";
+    internal const string MobileRuntimeKey = PluginPermissionServiceBridge.MobileRuntimeKey;
 
     private Attached? _attached;
     // The answers and cancels on their way, by action id: one sent again before the first has its outcome waits for it.

@@ -28,6 +28,8 @@ public sealed partial class FleetNodeService
                 try
                 {
                     var info = People.Set(change);
+                    // A machine that lets a person in serves no phone any more: a phone has no person attached to its key.
+                    _ = StopMobileForOthersAsync();
                     LogInfo($"The people of the machine changed: {change.PersonId} {(change.Permissions is { Count: > 0 } names ? string.Join(",", names) : change.Refuse ? "refused" : "removed")}.");
                     return Task.FromResult(info);
                 }

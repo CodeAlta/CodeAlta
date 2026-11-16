@@ -495,6 +495,37 @@ public sealed partial class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlLabelsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMachineLabelsInfo,
             null, cancellationToken);
 
+    /// <summary>The owner's local control, or a paired device that manages the node: whether the node serves the page of the phones.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The state of the page.</returns>
+    /// <exception cref="FleetException">The node refused the call, or serves no page.</exception>
+    public Task<FleetMobileState> GetMobileAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlMobileState, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMobileState,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the node: turns the page of the phones on or off.</summary>
+    /// <param name="enabled">Whether it is on.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The state of the page after the change.</returns>
+    /// <exception cref="FleetException">The node refused the call: it lets other people in, or serves no page.</exception>
+    public Task<FleetMobileState> EnableMobileAsync(bool enabled, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlMobileEnable, new FleetMobileEnableParams(enabled), FleetNodeJsonContext.Default.FleetMobileEnableParams,
+            FleetNodeJsonContext.Default.FleetMobileState, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the node: one call of the Mobile tab or of its settings page.</summary>
+    /// <param name="method">The call, one of <see cref="FleetMobileInvokeParams.Methods"/>.</param>
+    /// <param name="payload">The JSON of its parameters, or null.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The JSON of the answer.</returns>
+    /// <exception cref="ArgumentException"><paramref name="method"/> is empty.</exception>
+    /// <exception cref="FleetException">The node refused the call, or its page is turned off.</exception>
+    public async Task<string> InvokeMobileAsync(string method, string? payload = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        return (await CallAsync(FleetNodeMethods.ControlMobileInvoke, new FleetMobileInvokeParams(method, payload), FleetNodeJsonContext.Default.FleetMobileInvokeParams,
+            FleetNodeJsonContext.Default.FleetMobileInvokeResult, null, cancellationToken).ConfigureAwait(false)).Json;
+    }
+
     /// <summary>The owner's local control, or a device that manages the node: sets the labels of the machine, which it publishes.</summary>
     /// <param name="labels">The labels.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

@@ -597,7 +597,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 {
                     PluginFrontends.Desktop => "desktop",
                     PluginFrontends.Terminal => "tui",
-                    PluginFrontends.Cli => "cli",
+                    // A node calls its providers as the command-line application does: without a window.
+                    PluginFrontends.Cli or PluginFrontends.Node => "cli",
                     _ => null,
                 },
                 CliSignInHint = options.CliSignInHint,

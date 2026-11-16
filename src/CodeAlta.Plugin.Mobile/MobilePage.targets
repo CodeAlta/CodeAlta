@@ -1,0 +1,41 @@
+<Project>
+  <!--
+    The files of the phone page, for a host that has no page of its own (CodeAlta Node): mobile.html and what it reaches,
+    taken out of the one build of the frontend (src/CodeAlta/frontend/dist) and copied to mobile-page/ of the output and of
+    the packages, with the list of its files (files.json) that FolderPluginAppFiles serves from.
+
+    The frontend is built by the desktop project, once: this asks that project for the same target, with the same
+    properties, as its own builds do, so that MSBuild runs one build of the page whatever asks first and two builds
+    never write frontend/dist or node_modules at once. Nothing of the desktop is referenced: only its files are read.
+  -->
+  <PropertyGroup>
+    <CodeAltaMobilePageFrontend>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'CodeAlta', 'frontend'))</CodeAltaMobilePageFrontend>
+    <CodeAltaMobilePageOutput>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', 'obj', 'mobile-page'))</CodeAltaMobilePageOutput>
+    <CodeAltaMobilePageDesktopProject>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'CodeAlta', 'CodeAlta.csproj'))</CodeAltaMobilePageDesktopProject>
+  </PropertyGroup>
+
+  <Target Name="CodeAltaBuildMobilePageFrontend" Condition="'$(DesignTimeBuild)' != 'true' and '$(CodeAltaMobilePagePrebuilt)' != 'true'">
+    <!-- A build without a runtime is the build of the desktop project itself: the same project, the same properties. -->
+    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="NeoAstraPrepareFrontend" Condition="'$(RuntimeIdentifier)' == ''" />
+    <!-- A build for a runtime asks what the per-runtime builds of the desktop ask (CodeAltaBuildFrontendOnce). -->
+    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="NeoAstraPrepareFrontend" Condition="'$(RuntimeIdentifier)' != ''"
+             RemoveProperties="RuntimeIdentifier" Properties="UseCurrentRuntimeIdentifier=false;UseDefaultPublishRuntimeIdentifier=false" />
+  </Target>
+
+  <Target Name="CodeAltaExtractMobilePage" DependsOnTargets="CodeAltaBuildMobilePageFrontend" Condition="'$(DesignTimeBuild)' != 'true'"
+          Inputs="$(CodeAltaMobilePageFrontend)dist/mobile.html;$(CodeAltaMobilePageFrontend)scripts/mobile-page.mjs"
+          Outputs="$(CodeAltaMobilePageOutput)files.json">
+    <Exec Command="node scripts/mobile-page.mjs dist &quot;$(CodeAltaMobilePageOutput.TrimEnd('/').TrimEnd('\'))&quot;" WorkingDirectory="$(CodeAltaMobilePageFrontend)" />
+  </Target>
+
+  <Target Name="CodeAltaStageMobilePage" BeforeTargets="AssignTargetPaths" DependsOnTargets="CodeAltaExtractMobilePage" Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <_CodeAltaMobilePageFile Include="$(CodeAltaMobilePageOutput)**/*" />
+      <ContentWithTargetPath Include="@(_CodeAltaMobilePageFile)">
+        <TargetPath>mobile-page/%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ContentWithTargetPath>
+    </ItemGroup>
+  </Target>
+</Project>

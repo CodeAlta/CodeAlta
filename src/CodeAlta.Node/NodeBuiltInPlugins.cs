@@ -3,6 +3,7 @@ using CodeAlta.Plugin.CodexCli;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugin.Mobile;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
@@ -10,7 +11,8 @@ namespace CodeAlta.Node;
 
 /// <summary>
 /// The built-in plugins of a node: those that run without a window (Git, Jira, MCP, ACP, Codex CLI), as
-/// <c>altacli</c> has them, and the statistics of its sessions. The browser comes with its own part of the fleet.
+/// <c>altacli</c> has them, the statistics of its sessions, and the page of the phones, which only a host that stays on
+/// serves. The browser comes with its own part of the fleet.
 /// </summary>
 internal static class NodeBuiltInPlugins
 {
@@ -30,6 +32,21 @@ internal static class NodeBuiltInPlugins
         Description = "Connects CodeAlta to configured Model Context Protocol servers.",
         PluginType = typeof(McpPlugin), Factory = () => new McpPlugin(McpOptions(root)),
         Frontends = PluginFrontends.All | PluginFrontends.Cli,
+    };
+
+    /// <summary>The id of the Mobile plugin.</summary>
+    public const string MobileId = "mobile";
+
+    /// <summary>The folder of the files of the page of the phones, beside the application (<c>MobilePage.targets</c>).</summary>
+    internal static string MobilePageRoot => Path.Combine(AppContext.BaseDirectory, "mobile-page");
+
+    // Off until the owner of the node turns it on (altanode mobile on): it publishes the machine on a private network.
+    private static BuiltInPluginDefinition Mobile { get; } = new()
+    {
+        Id = MobileId, DisplayName = "Mobile",
+        Description = "The sessions of this machine on a phone, through Tailscale or Dev Tunnels.",
+        EnabledByDefault = false, Frontends = PluginFrontends.Desktop | PluginFrontends.Node,
+        PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
     };
 
     /// <summary>The id of the Statistics plugin.</summary>
@@ -55,6 +72,7 @@ internal static class NodeBuiltInPlugins
                 Factory = () => CodeAlta.Plugin.Statistics.StatisticsPlugin.CreateForHost(journals),
                 Frontends = PluginFrontends.All | PluginFrontends.Cli,
             },
+            Mobile,
         ];
     }
 

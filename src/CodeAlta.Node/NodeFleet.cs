@@ -171,6 +171,9 @@ internal sealed class NodeFleet : IAsyncDisposable
                 IsPersonalProvider = provider => ServesOwnerOnly(node.Automations?.CredentialKindOf(provider) ?? NodeAutomations.Classify(catalog, provider)),
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
                 Providers = providers,
+                // The page of the phones, which the Mobile plugin of the node serves once its owner turned it on.
+                Mobile = new Plugins.NodeMobile(node.Host, node.Options.MobilePageRoot),
+                IsSharedMachine = () => node.Automations?.IsSharedMachine() == true,
                 // Whether the node still runs after a restart or a logout, for the page of the machine.
                 ServiceStatus = () => NodeServiceStatus.Read(node.Options.Profile),
                 // The sign-ins the node keeps for itself, made from the desktop: the node starts each one and keeps its tokens.

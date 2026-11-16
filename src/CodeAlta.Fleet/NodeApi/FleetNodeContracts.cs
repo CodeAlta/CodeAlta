@@ -201,6 +201,15 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: sets the labels of the machine.</summary>
     public const string ControlLabelsSet = "control.labels.set";
 
+    /// <summary>The owner's local control, or a paired device that manages the node: whether the node serves the page of the phones.</summary>
+    public const string ControlMobileState = "control.mobile.state";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: turns the page of the phones on or off.</summary>
+    public const string ControlMobileEnable = "control.mobile.enable";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: one call of the Mobile tab or of its settings page.</summary>
+    public const string ControlMobileInvoke = "control.mobile.invoke";
+
     /// <summary>The owner's local control, or a device that manages the node: the limits of the machine (sessions at work at once).</summary>
     public const string ControlLimitsGet = "control.limits.get";
 
@@ -1238,6 +1247,10 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetNodePeopleInfo))]
 [JsonSerializable(typeof(FleetNodePeopleChange))]
 [JsonSerializable(typeof(FleetMachineLabelsInfo))]
+[JsonSerializable(typeof(FleetMobileState))]
+[JsonSerializable(typeof(FleetMobileEnableParams))]
+[JsonSerializable(typeof(FleetMobileInvokeParams))]
+[JsonSerializable(typeof(FleetMobileInvokeResult))]
 [JsonSerializable(typeof(FleetMachineLimitsInfo))]
 [JsonSerializable(typeof(FleetSeatsSnapshot))]
 [JsonSerializable(typeof(FleetSeatRef))]

@@ -568,7 +568,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
 
     // Whether a signed access document of a server of this machine says it is a team's or the organization's: a shared machine,
     // which runs every automation with account credentials, whatever gave it (a server, a device paired directly, its owner).
-    private bool IsSharedMachine()
+    internal bool IsSharedMachine()
         => DeviceId is { } self && ServerAccesses?.Invoke() is { } documents
             && documents.Any(access => access is not null && (access.TeamOf(self) is not null || access.IsOrganizationMachine(self)));
 

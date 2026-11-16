@@ -16,9 +16,17 @@ namespace CodeAlta.Plugin.Mobile;
 /// while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; the provider, its ports and the access of the
 /// phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
 /// </summary>
-[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or a private network of a plugin.", Frontends = PluginFrontends.Desktop)]
-public sealed class MobilePlugin : PluginBase
+/// <remarks>
+/// CodeAlta Node runs it too, without a window: what the tab and the settings page ask is then asked by the node, for its
+/// owner (<c>altanode mobile</c>) or a desktop that manages it, through <see cref="IMobileHostControl"/>, and a pairing
+/// token there signs one phone in and lasts <see cref="NodePairingLife"/>.
+/// </remarks>
+[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or a private network of a plugin.", Frontends = PluginFrontends.Desktop | PluginFrontends.Node)]
+public sealed class MobilePlugin : PluginBase, IMobileHostControl
 {
+    /// <summary>How long a pairing code of a node signs a phone in: a command prints it, so it is not a standing code.</summary>
+    public static readonly TimeSpan NodePairingLife = TimeSpan.FromMinutes(5);
+
     /// <summary>The id of the Mobile tab.</summary>
     internal const string CanvasId = "mobile";
 
@@ -141,7 +149,7 @@ public sealed class MobilePlugin : PluginBase
     /// <inheritdoc />
     public override async ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
-        if (Context.Host.Frontend != PluginFrontends.Desktop) return;
+        if (Context.Host.Frontend is not (PluginFrontends.Desktop or PluginFrontends.Node)) return;
         // The server starts in the background: the window does not wait for the provider.
         _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Starts the mobile view." });
         Tasks.Run("mobile-live", FlushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Pushes the state of the sessions to the phones." });
@@ -199,7 +207,7 @@ public sealed class MobilePlugin : PluginBase
     private async Task<MobileSettings> ReadSettingsAsync(CancellationToken cancellationToken)
     {
         var settings = await Services.State.ReadJsonAsync<MobileSettings>(PluginStateScope.User, SettingsName, cancellationToken).ConfigureAwait(false) ?? new MobileSettings();
-        var access = await MobileAccess.LoadAsync(Services.State, cancellationToken).ConfigureAwait(false);
+        var access = await MobileAccess.LoadAsync(Services.State, Context.Host.Frontend == PluginFrontends.Node ? NodePairingLife : null, null, cancellationToken).ConfigureAwait(false);
         if (MobileToken.IsValid(settings.Token)) await access.AdoptAsync(settings.Token!, cancellationToken).ConfigureAwait(false);
         _access = access;
         _push = await MobilePush.LoadAsync(Services.State, access, cancellationToken).ConfigureAwait(false);
@@ -243,7 +251,7 @@ public sealed class MobilePlugin : PluginBase
             _state = _state with { Server = "listening", ServerDetail = null };
             Logger.Info($"Mobile: the mobile view listens on http://127.0.0.1:{port}");
         }
-        catch (Exception exception) when (exception is IOException { InnerException: SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse } } or SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse })
+        catch (Exception exception) when (IsAddressInUse(exception))
         {
             await server.DisposeAsync().ConfigureAwait(false);
             _state = _state with { Server = "port-in-use", ServerDetail = $"Port {port} of this computer is used by another program, such as another CodeAlta that serves the mobile view." };
@@ -255,6 +263,14 @@ public sealed class MobilePlugin : PluginBase
             _state = _state with { Server = "failed", ServerDetail = exception.Message };
             Logger.Warn(exception, "Mobile: the mobile view could not start.");
         }
+    }
+
+    // Kestrel wraps the refusal of the socket once or twice, depending on the system.
+    private static bool IsAddressInUse(Exception? exception)
+    {
+        for (var depth = 0; exception is not null && depth < 4; exception = exception.InnerException, depth++)
+            if (exception is SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse }) return true;
+        return false;
     }
 
     private async Task StopServerAsync()
@@ -599,7 +615,57 @@ public sealed class MobilePlugin : PluginBase
         var mark = _network?.Capabilities.HasFlag(PrivateNetworkCapabilities.BrowserSignIn) == true ? '?' : '#';
         var connect = url is not null && _access?.PairingToken is { } token ? $"{url}/{mark}k={token}" : null;
         return new MobileStatus(state.Server, _listeningPort ?? _settings.Port, state.ServerDetail, View(state), connect, connect is null ? null : url,
-            connect is null ? null : MobileQr.Rows(connect));
+            connect is null ? null : MobileQr.Rows(connect))
+        {
+            Served = url, Phones = _access?.PhoneCount ?? 0, PairsOnce = _access?.PairsOnce == true,
+            PairingSeconds = connect is not null && _access?.PairingEndsIn is { } left ? Math.Max(1, (int)Math.Ceiling(left.TotalSeconds)) : null,
+        };
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<string> InvokeAsync(string method, string? payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        switch (method)
+        {
+            case "mobile.status":
+                return Json(Status());
+            case "mobile.pair":
+                // A new code each time it is asked for: the one of before signs no phone in any more.
+                if (_access is { } access && ServedUrl(_state) is not null) await access.RenewAsync(cancellationToken).ConfigureAwait(false);
+                return Json(Status());
+            case "mobile.retry":
+                return Json(await RetryAsync(cancellationToken).ConfigureAwait(false));
+            case "mobile.act":
+                return Json(await ActAsync(Read<MobileAction>(payload).Action, cancellationToken).ConfigureAwait(false));
+            case "mobile.settings.get":
+                return Json(Settings());
+            case "mobile.settings.set":
+                return Json(await SetAsync(Read<MobileSettingsChange>(payload), cancellationToken).ConfigureAwait(false));
+            case "mobile.reset":
+                return Json(await ResetAsync(cancellationToken).ConfigureAwait(false));
+            default:
+                throw new ArgumentException($"The Mobile plugin knows no call '{method}'.", nameof(method));
+        }
+    }
+
+    private static readonly JsonSerializerOptions HostJson = new(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
+
+    // The JSON of the pages: the names of the web, as the tab and the settings page read them.
+    private static string Json<T>(T value)
+        => JsonSerializer.Serialize(value, (System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>)HostJson.GetTypeInfo(typeof(T)));
+
+    private static T Read<T>(string? payload)
+    {
+        try
+        {
+            return payload is { Length: > 0 } && JsonSerializer.Deserialize(payload, (System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>)HostJson.GetTypeInfo(typeof(T))) is { } value
+                ? value : throw new ArgumentException("The call needs its parameters.", nameof(payload));
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException("The parameters of the call do not read.", nameof(payload), exception);
+        }
     }
 
     /// <summary>What the settings page shows: the provider and its settings, and the address while the view is served.</summary>
@@ -872,7 +938,39 @@ internal sealed record MobileNetworkView(string Id, string Name, string Descript
 /// <param name="ConnectUrl">The address a phone opens, with the access token; null while no phone can connect.</param>
 /// <param name="Address">The same without the token.</param>
 /// <param name="Qr">The QR code of <paramref name="ConnectUrl"/>, one string of <c>0</c> and <c>1</c> per row.</param>
-internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileProviderView Provider, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr);
+internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileProviderView Provider, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr)
+{
+    /// <summary>Gets the address of the page while it is served, without a token, also when there is no code to show.</summary>
+    public string? Served { get; init; }
+
+    /// <summary>Gets how many phones are connected.</summary>
+    public int Phones { get; init; }
+
+    /// <summary>Gets whether a code connects one phone and ends by itself (a host without a window), so that it is asked for when needed.</summary>
+    public bool PairsOnce { get; init; }
+
+    /// <summary>Gets how many seconds the code still connects a phone; null for a standing code, or without a code.</summary>
+    public int? PairingSeconds { get; init; }
+}
+
+/// <summary>
+/// What a host without a window asks the Mobile plugin, in the place of its tab and of its settings page: the same calls,
+/// with their JSON. It is the host's alone, never an <c>alta</c> command: a pairing code an agent could read would let it
+/// answer its own permission requests.
+/// </summary>
+public interface IMobileHostControl
+{
+    /// <summary>Runs one call of the tab or of the settings page.</summary>
+    /// <param name="method">
+    /// <c>mobile.status</c>, <c>mobile.pair</c> (a new pairing code, then the status), <c>mobile.retry</c>, <c>mobile.act</c>,
+    /// <c>mobile.settings.get</c>, <c>mobile.settings.set</c> or <c>mobile.reset</c>.
+    /// </param>
+    /// <param name="payload">The JSON of its parameters, for a call that takes some.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The JSON of its answer.</returns>
+    /// <exception cref="ArgumentException">The call is unknown, or its parameters do not read.</exception>
+    ValueTask<string> InvokeAsync(string method, string? payload, CancellationToken cancellationToken = default);
+}
 
 /// <summary>The settings the settings page asks for.</summary>
 /// <param name="Provider">The id of the provider; null keeps the one of now.</param>

@@ -2,28 +2,31 @@ using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins.Abstractions;
 
-namespace CodeAlta.Desktop;
+namespace CodeAlta.LiveTool;
 
 /// <summary>
-/// The permission requests the plugins of the window read and answer for the user, as the window does: through the same
-/// service, which takes one answer for a request. Until the host is attached (while the plugins start), no session waits. Only
+/// The permission requests the plugins of a host read and answer for the user, as its window or its node API does: through
+/// the same service, which takes one answer for a request. Until the host is attached (while the plugins start), no session waits. Only
 /// the built-in Mobile plugin gets them (<see cref="ForPlugin"/>): an answer allows what an agent asked to do, and a plugin of
 /// a folder can be written by an agent.
 /// </summary>
-internal sealed class DesktopPluginPermissions : IPluginPermissionRuntimeService
+public sealed class PluginPermissionServiceBridge : IPluginPermissionRuntimeService
 {
+    /// <summary>The runtime key of the plugin that answers for the user: the built-in Mobile plugin, for the page of the phones.</summary>
+    public const string MobileRuntimeKey = "builtin:mobile";
+
     private Attached? _attached;
 
     /// <inheritdoc />
     public IPluginPermissionService ForPlugin(string pluginRuntimeKey, bool builtIn)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
-        return builtIn && pluginRuntimeKey == DesktopPluginAsks.MobileRuntimeKey ? this : NoopPluginPermissionService.Instance;
+        return builtIn && pluginRuntimeKey == MobileRuntimeKey ? this : NoopPluginPermissionService.Instance;
     }
 
     /// <summary>Gives the permission requests of the host once it runs.</summary>
     /// <param name="permissions">The service of the permission requests.</param>
-    internal void Attach(SessionPermissionService permissions)
+    public void Attach(SessionPermissionService permissions)
     {
         ArgumentNullException.ThrowIfNull(permissions);
         Attach(permissions.ListWaitingSessionsAsync, permissions.ListOwnedCommandsAsync, permissions.ResolveOwnedCommandAsync);
@@ -33,7 +36,7 @@ internal sealed class DesktopPluginPermissions : IPluginPermissionRuntimeService
     /// <param name="waiting">Lists the sessions that wait for the user.</param>
     /// <param name="list">Lists the requests of a session.</param>
     /// <param name="resolve">Answers a request.</param>
-    internal void Attach(Func<ValueTask<IReadOnlyList<string>>> waiting, Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> list,
+    public void Attach(Func<ValueTask<IReadOnlyList<string>>> waiting, Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> list,
         Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken, ValueTask<bool>> resolve)
     {
         ArgumentNullException.ThrowIfNull(waiting);
@@ -112,7 +115,7 @@ internal sealed class DesktopPluginPermissions : IPluginPermissionRuntimeService
         }
     }
 
-    internal static PluginPermissionRequest ToPlugin(SessionOwnedPermissionSnapshot entry)
+    private static PluginPermissionRequest ToPlugin(SessionOwnedPermissionSnapshot entry)
     {
         var request = entry.Request;
         return new()

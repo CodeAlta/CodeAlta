@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Acp;
 using CodeAlta.Plugin.Browser;
@@ -255,7 +256,7 @@ internal static class DesktopPlugins
 /// operation context carries.
 /// </remarks>
 internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
-    IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, DesktopPluginPermissions? permissions = null,
+    IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, PluginPermissionServiceBridge? permissions = null,
     PluginSettingsStore? settings = null, IPluginPrivateNetworkService? privateNetworks = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();

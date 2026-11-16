@@ -118,6 +118,15 @@ public sealed class FleetNodeServiceOptions
     /// <see cref="FleetNodeErrorCodes.ProvidersUnavailable"/>.
     /// </summary>
     public IFleetNodeProviders? Providers { get; init; }
+
+    /// <summary>
+    /// Gets whether an organization the machine joined made it a machine of a team or of the organization, whose members
+    /// each see their own sessions; null for a host that joins none.
+    /// </summary>
+    public Func<bool>? IsSharedMachine { get; init; }
+
+    /// <summary>Gets the page of the phones the host serves (its Mobile plugin); null for a host that serves none through the node API.</summary>
+    public IFleetNodeMobile? Mobile { get; init; }
 }
 
 /// <summary>A device that paired with a node both ways: the node reaches it as a machine of its own, pinned to its key.</summary>
@@ -437,6 +446,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             RegisterLimits(caller, Access.Owner);
             RegisterSeats(caller, Access.Owner, Access.Owner);
             RegisterPeople(caller, Access.Owner);
+            RegisterMobile(caller, Access.Owner);
             RegisterModelServers(caller, owner: true);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
@@ -520,6 +530,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         RegisterLimits(caller, Access.Manage);
         // Who the machine lets in is its owner's: a device paired to manage it, never one trusted through the organization alone.
         RegisterPeople(caller, Access.ManagePaired);
+        // Who shows a pairing code of the page of the phones holds the sessions of the machine: a device paired to manage it only.
+        RegisterMobile(caller, Access.ManagePaired);
         RegisterModelServers(caller, owner: false);
     }
 

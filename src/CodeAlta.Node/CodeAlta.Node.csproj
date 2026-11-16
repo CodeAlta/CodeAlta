@@ -72,6 +72,7 @@
     <ProjectReference Include="..\CodeAlta.Plugin.Git\CodeAlta.Plugin.Git.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Jira\CodeAlta.Plugin.Jira.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Mobile\CodeAlta.Plugin.Mobile.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
   </ItemGroup>
@@ -79,4 +80,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
   </ItemGroup>
+  <!-- The page of the phones, which the Mobile plugin of the node serves: mobile-page/ beside the application. -->
+  <Import Project="..\CodeAlta.Plugin.Mobile\MobilePage.targets" />
 </Project>

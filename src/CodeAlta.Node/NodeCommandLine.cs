@@ -102,6 +102,9 @@ internal sealed record NodeCommandHandlers(
     /// <summary>Gets what lists, sets, rotates and deletes the secrets and variables of the machine; null for none.</summary>
     public Func<NodeSecretCommandOptions, ValueTask<int>>? Secrets { get; init; }
 
+    /// <summary>Gets what shows and changes the page of the phones of the node; null for none.</summary>
+    public Func<NodeMobileCommandOptions, ValueTask<int>>? Mobile { get; init; }
+
     /// <summary>Gets what lists and changes the labels of the machine; null for none.</summary>
     public Func<NodeLabelCommandOptions, ValueTask<int>>? Labels { get; init; }
 
@@ -484,6 +487,36 @@ internal static class NodeCommandLine
             return handlers.Secrets?.Invoke(secrets) ?? handlers.NotImplemented("secrets");
         });
 
+        var mobile = new NodeMobileCommandOptions();
+        var mobileCommand = new Command("mobile", "Connect a phone to the sessions of this machine");
+        mobileCommand.Add(new CommandUsage("Usage: {NAME} [options]"));
+        mobileCommand.Add(new CommandUsage("       {NAME} off|reset [options]"));
+        mobileCommand.Add(new CommandUsage("       {NAME} on|set [--network <id>] [--port <n>] [--https-port <n>] [options]"));
+        mobileCommand.Add(_);
+        mobileCommand.Add("The page of the phones: the sessions of this machine on a phone, through");
+        mobileCommand.Add("Tailscale or a Dev Tunnel, as the Mobile plugin of CodeAlta Desktop serves");
+        mobileCommand.Add("them. Alone, it shows where the page is served and a QR code that connects");
+        mobileCommand.Add("one phone for five minutes, or what keeps phones out and how to fix it.");
+        mobileCommand.Add("  on     turns the page on, and shows the code");
+        mobileCommand.Add("  off    turns it off; the phones keep their access for the next time");
+        mobileCommand.Add("  set    changes how phones connect");
+        mobileCommand.Add("  reset  disconnects every phone");
+        mobileCommand.Add("A phone that is connected can read the sessions of this machine and allow");
+        mobileCommand.Add("what their agents ask: keep it locked. A machine other people use does not");
+        mobileCommand.Add("serve the page.");
+        mobileCommand.Add(_);
+        mobileCommand.Add("Options:");
+        mobileCommand.Add("network=", "With on or set: the private network phones connect through (tailscale, devtunnel)", value => mobile.Network = value);
+        mobileCommand.Add("port=", "With on or set: the port of the page on this machine (2584)", value => mobile.Port = value);
+        mobileCommand.Add("https-port=", "With on or set: the HTTPS port of the page on the tailnet (2584)", value => mobile.HttpsPort = value);
+        AddProfile(mobileCommand, mobile.Profile);
+        mobileCommand.Add("<>", "The command");
+        mobileCommand.Add((_, words) =>
+        {
+            mobile.Words.AddRange(words);
+            return handlers.Mobile?.Invoke(mobile) ?? handlers.NotImplemented("mobile");
+        });
+
         var tags = new NodeLabelCommandOptions();
         var tagsCommand = TagsCommand("tags", hidden: false);
         // The name of 4.0 and 4.1, kept for the scripts that use it, and not listed.
@@ -740,6 +773,7 @@ internal static class NodeCommandLine
             secretsCommand,
             tagsCommand,
             labelsCommand,
+            mobileCommand,
             limitsCommand,
             providersCommand,
             llamaCommand,

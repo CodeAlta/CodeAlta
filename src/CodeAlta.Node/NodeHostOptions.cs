@@ -29,6 +29,18 @@ public sealed record NodeHostOptions
     /// <summary>Gets whether the host starts its plugins. Default true.</summary>
     public bool StartPlugins { get; init; } = true;
 
+    /// <summary>
+    /// Gets the folder of the files of the page of the phones (<c>files.json</c> and what it lists); null for
+    /// <c>mobile-page</c> beside the application, where the build puts them.
+    /// </summary>
+    public string? MobilePageRoot { get; init; }
+
+    /// <summary>
+    /// Gets the private networks the plugins publish through (the page of the phones); null for those of the machine
+    /// (Tailscale, Dev Tunnels) and of the plugins. A test gives its own, so that it publishes nothing.
+    /// </summary>
+    public CodeAlta.Plugins.Abstractions.IPluginPrivateNetworkService? PrivateNetworks { get; init; }
+
     /// <summary>Gets whether the host stays off the network for the catalog of models.dev. Default false.</summary>
     public bool Offline { get; init; }
 

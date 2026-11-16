@@ -309,6 +309,9 @@ public sealed class MobileSettingsTests
 
         internal MemoryState State { get; } = state ?? new();
 
+        /// <summary>Gets the application the plugin runs in: the desktop, unless a test says a node.</summary>
+        internal PluginFrontends Frontend { get; init; } = PluginFrontends.Desktop;
+
         // The access of the plugin, read from its files when it started.
         internal Task<MobileAccess> AccessAsync() => Task.FromResult(Plugin.Access!);
 
@@ -319,7 +322,7 @@ public sealed class MobileSettingsTests
             Plugin.AttachRuntimeContext(new PluginRuntimeContext
             {
                 Plugin = PluginDescriptorFactory.FromType(typeof(MobilePlugin)),
-                Host = new PluginHostInfo { ApplicationName = "CodeAlta", Version = "test", HostApiVersion = "1", UserDataDirectory = Path.GetTempPath(), Frontend = PluginFrontends.Desktop, HasInteractiveUi = true },
+                Host = new PluginHostInfo { ApplicationName = "CodeAlta", Version = "test", HostApiVersion = "1", UserDataDirectory = Path.GetTempPath(), Frontend = Frontend, HasInteractiveUi = Frontend == PluginFrontends.Desktop },
                 Logger = services.Logger,
                 Services = services,
                 PackageDirectory = Path.GetTempPath(),

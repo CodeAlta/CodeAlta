@@ -133,7 +133,17 @@ public sealed class NodeHost : IAsyncDisposable
             });
             if (!options.Offline && options.ConfigureModelProviders is null) modelsDev.StartBackgroundRefresh();
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
-            host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes), cancellationToken).ConfigureAwait(false);
+            // What the plugins of the node are given: the alta commands and the permission requests once the host runs, the private
+            // networks of the machine and of the plugins, and the files of the page of the phones.
+            CodeAltaHost? created = null;
+            var pluginServices = !options.StartPlugins ? null : new Plugins.NodePluginServices(
+                new PluginAltaServiceBridge(),
+                (CodeAlta.Plugins.Abstractions.IPluginAppFileService?)CodeAlta.Plugins.FolderPluginAppFiles.TryOpen(options.MobilePageRoot ?? NodeBuiltInPlugins.MobilePageRoot) ?? CodeAlta.Plugins.Abstractions.NoopPluginAppFileService.Instance,
+                options.PrivateNetworks ?? new CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry(
+                    () => Volatile.Read(ref created) is { } ready ? ready.PluginRuntime.ActivePlugins.Select(static plugin => (object?)plugin.Instance) : []),
+                new PluginPermissionServiceBridge());
+            host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes, pluginServices), cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref created, host);
             var running = host;
             var providerConfiguration = new NodeAltaProviderConfiguration(host.ModelProviderRegistry);
             var alta = HeadlessAltaTools.Attach(host, CreateAltaOptions(profile) with
@@ -146,6 +156,8 @@ public sealed class NodeHost : IAsyncDisposable
                         (session, prompt) => running.RuntimeService.DeliverHostPromptAsync(session, prompt, CodeAlta.Orchestration.Runtime.SessionRuntimeService.JobPromptKind))
                     : null,
             });
+            pluginServices?.AltaBridge.SetDispatcher(alta.Dispatcher);
+            pluginServices?.PermissionBridge.Attach(host.RuntimeService.Permissions);
             // The schedules fire on the node: those of its profile, and those its devices assigned to it, which it keeps.
             NodeAutomations? automations = null;
             if (options.RunAutomations)
@@ -180,7 +192,7 @@ public sealed class NodeHost : IAsyncDisposable
 
     /// <summary>The composition of the host of a node, as CodeAlta TUI composes its own, without a window.</summary>
     internal static CodeAltaHostOptions CreateHostOptions(NodeHostOptions options, CodeAltaSingleInstanceGuard? guard,
-        ModelsDevCatalogService modelsDev, PluginModelProviderTypes pluginProviderTypes)
+        ModelsDevCatalogService modelsDev, PluginModelProviderTypes pluginProviderTypes, CodeAlta.Plugins.Abstractions.IPluginServices? pluginServices = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(modelsDev);
@@ -222,9 +234,10 @@ public sealed class NodeHost : IAsyncDisposable
             SessionLeaseOwner = SessionLeaseOwner.NodeKind,
             FollowExternalSessions = true,
             // The plugins made for hosts without a user interface: the built-in ones below, and source plugins that
-            // declare the command-line application.
+            // declare the command-line application or the node.
             StartPlugins = options.StartPlugins,
-            PluginFrontend = PluginFrontends.Cli,
+            PluginFrontend = PluginFrontends.Node,
+            PluginServices = pluginServices,
             // Nobody sits at a node, and CodeAlta takes no part in a Claude sign-in: the person signs Claude Code in on the machine,
             // with Anthropic's own flow, as the account the node runs as.
             CliSignInHint = $"Sign it in on the machine itself, with Anthropic's own sign-in: in a terminal there as {Environment.UserName}, run altanode providers sign-in followed by the key of the provider",

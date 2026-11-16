@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.LiveTool;
 using CodeAlta.Desktop;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins.Abstractions;
@@ -24,9 +25,9 @@ public sealed class DesktopPluginPermissionsTests
         internal List<(SessionOwnedPermissionHandle Handle, AgentPermissionDecisionKind Decision)> Resolved { get; } = [];
         internal Func<bool> Accept { get; set; } = static () => true;
 
-        internal DesktopPluginPermissions Service()
+        internal PluginPermissionServiceBridge Service()
         {
-            var service = new DesktopPluginPermissions();
+            var service = new PluginPermissionServiceBridge();
             service.Attach(
                 () => ValueTask.FromResult<IReadOnlyList<string>>([.. Waiting]),
                 (id, _) => ValueTask.FromResult(new SessionOwnedPermissionPage(Pending.GetValueOrDefault(id) ?? [], Pending.GetValueOrDefault(id)?.Length > 3)),
@@ -38,7 +39,7 @@ public sealed class DesktopPluginPermissionsTests
     [TestMethod]
     public void OnlyTheBuiltInMobilePlugin_GetsThePermissionRequests()
     {
-        var service = new DesktopPluginPermissions();
+        var service = new PluginPermissionServiceBridge();
         Assert.AreSame(service, service.ForPlugin("builtin:mobile", builtIn: true));
         Assert.AreSame(NoopPluginPermissionService.Instance, service.ForPlugin("builtin:mobile", builtIn: false), "a plugin of a folder whose key looks like it");
         Assert.AreSame(NoopPluginPermissionService.Instance, service.ForPlugin("builtin:git", builtIn: true));
@@ -49,7 +50,7 @@ public sealed class DesktopPluginPermissionsTests
     [TestMethod]
     public async Task BeforeTheHostRuns_NothingWaits_AndNothingCanBeAnswered()
     {
-        var service = new DesktopPluginPermissions();
+        var service = new PluginPermissionServiceBridge();
         Assert.IsFalse(service.HasPermissions);
         Assert.IsEmpty(await service.ListWaitingAsync());
         Assert.IsEmpty((await service.ListAsync("session")).Requests);
