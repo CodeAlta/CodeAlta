@@ -239,6 +239,7 @@ public sealed partial class FleetNodeService
     private static string? SessionIdOf(object parameters) => parameters switch
     {
         FleetSessionRef value => value.SessionId,
+        FleetSessionReadParams value => value.SessionId,
         FleetHistoryParams value => value.SessionId,
         FleetWatchParams value => value.SessionId,
         FleetSendParams value => value.SessionId,

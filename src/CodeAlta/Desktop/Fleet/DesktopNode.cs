@@ -8,6 +8,7 @@ using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
+using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Hosting;
 using XenoAtom.Logging;
 
@@ -447,6 +448,17 @@ internal sealed class DesktopNode : IAsyncDisposable
         if (settings.Visible) Listen(service);
     }
 
+    private Func<IReadOnlyList<string>, int, CancellationToken, Task<FleetNodeAltaResult>>? _alta;
+
+    /// <summary>Gives the <c>alta</c> commands of this computer, which <c>sessions.read</c> answers the person's other devices with.</summary>
+    /// <param name="alta">Runs one command for the person: its words, the most bytes of its output.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="alta"/> is null.</exception>
+    public void AttachAlta(Func<IReadOnlyList<string>, int, CancellationToken, Task<FleetNodeAltaResult>> alta)
+    {
+        ArgumentNullException.ThrowIfNull(alta);
+        Volatile.Write(ref _alta, alta);
+    }
+
     private FleetNodeService EnsureService()
     {
         if (_service is { } running) return running;
@@ -458,6 +470,10 @@ internal sealed class DesktopNode : IAsyncDisposable
             PairingAddresses = () => Volatile.Read(ref _addresses),
             PairBack = PairBackAsync,
             ModelServers = ModelServers,
+            // The reads of sessions.read: the alta commands of this computer, once the window gave them.
+            Alta = async (args, maxBytes, token) => Volatile.Read(ref _alta) is { } alta
+                ? await alta(args, maxBytes, token).ConfigureAwait(false)
+                : throw new FleetException(FleetNodeErrorCodes.Unavailable, FleetErrorHints.Retry, "This computer is starting: it does not answer reads yet."),
         })
         {
             Policy = Policy,

@@ -27,6 +27,12 @@ public static class FleetNodeMethods
     /// <summary>Stops a watch.</summary>
     public const string SessionsUnwatch = "sessions.unwatch";
 
+    /// <summary>A read of a session or of the machine, by the <c>alta</c> command of the list of <see cref="FleetSessionReads"/>, answered with its records.</summary>
+    public const string SessionsRead = "sessions.read";
+
+    /// <summary>A small action on a session that starts no work (take a queued prompt back, change the provider, archive, stop a job), of the same list.</summary>
+    public const string SessionsAct = "sessions.act";
+
     /// <summary>Creates a session, and sends its first prompt when one is given.</summary>
     public const string SessionsCreate = "sessions.create";
 
@@ -469,6 +475,9 @@ public sealed record FleetAgentPromptInfo(string Id, string Name);
 public sealed record FleetNodeInfo(string Name, string DeviceId, string Os, string Version, IReadOnlyList<FleetSpaceInfo> Spaces,
     IReadOnlyList<FleetProjectInfo> Projects, IReadOnlyList<string> Permissions)
 {
+    /// <summary>Gets the features of the node API the node has beside those of its first version, such as <see cref="FleetSessionReads.Feature"/>; empty for a node that does not say (an older one).</summary>
+    public IReadOnlyList<string> Features { get; init; } = [];
+
     /// <summary>Gets the providers of the node that are ready to run sessions; empty for a node that does not say (an older one).</summary>
     public IReadOnlyList<FleetProviderInfo> Providers { get; init; } = [];
 
@@ -842,7 +851,20 @@ public sealed record FleetQueueResult(string Status, string QueueItemId);
 /// <param name="Reason">Why the agent asks.</param>
 /// <param name="Timestamp">When it asked.</param>
 public sealed record FleetPermissionRequest(Guid Id, string? RunId, string Kind, string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp)
+{
+    /// <summary>Gets whether the command shown is shortened; false for a node that does not say (an older one).</summary>
+    public bool Shortened { get; init; }
+
+    /// <summary>Gets whether the request asks to run outside the sandbox of the session; false for a node that does not say.</summary>
+    public bool OutsideSandbox { get; init; }
+
+    /// <summary>Gets the server of the skill the request asks to load; null for another request, or a node that does not say.</summary>
+    public string? SkillServer { get; init; }
+
+    /// <summary>Gets the name of the skill the request asks to load; null for another request, or a node that does not say.</summary>
+    public string? SkillName { get; init; }
+}
 
 /// <summary>The result of <c>sessions.permissions.list</c>.</summary>
 /// <param name="Requests">The requests that wait.</param>
@@ -871,14 +893,41 @@ public sealed record FleetAskChoice(string? Title, string? Description);
 /// <param name="Description">Its details.</param>
 /// <param name="Choices">Its choices.</param>
 /// <param name="AllowsText">Whether a free answer is allowed.</param>
-public sealed record FleetAskQuestion(string? Title, string? Question, string? Description, IReadOnlyList<FleetAskChoice> Choices, bool AllowsText);
+public sealed record FleetAskQuestion(string? Title, string? Question, string? Description, IReadOnlyList<FleetAskChoice> Choices, bool AllowsText)
+{
+    /// <summary>Gets the title of the free answer, when the question gives one.</summary>
+    public string? FreeformTitle { get; init; }
+
+    /// <summary>Gets what the empty free answer shows, when the question gives one.</summary>
+    public string? FreeformPlaceholder { get; init; }
+}
 
 /// <summary>The question of a session that waits for a person.</summary>
 /// <param name="AskId">Its id.</param>
 /// <param name="RunId">The run that asks.</param>
 /// <param name="State">Its state.</param>
 /// <param name="Questions">Its questions.</param>
-public sealed record FleetAsk(string AskId, string RunId, string State, IReadOnlyList<FleetAskQuestion> Questions);
+public sealed record FleetAsk(string AskId, string RunId, string State, IReadOnlyList<FleetAskQuestion> Questions)
+{
+    /// <summary>
+    /// Gets what the ask is: <see cref="KindQuestions"/> for questions, <see cref="KindReview"/> for a review request, which is answered
+    /// with a verdict the node API does not carry. Null for a node that does not say (an older one): such an ask is not known
+    /// to be a question, so a reader that only answers questions leaves it alone.
+    /// </summary>
+    public string? Kind { get; init; }
+
+    /// <summary>Gets the revision of the ask, which changes when its answer is taken or lost; null for a node that does not say.</summary>
+    public string? Revision { get; init; }
+
+    /// <summary>Gets whether the ask shows while the turn of its session runs (a question of a script).</summary>
+    public bool Immediate { get; init; }
+
+    /// <summary>The <see cref="Kind"/> of an ask made of questions.</summary>
+    public const string KindQuestions = "questions";
+
+    /// <summary>The <see cref="Kind"/> of a review request.</summary>
+    public const string KindReview = "review";
+}
 
 /// <summary>The result of <c>sessions.asks.list</c>.</summary>
 /// <param name="Ask">The question that waits; null when none does.</param>
@@ -896,7 +945,11 @@ public sealed record FleetAskAnswer(int QuestionIndex, IReadOnlyList<int> Choice
 /// <param name="AskId">The question.</param>
 /// <param name="Answers">The answers; ignored when <paramref name="Cancel"/> is true.</param>
 /// <param name="Cancel">Whether the question is cancelled instead.</param>
-public sealed record FleetAskAnswerParams(string SessionId, string AskId, IReadOnlyList<FleetAskAnswer> Answers, bool Cancel = false);
+public sealed record FleetAskAnswerParams(string SessionId, string AskId, IReadOnlyList<FleetAskAnswer> Answers, bool Cancel = false)
+{
+    /// <summary>Gets the response revision the person read; null for an older client. A changed revision rejects the answer.</summary>
+    public string? Revision { get; init; }
+}
 
 /// <summary>The parameters of <c>control.pairing.create</c>.</summary>
 /// <param name="LifetimeSeconds">How long the offer stays open; null for 10 minutes.</param>
@@ -1247,6 +1300,8 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetNodePeopleInfo))]
 [JsonSerializable(typeof(FleetNodePeopleChange))]
 [JsonSerializable(typeof(FleetMachineLabelsInfo))]
+[JsonSerializable(typeof(FleetSessionReadParams))]
+[JsonSerializable(typeof(FleetSessionReadResult))]
 [JsonSerializable(typeof(FleetMobileState))]
 [JsonSerializable(typeof(FleetMobileEnableParams))]
 [JsonSerializable(typeof(FleetMobileInvokeParams))]

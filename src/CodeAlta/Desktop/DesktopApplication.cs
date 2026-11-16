@@ -1123,6 +1123,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new DesktopAltaProviderConfiguration(new CodeAltaConfigStore(host.CatalogOptions), host.ModelProviderRegistry, options.CatalogRoot!,
                         pluginProviderTypes, modelsDev, () => _copilotPolicies?.RefreshSoon()));
                 // A script of an automation without a model runs with these commands, as the automation allows them.
+                // The person's other computers read the sessions of this one with its alta commands (sessions.read of the node API).
+                desktopNode?.AttachAlta(async (args, maxBytes, token) =>
+                {
+                    var (exitCode, jsonl, truncated, error) = await AltaPersonCommands.RunAsync(altaCommands, args, maxBytes, token).ConfigureAwait(false);
+                    return new CodeAlta.Fleet.NodeApi.FleetNodeAltaResult(exitCode, jsonl, truncated, error);
+                });
                 if (automationRunner is not null) automationRunner.Unattended = DesktopUnattendedScripts.Create(altaCommands, host);
                 search.AttachCommands(altaCommands);
                 search.AttachSettings(desktopSettings);

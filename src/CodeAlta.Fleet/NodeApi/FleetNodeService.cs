@@ -120,6 +120,13 @@ public sealed class FleetNodeServiceOptions
     public IFleetNodeProviders? Providers { get; init; }
 
     /// <summary>
+    /// Gets what runs an <c>alta</c> command of the host for a person (its words, the most bytes of its output): the reads and
+    /// the small actions of <c>sessions.read</c> and <c>sessions.act</c>, each built by the node from the list of
+    /// <see cref="FleetSessionReads"/>. Null for a host that answers none.
+    /// </summary>
+    public Func<IReadOnlyList<string>, int, CancellationToken, Task<FleetNodeAltaResult>>? Alta { get; init; }
+
+    /// <summary>
     /// Gets whether an organization the machine joined made it a machine of a team or of the organization, whose members
     /// each see their own sessions; null for a host that joins none.
     /// </summary>
@@ -488,6 +495,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetAskList, ListAsksAsync);
         On(caller, FleetNodeMethods.SessionsAsksAnswer, Access.Drive, FleetNodeJsonContext.Default.FleetAskAnswerParams,
             FleetNodeJsonContext.Default.FleetAnswerResult, AnswerAskAsync);
+        RegisterReads(caller);
         RegisterMoves(caller, Access.Move);
         On(caller, FleetNodeMethods.MovesStart, Access.Relocate, FleetNodeJsonContext.Default.FleetMoveStartParams,
             FleetNodeJsonContext.Default.FleetMoveResult, StartMoveAsync);
@@ -598,7 +606,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         async ValueTask<JsonElement?> HandleAsync(FleetRequestContext context, CancellationToken cancellationToken)
         {
             // A person granted the content of a session reads it live here (its state, its history, what it does), and nothing else.
-            var granted = method is FleetNodeMethods.SessionsState or FleetNodeMethods.SessionsHistory or FleetNodeMethods.SessionsWatch
+            var granted = method is FleetNodeMethods.SessionsState or FleetNodeMethods.SessionsHistory or FleetNodeMethods.SessionsWatch or FleetNodeMethods.SessionsRead
                 ? ContentReader(caller, context.Params) : null;
             var device = granted?.Device ?? Authorize(caller, access);
             TParams? parameters;

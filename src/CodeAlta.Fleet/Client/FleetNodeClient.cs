@@ -495,6 +495,22 @@ public sealed partial class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlLabelsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMachineLabelsInfo,
             null, cancellationToken);
 
+    /// <summary>
+    /// Reads a session or the machine the way its person reads it there, or does a small action that starts no work: a read or
+    /// an action of the list of <see cref="FleetSessionReads"/>, sent by <c>sessions.read</c> or <c>sessions.act</c> as it is one or the other.
+    /// </summary>
+    /// <param name="parameters">The read or the action, and its values.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The records the machine wrote.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is null.</exception>
+    /// <exception cref="FleetException">The node refused the call: the session is not this device's to see, a value is not of its kind, or the node is an older one.</exception>
+    public Task<FleetSessionReadResult> ReadSessionAsync(FleetSessionReadParams parameters, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return CallAsync(FleetSessionReads.IsAction(parameters) ? FleetNodeMethods.SessionsAct : FleetNodeMethods.SessionsRead, parameters,
+            FleetNodeJsonContext.Default.FleetSessionReadParams, FleetNodeJsonContext.Default.FleetSessionReadResult, null, cancellationToken);
+    }
+
     /// <summary>The owner's local control, or a paired device that manages the node: whether the node serves the page of the phones.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The state of the page.</returns>

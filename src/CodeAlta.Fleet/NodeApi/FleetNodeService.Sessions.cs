@@ -42,6 +42,7 @@ public sealed partial class FleetNodeService
             [.. projects.Select((project, index) => FleetProjectEditor.Describe(project, locations[index]))],
             Describe(call.Device!.Permissions))
         {
+            Features = _options.Alta is null ? [] : [FleetSessionReads.Feature],
             Providers = await ReadyProvidersAsync(call.Device, cancellationToken).ConfigureAwait(false),
             Diagnostics = diagnostics,
             Update = _options.UpdateStatus?.Invoke(),

@@ -174,6 +174,12 @@ internal sealed class NodeFleet : IAsyncDisposable
                 // The page of the phones, which the Mobile plugin of the node serves once its owner turned it on.
                 Mobile = new Plugins.NodeMobile(node.Host, node.Options.MobilePageRoot),
                 IsSharedMachine = () => node.Automations?.IsSharedMachine() == true,
+                // The reads of sessions.read: the alta commands of the node, run for the person, each built by the node API.
+                Alta = async (args, maxBytes, token) =>
+                {
+                    var (exitCode, jsonl, truncated, error) = await CodeAlta.LiveTool.AltaPersonCommands.RunAsync(node.Alta, args, maxBytes, token).ConfigureAwait(false);
+                    return new FleetNodeAltaResult(exitCode, jsonl, truncated, error);
+                },
                 // Whether the node still runs after a restart or a logout, for the page of the machine.
                 ServiceStatus = () => NodeServiceStatus.Read(node.Options.Profile),
                 // The sign-ins the node keeps for itself, made from the desktop: the node starts each one and keeps its tokens.

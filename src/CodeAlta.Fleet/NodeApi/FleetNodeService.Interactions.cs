@@ -18,7 +18,10 @@ public sealed partial class FleetNodeService
         var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         var page = await _host.RuntimeService.Permissions.ListOwnedCommandsAsync(sessionId, cancellationToken).ConfigureAwait(false);
         return new FleetPermissionList([.. page.Entries.Select(static entry => new FleetPermissionRequest(entry.Handle.Attempt.AttemptId, entry.Handle.Attempt.RunId,
-            entry.Request.Kind, entry.Request.Command, entry.Request.WorkingDirectory, entry.Request.GrantRoot, entry.Request.Reason, entry.Request.Timestamp))], page.HasMore);
+            entry.Request.Kind, entry.Request.Command, entry.Request.WorkingDirectory, entry.Request.GrantRoot, entry.Request.Reason, entry.Request.Timestamp)
+        {
+            Shortened = entry.Request.Shortened, OutsideSandbox = entry.Request.OutsideSandbox, SkillServer = entry.Request.Skill?.Server, SkillName = entry.Request.Skill?.Name,
+        })], page.HasMore);
     }
 
     private async Task<FleetAnswerResult> AnswerPermissionAsync(FleetNodeCall call, FleetPermissionAnswerParams parameters, CancellationToken cancellationToken)
@@ -46,7 +49,13 @@ public sealed partial class FleetNodeService
         var ask = page.Head is { } head
             ? new FleetAsk(head.Handle.AskId, head.Handle.RunId, head.State, [.. head.Request.Questions.Select(static question => new FleetAskQuestion(question.Title,
                 question.Question, question.Description, [.. question.Choices.Select(static choice => new FleetAskChoice(choice.Title, choice.Description))],
-                question.Freeform is not null))])
+                question.Freeform is not null) { FreeformTitle = question.Freeform?.Title, FreeformPlaceholder = question.Freeform?.Placeholder })])
+            {
+                // A review request is answered with a verdict, which this API does not carry: it says so, and is not a question.
+                Kind = head.Request.Review is null ? FleetAsk.KindQuestions : FleetAsk.KindReview,
+                Revision = head.Handle.ResponseGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Immediate = head.Immediate,
+            }
             : null;
         return new FleetAskList(ask, page.HasMore);
     }
@@ -67,6 +76,9 @@ public sealed partial class FleetNodeService
         {
             var head = _host.Commands.Asks.List(sessionId).Head;
             if (head is null || !string.Equals(head.Handle.AskId, parameters.AskId, StringComparison.Ordinal)) return new FleetAnswerResult("not_found");
+            if (parameters.Revision is { } revision && revision != head.Handle.ResponseGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                return new FleetAnswerResult("rejected");
+            if (!parameters.Cancel && head.Request.Review is not null) return new FleetAnswerResult("rejected");
             var action = new OwnedAskAction(ActionId(retryKey), head.Handle, answers);
             var disposition = parameters.Cancel
                 ? await _host.Commands.Asks.CancelAsync(action, CancellationToken.None).ConfigureAwait(false)
