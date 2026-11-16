@@ -623,6 +623,9 @@ public sealed class MobilePlugin : PluginBase, IMobileHostControl
     }
 
     /// <inheritdoc />
+    public int? ListeningPort => Volatile.Read(ref _server)?.Port;
+
+    /// <inheritdoc />
     public async ValueTask<string> InvokeAsync(string method, string? payload, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
@@ -960,6 +963,12 @@ internal sealed record MobileStatus(string Server, int Port, string? ServerDetai
 /// </summary>
 public interface IMobileHostControl
 {
+    /// <summary>
+    /// Gets the port of this computer the page listens on now, or null while it does not: the host keeps it out of the
+    /// reach of sandboxed sessions, which must not sign in as a phone.
+    /// </summary>
+    int? ListeningPort { get; }
+
     /// <summary>Runs one call of the tab or of the settings page.</summary>
     /// <param name="method">
     /// <c>mobile.status</c>, <c>mobile.pair</c> (a new pairing code, then the status), <c>mobile.retry</c>, <c>mobile.act</c>,

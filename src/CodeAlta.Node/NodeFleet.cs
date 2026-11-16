@@ -204,6 +204,8 @@ internal sealed class NodeFleet : IAsyncDisposable
             {
                 listener = FleetDirectListener.Start(new IPEndPoint(listen.Address, listen.Port), service.ServeAsync);
                 addresses = DescribeAddresses(listener.LocalEndPoint);
+                // A session in a sandbox does not reach the listener: the key of the node, which only this machine may use, drives it.
+                if (node.ReservedPorts is { } reserved) reserved.Listener = listener.LocalEndPoint.Port;
                 file = Path.Combine(catalog.FleetRoot, ListenerFileName);
                 WriteListenerFile(file, new NodeListenerFile { ProcessId = Environment.ProcessId, DeviceId = identity.DeviceId, Port = listener.LocalEndPoint.Port, Addresses = [.. addresses] });
             }

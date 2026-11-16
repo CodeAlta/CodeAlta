@@ -61,6 +61,9 @@ public sealed class NodeHost : IAsyncDisposable
     /// <summary>Gets the configuration of the providers <c>alta provider refresh</c> applies, once the fleet part of the node gave its providers.</summary>
     internal NodeAltaProviderConfiguration? ProviderConfiguration { get; private init; }
 
+    /// <summary>Gets the ports of this machine no sandboxed session reaches; the fleet part of the node adds its listener.</summary>
+    internal NodeReservedPorts? ReservedPorts { get; private init; }
+
     /// <summary>Gets the catalog of models the providers of the node are started with.</summary>
     internal ModelsDevCatalogService ModelCatalog => _modelsDev;
 
@@ -104,6 +107,30 @@ public sealed class NodeHost : IAsyncDisposable
     /// <param name="paused">Whether new work is refused.</param>
     public void PauseAdmission(bool paused) => Volatile.Write(ref _admissionPaused, paused ? 1 : 0);
 
+    /// <summary>The ports of the node itself that the sandboxes of its sessions do not reach.</summary>
+    /// <param name="mobile">Gives the port of the page of the phones while it listens.</param>
+    internal sealed class NodeReservedPorts(Func<int?> mobile)
+    {
+        private int _listener;
+
+        /// <summary>Gets or sets the port the node listens on for its devices and its local control; 0 for none.</summary>
+        public int Listener
+        {
+            get => Volatile.Read(ref _listener);
+            set => Volatile.Write(ref _listener, value);
+        }
+
+        /// <summary>The ports now.</summary>
+        /// <returns>The listener of the node and the page of the phones, those that listen.</returns>
+        public IReadOnlyCollection<int> Current()
+        {
+            var ports = new List<int>(2);
+            if (Listener is > 0 and var listener) ports.Add(listener);
+            if (mobile() is > 0 and var page) ports.Add(page);
+            return ports;
+        }
+    }
+
     /// <summary>Takes the lock of the profile and starts the host.</summary>
     /// <param name="options">The profile and the options of the node.</param>
     /// <param name="cancellationToken">Cancels the start; what was acquired is released.</param>
@@ -142,7 +169,11 @@ public sealed class NodeHost : IAsyncDisposable
                 options.PrivateNetworks ?? new CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry(
                     () => Volatile.Read(ref created) is { } ready ? ready.PluginRuntime.ActivePlugins.Select(static plugin => (object?)plugin.Instance) : []),
                 new PluginPermissionServiceBridge());
-            host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes, pluginServices), cancellationToken).ConfigureAwait(false);
+            // What no sandboxed session reaches on this machine: the listener of the node, which its own key drives, and the page
+            // of the phones, where a session could sign in as a phone and answer its own requests.
+            var reserved = new NodeReservedPorts(() => Volatile.Read(ref created)?.PluginRuntime.ActivePlugins
+                .Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mobile.IMobileHostControl>().FirstOrDefault()?.ListeningPort);
+            host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes, pluginServices, reserved.Current), cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref created, host);
             var running = host;
             var providerConfiguration = new NodeAltaProviderConfiguration(host.ModelProviderRegistry);
@@ -171,6 +202,7 @@ public sealed class NodeHost : IAsyncDisposable
             return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger, automations, options.ConfigureModelProviders is null ? pluginProviderTypes : null)
             {
                 ProviderConfiguration = providerConfiguration,
+                ReservedPorts = reserved,
             };
         }
         catch
@@ -192,7 +224,8 @@ public sealed class NodeHost : IAsyncDisposable
 
     /// <summary>The composition of the host of a node, as CodeAlta TUI composes its own, without a window.</summary>
     internal static CodeAltaHostOptions CreateHostOptions(NodeHostOptions options, CodeAltaSingleInstanceGuard? guard,
-        ModelsDevCatalogService modelsDev, PluginModelProviderTypes pluginProviderTypes, CodeAlta.Plugins.Abstractions.IPluginServices? pluginServices = null)
+        ModelsDevCatalogService modelsDev, PluginModelProviderTypes pluginProviderTypes, CodeAlta.Plugins.Abstractions.IPluginServices? pluginServices = null,
+        Func<IReadOnlyCollection<int>>? reservedPorts = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(modelsDev);
@@ -238,6 +271,7 @@ public sealed class NodeHost : IAsyncDisposable
             StartPlugins = options.StartPlugins,
             PluginFrontend = PluginFrontends.Node,
             PluginServices = pluginServices,
+            ReservedLocalPorts = reservedPorts,
             // Nobody sits at a node, and CodeAlta takes no part in a Claude sign-in: the person signs Claude Code in on the machine,
             // with Anthropic's own flow, as the account the node runs as.
             CliSignInHint = $"Sign it in on the machine itself, with Anthropic's own sign-in: in a terminal there as {Environment.UserName}, run altanode providers sign-in followed by the key of the provider",

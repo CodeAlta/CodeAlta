@@ -573,7 +573,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 // No sandbox reaches the MCP server of the window, on whatever port it listens.
-                ReservedLocalPorts = () => mcp?.ListeningPort is { } listening ? [listening, .. mcpPorts.Current()] : mcpPorts.Current(),
+                // Nor the page of the phones: a session that reached it could sign in as a phone and answer its own requests.
+                ReservedLocalPorts = () =>
+                {
+                    IReadOnlyCollection<int> ports = mcp?.ListeningPort is { } listening ? [listening, .. mcpPorts.Current()] : mcpPorts.Current();
+                    return _hostCreation is { IsCompletedSuccessfully: true } created
+                        && created.Result.PluginRuntime.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mobile.IMobileHostControl>().FirstOrDefault()?.ListeningPort is { } phones
+                        ? [phones, .. ports] : ports;
+                },
                 // The normal instance asks a locked vault to unlock; the developer instance never does, beside the one the user works in.
                 CredentialPrompts = !options.Developer,
                 // The developer instance asks a vault to unlock on a click, once the user lets it in Settings › Secrets.

@@ -38,6 +38,20 @@ public sealed class FleetNodeManagementTests
     }
 
     [TestMethod]
+    public async Task TheListenerOfTheNode_AndThePageOfThePhones_AreOutOfReachOfSandboxedSessions()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var listener = int.Parse(fixture.Fleet.Addresses[0].Split(':')[^1], System.Globalization.CultureInfo.InvariantCulture);
+
+        // The key of the node drives its listener from this machine: a session in a sandbox must not reach it.
+        CollectionAssert.Contains(fixture.Node.Host.RuntimeService.ReservedLocalPorts!().ToArray(), listener);
+
+        var ports = new NodeHost.NodeReservedPorts(static () => 2594) { Listener = 2585 };
+        CollectionAssert.AreEquivalent(new[] { 2585, 2594 }, ports.Current().ToArray());
+        Assert.AreEqual(0, new NodeHost.NodeReservedPorts(static () => null).Current().Count, "nothing listens yet");
+    }
+
+    [TestMethod]
     public async Task Manager_ChangesDevicesAndProjects_ReadsLogAndUpdates_WhileOthersAreForbidden()
     {
         await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
