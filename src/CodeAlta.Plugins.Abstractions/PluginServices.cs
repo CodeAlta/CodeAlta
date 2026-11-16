@@ -89,6 +89,9 @@ public interface IPluginServices
     /// </summary>
     IPluginPermissionService Permissions => NoopPluginPermissionService.Instance;
 
+    /// <summary>Gets the person's other machines; nodes and hosts without per-plugin confinement expose none.</summary>
+    IPluginMachineService Machines => NoopPluginMachineService.Instance;
+
     /// <summary>
     /// Gets the values of the settings the plugin declares (<see cref="PluginBase.GetSettings"/>), and tells of their changes.
     /// A host that was written before plugins had settings has none.

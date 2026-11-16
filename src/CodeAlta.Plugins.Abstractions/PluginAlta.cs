@@ -251,4 +251,10 @@ public sealed record PluginAltaInvocationOptions
     /// Mobile plugin: the prompts it sends are recorded as the user's, not as prompts of the plugin. False by default.
     /// </summary>
     public bool OnBehalfOfUser { get; init; }
+
+    /// <summary>
+    /// Gets the id of a user action in a client served by the plugin. A remote machine namespaces this key by its calling
+    /// device and deduplicates retries; null gives the invocation a fresh key. Never put credentials or prompt text here.
+    /// </summary>
+    public string? RequestId { get; init; }
 }
