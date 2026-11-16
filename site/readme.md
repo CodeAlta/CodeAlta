@@ -32,11 +32,13 @@ og_type: website
           <button type="button" class="alta-shots-tab" data-alta-os-set="windows">Windows</button>
         </span>
       </div>
-      <div class="alta-only-unix">
+      <div class="alta-only-unix alta-command">
         <pre class="language-shell-session"><code>curl -fsSL https://codealta.io/install.sh | sh</code></pre>
+        <button type="button" class="alta-copy" data-alta-copy><i class="bi bi-clipboard" aria-hidden="true"></i> <span>Copy</span></button>
       </div>
-      <div class="alta-only-windows">
+      <div class="alta-only-windows alta-command">
         <pre class="language-powershell"><code>irm https://codealta.io/install.ps1 | iex</code></pre>
+        <button type="button" class="alta-copy" data-alta-copy><i class="bi bi-clipboard" aria-hidden="true"></i> <span>Copy</span></button>
       </div>
     </div>
     <p class="alta-install-note">One command, everything included · then type <code>alta</code> · <a href="{{site.basepath}}/docs/getting-started/#install">Other ways to install</a> · <a href="#desktop-or-tui">Prefer a terminal?</a></p>
@@ -303,22 +305,26 @@ og_type: website
     <p>Prefer the terminal? CodeAlta TUI shares the same profile, providers and sessions. Start in one app and continue in the other.</p>
     <div class="alta-install-card">
       <div class="alta-install-label"><i class="bi bi-terminal" aria-hidden="true"></i> Install CodeAlta TUI <small>then, in a new terminal: <code>altatui</code></small></div>
-      <div class="alta-only-unix">
+      <div class="alta-only-unix alta-command">
         <pre class="language-shell-session"><code>curl -fsSL https://codealta.io/install.sh | sh -s -- --tui</code></pre>
+        <button type="button" class="alta-copy" data-alta-copy><i class="bi bi-clipboard" aria-hidden="true"></i> <span>Copy</span></button>
       </div>
-      <div class="alta-only-windows">
+      <div class="alta-only-windows alta-command">
         <pre class="language-powershell"><code>&amp; ([scriptblock]::Create((irm https://codealta.io/install.ps1))) -Tui</code></pre>
+        <button type="button" class="alta-copy" data-alta-copy><i class="bi bi-clipboard" aria-hidden="true"></i> <span>Copy</span></button>
       </div>
     </div>
     <a href="{{site.basepath}}/docs/desktop-and-tui/">Compare Desktop and TUI <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
     <p>No window at all? <code>altacli</code> runs the same harness from a script, a CI job or a container: a prompt to its end, with text or JSONL output and exit codes, or CodeAlta as an ACP agent for your editor. Its sessions show in CodeAlta Desktop and TUI.</p>
     <div class="alta-install-card">
       <div class="alta-install-label"><i class="bi bi-gear-wide-connected" aria-hidden="true"></i> Install altacli <small>then: <code>altacli run "Fix the failing test"</code></small></div>
-      <div class="alta-only-unix">
+      <div class="alta-only-unix alta-command">
         <pre class="language-shell-session"><code>curl -fsSL https://codealta.io/install.sh | sh -s -- --cli</code></pre>
+        <button type="button" class="alta-copy" data-alta-copy><i class="bi bi-clipboard" aria-hidden="true"></i> <span>Copy</span></button>
       </div>
-      <div class="alta-only-windows">
+      <div class="alta-only-windows alta-command">
         <pre class="language-powershell"><code>&amp; ([scriptblock]::Create((irm https://codealta.io/install.ps1))) -Cli</code></pre>
+        <button type="button" class="alta-copy" data-alta-copy><i class="bi bi-clipboard" aria-hidden="true"></i> <span>Copy</span></button>
       </div>
     </div>
     <a href="{{site.basepath}}/docs/command-line/">Run CodeAlta from the command line <i class="bi bi-arrow-right" aria-hidden="true"></i></a>

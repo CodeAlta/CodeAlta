@@ -329,10 +329,61 @@
     overflow-x: auto;
   }
 
-  // Keep the copy button, hide the language label that would cover the short commands.
-  .code-toolbar .toolbar-item > span {
-    display: none;
+  // The Copy button of the card replaces the toolbar of the code block, which shows only an icon and not at all
+  // in a narrow window.
+  .code-toolbar > .toolbar {
+    display: none !important;
   }
+}
+
+// An install command and its Copy button.
+.alta-command {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+
+  > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.alta-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  flex: none;
+  padding: .32rem .85rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bs-body-color);
+  font-size: .84rem;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+
+  &:hover {
+    border-color: var(--alta-cyan);
+    color: var(--alta-cyan);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--alta-cyan);
+    outline-offset: 2px;
+  }
+
+  &.copied {
+    border-color: transparent;
+    background: var(--alta-gradient);
+    color: #fff;
+  }
+}
+
+// Without JavaScript nothing copies: the command is selected by hand.
+:root:not([data-alta-os]) .alta-copy {
+  display: none;
 }
 
 .alta-install-label {

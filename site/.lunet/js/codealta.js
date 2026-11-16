@@ -43,6 +43,48 @@
     if (tab && systems.indexOf(tab.getAttribute("data-alta-os-set")) >= 0) applyOs(tab.getAttribute("data-alta-os-set"));
   });
 
+  // Copy button of an install command: the text of the command beside it, then a word that says it is done.
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+    // A page not served over HTTPS has no clipboard API: a selection copied by the browser does the same.
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      var done = false;
+      try { done = document.execCommand("copy"); } catch (_) { }
+      document.body.removeChild(area);
+      if (done) resolve(); else reject(new Error("copy"));
+    });
+  }
+
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest ? event.target.closest("[data-alta-copy]") : null;
+    if (!button) return;
+    var command = button.closest(".alta-command");
+    var code = command ? command.querySelector("code") : null;
+    if (!code) return;
+    var label = button.querySelector("span");
+    var icon = button.querySelector("i");
+    copyText(code.textContent.trim()).then(function () {
+      button.classList.add("copied");
+      if (label) label.textContent = "Copied";
+      if (icon) icon.className = "bi bi-check2";
+      clearTimeout(button.altaCopied);
+      button.altaCopied = setTimeout(function () {
+        button.classList.remove("copied");
+        if (label) label.textContent = "Copy";
+        if (icon) icon.className = "bi bi-clipboard";
+      }, 1600);
+    }, function () {
+      if (label) label.textContent = "Select and copy";
+    });
+  });
+
   // The document is the story: every chapter, link and image works without JavaScript.
   // A decorative sticky stage mirrors its pictures on roomy screens. Never intercept scrolling,
   // move focus, hide chapter text, or announce every scroll position to a screen reader.
