@@ -3,6 +3,7 @@ using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.WorkItems;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using NeoAstra.Rpc;
 

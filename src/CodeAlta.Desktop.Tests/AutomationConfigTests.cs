@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Automations;
+using CodeAlta.Orchestration.Hosting;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -52,6 +53,29 @@ public sealed class AutomationConfigTests
         CollectionAssert.AreEqual(
             new[] { "hourly:15/2", "daily:09:00,17:30", "weekly:mon,thu@08:30", "cron:0 9 * * 1-5", "issue:opened:trusted", "pull_request:updated:anyone" },
             automation.Triggers.Select(static trigger => trigger.Key).ToArray());
+    }
+
+    [TestMethod]
+    public void ATier_IsReadAndWrittenInPlaceOfAModel_OnTheMachineThatRunsTheAutomation()
+    {
+        var definition = new AutomationDefinition(First, "Nightly") { Prompt = "Review.", Tier = SessionStartTier.Parse("Adaptive:High") };
+        Assert.IsNull(AutomationConfig.Validate(definition));
+        var written = AutomationConfig.Write(string.Empty, definition);
+        StringAssert.Contains(written, "tier = \"adaptive:high\"");
+        Assert.IsFalse(written.Contains("model =", StringComparison.Ordinal));
+        var (definitions, faults) = AutomationConfig.Read(written, Global);
+        Assert.AreEqual(0, faults.Count, string.Join("; ", faults.Select(static fault => fault.Message)));
+        Assert.AreEqual((new SessionStartTier(null, true, CodeAlta.Catalog.ModelTiers.AdaptiveLevel.High), true), (definitions.Single().Tier, definitions.Single().Model.IsEmpty));
+        Assert.AreEqual("quick", AutomationConfig.Read(written.Replace("adaptive:high", " Quick ", StringComparison.Ordinal), Global).Definitions.Single().Tier!.Name);
+
+        // A tier that is none, a tier beside a model, and a tier for another machine, whose tiers are not these.
+        Assert.AreEqual(AutomationConfig.TierProblem, AutomationConfig.Read(written.Replace("adaptive:high", "fastest", StringComparison.Ordinal), Global).Faults.Single().Message);
+        Assert.AreEqual("An automation runs on a tier or on a model, not both.", AutomationConfig.Validate(definition with { Model = new("codex", null, null) }));
+        StringAssert.Contains(AutomationConfig.Validate(definition with { RunsOn = "mac" }), "names its model");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { RunsOnTags = ["gpu"] }), "names its model");
+
+        // The tier is part of what the user allowed: another one, or none, is another automation.
+        Assert.AreEqual(4, new[] { "adaptive:high", "adaptive", "quick", null }.Select(tier => (definition with { Tier = SessionStartTier.Parse(tier) }).Fingerprint()).Distinct().Count());
     }
 
     [TestMethod]

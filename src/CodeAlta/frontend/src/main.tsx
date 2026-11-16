@@ -226,7 +226,7 @@ import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
 import { WorkItemSettings } from "./workItems/WorkItemSettings";
 import type { RunModelsLoader, RunProvider } from "./workItems/runsWith";
-import type { TieredStartRequest } from "./sessionSettings/sessionSettings";
+import type { SessionStartRequest } from "./sessionSettings/sessionSettings";
 import { readShowingSession } from "./workItems/showingSession";
 import { sessionSettingsApi } from "./sessionSettings/sessionSettingsApi";
 import { SessionSettingsChip, useSessionSettingsChoices } from "./sessionSettings/SessionSettingsChip";
@@ -3068,7 +3068,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   // `shown` says whether the user still looks at what started the work when its session exists: the session is then
   // opened, and offered by a toast otherwise.
-  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, request: TieredStartRequest | null = null, shown?: () => boolean) {
+  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, request: SessionStartRequest | null = null, shown?: () => boolean) {
     const key = workItemKey(item);
     setWorkBusy(value => new Set(value).add(key));
     try {
@@ -6523,6 +6523,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               // The automations are the application's, whatever the space shown: each names its project among all of them.
               ? <AutomationsPanel key={fileTabKey(tab)} hub={automationsHub} projects={(catalog.current ?? snapshot)?.projects.filter(project => !project.archived) ?? []} sessions={(catalog.current ?? snapshot)?.sessions ?? []}
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+                spaces={spacesState.available ? spacesState.spaces : null}
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
                 visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
                 onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id).then(opened => {

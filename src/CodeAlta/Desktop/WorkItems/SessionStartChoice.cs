@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.WorkItems;
+using CodeAlta.Orchestration.Hosting;
 
 namespace CodeAlta.Desktop.WorkItems;
 
@@ -51,34 +52,6 @@ internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkIt
     /// to <see cref="Asked"/>, then to the session that shows the work.
     /// </summary>
     public SessionStartTier? Tier { get; init; }
-}
-
-/// <summary>A tier of models or Adaptive at a level, as a start of work names it.</summary>
-/// <param name="Tier">The tier; null on Adaptive.</param>
-/// <param name="Adaptive">Whether CodeAlta chooses the model of each turn of the session.</param>
-/// <param name="Level">The level of Adaptive; null for its default level, and off Adaptive.</param>
-internal sealed record SessionStartTier(ModelTier? Tier, bool Adaptive, AdaptiveLevel? Level)
-{
-    /// <summary>
-    /// Reads a tier as the composer names it: <c>complex</c>, <c>standard</c> or <c>quick</c>, <c>adaptive</c> for
-    /// Adaptive at its default level, or <c>adaptive:&lt;level&gt;</c>.
-    /// </summary>
-    /// <param name="value">The name.</param>
-    /// <returns>The tier, or <see langword="null"/> when the name is none of them.</returns>
-    internal static SessionStartTier? Parse(string? value)
-    {
-        var text = value?.Trim().ToLowerInvariant();
-        if (text is null) return null;
-        if (text == "adaptive") return new(null, true, null);
-        if (text.StartsWith("adaptive:", StringComparison.Ordinal))
-            return AdaptiveLevels.Parse(text["adaptive:".Length..]) is { } level ? new(null, true, level) : null;
-        return ModelTiers.Parse(text) is { } tier ? new(tier, false, null) : null;
-    }
-
-    /// <summary>Gets the name of the tier as <see cref="Parse"/> reads it.</summary>
-    internal string Name => Adaptive
-        ? Level is { } level ? "adaptive:" + AdaptiveLevels.NameOf(level) : "adaptive"
-        : ModelTiers.NameOf(Tier!.Value);
 }
 
 /// <summary>What the user chose for a new session besides its model, as the form of the Agent chip chooses it.</summary>

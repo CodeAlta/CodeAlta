@@ -67,7 +67,8 @@ sandbox = "workspace"
 
 - **Use the defaults**, at the top of the form, is on for a new automation. The rows then show what a run takes, grayed: the [default provider](model-providers/readme.md), its model and effort, and the defaults of your settings. A provider marked **(first enabled)** means no default provider is set.
 - Turn it off to choose. What the defaults gave becomes your choice, and you change it from there.
-- A provider, model or permission mode that is no longer offered stops the run, which says why.
+- The model list also offers the [model tiers](model-tiers.md) and [Adaptive](model-tiers.md#adaptive) at a level. Each run then starts on the model the tier gives at that time, and goes on with the next model of the tier when one reaches its limit. The tiers are those of this computer: an automation that [runs on another machine](fleet/readme.md) names its model.
+- A provider, model, tier or permission mode that is no longer offered stops the run, which says why.
 - **More options**, at the end of the form, has **Sub-sessions**: off, the sessions of the automation do all the work themselves and start no [sub-agents](sessions/delegation.md#sessions-without-sub-sessions).
 
 ```toml
@@ -76,6 +77,12 @@ permission_mode = "acceptEdits"
 review_before_commit = true
 sandbox = "off"
 sub_sessions = false
+```
+
+On a tier, `tier` replaces `model`: `complex`, `standard`, `quick`, `adaptive` or `adaptive:<level>`.
+
+```toml
+tier = "quick"
 ```
 
 ## What starts an automation

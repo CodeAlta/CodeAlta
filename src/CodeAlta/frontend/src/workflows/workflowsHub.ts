@@ -1,6 +1,6 @@
 // The page's link to the scripts of the library and to their runs, for the host of one epoch.
 import type { workflows, WorkflowRunDetailResponse, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
-import { defaultSessionSettings, type TieredStartRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, type SessionStartRequest } from "../sessionSettings/sessionSettings";
 
 export type WorkflowsApi = Pick<typeof workflows, "scripts" | "source" | "runs" | "run" | "saveAsScript" | "resume" | "stop" | "runDetail" | "delete">;
 
@@ -50,9 +50,9 @@ export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
      * Starts a script in a new session of a project, which runs with what the form of the Agent chip chose (null parts
      * for the defaults). The answer comes once the session exists.
      */
-    async run(name: string, projectId: string, args: string | null, start: TieredStartRequest = defaultSessionSettings): Promise<WorkflowsOutcome> {
+    async run(name: string, projectId: string, args: string | null, start: SessionStartRequest = defaultSessionSettings): Promise<WorkflowsOutcome> {
       try {
-        const reply = await api.run({ expectedEpoch: epoch, name, projectId, arguments: args, ...start, tier: start.tier ?? null }, { timeoutMilliseconds: 120_000 });
+        const reply = await api.run({ expectedEpoch: epoch, name, projectId, arguments: args, ...start }, { timeoutMilliseconds: 120_000 });
         return { ok: reply.status === "ok", sessionId: reply.sessionId ?? null, message: reply.message ?? null };
       } catch { return { ok: false }; }
     },

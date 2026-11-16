@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.WorkItems;
+using CodeAlta.Orchestration.Hosting;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;

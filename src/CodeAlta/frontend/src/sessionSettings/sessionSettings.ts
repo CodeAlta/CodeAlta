@@ -12,12 +12,18 @@ export type SessionSettings = Readonly<{
   providerId: string | null; modelId: string | null; reasoningEffort: string | null;
   permissionMode: string | null; reviewBeforeCommit: boolean | null; sandbox: string | null;
   options: SessionOptionsChoice | null;
+  /**
+   * The tier of models of the session (`complex`, `standard`, `quick`), or Adaptive (`adaptive`, `adaptive:<level>`),
+   * as the composer names them: it gives the model, the tiers of the space saying which now. Null for a model chosen
+   * by hand, or the defaults. Only where the form offers tiers.
+   */
+  tier: string | null;
 }>;
 
 /** The provider, the model and the effort the form shows: what is chosen, else what the defaults give. */
 export type ShownModel = Readonly<{ providerId: string | null; modelId: string | null; reasoningEffort: string | null }>;
 
-/** What a start asks of the host; null parts leave it to the host, which takes the defaults. */
+/** What a start asks of the host; null parts leave it to the host, which takes the defaults. A tier gives the model, which the request then leaves to the host. */
 export type SessionStartRequest = SessionSettings;
 
 /**
@@ -38,57 +44,61 @@ export function shownModel(providers: readonly RunProvider[], models: readonly R
 
 /** Every part left to the defaults. */
 export const defaultSessionSettings: SessionSettings = Object.freeze({
-  agentPromptId: null, providerId: null, modelId: null, reasoningEffort: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, options: null,
+  agentPromptId: null, providerId: null, modelId: null, reasoningEffort: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, options: null, tier: null,
 });
 
-/** Whether the provider, the model, the effort, the permission mode, the review and the sandbox are the defaults. The agent prompt has its own default. */
+/** Whether the provider, the model, the effort, the tier, the permission mode, the review and the sandbox are the defaults. The agent prompt has its own default. */
 export function usesDefaults(settings: SessionSettings): boolean {
-  return settings.providerId === null && settings.modelId === null && settings.reasoningEffort === null
+  return settings.providerId === null && settings.modelId === null && settings.reasoningEffort === null && settings.tier === null
     && settings.permissionMode === null && settings.reviewBeforeCommit === null && settings.sandbox === null;
 }
 
 /**
  * The switch of the defaults: on, every part but the agent prompt and the options goes back to the defaults; off, what
- * the defaults give now becomes the choice of the user, who changes it from there.
+ * the defaults give now becomes the choice of the user, who changes it from there, with the tier they give
+ * (`inheritedTier`: the one of the session the new one takes its model from).
  */
-export function switchDefaults(settings: SessionSettings, on: boolean, shown: ShownModel): SessionSettings {
+export function switchDefaults(settings: SessionSettings, on: boolean, shown: ShownModel, inheritedTier: string | null = null): SessionSettings {
   if (on) return { ...defaultSessionSettings, agentPromptId: settings.agentPromptId, options: settings.options };
-  return { ...settings, providerId: settings.providerId ?? shown.providerId, modelId: settings.modelId ?? shown.modelId,
+  return { ...settings, tier: settings.tier ?? inheritedTier, providerId: settings.providerId ?? shown.providerId, modelId: settings.modelId ?? shown.modelId,
     reasoningEffort: settings.reasoningEffort ?? (settings.modelId ?? shown.modelId ? shown.reasoningEffort : null) };
 }
 
+// A provider, a model or an effort chosen by hand leaves the tier that gave them.
+
 /** Another provider: its model, its effort and its permission mode are its defaults until chosen. */
 export function chooseProvider(settings: SessionSettings, providerId: string): SessionSettings {
-  return { ...settings, providerId, modelId: null, reasoningEffort: null, permissionMode: null };
+  return { ...settings, providerId, modelId: null, reasoningEffort: null, permissionMode: null, tier: null };
 }
 
 /** Another model of the provider shown: its effort is its default until chosen. */
 export function chooseModel(settings: SessionSettings, modelId: string, shown: ShownModel): SessionSettings {
-  return { ...settings, providerId: settings.providerId ?? shown.providerId, modelId, reasoningEffort: null };
+  return { ...settings, providerId: settings.providerId ?? shown.providerId, modelId, reasoningEffort: null, tier: null };
 }
 
 /** Another effort of the model shown, which becomes a choice with it. */
 export function chooseEffort(settings: SessionSettings, effort: string, shown: ShownModel): SessionSettings {
-  return { ...settings, providerId: settings.providerId ?? shown.providerId, modelId: settings.modelId ?? shown.modelId, reasoningEffort: effort };
+  return { ...settings, providerId: settings.providerId ?? shown.providerId, modelId: settings.modelId ?? shown.modelId, reasoningEffort: effort, tier: null };
 }
 
 /**
- * What a start asks of a host that takes a tier of models: the tier (`complex`, `standard`, `quick`), or Adaptive
- * (`adaptive`, `adaptive:<level>`), gives the model, which the request then leaves to the host; null for a model.
+ * A tier of models, or Adaptive, as the choice of the form: the model the tiers give for it now (`choice`), with its
+ * effort. The permission mode stays when the provider does: the one chosen, else the one the form shows (`shownProviderId`),
+ * as for a tier saved without the model it gave.
  */
-export type TieredStartRequest = SessionStartRequest & Readonly<{ tier?: string | null }>;
-
-/** What a start asks of a host that takes a tier: the tier chosen, with the other choices of the form, else what {@link startRequest} asks. */
-export function tieredStartRequest(settings: SessionSettings, shown: ShownModel, tier: string | null): TieredStartRequest {
-  if (!tier) return { ...startRequest(settings, shown), tier: null };
-  return { ...settings, providerId: null, modelId: null, reasoningEffort: null, tier };
+export function chooseTier(settings: SessionSettings, tier: string, choice: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }>,
+  shownProviderId: string | null = null): SessionSettings {
+  const same = (settings.providerId ?? shownProviderId)?.toLowerCase() === choice.providerKey.toLowerCase();
+  return { ...settings, providerId: choice.providerKey, modelId: choice.modelId, reasoningEffort: choice.reasoning, permissionMode: same ? settings.permissionMode : null, tier };
 }
 
 /**
  * What a start asks of the host: nothing of the model with the defaults, which the host resolves as the form shows
- * them; otherwise the provider, the model and the effort the form shows.
+ * them; the tier alone when one is chosen, which gives the model on the host; otherwise the provider, the model and
+ * the effort the form shows.
  */
 export function startRequest(settings: SessionSettings, shown: ShownModel): SessionStartRequest {
+  if (settings.tier) return { ...settings, providerId: null, modelId: null, reasoningEffort: null };
   if (usesDefaults(settings)) return { ...defaultSessionSettings, agentPromptId: settings.agentPromptId, options: settings.options };
   const providerId = settings.providerId ?? shown.providerId;
   const modelId = providerId ? settings.modelId ?? shown.modelId : null;

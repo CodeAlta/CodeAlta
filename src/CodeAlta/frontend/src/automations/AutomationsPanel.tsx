@@ -5,6 +5,8 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
 import { ModelIcon } from "../ProviderIcon";
+import { sessionTierLabel } from "../modelTiers";
+import type { Space } from "../spaces/spaces";
 import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
@@ -123,6 +125,7 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
       onChange={event => onToggle(event.currentTarget.checked)} />}
     <div className="automation-card-meta"><ScopeTag item={item} />
       {placed && <span className="automation-chip" title={item.placement?.message ?? undefined}><AppIcon name="server" size={12} /><span>{placed}</span></span>}
+      {item.tier && <span className="automation-chip"><span>{sessionTierLabel(item.tier, t)}</span></span>}
       {item.provider && <span className="automation-chip"><ModelIcon modelId={item.model} providerKey={item.provider} size={12} /><span>{item.model ?? item.provider}</span></span>}</div>
     <div className="automation-card-foot">
       <span className="automation-card-state" data-problem={problem ? true : undefined} title={problem ?? (handoff || undefined) ?? next?.title}>{state}</span>
@@ -292,7 +295,7 @@ function Templates({ onPick, chatOnly }: { onPick: (template: AutomationTemplate
  * The tab of the automations: what they are, when they run next, what they started, and the templates a new
  * one starts from. Everything it shows comes from the host; it asks again when the host says something changed.
  */
-export function AutomationsPanel({ hub, projects, sessions, projectId, providers, epoch, visible, focus, onFocused, onActivate, onOpenSession }: {
+export function AutomationsPanel({ hub, projects, sessions, projectId, providers, spaces = null, epoch, visible, focus, onFocused, onActivate, onOpenSession }: {
   hub: AutomationsHub;
   /** The projects an automation can run in. */
   projects: readonly WorkspaceProject[];
@@ -301,6 +304,8 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
   projectId: string | null;
   /** The enabled providers. */
   providers: readonly RunProvider[];
+  /** The spaces, which say whose tiers of models the runs of an automation take; null where there are none. */
+  spaces?: readonly Space[] | null;
   epoch: string | null | undefined;
   visible: boolean;
   /** The automation to show, asked from elsewhere in the window. */
@@ -467,7 +472,7 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
             </section>}
       </aside>}
     </div>
-    {editing && <AutomationEditor hub={hub} initial={editing} projects={ownProjects} providers={providers} epoch={epoch} onClose={() => setEditing(null)}
+    {editing && <AutomationEditor hub={hub} initial={editing} projects={ownProjects} providers={providers} spaces={spaces} epoch={epoch} onClose={() => setEditing(null)}
       onSaved={(id, start) => {
         setEditing(null); setSelected(id);
         if (start) void run(id);

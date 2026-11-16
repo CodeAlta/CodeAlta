@@ -488,10 +488,19 @@ internal sealed class AutomationRunner : IAutomationRunner
                 prompt = scriptPrompt;
             }
 
-            if (definition.Model.Provider is { Length: > 0 } named && !inSpace.Allows(SpaceResourceKind.Provider, named))
+            // A tier gives the model, as the tiers of the space give it now; the run then goes as one that names that model.
+            var asked = definition.Model;
+            if (definition.Tier is { } onTier)
+            {
+                var given = await onTier.ResolveModelAsync(_host, spaceId, project?.Id, cancellationToken).ConfigureAwait(false);
+                if (given.Model is not { } tierModel) return Refuse(given.Problem!);
+                asked = new(tierModel.ProviderKey, tierModel.ModelId, tierModel.Effort);
+            }
+
+            if (asked.Provider is { Length: > 0 } named && !inSpace.Allows(SpaceResourceKind.Provider, named))
                 return Refuse($"The provider '{named}' is not available in the space '{spaceId}'.");
             var providers = _host.ModelProviderRegistry.ListProviders().Where(candidate => inSpace.Allows(SpaceResourceKind.Provider, candidate.ProviderId.Value)).ToArray();
-            var providerKey = definition.Model.Provider
+            var providerKey = asked.Provider
                 ?? new CodeAltaConfigStore(_host.CatalogOptions).GetEffectiveDefaultProvider(project?.ProjectPath)
                 ?? providers.FirstOrDefault()?.ProviderId.Value;
             if (providerKey is null) return Refuse("No model provider is enabled.");
@@ -500,8 +509,8 @@ internal sealed class AutomationRunner : IAutomationRunner
             {
                 // The default provider of the configuration may be one that is not enabled, or not in the space: the
                 // first enabled provider of the space then.
-                provider = definition.Model.Provider is null ? providers.FirstOrDefault(static candidate => candidate.IsEnabled) : null;
-                if (provider is null) return Refuse(definition.Model.Provider is null ? $"No model provider is enabled in the space '{spaceId}'." : $"The provider '{providerKey}' is not enabled.");
+                provider = asked.Provider is null ? providers.FirstOrDefault(static candidate => candidate.IsEnabled) : null;
+                if (provider is null) return Refuse(asked.Provider is null ? $"No model provider is enabled in the space '{spaceId}'." : $"The provider '{providerKey}' is not enabled.");
             }
 
             // What the host itself requires of a run (a node: its policy, the credential kind), before anything is created.
@@ -521,12 +530,12 @@ internal sealed class AutomationRunner : IAutomationRunner
                 return Refuse(overBudget);
 
             var models = await _host.ModelProviderInitializationService.GetModelsAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
-            var modelId = definition.Model.Model ?? AgentModelDefaults.ResolveModelId(models, provider.DefaultModelId);
+            var modelId = asked.Model ?? AgentModelDefaults.ResolveModelId(models, provider.DefaultModelId);
             var model = models.FirstOrDefault(candidate => string.Equals(candidate.Id, modelId, StringComparison.Ordinal));
             if (model is null)
             {
-                return Refuse(definition.Model.Model is { } asked
-                    ? $"The provider '{provider.ProviderId.Value}' does not offer the model '{asked}'."
+                return Refuse(asked.Model is { } wanted
+                    ? $"The provider '{provider.ProviderId.Value}' does not offer the model '{wanted}'."
                     : $"The provider '{provider.ProviderId.Value}' offers no model at the moment.");
             }
 
@@ -536,8 +545,12 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (limits.Problem is { } limited) return Refuse(limited);
             var permissionMode = limits.PermissionMode ?? definition.PermissionMode;
             var sandboxName = limits.Sandbox ?? definition.Sandbox;
-            if (definition.Model.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
-                return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
+            if (asked.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
+            {
+                // The effort of a tier is the one its settings give: one its model does not have is left to the model.
+                if (definition.Tier is null) return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
+                asked = asked with { Effort = null };
+            }
 
             // The agent the automation names, else the one its space starts its new sessions with; one the space does
             // not have is refused, as for any session of that space.
@@ -618,6 +631,10 @@ internal sealed class AutomationRunner : IAutomationRunner
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 
+            // The tier, or Adaptive, before the first prompt, which then runs on it.
+            if (definition.Tier is { } tier && await tier.PutSessionAsync(_host, sessionId, cancellationToken).ConfigureAwait(false) is { } notOnTier)
+                return new(sessionId, $"The session could not be put on {tier.Name} ({notOnTier}).", null);
+
             // A script runs through exec, which its session has whatever the setting of Code Mode says.
             if (definition.Script is not null) _host.CodeModeRuns.RequireCodeMode(sessionId);
             // What a run with autonomy does without a person is enforced on this machine, at every tool call, from its first one.
@@ -634,7 +651,7 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             // The effort of a model that reports its efforts is completed by the host when the automation names none.
-            var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, definition.Model.Effort);
+            var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, asked.Effort);
             var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest("automation:" + runId, sessionId, prompt)
                 { Selection = selection, Provenance = AgentPromptProvenance.Automation }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)

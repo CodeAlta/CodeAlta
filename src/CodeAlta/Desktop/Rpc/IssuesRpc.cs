@@ -6,6 +6,7 @@ using CodeAlta.Catalog.StartPrompts;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Desktop.WorkItems;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;

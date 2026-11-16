@@ -156,6 +156,15 @@ export function readAdaptiveTier(tier: string | null | undefined): Readonly<{ ad
 
 const modelOfTarget = (target: TierTarget) => target.modelId;
 
+/** The name the Agent chip and the lists give a tier, or Adaptive at a level; null for none. */
+export function sessionTierLabel(tier: string | null | undefined, t: (key: "Complex" | "Standard" | "Quick" | "Adaptive" | "Low" | "Medium" | "High" | "Max") => string): string | null {
+  if (!tier) return null;
+  const adaptive = readAdaptiveTier(tier);
+  if (adaptive.adaptive) return adaptive.level ? `${t("Adaptive")} ${t(adaptiveLevelLabels[adaptive.level])}` : t("Adaptive");
+  const name = tierNames.find(candidate => candidate === tier);
+  return name ? t(tierLabels[name]) : null;
+}
+
 /** What a level does, in a few words: its model, and who reviews its changes (or its recheck). */
 export function adaptiveLevelSummary(level: AdaptiveLevel, t: (key: "Recheck" | "Review by {models}", values?: Record<string, string>) => string): string {
   const model = level.choice?.modelName ?? modelOfTarget(level.model);

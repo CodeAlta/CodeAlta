@@ -5,7 +5,7 @@ import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { useShellLanguage } from "../shellLanguage";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
-import { defaultSessionSettings, tieredStartRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, startRequest } from "../sessionSettings/sessionSettings";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import type { RunProvider } from "../workItems/runsWith";
 import { argumentsOf, fieldsOf, initialValues, type FieldValue } from "./workflows";
@@ -37,8 +37,6 @@ export function RunScriptWindow({ hub, script, projects, projectId, providers = 
   const [values, setValues] = useState(() => initialValues(script.parameters));
   const [project, setProject] = useState(projectId ?? projects[0]?.id ?? "");
   const [settings, setSettings] = useState(defaultSessionSettings);
-  // The tier of models, or Adaptive, of that session, which then gives its model; null for a model.
-  const [tier, setTier] = useState<string | null>(null);
   const settingsApi = useMemo(() => project && sessionSettings ? sessionSettings(project) : null, [project, sessionSettings]);
   const choices = useSessionSettingsChoices(settingsApi, providers, null, settings);
   const [busy, setBusy] = useState(false);
@@ -51,7 +49,7 @@ export function RunScriptWindow({ hub, script, projects, projectId, providers = 
     const args = argumentsOf(fields, values);
     if ("problem" in args) { setProblem(t(args.problem.message, args.problem.values)); return; }
     setBusy(true);
-    const outcome = await hub.run(script.name, project, fields.length > 0 ? args.json : null, tieredStartRequest(settings, choices.shown, tier));
+    const outcome = await hub.run(script.name, project, fields.length > 0 ? args.json : null, startRequest(settings, choices.shown));
     setBusy(false);
     if (outcome.ok && outcome.sessionId) onStarted(outcome.sessionId);
     else setProblem(outcome.message ?? t("The script did not start."));
@@ -88,8 +86,7 @@ export function RunScriptWindow({ hub, script, projects, projectId, providers = 
         </FormGroup>
         {/* What its session runs with: its model runs the script, and is the one of the sessions it starts without a tier. */}
         {choices.provider && <FormGroup label={t("Runs with")} className="workflow-run-with">
-          <SessionSettingsChip id="workflow-run" providers={providers} choices={choices} value={settings} disabled={busy} onChange={next => { setSettings(next); setProblem(null); }}
-            tier={{ value: tier, onChange: setTier }} />
+          <SessionSettingsChip id="workflow-run" providers={providers} choices={choices} value={settings} disabled={busy} onChange={next => { setSettings(next); setProblem(null); }} />
         </FormGroup>}
         {problem && <Callout intent="danger" compact role="alert">{problem}</Callout>}
       </div>

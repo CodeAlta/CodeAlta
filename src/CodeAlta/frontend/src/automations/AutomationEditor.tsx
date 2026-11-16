@@ -9,9 +9,10 @@ import { useMachines, useRemoteChoices } from "../machines/RunOnChip";
 import { machineRunProviders, onMachine } from "../machines/machineProviderNames";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
+import { unattendedSessionSpace, type Space } from "../spaces/spaces";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider } from "../workItems/runsWith";
-import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, isSourceType, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumRunsAtOnce, maximumTriggers, needsProject,
+import { dayName, formProblem, formSettings, inputOf, placedElsewhere, isIntegration, isSchedule as schedule, isSourceType, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumRunsAtOnce, maximumTriggers, needsProject,
   newSourceTrigger, newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import { SourceTriggerFields } from "./SourceTriggerFields";
 import type { AutomationsHub } from "./automationsHub";
@@ -158,12 +159,14 @@ function ScriptFields({ scripts, form, disabled, edit }: {
  * The window that writes an automation: its name, where it runs, what starts it, the prompt it sends and what its
  * sessions run with (the Agent chip of the composer). Saving writes its configuration file; nothing runs before that.
  */
-export function AutomationEditor({ hub, initial, projects, providers, epoch, onClose, onSaved }: {
+export function AutomationEditor({ hub, initial, projects, providers, spaces = null, epoch, onClose, onSaved }: {
   hub: AutomationsHub; initial: AutomationForm;
   /** The projects an automation can run in. */
   projects: readonly WorkspaceProject[];
   /** The enabled providers, the default one first. */
   providers: readonly RunProvider[];
+  /** The spaces, which say where its runs are and so whose tiers of models they take; null where there are none. */
+  spaces?: readonly Space[] | null;
   epoch: string | null | undefined;
   onClose: () => void;
   /** Called once the automation is written, with whether it is to run now. */
@@ -185,11 +188,14 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const machine = useRemoteChoices(epoch, form.runsOn, null, undefined, true).choices;
   const machineProviders = form.runsOn ? machineRunProviders(machine) : null;
   const runProviders = machineProviders ?? providers;
+  const elsewhere = placedElsewhere(form);
   // An automation runs in the space of its project when it is in one, else in the default space: the host reads its catalogs there.
   const api = useMemo(() => {
     const base = epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null;
-    return base && form.runsOn && machine && machineProviders ? onMachine(base, form.runsOn, machine) : base;
-  }, [epoch, project?.id, project?.path, form.runsOn, machine]);
+    if (base && form.runsOn && machine && machineProviders) return onMachine(base, form.runsOn, machine);
+    // The tiers of models are those of this computer, in the space of its runs: placed elsewhere, the form offers none.
+    return base && { ...base, tiers: elsewhere ? null : { epoch: epoch!, spaceId: spaces ? unattendedSessionSpace(spaces, project?.id ?? null) : null } };
+  }, [epoch, project?.id, project?.path, form.runsOn, machine, elsewhere, spaces]);
   const settings = sessionSettingsOf(form);
   const choices = useSessionSettingsChoices(api, runProviders, null, settings);
   const [kind, setKind] = useState<"prompt" | "script">(initial.script ? "script" : "prompt");
