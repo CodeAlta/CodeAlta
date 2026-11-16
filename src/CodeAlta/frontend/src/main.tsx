@@ -6753,7 +6753,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}
           holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
-        readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
+        readProviders={modelCatalog.providers} readModels={modelCatalog.models} refreshModels={modelCatalog.probe} readChoices={sessionOperations.choices}
         providerSpaces={tierProviderSpaces}
         target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}

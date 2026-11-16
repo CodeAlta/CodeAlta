@@ -592,6 +592,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .model-catalog-providers button strong, .model-catalog-providers button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-catalog-providers button small { color: var(--muted); }
 .model-catalog-results label { display: grid; gap: 6px; margin-bottom: 14px; }
+.model-catalog-refresh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.model-catalog-refresh .bp6-html-select { min-width: 0; max-width: 100%; }
+.model-catalog-refresh select { max-width: 100%; }
 .model-catalog-results input { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
 .model-catalog-detail { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
 .model-catalog-detail dl { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 10px; margin-top: 16px; }

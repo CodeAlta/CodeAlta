@@ -214,6 +214,29 @@ public sealed class ModelCatalogRpcTests
     }
 
     [TestMethod]
+    public async Task RefreshReplacesAProvidersCachedModels_ForTheInventoryAndSessionChoices()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new("selected"), "Selected");
+        IReadOnlyList<AgentModelInfo> offered = [new("retired")];
+        var probes = 0;
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => { probes++; return offered; }));
+        var other = new ModelProviderDescriptor(new("other"), "Other");
+        registry.RegisterOrReplace(other, () => throw new AssertFailedException("Refresh only the chosen provider."));
+        var initialization = new ModelProviderInitializationService(registry);
+        var service = new ModelCatalogService(registry, initialization, "epoch");
+        Assert.AreEqual("retired", (await service.Models(new("epoch", "selected"), default)).Models.Single().Id);
+
+        offered = [new("new-model")];
+        Assert.AreEqual("retired", (await service.Models(new("epoch", "selected"), default)).Models.Single().Id, "an ordinary read uses the cache");
+        Assert.AreEqual("ok", (await service.Probe(new("epoch", "selected"), default)).Status);
+
+        Assert.AreEqual("new-model", (await service.Models(new("epoch", "selected"), default)).Models.Single().Id);
+        Assert.AreEqual("new-model", (await initialization.GetModelsAsync(descriptor.ProviderId)).Single().Id, "session choices read the same refreshed inventory");
+        Assert.AreEqual(2, probes, "the original provider runtime is probed again");
+    }
+
+    [TestMethod]
     public async Task ExplicitProbeRetainsWorkAcrossCallerCancellationAndHostDrain()
     {
         await using var registry = new ModelProviderRegistry();

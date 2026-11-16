@@ -1,9 +1,9 @@
-import { HTMLSelect } from "@blueprintjs/core";
+import { Button, HTMLSelect } from "@blueprintjs/core";
 import { ModelIcon, ProviderIcon } from "./ProviderIcon";
 import { Cell, Column, Regions, SelectionModes, Table2 } from "@blueprintjs/table";
 import "@blueprintjs/table/lib/css/table.css";
-import { useEffect, useRef, useState } from "react";
-import type { ModelCatalogModel, ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ModelCatalogModel, ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalogProbeRequest, ModelCatalogProbeResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
 import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStore } from "./nextSendSelection";
 import { useShellLanguage } from "./shellLanguage";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
@@ -17,10 +17,11 @@ const maximumAgentPrompts = 1024;
 
 type ProvidersRead = (request: ModelCatalogProvidersRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogProvidersResponse>;
 type ModelsRead = (request: ModelCatalogModelsRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogModelsResponse>;
+type ModelsRefresh = (request: ModelCatalogProbeRequest, options: { signal: AbortSignal }) => Promise<ModelCatalogProbeResponse>;
 type ChoicesRead = (request: SessionChoicesRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionChoicesResponse>;
 
-export function ModelCatalogPanel({ epoch, readProviders, readModels, target, readChoices, selections, pendingSend, pendingSelection, onApply, providerSpaces = null }: {
-  epoch: string | null; readProviders: ProvidersRead; readModels: ModelsRead;
+export function ModelCatalogPanel({ epoch, readProviders, readModels, refreshModels, target, readChoices, selections, pendingSend, pendingSelection, onApply, providerSpaces = null }: {
+  epoch: string | null; readProviders: ProvidersRead; readModels: ModelsRead; refreshModels: ModelsRefresh;
   /** The spaces of the providers, which the model tiers name; null when the host keeps no spaces. */
   providerSpaces?: TierProviderSpaces | null;
   target: { epoch: string; sessionId: string } | null; readChoices: ChoicesRead;
@@ -34,6 +35,11 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   const [pages, setPages] = useState<ReadonlyMap<string, ModelCatalogModelsResponse>>(new Map());
   const [modelErrors, setModelErrors] = useState<ReadonlyMap<string, InventoryNotice>>(new Map());
   const [loadingModels, setLoadingModels] = useState(false);
+  const [refreshProvider, setRefreshProvider] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState<InventoryNotice>("");
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshController = useRef<AbortController | null>(null);
   const [query, setQuery] = useState("");
   const [modelId, setModelId] = useState<string | null>(null);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
@@ -61,33 +67,65 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
     }).catch(() => { if (!controller.signal.aborted) setProvidersError("Model provider inventory could not be read."); });
     return () => controller.abort();
   }, [epoch, readProviders]);
+  const loadModels = useCallback(async (id: string, controller: AbortController) => {
+    if (!epoch) return false;
+    const fail = (notice: InventoryNotice) => {
+      setPages(current => { const next = new Map(current); next.delete(id); return next; });
+      setModelErrors(current => new Map(current).set(id, notice));
+      return false;
+    };
+    try {
+      const value = await readModels({ expectedEpoch: epoch, providerId: id }, { signal: controller.signal, timeoutMilliseconds: 15000 });
+      if (controller.signal.aborted) return;
+      if (value.epoch !== epoch || value.status === "stale_epoch") return fail("Host identity changed. Reload required.");
+      if (value.status !== "ok") {
+        // A signed-out account is not a failure: it lists its models once it is signed in.
+        return fail(isSignedOut(value.reason) ? "Signed out: sign in on the Providers page to list its models."
+          : { key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability });
+      }
+      if (value.providerId?.toLowerCase() !== id.toLowerCase() || !Array.isArray(value.models) || value.models.length > maximumProviderModels
+        || value.models.some(model => typeof model.id !== "string" || !model.id || model.id.length > 256 || typeof model.name !== "string")) {
+        return fail("Invalid model inventory. Reload required.");
+      }
+      setPages(current => new Map(current).set(id, value));
+      setModelErrors(current => { const next = new Map(current); next.delete(id); return next; });
+      return true;
+    } catch { if (!controller.signal.aborted) return fail("Model inventory could not be read."); }
+    return false;
+  }, [epoch, readModels]);
   useEffect(() => {
     setPages(new Map()); setModelErrors(new Map()); setProviderId(null); setModelId(null);
+    setLoadingModels(false); setRefreshing(false); setRefreshNotice(""); setRefreshProvider("");
     if (!epoch || providers?.epoch !== epoch) return;
     const enabled = providers.providers.filter(provider => provider.enabled);
+    setRefreshProvider(enabled[0]?.id ?? "");
     if (!enabled.length) return;
     const controller = new AbortController();
     setLoadingModels(true);
     // One bounded read per enabled provider, in parallel; each result or failure is shown as it arrives.
-    void Promise.all(enabled.map(provider => readModels({ expectedEpoch: epoch, providerId: provider.id }, { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
-      if (controller.signal.aborted) return;
-      const fail = (notice: InventoryNotice) => setModelErrors(current => new Map(current).set(provider.id, notice));
-      if (value.epoch !== epoch || value.status === "stale_epoch") { fail("Host identity changed. Reload required."); return; }
-      if (value.status !== "ok") {
-        // A signed-out account is not a failure: it lists its models once it is signed in.
-        fail(isSignedOut(value.reason) ? "Signed out: sign in on the Providers page to list its models."
-          : { key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability }); return;
-      }
-      if (value.providerId?.toLowerCase() !== provider.id.toLowerCase() || !Array.isArray(value.models) || value.models.length > maximumProviderModels
-        || value.models.some(model => typeof model.id !== "string" || !model.id || model.id.length > 256 || typeof model.name !== "string")) {
-        fail("Invalid model inventory. Reload required."); return;
-      }
-      setPages(current => new Map(current).set(provider.id, value));
-    }).catch(() => { if (!controller.signal.aborted) setModelErrors(current => new Map(current).set(provider.id, "Model inventory could not be read.")); })))
+    void Promise.all(enabled.map(provider => loadModels(provider.id, controller)))
       .finally(() => { if (!controller.signal.aborted) setLoadingModels(false); });
-    return () => controller.abort();
-  }, [epoch, providers, readModels]);
+    return () => { controller.abort(); refreshController.current?.abort(); refreshController.current = null; };
+  }, [epoch, providers, loadModels]);
   const activeProviders = providers?.epoch === epoch ? providers : undefined;
+  async function refresh() {
+    if (!epoch || loadingModels || refreshController.current || !activeProviders?.providers.some(provider => provider.id === refreshProvider && provider.enabled)) return;
+    const controller = new AbortController(); refreshController.current = controller;
+    setRefreshing(true); setRefreshNotice(""); setRefreshFailed(false);
+    try {
+      // The host owns the refresh even if this page closes. No page timer abandons a slow provider.
+      const reply = await refreshModels({ expectedEpoch: epoch, providerId: refreshProvider }, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (reply.epoch !== epoch || reply.status === "stale_epoch" || (reply.status === "ok" && reply.providerId !== refreshProvider)) {
+        setRefreshFailed(true); setRefreshNotice("Host or provider identity changed. Reload required."); return;
+      }
+      if (reply.status !== "ok") {
+        setRefreshFailed(true); setRefreshNotice(reply.status === "busy" ? "A provider test is already running. Try again after it settles." : "Model refresh could not be completed."); return;
+      }
+      if (await loadModels(refreshProvider, controller) && !controller.signal.aborted) setRefreshNotice("Models refreshed.");
+    } catch { if (!controller.signal.aborted) { setRefreshFailed(true); setRefreshNotice("Model refresh could not be completed."); } }
+    finally { if (refreshController.current === controller) { refreshController.current = null; setRefreshing(false); } }
+  }
   const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
   // Every provider's models in one list, provider order first, each provider's reported order kept.
   const rows = (activeProviders?.providers ?? []).flatMap(provider => (pages.get(provider.id)?.models ?? []).map(model => ({ provider, model })));
@@ -173,13 +211,21 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
           {providersError && <p role="alert" className="error-text">{inventoryNotice(locale, providersError)}</p>}
           {activeProviders?.providers.length === 0 && <p role="status">{t("No providers are registered with this host.")}</p>}
           {activeProviders && <>
+            <div className="model-catalog-refresh">
+              <HTMLSelect aria-label={t("Refresh provider")} value={refreshProvider} disabled={loadingModels || refreshing || !refreshProvider}
+                onChange={event => { setRefreshProvider(event.currentTarget.value); setRefreshNotice(""); }}>
+                {activeProviders.providers.filter(provider => provider.enabled).map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+              </HTMLSelect>
+              <Button loading={refreshing} disabled={loadingModels || refreshing || !refreshProvider} onClick={() => void refresh()}>{t("Refresh models")}</Button>
+            </div>
+            {refreshNotice && <p className="model-catalog-refresh-notice" role={refreshFailed ? "alert" : "status"}>{inventoryNotice(locale, refreshNotice)}</p>}
             <label>{t("Search models")}<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("Name, ID or description")} /></label>
             {[...modelErrors].map(([id, notice]) => <p key={id} role="alert" className="error-text"><strong>{activeProviders.providers.find(provider => provider.id === id)?.name ?? id}</strong>: {inventoryNotice(locale, notice)}</p>)}
             {loadingModels && rows.length === 0 && <p role="status">{t("Loading models…")}</p>}
             {!loadingModels && rows.length === 0 && modelErrors.size === 0 && <p role="status">{t("This provider reported no models. A configured default is not inventory.")}</p>}
             {rows.length > 0 && visible.length === 0 && <p role="status">{t("No models match this search.")}</p>}
             {visible.length > 0 && <div className="model-catalog-grid">
-              <Table2 numRows={visible.length} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
+              <Table2 numRows={visible.length} cellRendererDependencies={[pages, query, activeProviders, locale]} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
                 columnWidths={[130, 230, 230, 112, 100, 108, 96, 96, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
                 selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}
                 selectedRegions={selectedRow >= 0 ? [Regions.row(selectedRow)] : []}

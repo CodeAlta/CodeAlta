@@ -218,6 +218,8 @@ The rules are `models_hide` and `models_show` in the [configuration file](config
 
 The **Models** page of CodeAlta Desktop shows each model's limits, price per million tokens, inputs, knowledge cutoff and release date. For a subscription (Claude Code, Codex, Copilot, a coding plan), it shows the price of the model's vendor and names it.
 
+When a provider adds or retires models, open **Settings > Models**, choose the provider above the inventory and click **Refresh models**. CodeAlta reads that provider's models again without a restart. Reopen a model picker to see the updated list.
+
 Reasoning effort is chosen per provider and model:
 
 - a model that does not reason shows the effort that applies to it;
