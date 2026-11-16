@@ -36,7 +36,7 @@ The folder a conversation started in decides where it is listed:
 - A group shows 20 conversations; **Show more…** adds 50 at a time.
 - Each row has the title, the time of the last change, and an icon for where it started (VS Code, a terminal or another program). A label says where it started when that is not the project folder. An eye says another Claude process works on it now; a quieter arrow says it is merely open there.
 - The menu of a row (right-click, `Shift+F10` or `…`) has **Open preview**, **Import**, **Import into project…**, **Open in VS Code**, **Copy resume command** and **Run in terminal** (not for a conversation of no project). Nothing in it deletes a conversation.
-- `Ctrl+P` finds these conversations by title, project or folder, and **Filter sessions** at the top of the Explorer narrows the groups.
+- `Ctrl+P` finds these conversations by title, project, folder or id, and **Filter sessions** at the top of the Explorer narrows the groups.
 
 Once you imported what you need, turn off **Claude Code conversations from VS Code and the terminal** in Settings → **Sessions**, or set `claude_code_conversations = false` under `[sessions]` in `~/.alta/config.toml`. The groups and the search then leave these conversations out; the sessions you imported still open in VS Code and take the turns made there. Turn it on again to import more.
 
