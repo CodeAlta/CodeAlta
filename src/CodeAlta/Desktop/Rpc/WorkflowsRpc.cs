@@ -173,7 +173,9 @@ internal sealed class WorkflowsService
             || request.ProviderId is not null && !Name(request.ProviderId) || request.ModelId is not null && (request.ProviderId is null || !Name(request.ModelId))
             || request.ReasoningEffort is not null && (request.ModelId is null || !Name(request.ReasoningEffort))
             || request.PermissionMode is not null && !Name(request.PermissionMode) || request.Sandbox is not null && !Name(request.Sandbox)
-            || request.AgentPromptId is not null && !Name(request.AgentPromptId))
+            || request.AgentPromptId is not null && !Name(request.AgentPromptId)
+            // A tier gives the model: the request names one or the other.
+            || request.Tier is not null && (request.ProviderId is not null || SessionStartTier.Parse(request.Tier) is null))
             return new("invalid_request", null, null);
         var project = await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project is null || project.Archived) return new("refused", null, "The project is no longer one of the projects of CodeAlta.");
@@ -183,9 +185,10 @@ internal sealed class WorkflowsService
         if (prompt is null) return new("refused", null, problem);
         var title = _scripts!.Find(request.Name, project.ProjectPath)?.Title is { Length: > 0 } named ? named : request.Name;
         // The session runs the script and its model is the one of the sessions the script starts without a tier: what the
-        // user chose in the form of the Agent chip, else the defaults.
+        // user chose in the form of the Agent chip, a model, a tier or Adaptive, else the defaults.
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
-        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options));
+        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options),
+            SessionStartTier.Parse(request.Tier));
         var model = new SessionStartModel(asked) { CodeMode = true };
         var started = await _starter!.StartAsync(project, title, _ => prompt, false, null, "workflow", settings?.Apply(model) ?? model).ConfigureAwait(false);
         return started.Problem is null ? new("ok", started.SessionId, null) : new("refused", started.SessionId, started.Problem);
@@ -339,9 +342,13 @@ internal sealed record WorkflowRecordItem(string Kind, string? ActivityId, strin
 /// <param name="ReviewBeforeCommit">Whether the user reviews the changes of the session before a commit; null follows the setting.</param>
 /// <param name="Sandbox">The sandbox of the session, a profile or <c>off</c>; null for what the settings give.</param>
 /// <param name="Options">The options of the session, such as whether it can start sessions of its own; null for the defaults.</param>
+/// <param name="Tier">
+/// The tier of models the session starts and runs on (<c>complex</c>, <c>standard</c>, <c>quick</c>), or Adaptive (<c>adaptive</c>,
+/// <c>adaptive:&lt;level&gt;</c>), which gives its model; null for the model of <paramref name="ProviderId"/>.
+/// </param>
 internal sealed record WorkflowRunRequest(string? ExpectedEpoch, string Name, string ProjectId, string? Arguments,
     string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null, string? AgentPromptId = null, string? PermissionMode = null,
-    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null);
+    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null, string? Tier = null);
 
 /// <param name="SessionId">The session that was created, also when the prompt was not sent.</param>
 /// <param name="Message">Why the run did not start.</param>

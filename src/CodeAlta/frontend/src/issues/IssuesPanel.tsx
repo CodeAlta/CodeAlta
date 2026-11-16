@@ -13,7 +13,7 @@ import { createMarkdownImageCache, markdownImageRequest, type MarkdownImages } f
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
-import { defaultSessionSettings, startRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, tieredStartRequest } from "../sessionSettings/sessionSettings";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { WorkStartButtons } from "../workItems/WorkItemCards";
 import type { RunProvider } from "../workItems/runsWith";
@@ -128,6 +128,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const available = epoch !== null && epoch !== undefined;
   // What a session started on an item runs with: the Agent chip of the composer, the defaults until the user changes them.
   const [runSettings, setRunSettings] = useState(defaultSessionSettings);
+  // Its tier of models, or Adaptive, which then gives its model; null for a model.
+  const [runTier, setRunTier] = useState<string | null>(null);
   const settingsApi = useMemo(() => project && sessionSettings ? sessionSettings(project.id) : null, [project, sessionSettings]);
   const runChoices = useSessionSettingsChoices(settingsApi, providers, null, runSettings);
   useEffect(() => {
@@ -362,7 +364,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     setStarting(value => new Set(value).add(key));
     try {
       const reply = await api.start({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: item.kind, id: item.id, worktree: way === "worktree", sessionId: null,
-        ...startRequest(runSettings, runChoices.shown), branch }, { timeoutMilliseconds: 600_000 });
+        ...tieredStartRequest(runSettings, runChoices.shown, runTier), tier: runTier, branch }, { timeoutMilliseconds: 600_000 });
       if (reply.sessionId) {
         if (shownKey.current === key || !onStarted) { setExpanded(false); onOpenSession(reply.sessionId, wanted.projectId); }
         else onStarted(reply.sessionId, wanted.projectId, `${issueReference(item)} ${item.title}`);
@@ -388,7 +390,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const runsWith = (runChoices.provider || branchToggle) && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
     {runChoices.provider && <>
       <span className="work-runs-with-label">{t("Runs with")}</span>
-      <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings} />
+      <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings}
+        tier={{ value: runTier, onChange: setRunTier }} />
     </>}
     {branchToggle}
   </div>;

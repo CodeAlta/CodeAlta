@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { WorkflowRunRequest, WorkflowRunResponse } from "#neoastra";
-import { defaultSessionSettings, startRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, startRequest, tieredStartRequest } from "../sessionSettings/sessionSettings";
 import { createWorkflowsHub, type WorkflowsApi } from "./workflowsHub";
 
 test("Run… sends what the form of the Agent chip chose, and the defaults as nulls", async () => {
@@ -13,10 +13,14 @@ test("Run… sends what the form of the Agent chip chose, and the defaults as nu
   const shown = { providerId: "codex", modelId: "gpt-6.1-sol", reasoningEffort: "low" };
   await hub.run("triage", "p1", null, startRequest({ ...defaultSessionSettings, providerId: "codex", modelId: "gpt-6.1-sol", permissionMode: "auto" }, shown));
 
+  await hub.run("triage", "p1", null, tieredStartRequest({ ...defaultSessionSettings, providerId: "codex", modelId: "gpt-6.1-sol", agentPromptId: "plan" }, shown, "adaptive:high"));
+
   // The defaults leave every part to the host; a choice names its provider, model and effort.
-  assert.deepEqual(requests[0], { expectedEpoch: "epoch", name: "triage", projectId: "p1", arguments: "{\"days\":2}", ...defaultSessionSettings });
+  assert.deepEqual(requests[0], { expectedEpoch: "epoch", name: "triage", projectId: "p1", arguments: "{\"days\":2}", ...defaultSessionSettings, tier: null });
   assert.deepEqual([requests[1].providerId, requests[1].modelId, requests[1].reasoningEffort, requests[1].permissionMode, requests[1].arguments],
     ["codex", "gpt-6.1-sol", "low", "auto", null]);
+  // A tier, or Adaptive, gives the model: the request names it and no provider.
+  assert.deepEqual([requests[2].tier, requests[2].providerId, requests[2].modelId, requests[2].agentPromptId], ["adaptive:high", null, null, "plan"]);
 });
 
 test("Delete names the script, its scope and its project, and says why the host refused", async () => {

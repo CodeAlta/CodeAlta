@@ -1272,6 +1272,8 @@ public sealed class AutomationHostTests
             // What its session runs with: what the form of the Agent chip chose, checked like the choice of an issue or an automation.
             var providerId = provider.Descriptor.ProviderId.Value;
             Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", ModelId: "fixture-model"), default)).Status, "a model without its provider");
+            Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", ProviderId: providerId, Tier: "quick"), default)).Status, "a tier and a provider");
+            Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", Tier: "fastest"), default)).Status, "a tier that is none");
             foreach (var (model, effort, expected) in new (string, string?, string)[]
                      {
                          ("other-model", null, "does not offer the model 'other-model'"),
