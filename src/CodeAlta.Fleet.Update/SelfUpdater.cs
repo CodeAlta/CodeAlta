@@ -81,6 +81,13 @@ public sealed class SelfUpdaterOptions
 
     /// <summary>Gets the runtime whose package is downloaded; null for the one of this process (<see cref="UpdateProduct.CurrentRuntime"/>).</summary>
     public string? Runtime { get; init; }
+
+    /// <summary>
+    /// Gets the .NET installation a staged version runs on, where the shared frameworks it declares are looked for before it is
+    /// installed; null for the one the launcher gives it (<c>DOTNET_ROOT</c>, else the installation of this process, none when this
+    /// process is self-contained: nothing is checked).
+    /// </summary>
+    public string? DotnetRoot { get; init; }
 }
 
 /// <summary>
@@ -236,10 +243,14 @@ public sealed class SelfUpdater
 
             // A folder of an earlier update is taken only when it holds this very package.
             if (store.IsStaged(version, product) && StagedHash(target) == actual.Base64)
+            {
+                RequireFrameworks(target, version);
                 return new StagedUpdate(version, target, actual, checkedBy, AlreadyStaged: true);
+            }
 
             var files = Path.Combine(stagingRoot, "files");
             Extract(package, files, product, Runtime);
+            RequireFrameworks(files, version);
             File.WriteAllBytes(Path.Combine(files, ".package.json"), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new StagedVersionInfo
             {
                 PackageId = check.PackageId, Version = version.ToString(), Source = check.Source, Sha512 = actual.Base64, StagedAt = store.Time.GetUtcNow(),
@@ -255,6 +266,18 @@ public sealed class SelfUpdater
             try { Directory.Delete(stagingRoot, recursive: true); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
         }
+    }
+
+    // A version whose frameworks are not all installed is not staged: it would be stopped by the host, then rolled back as bad.
+    private void RequireFrameworks(string folder, UpdateVersion version)
+    {
+        var root = _options.DotnetRoot ?? Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? UpdateLauncher.FindDotnetRoot();
+        if (UpdateFrameworks.FirstMissing(folder, _options.Product, string.IsNullOrEmpty(root) ? null : root) is not { } missing) return;
+        var install = missing.StartsWith("Microsoft.AspNetCore.App", StringComparison.Ordinal)
+            ? "the ASP.NET Core 10 runtime, which the .NET runtime alone does not carry (Ubuntu: sudo apt install aspnetcore-runtime-10.0; dotnet.microsoft.com/download/dotnet/10.0)"
+            : "that runtime (dotnet.microsoft.com/download)";
+        throw new UpdateException(UpdateErrorCodes.RuntimeMissing,
+            $"{_options.Product.PackageId} {version} needs {missing}, which this machine does not have: it was not installed, and {_options.Running} keeps running. Install {install}, then update again.");
     }
 
     // The SHA-512 of the package a staged folder was unpacked from, as its .package.json records it; null when unknown.

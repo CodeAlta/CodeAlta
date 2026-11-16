@@ -57,6 +57,7 @@ export function setupProblem(code: string): MessageKey {
     case "ssh_missing": return "The OpenSSH client is missing on this computer: add it (on Windows, Settings > System > Optional features).";
     case "unsupported_system": return "CodeAlta installs over SSH on Linux and macOS: on this machine, install CodeAlta Node and pair it with its link.";
     case "dotnet_missing": return "The machine has no .NET 10: install it there (dotnet.microsoft.com/download), then try again.";
+    case "aspnetcore_missing": return "The machine has .NET 10 but not its ASP.NET Core runtime, which CodeAlta Node needs: install it there (on Ubuntu, aspnetcore-runtime-10.0; the .NET SDK and the installers of dotnet.microsoft.com/download include it), then try again.";
     case "packages_missing": return "The folder has no CodeAlta Node package for this machine.";
     case "copy_failed": return "The packages could not be copied to the machine.";
     case "tool_install_failed": return "dotnet could not install CodeAlta Node on the machine.";

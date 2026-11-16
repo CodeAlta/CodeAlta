@@ -24,6 +24,7 @@ public sealed class MachineServerJoinTests
         hostname=pc-ai
         dotnet=/usr/bin/dotnet
         sdk=10.0.114 [/usr/lib/dotnet/sdk]
+        runtime=Microsoft.AspNetCore.App 10.0.14 [/usr/lib/dotnet/shared/Microsoft.AspNetCore.App]
         runtime=Microsoft.NETCore.App 10.0.14 [/usr/lib/dotnet/shared/Microsoft.NETCore.App]
         linger=yes
         """;

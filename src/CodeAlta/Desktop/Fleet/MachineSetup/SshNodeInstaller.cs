@@ -91,6 +91,13 @@ internal sealed record SshMachineFacts(string Os, string Architecture, string? R
     /// <summary>Gets the firewall that runs there and can block a port (<c>ufw</c>); null when none is known.</summary>
     public string? Firewall { get; init; }
 
+    /// <summary>
+    /// Gets the newest ASP.NET Core runtime (<c>Microsoft.AspNetCore.App</c>) of .NET 10 or later there; null when there is none. CodeAlta Node
+    /// requires it: its Mobile plugin serves the phone page with Kestrel, and the application declares the framework, so that without it the
+    /// node does not start at all.
+    /// </summary>
+    public string? AspNetCore { get; init; }
+
     /// <summary>Gets whether Tailscale is installed there.</summary>
     public bool Tailscale { get; init; }
 
@@ -114,7 +121,7 @@ internal sealed class SshSetupException(string step, string code, string message
 
 /// <summary>
 /// Installs CodeAlta Node on a computer reached over SSH, as its owner would in a terminal there, and pairs it with this
-/// desktop, as the device that manages it when the person asked: connect and probe (system, architecture, .NET), install the tool
+/// desktop, as the device that manages it when the person asked: connect and probe (system, architecture, .NET and its ASP.NET Core runtime), install the tool
 /// (<c>dotnet tool update</c>, or the runtime package where only the .NET runtime is), install its service
 /// (<c>altanode install --listen-all</c>), then <c>altanode pair</c> (<c>--manage</c> when asked), whose link this desktop redeems at once over
 /// the channel it pins to the node's key. Each step can run again: a retry starts over and changes only what is missing.
@@ -186,9 +193,11 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         if (facts.Dotnet is null || facts.Runtime is null && facts.Sdk is null)
             throw Fail(SshSetupSteps.Check, "dotnet_missing", $"{facts.OsName} {facts.Architecture}");
         if (!useSdk && facts.Runtime is null) throw Fail(SshSetupSteps.Check, "dotnet_missing", $"{facts.OsName} {facts.Architecture}");
+        // The node declares the ASP.NET Core framework: without it, whichever way the node was installed, it does not start.
+        if (facts.AspNetCore is null) throw Fail(SshSetupSteps.Check, "aspnetcore_missing", $"{facts.OsName} {facts.Architecture} · {(useSdk ? $".NET SDK {facts.Sdk}" : $".NET {facts.Runtime}")}");
         var dataRoot = request.DataRoot is { Length: > 0 } root ? root : facts.DesktopRuns ? "~/.alta-node" : null;
         var toolPath = request.ToolPath is { Length: > 0 } tools ? tools : "~/.dotnet/tools";
-        var dotnetText = useSdk ? $".NET SDK {facts.Sdk}" : $".NET {facts.Runtime}";
+        var dotnetText = (useSdk ? $".NET SDK {facts.Sdk}" : $".NET {facts.Runtime}") + $" · ASP.NET Core {facts.AspNetCore}";
         // Always on needs root there: sudo without a password, or the one the person gives; without either, the page asks it.
         CheckAlwaysOn(facts, request.AlwaysOn, request.SudoPassword, "altanode install --listen-all");
 
@@ -359,7 +368,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         echo "dotnet=$DOTNET"
         if [ -n "$DOTNET" ]; then
           "$DOTNET" --list-sdks 2>/dev/null | sed 's/^/sdk=/'
-          "$DOTNET" --list-runtimes 2>/dev/null | grep 'Microsoft.NETCore.App' | sed 's/^/runtime=/'
+          "$DOTNET" --list-runtimes 2>/dev/null | grep -E 'Microsoft\.(NETCore|AspNetCore)\.App' | sed 's/^/runtime=/'
         fi
         if command -v loginctl >/dev/null 2>&1; then echo "linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)"; fi
         if pgrep -x alta >/dev/null 2>&1; then echo "desktop=running"; fi
@@ -377,16 +386,22 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
     internal static SshMachineFacts ReadFacts(string output)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        string? sdk = null, runtime = null;
+        string? sdk = null, runtime = null, aspNetCore = null;
         foreach (var line in output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
             var equal = line.IndexOf('=');
             if (equal <= 0) continue;
             var (key, value) = (line[..equal], line[(equal + 1)..]);
-            // The newest SDK and runtime of .NET 10 or later: "10.0.114 [/usr/lib/dotnet/sdk]", "Microsoft.NETCore.App 10.0.14 [...]".
+            // The newest SDK and runtimes of .NET 10 or later: "10.0.114 [/usr/lib/dotnet/sdk]", "Microsoft.NETCore.App 10.0.14 [...]",
+            // "Microsoft.AspNetCore.App 10.0.14 [...]".
             if (key == "sdk") sdk = Newest(sdk, value.Split(' ')[0]);
-            else if (key == "runtime" && value.Split(' ') is [_, var version, ..]) runtime = Newest(runtime, version);
-            else values[key] = value;
+            else if (key == "runtime" && value.Split(' ') is ["Microsoft.NETCore.App", var version, ..]) runtime = Newest(runtime, version);
+            else if (key == "runtime" && value.Split(' ') is ["Microsoft.AspNetCore.App", var aspNetCoreVersion, ..])
+            {
+                // The node runs on ASP.NET Core 10: a newer major beside it does not serve it.
+                if (Parse(aspNetCoreVersion).Major == 10) aspNetCore = Newest(aspNetCore, aspNetCoreVersion);
+            }
+            else if (key != "runtime") values[key] = value;
         }
 
         var os = values.GetValueOrDefault("os") ?? "";
@@ -403,6 +418,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
             AtLeast10(sdk), AtLeast10(runtime), values.GetValueOrDefault("desktop") == "running", NullIfEmpty(values.GetValueOrDefault("linger")),
             NullIfEmpty(values.GetValueOrDefault("hostname")))
         {
+            AspNetCore = AtLeast10(aspNetCore),
             Firewall = NullIfEmpty(values.GetValueOrDefault("firewall")), Tailscale = values.GetValueOrDefault("tailscale") == "yes",
             DevTunnel = values.GetValueOrDefault("devtunnel") == "yes",
             Sudo = values.GetValueOrDefault("sudo") is "root" or "nopassword" or "password" ? values["sudo"] : null,

@@ -140,7 +140,7 @@ internal sealed record MachineSshRequest(string ExpectedEpoch, string Target, st
 /// <param name="Step"><c>connect</c>, <c>check</c>, <c>install</c>, <c>service</c>, <c>pair</c>, <c>server</c>, or <c>finished</c>.</param>
 /// <param name="State"><c>running</c>, <c>done</c> or <c>failed</c>.</param>
 /// <param name="Detail">What the step checked or changed, or what the failure said.</param>
-/// <param name="Code">Why it failed (<c>host_key_unknown</c>, <c>auth_failed</c>, <c>unknown_host</c>, <c>unreachable</c>, <c>unsupported_system</c>, <c>dotnet_missing</c>...).</param>
+/// <param name="Code">Why it failed (<c>host_key_unknown</c>, <c>auth_failed</c>, <c>unknown_host</c>, <c>unreachable</c>, <c>unsupported_system</c>, <c>dotnet_missing</c>, <c>aspnetcore_missing</c>...).</param>
 /// <param name="MachineId">The machine, once paired.</param>
 /// <param name="MachineName">Its name.</param>
 /// <param name="Words">The six words of its key.</param>

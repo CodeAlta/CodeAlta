@@ -59,6 +59,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The Mobile plugin serves the phone page with Kestrel. The framework comes through its project reference too; naming it here
+         makes the prerequisite of the node plain: the application declares Microsoft.AspNetCore.App in its runtime configuration,
+         so a machine needs the ASP.NET Core runtime beside the .NET one (the .NET SDK has it), and the node does not start without it. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Automations\CodeAlta.Automations.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />

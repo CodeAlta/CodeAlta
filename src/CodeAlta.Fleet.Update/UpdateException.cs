@@ -27,6 +27,9 @@ public static class UpdateErrorCodes
     /// <summary>No package is published for the OS or the architecture of this machine.</summary>
     public const string UnsupportedRuntime = "update.unsupported_runtime";
 
+    /// <summary>The version needs a shared framework this machine does not have (CodeAlta Node and ASP.NET Core): it was not installed.</summary>
+    public const string RuntimeMissing = "update.runtime_missing";
+
     /// <summary>The version was rolled back on this machine before.</summary>
     public const string BadVersion = "update.bad_version";
 

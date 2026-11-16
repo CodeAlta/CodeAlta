@@ -155,6 +155,13 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
+      # The desktop and the node pack the frontend: the build of the page runs npm, and the node takes its phone page from it.
+      - uses: actions/setup-node@v7
+        if: matrix.project == 'CodeAlta' || matrix.project == 'CodeAlta.Node'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/CodeAlta/frontend/package-lock.json
       # What dotnet-releaser runs for each packable project of the release: its pack, with a package for each runtime.
       - name: "Pack"
         run: dotnet pack src/${{ matrix.project }}/${{ matrix.project }}.csproj -c Release -o artifacts/nuget
@@ -169,6 +176,20 @@ jobs:
           if [ "$actual" -ne "$expected" ]; then
             echo "::error::$actual packages for $expected expected: the tool package and one for each of $rids"
             exit 1
+          fi
+          # The package of each runtime of the node carries the phone page (the package of the tool only points to them) and a runtime
+          # configuration that asks for ASP.NET Core, which the SSH setup of the desktop checks the machine for.
+          if [ "${{ matrix.project }}" = "CodeAlta.Node" ]; then
+            for pkg in artifacts/nuget/*.nupkg; do
+              listing=$(unzip -l "$pkg")
+              if grep -q 'tools/any/any/DotnetToolSettings.xml' <<< "$listing"; then continue; fi
+              for file in mobile-page/files.json mobile-page/mobile.html altanode.runtimeconfig.json; do
+                if ! grep -q "/$file" <<< "$listing"; then echo "::error::$pkg carries no $file"; exit 1; fi
+              done
+              if ! unzip -p "$pkg" 'tools/*/altanode.runtimeconfig.json' | grep -q 'Microsoft.AspNetCore.App'; then
+                echo "::error::$pkg does not ask for the ASP.NET Core runtime"; exit 1
+              fi
+            done
           fi
           # nuget.org refuses a package over 250 MB.
           large=$(find artifacts/nuget -name '*.nupkg' -size +250M)
@@ -190,6 +211,10 @@ jobs:
       # back to a setuid helper the image leaves unconfigured, and aborts. The tests of the browser tools keep the sandbox.
       - name: "Allow the sandbox of Chromium browsers"
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The packages of the desktop and of the node run npm (the frontend, the phone page of the node): the same Node.js as the tests.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: "Build, Test, Pack and Publish"
         uses: xoofx/.github/.github/actions/dotnet-releaser-action@main
         env:

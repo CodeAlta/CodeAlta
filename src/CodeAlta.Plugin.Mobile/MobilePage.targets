@@ -7,19 +7,45 @@
     The frontend is built by the desktop project, once: this asks that project for the same target, with the same
     properties, as its own builds do, so that MSBuild runs one build of the page whatever asks first and two builds
     never write frontend/dist or node_modules at once. Nothing of the desktop is referenced: only its files are read.
+
+    The page is prepared once for all the builds of the node: those of a pack run in parallel, one for each runtime, and
+    would otherwise restore, build and extract the same folders at the same time (CodeAltaPrepareMobilePage).
   -->
   <PropertyGroup>
     <CodeAltaMobilePageFrontend>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'CodeAlta', 'frontend'))</CodeAltaMobilePageFrontend>
     <CodeAltaMobilePageOutput>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', 'obj', 'mobile-page'))</CodeAltaMobilePageOutput>
     <CodeAltaMobilePageDesktopProject>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'CodeAlta', 'CodeAlta.csproj'))</CodeAltaMobilePageDesktopProject>
+    <CodeAltaMobilePageDesktopAssets>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'CodeAlta', 'obj', 'project.assets.json'))</CodeAltaMobilePageDesktopAssets>
   </PropertyGroup>
 
+  <!-- A build for a runtime asks, for a build without one, what the per-runtime builds of the desktop ask (CodeAltaBuildFrontendOnce). -->
+  <Target Name="CodeAltaPrepareMobilePageForRuntime" Condition="'$(DesignTimeBuild)' != 'true' and '$(RuntimeIdentifier)' != ''">
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="CodeAltaPrepareMobilePage" RemoveProperties="RuntimeIdentifier"
+             Properties="UseCurrentRuntimeIdentifier=false;UseDefaultPublishRuntimeIdentifier=false" />
+  </Target>
+
+  <Target Name="CodeAltaPrepareMobilePage" DependsOnTargets="CodeAltaBuildMobilePageFrontend;CodeAltaExtractMobilePage"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(RuntimeIdentifier)' == ''" />
+
+  <!--
+    A pack of CodeAlta Node alone (dotnet pack src/CodeAlta.Node/CodeAlta.Node.csproj, as CI does) restores the node and what
+    it references, not the desktop project: its frontend target comes from the packages it restores (NeoAstra), and does not exist
+    without them. The desktop is restored here when no solution did it, and asked for its target as a project evaluated again
+    (CodeAltaMobilePageRestored), so that it sees what the restore wrote.
+
+    The frontend target compiles the desktop (its RPC client is read from the assembly). Asked alone, it would compile it
+    without the steps a build runs before a compile, and leave an assembly without its embedded resources that a later build
+    takes as up to date: they are asked first, in the order of a build.
+  -->
   <Target Name="CodeAltaBuildMobilePageFrontend" Condition="'$(DesignTimeBuild)' != 'true' and '$(CodeAltaMobilePagePrebuilt)' != 'true'">
-    <!-- A build without a runtime is the build of the desktop project itself: the same project, the same properties. -->
-    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="NeoAstraPrepareFrontend" Condition="'$(RuntimeIdentifier)' == ''" />
-    <!-- A build for a runtime asks what the per-runtime builds of the desktop ask (CodeAltaBuildFrontendOnce). -->
-    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="NeoAstraPrepareFrontend" Condition="'$(RuntimeIdentifier)' != ''"
-             RemoveProperties="RuntimeIdentifier" Properties="UseCurrentRuntimeIdentifier=false;UseDefaultPublishRuntimeIdentifier=false" />
+    <PropertyGroup>
+      <_CodeAltaMobilePageDesktopRestored>$([System.IO.File]::Exists('$(CodeAltaMobilePageDesktopAssets)'))</_CodeAltaMobilePageDesktopRestored>
+    </PropertyGroup>
+    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="Restore" Condition="'$(_CodeAltaMobilePageDesktopRestored)' != 'True'"
+             Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="ResolveReferences;PrepareResources;NeoAstraPrepareFrontend" Condition="'$(_CodeAltaMobilePageDesktopRestored)' == 'True'" />
+    <MSBuild Projects="$(CodeAltaMobilePageDesktopProject)" Targets="ResolveReferences;PrepareResources;NeoAstraPrepareFrontend" Condition="'$(_CodeAltaMobilePageDesktopRestored)' != 'True'"
+             Properties="CodeAltaMobilePageRestored=true" />
   </Target>
 
   <Target Name="CodeAltaExtractMobilePage" DependsOnTargets="CodeAltaBuildMobilePageFrontend" Condition="'$(DesignTimeBuild)' != 'true'"
@@ -28,7 +54,7 @@
     <Exec Command="node scripts/mobile-page.mjs dist &quot;$(CodeAltaMobilePageOutput.TrimEnd('/').TrimEnd('\'))&quot;" WorkingDirectory="$(CodeAltaMobilePageFrontend)" />
   </Target>
 
-  <Target Name="CodeAltaStageMobilePage" BeforeTargets="AssignTargetPaths" DependsOnTargets="CodeAltaExtractMobilePage" Condition="'$(DesignTimeBuild)' != 'true'">
+  <Target Name="CodeAltaStageMobilePage" BeforeTargets="AssignTargetPaths" DependsOnTargets="CodeAltaPrepareMobilePageForRuntime;CodeAltaPrepareMobilePage" Condition="'$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
       <_CodeAltaMobilePageFile Include="$(CodeAltaMobilePageOutput)**/*" />
       <ContentWithTargetPath Include="@(_CodeAltaMobilePageFile)">

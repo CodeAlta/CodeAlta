@@ -83,6 +83,81 @@ public sealed class UpdateStagingTests
         Assert.AreEqual("assembly 4.0.0-alpha.902", File.ReadAllText(Path.Combine(replaced.Path, "altanode.dll")));
     }
 
+    private static string RuntimeConfig(params string[] frameworks)
+        => "{ \"runtimeOptions\": { \"tfm\": \"net10.0\", \"frameworks\": [ " + string.Join(", ", frameworks.Select(static name => $"{{ \"name\": \"{name}\", \"version\": \"10.0.0\" }}")) + " ] } }";
+
+    // A fake installation: shared/<framework>/<version>/ for each, as the folder of .NET has them.
+    private static string Installation(TempFolder temp, string name, params string[] frameworks)
+    {
+        var root = temp.Combine(name);
+        Directory.CreateDirectory(root);
+        foreach (var framework in frameworks) Directory.CreateDirectory(Path.Combine(root, "shared", framework.Split(' ')[0], framework.Split(' ')[1]));
+        return root;
+    }
+
+    // The packages are framework-dependent: a version that needs ASP.NET Core on a machine that has the .NET runtime alone would be stopped
+    // by the .NET host before it ran, then rolled back as bad. It is refused when staged, with what to install, and the running version stays.
+    [TestMethod]
+    public async Task AVersionThatNeedsAFrameworkTheMachineLacksIsNotStaged_AndSaysWhatToInstall()
+    {
+        using var temp = new TempFolder();
+        var feed = Directory.CreateDirectory(temp.Combine("feed")).FullName;
+        Packages.Write(feed, "4.5.0", extra: [("tools/net10.0/win-x64/altanode.runtimeconfig.json", RuntimeConfig("Microsoft.NETCore.App", "Microsoft.AspNetCore.App"))]);
+        var request = new UpdateRequest { Source = feed };
+
+        var runtimeOnly = new SelfUpdater(new SelfUpdaterOptions
+        {
+            Product = Packages.Product, Store = new UpdateVersionStore(temp.Combine("versions")), Running = UpdateVersion.Parse("4.4.0"),
+            Policy = UpdateSourcePolicy.From(new UpdateSourceSettings()), Http = new HttpClient(), Runtime = Packages.Runtime,
+            DotnetRoot = Installation(temp, "runtime-only", "Microsoft.NETCore.App 10.0.14"),
+        });
+        var failure = await Assert.ThrowsExactlyAsync<UpdateException>(async () => await runtimeOnly.StageAsync(await runtimeOnly.CheckAsync(request, CancellationToken.None), request, CancellationToken.None));
+        Assert.AreEqual(UpdateErrorCodes.RuntimeMissing, failure.Code);
+        StringAssert.Contains(failure.Message, "Microsoft.AspNetCore.App 10.0.0");
+        StringAssert.Contains(failure.Message, "aspnetcore-runtime-10.0");
+        StringAssert.Contains(failure.Message, "4.4.0 keeps running");
+        Assert.IsFalse(Directory.Exists(temp.Combine("versions", "4.5.0")), "nothing is left to switch to");
+
+        // The same package on a machine that has the runtime: staged. A newer patch of the major satisfies the version it asks for.
+        var complete = new SelfUpdater(new SelfUpdaterOptions
+        {
+            Product = Packages.Product, Store = new UpdateVersionStore(temp.Combine("versions")), Running = UpdateVersion.Parse("4.4.0"),
+            Policy = UpdateSourcePolicy.From(new UpdateSourceSettings()), Http = new HttpClient(), Runtime = Packages.Runtime,
+            DotnetRoot = Installation(temp, "complete", "Microsoft.NETCore.App 10.0.14", "Microsoft.AspNetCore.App 10.0.14"),
+        });
+        var staged = await complete.StageAsync(await complete.CheckAsync(request, CancellationToken.None), request, CancellationToken.None);
+        Assert.IsFalse(staged.AlreadyStaged);
+
+        // A folder staged earlier, by a version that did not check, is checked too: it is not taken as it is.
+        var failureAgain = await Assert.ThrowsExactlyAsync<UpdateException>(async () => await runtimeOnly.StageAsync(await runtimeOnly.CheckAsync(request, CancellationToken.None), request, CancellationToken.None));
+        Assert.AreEqual(UpdateErrorCodes.RuntimeMissing, failureAgain.Code);
+    }
+
+    [TestMethod]
+    public void TheFrameworksADeclaredVersionNeeds_AreThoseOfTheSameMajorNotOlder()
+    {
+        using var temp = new TempFolder();
+        var app = Directory.CreateDirectory(temp.Combine("app")).FullName;
+        File.WriteAllText(Path.Combine(app, "altanode.runtimeconfig.json"), RuntimeConfig("Microsoft.NETCore.App", "Microsoft.AspNetCore.App"));
+        var count = 0;
+        string? Missing(params string[] installed) => UpdateFrameworks.FirstMissing(app, Packages.Product, Installation(temp, "dotnet" + count++, installed));
+
+        Assert.IsNull(Missing("Microsoft.NETCore.App 10.0.14", "Microsoft.AspNetCore.App 10.0.14"));
+        Assert.IsNull(Missing("Microsoft.NETCore.App 10.0.0-rc.2.25502.107", "Microsoft.AspNetCore.App 10.1.2"), "a preview and a newer minor count");
+        Assert.AreEqual("Microsoft.AspNetCore.App 10.0.0", Missing("Microsoft.NETCore.App 10.0.14"), "the .NET runtime alone");
+        Assert.AreEqual("Microsoft.AspNetCore.App 10.0.0", Missing("Microsoft.NETCore.App 10.0.14", "Microsoft.AspNetCore.App 9.0.9", "Microsoft.AspNetCore.App 8.0.14"), "another major does not stand in");
+        Assert.AreEqual("Microsoft.NETCore.App 10.0.0", Missing(), "no runtime at all");
+
+        // Nothing to check where the process runs on no shared runtime, or the package has no runtimeconfig.json.
+        Assert.IsNull(UpdateFrameworks.FirstMissing(app, Packages.Product, null));
+        var empty = Installation(temp, "empty");
+        Assert.IsNull(UpdateFrameworks.FirstMissing(temp.Combine("elsewhere"), Packages.Product, empty));
+        File.WriteAllText(Path.Combine(app, "altanode.runtimeconfig.json"), "not json");
+        Assert.IsNull(UpdateFrameworks.FirstMissing(app, Packages.Product, empty), "a file nothing can read is not a reason to refuse");
+        File.WriteAllText(Path.Combine(app, "altanode.runtimeconfig.json"), """{ "runtimeOptions": { "framework": { "name": "Microsoft.AspNetCore.App", "version": "10.0.0" } } }""");
+        Assert.AreEqual("Microsoft.AspNetCore.App 10.0.0", UpdateFrameworks.FirstMissing(app, Packages.Product, empty), "the single \"framework\" form");
+    }
+
     [TestMethod]
     public async Task AnExpectedHashThatDoesNotMatchInstallsNothing()
     {

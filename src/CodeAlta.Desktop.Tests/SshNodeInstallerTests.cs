@@ -14,6 +14,7 @@ public sealed class SshNodeInstallerTests
         hostname=pc-ai
         dotnet=/usr/bin/dotnet
         sdk=10.0.114 [/usr/lib/dotnet/sdk]
+        runtime=Microsoft.AspNetCore.App 10.0.14 [/usr/lib/dotnet/shared/Microsoft.AspNetCore.App]
         runtime=Microsoft.NETCore.App 10.0.14 [/usr/lib/dotnet/shared/Microsoft.NETCore.App]
         linger=no
         """;
@@ -28,6 +29,7 @@ public sealed class SshNodeInstallerTests
         sdk=10.0.401 [/usr/local/share/dotnet/sdk]
         sdk=10.0.402 [/usr/local/share/dotnet/sdk]
         sdk=9.0.100 [/usr/local/share/dotnet/sdk]
+        runtime=Microsoft.AspNetCore.App 10.0.13 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]
         runtime=Microsoft.NETCore.App 10.0.13 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
         desktop=running
         """;
@@ -59,6 +61,7 @@ public sealed class SshNodeInstallerTests
         Assert.AreEqual("osx-arm64", mac.RuntimeIdentifier);
         Assert.AreEqual("10.0.402", mac.Sdk, "the newest SDK of .NET 10 or later");
         Assert.AreEqual("10.0.13", mac.Runtime);
+        Assert.AreEqual("10.0.13", mac.AspNetCore, "the ASP.NET Core runtime is read apart from the .NET one");
         Assert.IsTrue(mac.DesktopRuns);
         var linux = SshNodeInstaller.ReadFacts(Ubuntu.ReplaceLineEndings("\n"));
         Assert.AreEqual("linux-x64", linux.RuntimeIdentifier);
@@ -67,6 +70,38 @@ public sealed class SshNodeInstallerTests
         Assert.AreEqual("linux-musl-arm64", musl.RuntimeIdentifier);
         Assert.IsNull(SshNodeInstaller.ReadFacts("os=FreeBSD\narch=amd64\n").RuntimeIdentifier);
         Assert.IsNull(SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\ndotnet=/usr/bin/dotnet\nsdk=8.0.100 [x]\n").Sdk, ".NET 8 is too old");
+    }
+
+    // The node declares the ASP.NET Core framework (its phone page is served by Kestrel): a machine that has .NET without it cannot start the node.
+    [TestMethod]
+    public void Probe_ReadsTheAspNetCoreRuntimeApartFromTheDotNetOne()
+    {
+        var runtimes = SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\ndotnet=/usr/bin/dotnet\nruntime=Microsoft.NETCore.App 10.0.14 [/r]\nruntime=Microsoft.AspNetCore.App 9.0.3 [/r]\n"
+            + "runtime=Microsoft.AspNetCore.App 10.0.2 [/r]\nruntime=Microsoft.AspNetCore.App 10.0.14 [/r]\nruntime=Microsoft.WindowsDesktop.App 10.0.14 [/r]\n");
+        Assert.AreEqual("10.0.14", runtimes.Runtime);
+        Assert.AreEqual("10.0.14", runtimes.AspNetCore, "the newest of ASP.NET Core 10");
+        var withoutIt = SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\ndotnet=/usr/bin/dotnet\nruntime=Microsoft.NETCore.App 10.0.14 [/r]\nruntime=Microsoft.AspNetCore.App 9.0.3 [/r]\n");
+        Assert.AreEqual("10.0.14", withoutIt.Runtime);
+        Assert.IsNull(withoutIt.AspNetCore, "ASP.NET Core 9 does not run the node");
+        var newerOnly = SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\ndotnet=/usr/bin/dotnet\nruntime=Microsoft.NETCore.App 10.0.14 [/r]\nruntime=Microsoft.AspNetCore.App 11.0.1 [/r]\n");
+        Assert.IsNull(newerOnly.AspNetCore, "ASP.NET Core 11 alone does not run a node built for 10");
+        StringAssert.Contains(SshNodeInstaller.ProbeScript, "Microsoft\\.(NETCore|AspNetCore)\\.App", "the probe lists both runtimes");
+    }
+
+    [TestMethod]
+    public async Task Setup_WhereDotNetHasNoAspNetCore_StopsBeforeInstallingAnythingAndSaysWhich()
+    {
+        const string runtimeOnly = "os=Linux\narch=x86_64\ndotnet=/usr/bin/dotnet\nruntime=Microsoft.NETCore.App 10.0.14 [/r]\n";
+        const string sdkWithoutIt = runtimeOnly + "sdk=10.0.114 [/s]\n";
+        foreach (var probe in new[] { runtimeOnly, sdkWithoutIt })
+        {
+            var ssh = Scripted(new SshResult(0, probe, ""));
+            var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshNodeInstaller(ssh, "4.0.0").RunAsync(
+                new SshNodeSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken));
+            Assert.AreEqual("aspnetcore_missing", failure.Code);
+            Assert.AreEqual("check", failure.Step);
+            Assert.HasCount(1, ssh.Scripts, "only the probe ran: nothing was installed");
+        }
     }
 
     [TestMethod]
@@ -87,7 +122,7 @@ public sealed class SshNodeInstallerTests
         Assert.AreEqual(Link, redeemed, "the desktop redeems the link the node printed");
         CollectionAssert.AreEqual(new[] { "connect:running", "connect:done", "check:running", "check:done", "install:running", "install:done", "service:running",
             "service:done", "pair:running" }, steps.Select(static step => $"{step.Step}:{step.State}").ToArray());
-        Assert.AreEqual("Linux x86_64 · .NET SDK 10.0.114", steps.Single(static step => step is { Step: "check", State: "done" }).Detail);
+        Assert.AreEqual("Linux x86_64 · .NET SDK 10.0.114 · ASP.NET Core 10.0.14", steps.Single(static step => step is { Step: "check", State: "done" }).Detail);
         StringAssert.Contains(ssh.Scripts[1], "tool update --tool-path \"$TOOLS\" CodeAlta.Node --version '3.4.1' --allow-downgrade", "the version of this desktop, without its build metadata");
         StringAssert.Contains(ssh.Scripts[1], "TOOLS=\"$HOME\"/'.dotnet/tools'");
         StringAssert.Contains(ssh.Scripts[2], "install --listen-all --port 2690");

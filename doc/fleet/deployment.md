@@ -28,7 +28,7 @@ search (`Ctrl+P`) open it. Each flow is a short checklist that shows what it che
 
 | Flow | Steps |
 | --- | --- |
-| **Pair a machine** | Choose how it is reached (same network, Tailscale, SSH); on the machine, `altanode install` and `altanode pair`, or **over SSH** (the desktop uses the system's OpenSSH client and the person's agent, checks the system and .NET, installs the node and its service, **Always on** when the person ticked it, and redeems an `altanode pair` link itself, `--manage` when the person ticked **Manage it from this computer**); confirm the short words; choose what the machine may do. Only a device that paired through a `--manage` link manages the node, the first one included ([node](node.md)). |
+| **Pair a machine** | Choose how it is reached (same network, Tailscale, SSH); on the machine, `altanode install` and `altanode pair`, or **over SSH** (the desktop uses the system's OpenSSH client and the person's agent, checks the system, .NET and its ASP.NET Core runtime, installs the node and its service, **Always on** when the person ticked it, and redeems an `altanode pair` link itself, `--manage` when the person ticked **Manage it from this computer**); confirm the short words; choose what the machine may do. Only a device that paired through a `--manage` link manages the node, the first one included ([node](node.md)). |
 | **Add a machine to my fleet** | Same, then the node joins the server: a device code the desktop approves, or a one-line command with a single-use join link (`altanode join <link> --service`), or over SSH. Choose its spaces, its labels (`always-on`...), and whether it hosts sessions for others. |
 | **Create my server** | Where: almost always a machine away from the desktop, so the main path is **another machine over SSH** (or a cloud, below); this computer is the exception. How it is reached: Tailscale (recommended at home), the local network, a domain name, a Cloudflare Tunnel. The desktop installs CodeAlta Server and its service, checks from itself that the server answers at the address the machines will use (before anything is claimed), reads the setup code over SSH and claims it through a port forwarded to the server's loopback (the only place a setup is accepted from), makes the owner account and the keys, shows the recovery key, then offers to add the machines it knows: each one it manages enrolls itself (`control.servers.join`) and is approved by the device id it gave over its pinned channel. |
 | **Join an organization** | The server's address (or the configuration a company pushes to its machines); sign in with the company's SSO; choose the space it links to (a new **Work** space by default). |
@@ -120,6 +120,25 @@ machine) is set up for that one purpose, from the console:
 | Installers (winget, Homebrew, apt) | Later |
 
 All signed (Authenticode, Apple notarization, NuGet signatures, cosign for images), with an SBOM and build provenance.
+
+**The runtime of a node.** `altanode` declares two shared frameworks in its runtime configuration: `Microsoft.NETCore.App` and
+`Microsoft.AspNetCore.App`, the second because its Mobile plugin serves the phone page with Kestrel ([plugins](../plugins.md)).
+The tool package and the runtime package of each system (`CodeAlta.Node.<rid>`) are framework-dependent, so a machine needs
+.NET 10 **and** its ASP.NET Core runtime: the .NET SDK and the installers have both, a distribution package of the runtime alone
+(`dotnet-runtime-10.0`) does not (`aspnetcore-runtime-10.0` adds it). A self-contained publish carries both. Without the
+framework the .NET host refuses to run the application before any CodeAlta code, and names the missing framework, so the check
+happens where a person can still act: the SSH setup reads `dotnet --list-runtimes` in its check step and stops with
+`aspnetcore_missing`, before it installs anything. A self-update runs the new version on the runtime of the installed one, so the
+running version checks the frameworks of a version when it stages it and refuses one the machine lacks, naming what to install.
+A node older than that check (before the phone page) stages it anyway: the new version fails its trial and the node rolls back
+and goes on as it was, without saying why, until its owner installs the ASP.NET Core runtime and updates again.
+
+**The page of the phones.** A node serves `mobile-page/`, the phone page taken out of the one build of the desktop frontend
+(`MobilePage.targets`). Building or packing `CodeAlta.Node` therefore needs Node.js and npm, which the build of the frontend
+runs; the page is prepared once for every runtime build of a pack, and the desktop project is restored first when a pack of the
+node alone did not. The package of each runtime carries the folder (the package of the tool only points to them), the list of
+its files (`files.json`) being what the node serves; the pack job of CI checks each package for it, for the framework above, and
+for the size nuget.org accepts.
 
 ## Updates
 

@@ -142,6 +142,12 @@ export const addMachineMessages = {
   "The machine has no .NET 10: install it there (dotnet.microsoft.com/download), then try again.": ["La máquina no tiene .NET 10: instálalo allí (dotnet.microsoft.com/download) y vuelve a intentarlo.",
     "La machine n’a pas .NET 10 : installez-le (dotnet.microsoft.com/download), puis réessayez.", "Die Maschine hat kein .NET 10: Es dort installieren (dotnet.microsoft.com/download), dann erneut versuchen.",
     "マシンに .NET 10 がありません。インストールしてから (dotnet.microsoft.com/download) 再試行してください。", "该机器没有 .NET 10：请在其上安装（dotnet.microsoft.com/download），然后重试。"],
+  "The machine has .NET 10 but not its ASP.NET Core runtime, which CodeAlta Node needs: install it there (on Ubuntu, aspnetcore-runtime-10.0; the .NET SDK and the installers of dotnet.microsoft.com/download include it), then try again.": [
+    "La máquina tiene .NET 10 pero no su runtime de ASP.NET Core, que CodeAlta Node necesita: instálalo allí (en Ubuntu, aspnetcore-runtime-10.0; el SDK de .NET y los instaladores de dotnet.microsoft.com/download lo incluyen) y vuelve a intentarlo.",
+    "La machine a .NET 10 mais pas son runtime ASP.NET Core, dont CodeAlta Node a besoin : installez-le (sous Ubuntu, aspnetcore-runtime-10.0 ; le SDK .NET et les installateurs de dotnet.microsoft.com/download l’incluent), puis réessayez.",
+    "Die Maschine hat .NET 10, aber nicht dessen ASP.NET-Core-Runtime, die CodeAlta Node braucht: Sie dort installieren (unter Ubuntu aspnetcore-runtime-10.0; das .NET SDK und die Installer von dotnet.microsoft.com/download enthalten sie), dann erneut versuchen.",
+    "マシンには .NET 10 がありますが、CodeAlta Node が必要とする ASP.NET Core ランタイムがありません。インストールしてから (Ubuntu では aspnetcore-runtime-10.0。.NET SDK と dotnet.microsoft.com/download のインストーラーには含まれています) 再試行してください。",
+    "该机器有 .NET 10，但没有 CodeAlta Node 所需的 ASP.NET Core 运行时：请在其上安装（Ubuntu 上为 aspnetcore-runtime-10.0；.NET SDK 和 dotnet.microsoft.com/download 的安装程序已包含它），然后重试。"],
   "The folder has no CodeAlta Node package for this machine.": ["La carpeta no tiene ningún paquete de CodeAlta Node para esta máquina.", "Le dossier n’a aucun paquet CodeAlta Node pour cette machine.",
     "Der Ordner hat kein CodeAlta-Node-Paket für diese Maschine.", "フォルダーにこのマシン用の CodeAlta Node パッケージがありません。", "该文件夹中没有适用于此机器的 CodeAlta Node 包。"],
   "The packages could not be copied to the machine.": ["No se pudieron copiar los paquetes a la máquina.", "Les paquets n’ont pas pu être copiés sur la machine.", "Die Pakete konnten nicht auf die Maschine kopiert werden.",
