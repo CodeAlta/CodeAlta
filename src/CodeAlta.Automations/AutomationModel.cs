@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Catalog.Secrets;
+using CodeAlta.Orchestration.Hosting;
 
 namespace CodeAlta.Automations;
 
@@ -668,6 +669,13 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The provider, model and effort asked for.</summary>
     public AutomationModelRef Model { get; init; }
 
+    /// <summary>
+    /// The tier of models, or Adaptive, its sessions run on in place of <see cref="Model"/>: each run starts on the model the
+    /// tiers of its space give then, and goes on with the next one when that model reaches a limit. Null for a model.
+    /// The tiers are those of the machine that runs it: an automation placed on another machine names its model.
+    /// </summary>
+    public SessionStartTier? Tier { get; init; }
+
     /// <summary>The agent prompt asked for; null for the default one.</summary>
     public string? Agent { get; init; }
 
@@ -702,7 +710,7 @@ internal sealed record AutomationDefinition(string Id, string Name)
     public IReadOnlyList<AutomationTrigger> Triggers { get; init; } = [];
 
     /// <summary>
-    /// A value that changes with what the automation runs and with when it runs: its name, prompt or script, model, agent
+    /// A value that changes with what the automation runs and with when it runs: its name, prompt or script, model or tier, agent
     /// prompt, permission mode, review, sandbox, project and triggers, the command and the folder of a command
     /// trigger included. It does not change with <see cref="Enabled"/>.
     /// </summary>
@@ -713,6 +721,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         // An automation without them keeps the fingerprint it was allowed with.
         if (PermissionMode is not null || ReviewBeforeCommit is not null || Sandbox is not null)
             text += "\n" + string.Join('\n', PermissionMode ?? string.Empty, ReviewBeforeCommit switch { true => "1", false => "0", null => string.Empty }, Sandbox ?? string.Empty);
+        // Nor without a tier, which gives their model in place of the one they name.
+        if (Tier is not null) text += "\ntier\n" + Tier.Name;
         // Nor without options of their own.
         if (AgentSessionOptions.Stored(SessionOptions) is { } options) text += "\noptions\n" + (options.SubSessions ? "1" : "0");
         if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);

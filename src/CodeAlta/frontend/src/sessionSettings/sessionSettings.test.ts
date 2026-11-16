@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RunModel, RunProvider } from "../workItems/runsWith";
-import { chooseEffort, chooseModel, chooseProvider, defaultSessionSettings, shownModel, startRequest, switchDefaults, tieredStartRequest, usesDefaults, type SessionSettings } from "./sessionSettings";
+import { chooseEffort, chooseModel, chooseProvider, chooseTier, defaultSessionSettings, shownModel, startRequest, switchDefaults, usesDefaults, type SessionSettings } from "./sessionSettings";
 
 const providers: readonly RunProvider[] = [
   { id: "anthropic", name: "Anthropic", isDefault: false, defaultModel: null, defaultReasoning: null },
@@ -71,10 +71,25 @@ test("a start asks nothing of the model with the defaults, and what the form sho
 
 test("a start on a tier asks for the tier, which gives the model, with the other choices of the form", () => {
   const shown = { providerId: "codex", modelId: "gpt-b", reasoningEffort: "low" };
-  const onTier = settings({ agentPromptId: "orchestrator", providerId: "codex", modelId: "gpt-b", reasoningEffort: "low", sandbox: "off" });
-  assert.deepEqual(tieredStartRequest(onTier, shown, "standard"), { ...settings({ agentPromptId: "orchestrator", sandbox: "off" }), tier: "standard" });
-  assert.deepEqual(tieredStartRequest(onTier, shown, "adaptive:high"), { ...settings({ agentPromptId: "orchestrator", sandbox: "off" }), tier: "adaptive:high" });
-  // Without a tier, what a start asks otherwise.
-  assert.deepEqual(tieredStartRequest(onTier, shown, null), { ...startRequest(onTier, shown), tier: null });
-  assert.deepEqual(tieredStartRequest(settings({ agentPromptId: "plan" }), shown, null), { ...settings({ agentPromptId: "plan" }), tier: null });
+  const byHand = settings({ agentPromptId: "orchestrator", providerId: "codex", modelId: "gpt-b", reasoningEffort: "low", permissionMode: "auto", sandbox: "off" });
+  // The tier is a choice of the form, with the model it gives now; the permission mode stays with its provider.
+  const onTier = chooseTier(byHand, "standard", { providerKey: "Codex", modelId: "gpt-a", reasoning: "high" });
+  assert.deepEqual(onTier, { ...byHand, providerId: "Codex", modelId: "gpt-a", reasoningEffort: "high", tier: "standard" });
+  assert.equal(chooseTier(byHand, "quick", { providerKey: "claude", modelId: "haiku", reasoning: null }).permissionMode, null);
+  // A tier saved without the model it gave: the provider the form shows says whether the permission mode stays.
+  const saved = settings({ permissionMode: "plan", tier: "quick" });
+  assert.equal(chooseTier(saved, "standard", { providerKey: "codex", modelId: "gpt-a", reasoning: null }, "Codex").permissionMode, "plan");
+  assert.equal(chooseTier(saved, "standard", { providerKey: "codex", modelId: "gpt-a", reasoning: null }, "claude").permissionMode, null);
+  assert.equal(usesDefaults(settings({ tier: "quick" })), false);
+  assert.deepEqual(startRequest(onTier, shown), settings({ agentPromptId: "orchestrator", permissionMode: "auto", sandbox: "off", tier: "standard" }));
+  assert.deepEqual(startRequest({ ...onTier, tier: "adaptive:high" }, shown).tier, "adaptive:high");
+  // A provider, a model or an effort chosen by hand leaves the tier.
+  assert.equal(chooseProvider(onTier, "claude").tier, null);
+  assert.equal(chooseModel(onTier, "gpt-b", shown).tier, null);
+  assert.equal(chooseEffort(onTier, "low", shown).tier, null);
+  assert.deepEqual(startRequest(chooseModel(onTier, "gpt-b", shown), shown).providerId, "Codex");
+  // The defaults leave the tier; off, they give the tier of the session the new one takes its model from.
+  assert.equal(switchDefaults(onTier, true, shown).tier, null);
+  assert.equal(switchDefaults(settings(), false, shown, "adaptive").tier, "adaptive");
+  assert.equal(switchDefaults(settings(), false, shown).tier, null);
 });

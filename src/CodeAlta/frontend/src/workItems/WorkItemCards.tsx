@@ -14,7 +14,7 @@ import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
 import { dockSides, dockTargetAt, dockTargets, type DockPreference, type DockSide, type PaneRect } from "./proposalsDock";
 import type { MessageKey } from "../localization";
 import type { ProposalsOverlayMemory } from "../sessionOverlayMemory";
-import type { TieredStartRequest } from "../sessionSettings/sessionSettings";
+import type { SessionStartRequest } from "../sessionSettings/sessionSettings";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import type { RunProvider } from "./runsWith";
 import { useWorkRunsWith, WorkRunsWithField, type ShowingSession } from "./WorkRunsWith";
@@ -110,7 +110,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   /** What a new session started from a card runs with; without it, the cards offer no choice and the host takes the defaults. */
   runsWith?: WorkCardsRunsWith | null;
   /** Starts an item; `request` is what the user chose for a new session, null in this session. */
-  onStart: (item: WorkItem, start: WorkStart, request: TieredStartRequest | null) => void;
+  onStart: (item: WorkItem, start: WorkStart, request: SessionStartRequest | null) => void;
   /** Opens the Work items tab on an item. */
   onOpenList: (item: WorkItem) => void;
 }) {

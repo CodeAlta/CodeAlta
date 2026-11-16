@@ -88,9 +88,9 @@ internal sealed class SessionStarter : ISessionStarter
             var asked = model?.Asked;
             if (model?.Tier is { } askedTier && asked is null)
             {
-                var resolved = await TierModelAsync(askedTier, spaceId, project.Id).ConfigureAwait(false);
-                if (resolved.Problem is { } problem) return Refuse(problem);
-                asked = resolved.Selection;
+                var resolved = await askedTier.ResolveModelAsync(_host, spaceId, project.Id).ConfigureAwait(false);
+                if (resolved.Model is not { } given) return Refuse(resolved.Problem!);
+                asked = new(given.ProviderKey, given.ModelId, given.Effort?.ToString().ToLowerInvariant());
             }
 
             var choice = await SessionStartChoice.ChooseAsync(
@@ -143,7 +143,7 @@ internal sealed class SessionStarter : ISessionStarter
                 return new(sessionId, $"The session was created, but its sandbox '{sandbox}' could not be chosen ({sandboxed}).");
             // The tier, or Adaptive, before the first prompt, which then runs on it: a tier the user chose is required, the one
             // of the session that shows the work is taken when it can be.
-            if ((model?.Tier ?? likeTier) is { } tier && await PutOnTierAsync(sessionId, tier).ConfigureAwait(false) is { } notOnTier && model?.Tier is not null)
+            if ((model?.Tier ?? likeTier) is { } tier && await tier.PutSessionAsync(_host, sessionId).ConfigureAwait(false) is { } notOnTier && model?.Tier is not null)
                 return new(sessionId, $"The session was created, but it could not be put on {tier.Name} ({notOnTier}).");
             // A script of the library runs through exec, which the session then has whatever the setting of Code Mode says.
             if (model?.CodeMode == true) _host.CodeModeRuns.RequireCodeMode(sessionId);
@@ -180,39 +180,6 @@ internal sealed class SessionStarter : ISessionStarter
         var (tier, adaptive) = await _host.RuntimeService.GetSessionModelChoiceAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (adaptive) return new(null, true, await _host.RuntimeService.GetSessionAdaptiveLevelAsync(sessionId, CancellationToken.None).ConfigureAwait(false));
         return tier is { } chosen ? new(chosen, false, null) : null;
-    }
-
-    // The model a new session on a tier starts with: the first ready one of the tier, or the one of the level of Adaptive, in
-    // the tiers of the space, as `alta session create --tier` and the composer take it.
-    private async Task<(WorkItemSelection? Selection, string? Problem)> TierModelAsync(SessionStartTier tier, string? spaceId, string projectId)
-    {
-        var scope = await _host.RuntimeService.LoadModelTierScopeAsync(spaceId, projectId, CancellationToken.None).ConfigureAwait(false);
-        if (tier.Adaptive)
-        {
-            return scope.IsAdaptiveReady && scope.Adaptive!.Resolve(tier.Level) is { } level
-                ? (Selection(level.Model.ProviderKey, level.Model.ModelId, level.Model.PreferredReasoning), null)
-                : (null, "Adaptive is not set up: give its levels a model in Settings > Models.");
-        }
-
-        var name = ModelTiers.NameOf(tier.Tier!.Value);
-        var targets = scope.Tiers.Get(tier.Tier.Value);
-        if (targets.Count == 0) return (null, $"The {name} tier has no model: set the tiers in Settings > Models.");
-        return ModelTierSelection.SelectForNewSession(scope, tier.Tier.Value, _host.ModelProviderInitializationService.CurrentStates,
-                key => _host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(key), out var descriptor) ? descriptor : null, requestedReasoning: null) is { } choice
-            ? (Selection(choice.ProviderKey, choice.ModelId, choice.Reasoning), null)
-            : (null, $"No model of the {name} tier is ready ({string.Join(", ", targets.Select(static target => target.Format()))}).");
-
-        static WorkItemSelection Selection(string providerKey, string modelId, AgentReasoningEffort? effort)
-            => new(providerKey, modelId, effort?.ToString().ToLowerInvariant());
-    }
-
-    // Puts a new session on its tier, or on Adaptive: null when it is there, else what the host answered.
-    private async Task<string?> PutOnTierAsync(string sessionId, SessionStartTier tier)
-    {
-        var status = tier.Adaptive
-            ? (await _host.Commands.SetSessionAdaptiveAsync(sessionId, tier.Level, CancellationToken.None).ConfigureAwait(false)).Status
-            : await _host.Commands.SetSessionTierAsync(sessionId, tier.Tier, CancellationToken.None).ConfigureAwait(false);
-        return status == "ok" ? null : status;
     }
 
     // Moves the checkout of the project to a new branch for the work, or says why not: never under a session at work in

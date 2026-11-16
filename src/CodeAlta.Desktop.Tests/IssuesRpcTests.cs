@@ -175,6 +175,25 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public async Task TheTierTheUserChose_IsTheTierTheSessionStartsOn_AndNamesNoModelBesideIt()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Detail = new TrackedItemDetail(new(TrackedItemKind.Issue, "12", "Crash", "https://github.com/o/r/issues/12", TrackedItemState.Open), string.Empty, []);
+
+        Assert.AreEqual("ok", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, Tier: "quick"), default)).Status);
+        Assert.AreEqual(("quick", null), (fixture.Starter.Models[^1]?.Tier?.Name, fixture.Starter.Models[^1]?.Asked));
+
+        // Adaptive at a level, with the other choices of the form and the branch.
+        Assert.AreEqual("ok", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, AgentPromptId: "plan", Branch: "fix/12-crash", Tier: "adaptive:high"), default)).Status);
+        Assert.AreEqual(("adaptive:high", "plan", "fix/12-crash"), (fixture.Starter.Models[^1]?.Tier?.Name, fixture.Starter.Models[^1]?.AgentPromptId, fixture.Starter.Models[^1]?.Branch));
+
+        // A tier gives the model: a request that names both, or a tier that is none, starts nothing.
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, ProviderId: "codex", Tier: "quick"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, Tier: "fastest"), default)).Status);
+        Assert.AreEqual(2, fixture.Starter.Started.Count);
+    }
+
+    [TestMethod]
     public async Task TheBranchTheUserNamed_IsTheBranchTheWorkIsDoneOn_InANewWorktreeOrInTheProjectFolder()
     {
         await using var fixture = await Fixture.CreateAsync();

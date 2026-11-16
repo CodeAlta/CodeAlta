@@ -3,7 +3,7 @@ import test from "node:test";
 import type { WorkspaceMoveToSpaceRequest, WorkspaceMoveToSpaceResponse } from "#neoastra";
 import { spaceMoveTargets } from "./MoveToSpaceDialog";
 import { moveSessionToSpace, spaceMoveMessage } from "./sessionSpaceMove";
-import { readSpaces } from "./spaces";
+import { readSpaces, unattendedSessionSpace } from "./spaces";
 
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const reply = (status: string, changes: Partial<WorkspaceMoveToSpaceResponse> = {}): WorkspaceMoveToSpaceResponse =>
@@ -36,4 +36,11 @@ test("the space a session is in is not offered as the one to move it to", () => 
   ]);
   assert.deepEqual(spaceMoveTargets(spaces, "work").map(space => space.id), ["default"]);
   assert.deepEqual(spaceMoveTargets(spaces, "default").map(space => space.id), ["work"]);
+});
+
+test("a session started by no window is in the space of its project when it is in exactly one", () => {
+  const item = (id: string, projectIds: string[]) => ({ id, name: id, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: null, agentPrompt: null,
+    disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] });
+  const spaces = readSpaces([item("default", []), item("work", ["p1", "p2"]), item("home", ["p2"])]);
+  assert.deepEqual(["p1", "p2", "p3", null].map(projectId => unattendedSessionSpace(spaces, projectId)), ["work", "default", "default", "default"]);
 });

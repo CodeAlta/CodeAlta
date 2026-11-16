@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Automations;
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using NeoAstra.Rpc;
 
@@ -520,6 +521,7 @@ internal sealed class AutomationsService
                 definition.IsPlaced && _placement is not null ? _placement.NextDue(entry.Id) : _automations.NextDue(entry.Id), running, lastRun,
                 _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry))
             {
+                Tier = definition.Tier?.Name,
                 Script = definition.Script,
                 ScriptArguments = definition.ScriptArguments,
                 ScriptMode = definition.ScriptMode,
@@ -649,6 +651,8 @@ internal sealed class AutomationsService
             triggers.Add(trigger!);
         }
 
+        var tier = SessionStartTier.Parse(Blank(input.Tier));
+        if (tier is null && Blank(input.Tier) is not null) return false;
         var provider = Blank(input.Provider);
         var model = Blank(input.Model);
         if (provider is null && (model is not null || effort is not null))
@@ -667,6 +671,7 @@ internal sealed class AutomationsService
             ScriptMode = Blank(input.Script) is null ? null : Blank(input.ScriptMode),
             ScriptAccess = Blank(input.Script) is null || Blank(input.ScriptMode) is null ? null : Blank(input.ScriptAccess),
             Model = new(provider, model, effort),
+            Tier = tier,
             Agent = Blank(input.Agent),
             PermissionMode = Blank(input.PermissionMode),
             ReviewBeforeCommit = input.ReviewBeforeCommit,
@@ -890,6 +895,12 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
     IReadOnlyList<AutomationTriggerItem> Triggers, string? Problem, DateTimeOffset? NextRunAt, bool Running, AutomationRunItem? LastRun,
     string? Repository, string? WatchProblem, bool Allowed)
 {
+    /// <summary>
+    /// The tier of models its sessions run on (<c>complex</c>, <c>standard</c>, <c>quick</c>), or Adaptive (<c>adaptive</c>,
+    /// <c>adaptive:&lt;level&gt;</c>), in place of a model; null for the model of <paramref name="Provider"/>.
+    /// </summary>
+    public string? Tier { get; init; }
+
     /// <summary>The script of the library it runs in place of a prompt; null when it sends its prompt.</summary>
     public string? Script { get; init; }
 
@@ -1160,6 +1171,13 @@ internal sealed record AutomationUpcomingItem(string AutomationId, DateTimeOffse
 internal sealed record AutomationInput(string? Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? Provider, string? Model,
     string? Effort, string? Agent, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox, bool CatchUp, IReadOnlyList<AutomationTriggerItem> Triggers)
 {
+    /// <summary>
+    /// The tier of models its sessions run on (<c>complex</c>, <c>standard</c>, <c>quick</c>), or Adaptive (<c>adaptive</c>,
+    /// <c>adaptive:&lt;level&gt;</c>), which gives their model; null for the model of <paramref name="Provider"/>. Only for an
+    /// automation that runs on this computer.
+    /// </summary>
+    public string? Tier { get; init; }
+
     /// <summary>The script of the library it runs in place of its prompt; null to send its prompt.</summary>
     public string? Script { get; init; }
 

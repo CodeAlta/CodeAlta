@@ -6,6 +6,7 @@ using CodeAlta.Catalog.StartPrompts;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Desktop.WorkItems;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
@@ -207,6 +208,8 @@ internal sealed partial class IssuesService
             || request.ReasoningEffort is not null && (request.ModelId is null || !Name(request.ReasoningEffort))
             || request.PermissionMode is not null && !Name(request.PermissionMode) || request.Sandbox is not null && !Name(request.Sandbox)
             || request.AgentPromptId is not null && !Name(request.AgentPromptId)
+            // A tier gives the model: the request names one or the other.
+            || request.Tier is not null && (request.ProviderId is not null || SessionStartTier.Parse(request.Tier) is null)
             || request.Branch is not null && !GitWorktreeService.IsReferenceName(request.Branch)) return new("invalid_request");
         if (_starter is null) return new("unavailable");
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
@@ -225,7 +228,8 @@ internal sealed partial class IssuesService
 
         // What the user chose in the form of the Agent chip, else what the session that shows the item runs with, else the defaults.
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
-        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options));
+        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options),
+            SessionStartTier.Parse(request.Tier));
         var model = asked is null && settings is null ? null : settings?.Apply(new SessionStartModel(asked)) ?? new SessionStartModel(asked);
         // The branch the user named for the work: the one of the new worktree, or the one the folder of the project moves to.
         if (request.Branch is { } branch) model = (model ?? new SessionStartModel()) with { Branch = branch };
@@ -620,9 +624,13 @@ internal sealed record IssueComment(string? Author, DateTimeOffset? CreatedAt, s
 /// The branch the work is done on, such as <c>feature/123-export</c>: the new branch of the new worktree, or the new branch the folder of
 /// the project moves to; null for an <c>alta/</c> branch named by CodeAlta, or the branch the folder of the project is on.
 /// </param>
+/// <param name="Tier">
+/// The tier of models the session starts and runs on (<c>complex</c>, <c>standard</c>, <c>quick</c>), or Adaptive (<c>adaptive</c>,
+/// <c>adaptive:&lt;level&gt;</c>), which gives its model; null for the model of <paramref name="ProviderId"/>.
+/// </param>
 internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool Worktree, string? SessionId,
     string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null, string? AgentPromptId = null, string? PermissionMode = null,
-    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null, string? Branch = null);
+    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null, string? Branch = null, string? Tier = null);
 
 /// <summary>
 /// The start of a session. Status is <c>ok</c>, <c>refused</c> (with a message, and a reason code when the page

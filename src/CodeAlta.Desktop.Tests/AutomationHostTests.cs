@@ -7,6 +7,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Automations;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
@@ -172,6 +173,17 @@ public sealed class AutomationHostTests
         Assert.AreEqual("refused", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x"), "unknown"), default)).Status);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Id = "not-an-id" }, null), default)).Status);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Effort = "extreme" }, null), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Tier = "fastest" }, null), default)).Status);
+        Assert.AreEqual(("refused", "An automation runs on a tier or on a model, not both."), Outcome(await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Tier = "quick", Provider = "codex" }, null), default)));
+        StringAssert.Contains((await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Tier = "quick", RunsOn = "mac" }, null), default)).Message, "names its model");
+
+        // A tier of models, or Adaptive, in place of a model: the form of the Agent chip chose it.
+        var tiered = await fixture.Rpc.SaveAsync(new(Epoch, Input("Tiered") with { Tier = " Adaptive:High " }, null), default);
+        Assert.AreEqual("ok", tiered.Status, tiered.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.GlobalPath), "tier = \"adaptive:high\"");
+        var onTier = (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(candidate => candidate.Id == tiered.Id);
+        Assert.AreEqual(("adaptive:high", null, null), (onTier.Tier, onTier.Provider, onTier.Model));
+        Assert.AreEqual("ok", (await fixture.Rpc.DeleteAsync(new(Epoch, tiered.Id!), default)).Status);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [new("sometimes", 0, 1, [], [], null, "opened", "trusted", null, null)] }, null), default)).Status);
         Assert.AreEqual(1, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Count);
     }
@@ -916,6 +928,7 @@ public sealed class AutomationHostTests
             var home = Path.Combine(root, "home");
             var builtin = Path.Combine(root, "builtin");
             foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            File.WriteAllText(Path.Combine(global, "config.toml"), "[models.tiers]\nquick = [\"automation-fixture:fixture-model@low\"]\n");
             var provider = new RunnerProvider();
             await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
@@ -964,6 +977,24 @@ public sealed class AutomationHostTests
             var session = (await workspace.SnapshotAsync(new(), default)).Sessions.Single();
             Assert.AreEqual((start.SessionId, "Nightly review", Id, project.Id, "automation-fixture"), (session.Id, session.Title, session.AutomationId, session.ProjectId, session.ProviderKey));
             Assert.AreEqual("business", session.SpaceId);
+
+            // On a tier, the run starts on the model the tiers give now, and its session is on that tier: it goes on with the
+            // next model of the tier when that one reaches a limit. A tier, or Adaptive, that gives no model starts nothing.
+            var tiered = await runner.StartAsync(Entry(new(Id, "On a tier") { Tier = SessionStartTier.Parse("quick") }), "run-tier", "Review on a tier.", null, default);
+            Assert.IsNull(tiered.Problem);
+            Assert.AreEqual((ModelTier.Quick, false), await host.RuntimeService.GetSessionModelChoiceAsync(tiered.SessionId!));
+            Assert.AreEqual(AutomationRun.Completed, (await tiered.Completion!.WithinAsync(Patience)).Status);
+            var ranWith = (await host.Commands.GetObservedSelectionChoicesAsync(tiered.SessionId!, default))!.Current;
+            Assert.AreEqual(("automation-fixture", "fixture-model", (AgentReasoningEffort?)AgentReasoningEffort.Low), (ranWith.ProviderKey, ranWith.ModelId, ranWith.ReasoningEffort));
+            foreach (var (tier, expected) in new[]
+                     {
+                         ("complex", "The complex tier has no model: set the tiers in Settings > Models."),
+                         ("adaptive", "Adaptive is not set up: give its levels a model in Settings > Models."),
+                     })
+            {
+                var refused = await runner.StartAsync(Entry(new(Id, "x") { Tier = SessionStartTier.Parse(tier) }), "run-refused", "Prompt.", null, default);
+                Assert.AreEqual((null, expected, null), (refused.SessionId, refused.Problem, refused.Completion));
+            }
 
             // As a chat, in no project, started by an event: what it was about names the session too.
             var chat = await runner.StartAsync(Entry(new(Id, "A chat"), inProject: false), "run-2", "Say hello.", "#12  Crash\non start", default);
@@ -1272,6 +1303,8 @@ public sealed class AutomationHostTests
             // What its session runs with: what the form of the Agent chip chose, checked like the choice of an issue or an automation.
             var providerId = provider.Descriptor.ProviderId.Value;
             Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", ModelId: "fixture-model"), default)).Status, "a model without its provider");
+            Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", ProviderId: providerId, Tier: "quick"), default)).Status, "a tier and a provider");
+            Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", Tier: "fastest"), default)).Status, "a tier that is none");
             foreach (var (model, effort, expected) in new (string, string?, string)[]
                      {
                          ("other-model", null, "does not offer the model 'other-model'"),

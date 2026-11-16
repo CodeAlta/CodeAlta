@@ -5,6 +5,7 @@ using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.LiveTool;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime.Prompts;
 
 namespace CodeAlta.Desktop.Tests;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkItemRow, WorkItemsListResponse, WorkItemsProject, WorkItemsSettings } from "#neoastra";
-import { defaultSessionSettings, tieredStartRequest, type SessionStartRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, startRequest, type SessionStartRequest } from "../sessionSettings/sessionSettings";
 import { startRefusal, startWorkItem, type WorkStartHost } from "./startWorkItem";
 import { defaultWorkSettings, workItems, type WorkItem } from "./workItems";
 import { createWorkItemsHub, readingBatches, type WorkItemsApi } from "./workItemsHub";
@@ -173,8 +173,8 @@ test("work starts in a new session, or through the composer of the session that 
   assert.equal(await startWorkItem(window(false), item, "session", null, chosen({ agentPromptId: "plan", permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off" })), true);
   assert.deepEqual(server.ranWith.at(-1), [null, null, null, "plan", "acceptEdits", false, "off"]);
   // A tier, or Adaptive, gives the model: the host takes it instead of a model, never with one.
-  assert.equal(await startWorkItem(window(false), plan, "worktree", null, tieredStartRequest({ ...defaultSessionSettings, agentPromptId: "orchestrator", providerId: "codex",
-    modelId: "gpt-a", reasoningEffort: "high" }, { providerId: "codex", modelId: "gpt-a", reasoningEffort: "high" }, "complex")), false);
+  assert.equal(await startWorkItem(window(false), plan, "worktree", null, startRequest({ ...defaultSessionSettings, agentPromptId: "orchestrator", providerId: "codex",
+    modelId: "gpt-a", reasoningEffort: "high", tier: "complex" }, { providerId: "codex", modelId: "gpt-a", reasoningEffort: "high" })), false);
   assert.deepEqual(server.ranWith.at(-1), [null, null, null, "orchestrator", null, null, null, "tier:complex"]);
   assert.equal(await startWorkItem(window(false), item, "session", null, { ...chosen({ providerId: "codex" }), tier: "quick" }), true);
   assert.deepEqual(server.ranWith.at(-1), ["codex", null, null], "a model chosen by hand is not a tier");

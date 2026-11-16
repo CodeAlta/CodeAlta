@@ -201,6 +201,15 @@ export function sessionSpaces(spaces: readonly Space[], session: Readonly<{ spac
   return own.length === 0 ? [defaultSpaceId] : own;
 }
 
+/**
+ * The space a session started for a project by no window is in, as an automation starts it: the space of its project
+ * when the project is in exactly one, the default space otherwise, and for a chat.
+ */
+export function unattendedSessionSpace(spaces: readonly Space[], projectId: string | null): string {
+  const own = sessionSpaces(spaces, { spaceId: null, projectId });
+  return own.length === 1 ? own[0] : defaultSpaceId;
+}
+
 /** The space a session is shown in first: the one it records, else the first of the spaces it is listed in. */
 export function sessionHome(spaces: readonly Space[], session: Readonly<{ spaceId: string | null; projectId: string | null }>): Space {
   return findSpace(spaces, sessionSpaces(spaces, session)[0]);

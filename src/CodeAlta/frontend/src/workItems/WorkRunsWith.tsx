@@ -2,7 +2,7 @@
 // form of the Agent chip with the tiers of models and Adaptive, as the composer of a new session offers them.
 import { useState } from "react";
 import { useShellLanguage } from "../shellLanguage";
-import { defaultSessionSettings, tieredStartRequest, type SessionSettings, type TieredStartRequest } from "../sessionSettings/sessionSettings";
+import { defaultSessionSettings, startRequest, type SessionSettings, type SessionStartRequest } from "../sessionSettings/sessionSettings";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
 import type { RunProvider, RunsWith } from "./runsWith";
@@ -10,22 +10,21 @@ import type { RunProvider, RunsWith } from "./runsWith";
 /** What the session that shows an item runs with, which a new session started from its card takes by default. */
 export type ShowingSession = Readonly<{ runsWith: RunsWith | null; tier: string | null }>;
 
-type Choice = Readonly<{ key: string; settings: SessionSettings; tier: string | null }>;
+type Choice = Readonly<{ key: string; settings: SessionSettings }>;
 
 /**
  * The choices of the start of an item, until the user starts it or shows another item (`key`): what it runs with,
  * else the defaults, which are what the item was proposed with (`recorded`).
  */
 export function useWorkRunsWith(key: string, api: SessionSettingsApi | null, providers: readonly RunProvider[], recorded: RunsWith | null | undefined) {
-  const [choice, setChoice] = useState<Choice>({ key, settings: defaultSessionSettings, tier: null });
-  const current = choice.key === key ? choice : { key, settings: defaultSessionSettings, tier: null };
+  const [choice, setChoice] = useState<Choice>({ key, settings: defaultSessionSettings });
+  const current = choice.key === key ? choice : { key, settings: defaultSessionSettings };
   const choices = useSessionSettingsChoices(api, providers, recorded, current.settings);
   return {
-    settings: current.settings, tier: current.tier, choices,
-    setSettings: (settings: SessionSettings) => setChoice(previous => ({ ...(previous.key === key ? previous : current), settings })),
-    setTier: (tier: string | null) => setChoice(previous => ({ ...(previous.key === key ? previous : current), tier })),
+    settings: current.settings, choices,
+    setSettings: (settings: SessionSettings) => setChoice({ key, settings }),
     /** What the start asks of the host. */
-    request: (): TieredStartRequest => tieredStartRequest(current.settings, choices.shown, current.tier),
+    request: (): SessionStartRequest => startRequest(current.settings, choices.shown),
   };
 }
 
@@ -45,6 +44,6 @@ export function WorkRunsWithField({ id, providers, runs, inheritedTier = null, d
   return <div className="work-runs-with" role="group" aria-label={t("Runs with")} data-compact={compact || undefined}>
     <span className="work-runs-with-label">{t("Runs with")}</span>
     <SessionSettingsChip id={id} providers={providers} choices={runs.choices} value={runs.settings} disabled={disabled} onChange={runs.setSettings}
-      tier={{ value: runs.tier, inherited: inheritedTier, onChange: runs.setTier }} />
+      inheritedTier={inheritedTier} />
   </div>;
 }

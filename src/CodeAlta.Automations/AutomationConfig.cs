@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using CodeAlta.Agent;
+using CodeAlta.Orchestration.Hosting;
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Parsing;
@@ -67,6 +68,9 @@ internal static class AutomationConfig
         return (definitions, faults);
     }
 
+    /// <summary>What is said of a <c>tier</c> that is none.</summary>
+    internal const string TierProblem = "The tier of an automation is complex, standard or quick, or adaptive, or adaptive:<level> (low, medium, high, max).";
+
     /// <summary>Checks a definition the way reading it back would, before it is written.</summary>
     /// <returns>What is wrong with it, or null.</returns>
     internal static string? Validate(AutomationDefinition definition)
@@ -118,6 +122,12 @@ internal static class AutomationConfig
         if (definition.PublishTo is { } scope && (scope != "organization" && !(scope.StartsWith("team:", StringComparison.Ordinal) && scope.Length is > 5 and <= 133
                 && !scope.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))) || !definition.IsPlaced))
             return "An automation is published to a team (team:<id>) or to the organization of the machine it runs on.";
+        if (definition.Tier is not null)
+        {
+            if (!definition.Model.IsEmpty) return "An automation runs on a tier or on a model, not both.";
+            if (definition.IsPlaced) return "A tier is one of the machine that runs the automation: an automation that runs on another machine names its model.";
+        }
+
         if (definition.Agent is { } agent && (agent.Length is 0 or > 256 || agent.Any(char.IsControl))) return "The agent prompt of an automation is a name.";
         if (definition.PermissionMode is { } mode && (mode.Length is 0 or > 64 || mode.Any(char.IsControl) || mode.Trim() != mode))
             return "The permission mode of an automation is a name.";
@@ -278,7 +288,8 @@ internal static class AutomationConfig
             || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)
             || !TryRunsOn(table, out var runsOn, out var runsOnTags, out problem) || !TryText(table, "environment", out var environment, out problem)
             || !TryText(table, "publish_to", out var publishTo, out problem) || !TryText(table, "script_mode", out var scriptMode, out problem)
-            || !TryText(table, "script_access", out var scriptAccess, out problem) || !TryText(table, "time_zone", out var timeZone, out problem)) return false;
+            || !TryText(table, "script_access", out var scriptAccess, out problem) || !TryText(table, "time_zone", out var timeZone, out problem)
+            || !TryText(table, "tier", out var tierName, out problem)) return false;
         int? maxRuns = null;
         if (table.TryGetValue("max_runs", out var maxRunsValue))
         {
@@ -298,6 +309,13 @@ internal static class AutomationConfig
         }
 
         if (!AutomationModelRef.TryParse(model, out var reference, out problem)) return false;
+        var tier = SessionStartTier.Parse(Blank(tierName));
+        if (tier is null && Blank(tierName) is not null)
+        {
+            problem = TierProblem;
+            return false;
+        }
+
         AutomationAutonomy? autonomy = null;
         if (table.TryGetValue("autonomy", out var autonomyValue))
         {
@@ -353,6 +371,7 @@ internal static class AutomationConfig
             MaxRuns = maxRuns,
             TimeZone = Blank(timeZone),
             Model = reference,
+            Tier = tier,
             Agent = Blank(agent),
             PermissionMode = Blank(permissionMode),
             ReviewBeforeCommit = review,
@@ -610,6 +629,7 @@ internal static class AutomationConfig
         if (definition.TimeZone is { } zone) builder.Append("time_zone = ").Append(Quote(zone)).Append(newline);
         if (definition.PublishTo is { } scope) builder.Append("publish_to = ").Append(Quote(scope)).Append(newline);
         if (definition.Model.Format() is { } model) builder.Append("model = ").Append(Quote(model)).Append(newline);
+        if (definition.Tier is { } tier) builder.Append("tier = ").Append(Quote(tier.Name)).Append(newline);
         if (definition.Agent is { } agent) builder.Append("agent = ").Append(Quote(agent)).Append(newline);
         if (definition.PermissionMode is { } mode) builder.Append("permission_mode = ").Append(Quote(mode)).Append(newline);
         if (definition.ReviewBeforeCommit is { } review) builder.Append("review_before_commit = ").Append(review ? "true" : "false").Append(newline);

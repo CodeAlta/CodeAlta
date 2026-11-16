@@ -3,6 +3,7 @@
 import type { AutomationAllowedToolItem, AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, AutomationTriggerTypeItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
+import { sessionTierLabel } from "../modelTiers";
 import { permissionModeName } from "../permissionModes";
 import { notSandboxed } from "../sandbox/sandboxChoices";
 import { sessionOptionsOf, storedSessionOptions } from "../sessionSettings/sessionOptions";
@@ -236,6 +237,8 @@ export type AutomationForm = Readonly<{
   /** Whether it is written in the configuration of its project rather than of the user. */
   storeInProject: boolean;
   provider: string; model: string; effort: string; agent: string; catchUp: boolean;
+  /** The tier of models, or Adaptive, its sessions run on in place of a model (`quick`, `adaptive:high`); empty for a model. Only on this computer. */
+  tier: string;
   /** The permission mode, the review and the sandbox of its sessions; empty (null for the review) for the defaults. */
   permissionMode: string; reviewBeforeCommit: boolean | null; sandbox: string;
   /** The options of its sessions (sub-sessions); null for the defaults. */
@@ -281,7 +284,7 @@ export const toolNames = (text: string): readonly string[] => [...new Set(text.s
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
-  return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", withoutModel: false, writes: false, projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
+  return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", withoutModel: false, writes: false, projectId, storeInProject: false, provider: "", model: "", effort: "", tier: "", agent: "", catchUp: false,
     permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, runsOnTags: null, maxRuns: null, publishTo: null, triggers: [], autonomy: null };
 }
 
@@ -289,7 +292,7 @@ export function emptyForm(projectId: string | null): AutomationForm {
 export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "",
     withoutModel: item.scriptMode === "direct", writes: item.scriptMode === "direct" && item.scriptAccess === "write", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
-    provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
+    provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", tier: item.tier ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
     runsOn: item.runsOn ?? null, runsOnTags: item.runsOnTags ?? null, maxRuns: item.maxRuns ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
 }
@@ -320,7 +323,7 @@ export function placementWait(item: Pick<AutomationItem, "placement">): string |
  */
 export function runsWithFacts(item: AutomationItem, t: Translate, providerName: string | null = null): readonly string[] {
   const permission = item.permissionMode ? permissionModeName(item.permissionMode) : null;
-  return [item.provider ? providerName ?? item.provider : null, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
+  return [sessionTierLabel(item.tier, t), item.provider ? providerName ?? item.provider : null, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
     item.permissionMode ? `${t("Permissions")}: ${permission ? t(permission) : item.permissionMode}` : null,
     item.reviewBeforeCommit !== null ? `${t("Review before commit")}: ${t(item.reviewBeforeCommit ? "On" : "Off")}` : null,
     item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null,
@@ -332,12 +335,18 @@ export function runsWithFacts(item: AutomationItem, t: Translate, providerName: 
 export function sessionSettingsOf(form: AutomationForm): SessionSettings {
   const blank = (text: string) => text.trim() || null;
   return { agentPromptId: blank(form.agent), providerId: blank(form.provider), modelId: blank(form.model), reasoningEffort: blank(form.effort),
-    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox), options: form.options };
+    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox), options: form.options,
+    tier: placedElsewhere(form) ? null : blank(form.tier) };
 }
 
-/** The change of the form for what the form of its Agent chip chose. */
+/** Whether it runs on another machine, or on a pool: it then names its model, the tiers being those of this computer. */
+export const placedElsewhere = (form: Pick<AutomationForm, "runsOn" | "runsOnTags" | "storeInProject">) => !form.storeInProject && !!(form.runsOn || form.runsOnTags);
+
+/** The change of the form for what the form of its Agent chip chose: a tier gives the model, which the form then leaves to it. */
 export function formSettings(settings: SessionSettings): Partial<AutomationForm> {
-  return { agent: settings.agentPromptId ?? "", provider: settings.providerId ?? "", model: settings.modelId ?? "", effort: settings.reasoningEffort ?? "",
+  const byHand = !settings.tier;
+  return { agent: settings.agentPromptId ?? "", provider: byHand ? settings.providerId ?? "" : "", model: byHand ? settings.modelId ?? "" : "",
+    effort: byHand ? settings.reasoningEffort ?? "" : "", tier: settings.tier ?? "",
     permissionMode: settings.permissionMode ?? "", reviewBeforeCommit: settings.reviewBeforeCommit, sandbox: settings.sandbox ?? "", options: storedSessionOptions(settings.options) };
 }
 
@@ -390,7 +399,8 @@ export function poolTags(tags: readonly string[]): readonly string[] {
 
 /** What is sent to the host for a form. */
 export function inputOf(form: AutomationForm): AutomationInput {
-  const provider = form.provider.trim();
+  const tier = placedElsewhere(form) ? "" : form.tier.trim();
+  const provider = tier ? "" : form.provider.trim();
   const model = provider ? form.model.trim() : "";
   const script = form.script.trim();
   // An automation that runs a script sends no prompt of its own.
@@ -398,7 +408,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
     scriptArguments: script ? form.scriptArguments.trim() || null : null,
     // A script without a model runs alone: what it may do is said here, and read only otherwise.
     scriptMode: script && form.withoutModel ? "direct" : null, scriptAccess: script && form.withoutModel && form.writes ? "write" : null, projectId: form.projectId,
-    provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
+    provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, tier: tier || null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     options: storedSessionOptions(form.options),
     // The configuration of a project runs its automations on the machines that have it.
