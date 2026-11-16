@@ -76,6 +76,8 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     private readonly RemoteSessionHostOptions _options;
     private readonly TimeProvider _time;
     private readonly CancellationTokenSource _stop = new();
+    // Read once: a watcher may resume after disposal, when the source no longer gives its token.
+    private readonly CancellationToken _stopToken;
     private readonly SemaphoreSlim _refresh = new(0, 1);
     private readonly object _gate = new();
     private Task _loop = Task.CompletedTask;
@@ -110,6 +112,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
         _connect = connect;
         _options = options ?? new RemoteSessionHostOptions();
         _time = time ?? TimeProvider.System;
+        _stopToken = _stop.Token;
     }
 
     /// <summary>Raised, on a thread of the pool, when the state or the listing of the machine changed.</summary>
@@ -198,7 +201,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     {
         Task<FleetNodeClient> online;
         lock (_gate) online = _online.Task;
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopToken);
         return await online.WaitAsync(linked.Token).ConfigureAwait(false);
     }
 
@@ -220,7 +223,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
 
     private async Task RunAsync()
     {
-        var token = _stop.Token;
+        var token = _stopToken;
         var backoff = _options.MinimumBackoff;
         while (!token.IsCancellationRequested)
         {

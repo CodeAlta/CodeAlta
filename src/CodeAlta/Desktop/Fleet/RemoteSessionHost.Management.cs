@@ -20,7 +20,7 @@ internal sealed partial class RemoteSessionHost
     {
         ArgumentNullException.ThrowIfNull(call);
         var client = RequireClient();
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopToken);
         var result = await call(client, linked.Token).ConfigureAwait(false);
         if (!changes) return result;
         try

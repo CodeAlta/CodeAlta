@@ -26,6 +26,27 @@ public sealed class RemoteSessionHostTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task RemoteHost_DisposalCancelsWaitsAndEndsDisplays_AlsoWhenTheyStartAfterDisposal(bool startBeforeDisposal)
+    {
+        var token = TestContext.CancellationToken;
+        var machine = new PairedMachine("node", "device-node", default, [], DateTimeOffset.UnixEpoch, ["view"]);
+        var host = new RemoteSessionHost(machine, static _ => throw new AssertFailedException("A disposed host must not connect."));
+        await using var display = host.ObserveDisplayAsync("session", token).GetAsyncEnumerator(token);
+        // Calling either side before disposal starts a pending wait; after disposal reproduces a watcher resumed late.
+        var online = startBeforeDisposal ? host.WaitOnlineAsync(token) : null;
+        var more = startBeforeDisposal ? display.MoveNextAsync().AsTask() : null;
+
+        await host.DisposeAsync();
+        online ??= host.WaitOnlineAsync(token);
+        more ??= display.MoveNextAsync().AsTask();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => online.WithinAsync(Patience, token));
+        Assert.IsFalse(await more.WithinAsync(Patience, token), "A disposed host ends its display without throwing.");
+    }
+
+    [TestMethod]
     public async Task RemoteHost_ListsReadsAndDrivesTheSessionsOfTheNode()
     {
         var token = TestContext.CancellationToken;

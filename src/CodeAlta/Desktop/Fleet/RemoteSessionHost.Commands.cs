@@ -236,7 +236,7 @@ internal sealed partial class RemoteSessionHost
     private async Task ReadAsksAsync(string sessionId)
     {
         FleetAskList list;
-        try { list = await RequireClient().ListAsksAsync(sessionId, _stop.Token).ConfigureAwait(false); }
+        try { list = await RequireClient().ListAsksAsync(sessionId, _stopToken).ConfigureAwait(false); }
         catch (Exception exception) when (exception is FleetException or IOException or ObjectDisposedException or TimeoutException or OperationCanceledException or InvalidOperationException)
         {
             return;
