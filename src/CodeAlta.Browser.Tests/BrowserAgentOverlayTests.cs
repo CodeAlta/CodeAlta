@@ -183,7 +183,9 @@ public sealed class BrowserAgentOverlayTests
     }
 
     [TestMethod]
-    public async Task ADragTakesTheCursorAlong_AndANewDocumentShowsTheActivityAgain()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ADragTakesTheCursorAlong_AndANewDocumentShowsTheActivityAgain(bool slowNavigation)
     {
         await using var session = NewSession(showAgent: true);
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/cards")}}"}""");
@@ -196,9 +198,12 @@ public sealed class BrowserAgentOverlayTests
         Assert.AreEqual(end.GetProperty("y").GetDouble(), cursor.GetProperty("y").GetDouble(), 2);
 
         // A click that loads another document leaves the activity shown in that one.
-        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
-        var link = BrowserToolTesting.Uid(await session.OkAsync("take_snapshot"), "link \"Go to the second page\"");
-        StringAssert.Contains(await session.OkAsync("click", $$"""{"uid":"{{link}}"}"""), "Page navigated to");
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url(slowNavigation ? "/to-slow" : "/form")}}"}""");
+        var link = BrowserToolTesting.Uid(await session.OkAsync("take_snapshot"), slowNavigation ? "link \"Go to the slow page\"" : "link \"Go to the second page\"");
+        await session.OkAsync("click", $$"""{"uid":"{{link}}"}""");
+        // A click can return while its page still loads; wait for the new document, without another action on it.
+        var text = slowNavigation ? "The slow page" : "The second page";
+        await session.OkAsync("wait_for", $$"""{"text":["{{text}}"],"timeout":{{(int)BrowserToolTesting.Deadline.TotalMilliseconds}}}""");
         var state = (await StateAsync(page))!.Value;
         Assert.IsTrue(state.GetProperty("active").GetBoolean());
         Assert.AreEqual(JsonValueKind.Null, state.GetProperty("cursor").ValueKind, "A new document shows the cursor at the next pointer input.");
