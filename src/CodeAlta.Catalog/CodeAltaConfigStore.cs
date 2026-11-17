@@ -1580,7 +1580,16 @@ public sealed partial class CodeAltaConfigStore
     /// </summary>
     /// <param name="projectRoot">The folder of the project; null or empty for a session without a project.</param>
     /// <returns>True when the project turns it on; false when it says nothing or its file cannot be read.</returns>
-    public bool IsProjectPseudonymized(string? projectRoot)
+    public bool IsProjectPseudonymized(string? projectRoot) => ReadProjectPseudonymized(projectRoot) == true;
+
+    /// <summary>
+    /// Reads whether a project's configuration makes its sessions confidential, as <see cref="IsProjectPseudonymized"/>
+    /// does, for what must not take a file that cannot be read for a project that says nothing: what decides whether a
+    /// session sends as it is.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project; null or empty for a session without a project.</param>
+    /// <returns>True when the project turns it on, false when it says nothing, <see langword="null"/> when its file cannot be read.</returns>
+    public bool? ReadProjectPseudonymized(string? projectRoot)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return false;
         try
@@ -1589,7 +1598,7 @@ public sealed partial class CodeAltaConfigStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            return false;
+            return null;
         }
     }
 

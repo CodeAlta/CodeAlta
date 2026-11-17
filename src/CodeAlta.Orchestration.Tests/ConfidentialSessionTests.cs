@@ -1,5 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Orchestration.Tests;
 
@@ -41,9 +43,16 @@ public sealed class ConfidentialSessionTests
         Pseudonymize(root.ProjectRoot);
         var provider = new ScriptedTurnProvider();
         var host = await root.CreateHostAsync(provider);
-        host.RuntimeService.ProviderBoundaryOf = _ => new ReplacingBoundary();
         var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
         var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Confidential");
+        // Whether the session is recorded as confidential when its first request reaches the boundary, the project asking for it no longer.
+        Task<bool>? recordedAtTheBoundary = null;
+        host.RuntimeService.ProviderBoundaryOf = _ =>
+        {
+            File.Delete(Path.Combine(root.ProjectRoot, ".alta", "config.toml"));
+            recordedAtTheBoundary ??= host.RuntimeService.IsConfidentialAsync(session, CancellationToken.None);
+            return new ReplacingBoundary();
+        };
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply($"Bonjour {Token}."));
 
         await host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text($"Le dossier de M. {Name}") }).WithinAsync(TestDeadlines.Hang);
@@ -57,14 +66,10 @@ public sealed class ConfidentialSessionTests
         var journaled = string.Join("\n", history.Select(static @event => @event.ToJson()));
         StringAssert.Contains(journaled, $"Bonjour {Name}.");
 
-        // Once confidential, it stays so when the project no longer asks for it.
-        File.Delete(Path.Combine(root.ProjectRoot, ".alta", "config.toml"));
-        var deadline = DateTime.UtcNow + TestDeadlines.Hang;
-        while (!await host.RuntimeService.IsConfidentialAsync(session, CancellationToken.None))
-        {
-            Assert.IsTrue(DateTime.UtcNow < deadline, "The session records that it is confidential.");
-            await Task.Delay(50);
-        }
+        // Once confidential, it stays so when the project no longer asks for it: it was recorded before anything was sent.
+        Assert.IsNotNull(recordedAtTheBoundary);
+        Assert.IsTrue(await recordedAtTheBoundary, "The session records that it is confidential before its first request.");
+        Assert.IsTrue(await host.RuntimeService.IsConfidentialAsync(session, CancellationToken.None));
 
         await Assert.ThrowsExactlyAsync<NotSupportedException>(() => host.RuntimeService.AskSideQuestionAsync(session.SessionId, "side question", static (_, _) => ValueTask.CompletedTask));
     }
@@ -83,6 +88,66 @@ public sealed class ConfidentialSessionTests
 
         StringAssert.Contains(string.Join("\n", provider.Requests.Single().Conversation.Select(static message => message.ToJson())), Name);
         Assert.IsFalse(await host.RuntimeService.IsConfidentialAsync(session, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task ASessionOfAProjectWhoseConfigurationCannotBeRead_SendsNothing_UntilItCanBeRead()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider);
+        host.RuntimeService.ProviderBoundaryOf = _ => new ReplacingBoundary();
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Unknown");
+        var config = Path.Combine(root.ProjectRoot, ".alta", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        File.WriteAllText(config, "[privacy\npseudonymize = ");
+
+        try
+        {
+            await host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text($"Le dossier de M. {Name}") }).WithinAsync(TestDeadlines.Hang);
+        }
+        catch (Exception exception) when (exception is not AssertFailedException)
+        {
+        }
+
+        Assert.AreEqual(0, provider.Requests.Count, "Nothing reaches the provider while the project may be pseudonymized.");
+        Assert.IsTrue(await host.RuntimeService.IsConfidentialAsync(session, CancellationToken.None));
+
+        // The file that could not be read did not make the session confidential for good.
+        File.WriteAllText(config, "# nothing\n");
+        Assert.IsFalse(await host.RuntimeService.IsConfidentialAsync(session, CancellationToken.None));
+        await host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text($"Le dossier de M. {Name}") }).WithinAsync(TestDeadlines.Hang);
+        StringAssert.Contains(string.Join("\n", provider.Requests.Single().Conversation.Select(static message => message.ToJson())), Name);
+    }
+
+    [TestMethod]
+    public async Task ASessionAConfidentialSessionCreated_IsConfidential_WhateverItsParent()
+    {
+        await using var root = new HeadlessTestRoot();
+        Pseudonymize(root.ProjectRoot);
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider);
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        var chatOptions = new SessionExecutionOptions
+        {
+            ProviderId = options.ProviderId,
+            ProviderKey = options.ProviderKey,
+            WorkingDirectory = root.GlobalRoot,
+            Model = options.Model,
+            OnPermissionRequest = options.OnPermissionRequest,
+        };
+        var confidential = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Confidential");
+        var plain = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Plain");
+        var by = new AltaActorProvenance { Kind = "agent", SourceSessionId = confidential.SessionId };
+
+        var child = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Child", plain.SessionId, by);
+        // A parent that no longer exists ends its branch of the lineage: it makes nothing confidential.
+        var orphan = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Orphan", "no-such-session", null);
+
+        Assert.IsFalse(await host.RuntimeService.IsConfidentialAsync(plain, CancellationToken.None));
+        Assert.IsTrue(await host.RuntimeService.IsConfidentialAsync(child, CancellationToken.None), "The session that created it is confidential, its parent is not.");
+        Assert.IsFalse(await host.RuntimeService.IsConfidentialAsync(orphan, CancellationToken.None));
     }
 
     private static void Pseudonymize(string projectRoot)
