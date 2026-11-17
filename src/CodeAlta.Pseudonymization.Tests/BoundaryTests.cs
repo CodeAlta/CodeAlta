@@ -115,6 +115,16 @@ public sealed class BoundaryTests
     }
 
     [TestMethod]
+    public async Task ANameOfTwoLettersTheUserAlwaysHides_IsHidden_AsAWholeWord()
+    {
+        var boundary = CreateBoundary(alwaysHide: [(PiiEntities.Person, "Li")]);
+
+        var sent = await boundary.PrepareRequestAsync(Request(User("Mme Li lit le livre.")), CancellationToken.None);
+
+        Assert.AreEqual("Mme [PERSONNE_001] lit le livre.", Text(sent));
+    }
+
+    [TestMethod]
     public async Task ATry_PseudonymizesOneText_AsARequestWould()
     {
         var boundary = CreateBoundary();

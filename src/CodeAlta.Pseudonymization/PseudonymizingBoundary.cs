@@ -391,8 +391,9 @@ public sealed partial class PseudonymizingBoundary : IAgentProviderBoundary
         private string Apply(string text, IReadOnlyList<PiiSpan> analyzed)
         {
             var candidates = new List<PiiSpan>(analyzed);
-            foreach (var (entity, value) in owner._table.KnownValues()) AddOccurrences(text, entity, value, StringComparison.Ordinal, candidates);
-            foreach (var (entity, value) in owner._options.AlwaysHide) AddOccurrences(text, entity, value, StringComparison.OrdinalIgnoreCase, candidates);
+            foreach (var (entity, value) in owner._table.KnownValues()) AddOccurrences(text, entity, value, 3, StringComparison.Ordinal, candidates);
+            // What the user listed is hidden from two characters on: a name such as "Li" is one.
+            foreach (var (entity, value) in owner._options.AlwaysHide) AddOccurrences(text, entity, value, 2, StringComparison.OrdinalIgnoreCase, candidates);
             var spans = PiiAnalyzer.Resolve(text, candidates);
             if (spans.Count == 0) return text;
             var builder = new StringBuilder(text.Length);
@@ -412,10 +413,10 @@ public sealed partial class PseudonymizingBoundary : IAgentProviderBoundary
             return builder.Append(text, copied, text.Length - copied).ToString();
         }
 
-        // A value is found whole: not inside a longer word or number.
-        private static void AddOccurrences(string text, string entity, string value, StringComparison comparison, List<PiiSpan> candidates)
+        // A value is found whole: not inside a longer word or number. A value shorter than the minimum is not looked for.
+        private static void AddOccurrences(string text, string entity, string value, int minimumLength, StringComparison comparison, List<PiiSpan> candidates)
         {
-            if (value.Length < 3) return;
+            if (value.Length < minimumLength) return;
             for (var index = text.IndexOf(value, comparison); index >= 0; index = text.IndexOf(value, index + value.Length, comparison))
             {
                 var before = index == 0 || !char.IsLetterOrDigit(text[index - 1]);
