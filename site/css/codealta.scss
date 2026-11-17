@@ -329,8 +329,7 @@
     overflow-x: auto;
   }
 
-  // The Copy button of the card replaces the toolbar of the code block, which shows only an icon and not at all
-  // in a narrow window.
+  // The Copy button of the card replaces the toolbar of the code block, which does not show in a narrow window.
   .code-toolbar > .toolbar {
     display: none !important;
   }
@@ -340,7 +339,7 @@
 .alta-command {
   display: flex;
   align-items: center;
-  gap: .6rem;
+  gap: .25rem;
 
   > :first-child {
     flex: 1;
@@ -348,36 +347,40 @@
   }
 }
 
+// An icon alone, quiet until it is pointed at, so that the command keeps the width of the card.
 .alta-copy {
   display: inline-flex;
   align-items: center;
-  gap: .4rem;
+  justify-content: center;
   flex: none;
-  padding: .32rem .85rem;
-  border: 1px solid var(--alta-card-border);
-  border-radius: 999px;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: .5rem;
   background: transparent;
-  color: var(--bs-body-color);
-  font-size: .84rem;
-  font-weight: 600;
-  line-height: 1.5;
+  color: var(--bs-secondary-color);
+  font-size: .95rem;
+  line-height: 1;
   cursor: pointer;
-  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+  opacity: .7;
+  transition: color .15s ease, background-color .15s ease, opacity .15s ease;
 
   &:hover {
-    border-color: var(--alta-cyan);
+    background: color-mix(in srgb, var(--alta-cyan) 12%, transparent);
     color: var(--alta-cyan);
+    opacity: 1;
   }
 
   &:focus-visible {
     outline: 2px solid var(--alta-cyan);
     outline-offset: 2px;
+    opacity: 1;
   }
 
   &.copied {
-    border-color: transparent;
-    background: var(--alta-gradient);
-    color: #fff;
+    color: var(--alta-cyan);
+    opacity: 1;
   }
 }
 

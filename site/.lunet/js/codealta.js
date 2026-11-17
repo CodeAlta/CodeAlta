@@ -43,7 +43,7 @@
     if (tab && systems.indexOf(tab.getAttribute("data-alta-os-set")) >= 0) applyOs(tab.getAttribute("data-alta-os-set"));
   });
 
-  // Copy button of an install command: the text of the command beside it, then a word that says it is done.
+  // Copy button of an install command: the text of the command beside it, then a check mark that says it is done.
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
     // A page not served over HTTPS has no clipboard API: a selection copied by the browser does the same.
@@ -68,20 +68,24 @@
     var command = button.closest(".alta-command");
     var code = command ? command.querySelector("code") : null;
     if (!code) return;
-    var label = button.querySelector("span");
     var icon = button.querySelector("i");
+    // The button shows an icon only: its name says what happened.
+    function name(title, label) {
+      button.title = title;
+      button.setAttribute("aria-label", label);
+    }
     copyText(code.textContent.trim()).then(function () {
       button.classList.add("copied");
-      if (label) label.textContent = "Copied";
+      name("Copied", "Copied");
       if (icon) icon.className = "bi bi-check2";
       clearTimeout(button.altaCopied);
       button.altaCopied = setTimeout(function () {
         button.classList.remove("copied");
-        if (label) label.textContent = "Copy";
+        name("Copy", "Copy the command");
         if (icon) icon.className = "bi bi-clipboard";
       }, 1600);
     }, function () {
-      if (label) label.textContent = "Select and copy";
+      name("Select the command and copy it", "Select the command and copy it");
     });
   });
 
