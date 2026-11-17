@@ -71,6 +71,17 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
   return null;
 }
 
+/** The tabs of the form of a provider: what most people set, how its sessions run, its models, and the rest. */
+export type ProviderFormTab = "general" | "sessions" | "models" | "advanced";
+
+/** The tab that holds the field a problem of the form is about, so that it can be marked while another tab is shown. */
+export function providerProblemTab(problem: MessageKey | null): ProviderFormTab | null {
+  if (!problem) return null;
+  if (problem === "Requests at once is a whole number greater than zero.") return "sessions";
+  return problem === "A color is written as #rgb or #rrggbb." || problem === "A folder is a full path or starts with ~."
+    || problem === "A line of the environment has no name before =." ? "advanced" : "general";
+}
+
 function sameRules(rules: readonly ModelRuleDraft[], baseline: readonly ModelRuleDraft[]): boolean {
   return formatModelRules(rules).join("\n") === formatModelRules(baseline).join("\n");
 }

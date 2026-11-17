@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { Button, Collapse, HTMLSelect, InputGroup, Tag } from "@blueprintjs/core";
+import { Button, HTMLSelect, InputGroup, Tag } from "@blueprintjs/core";
 import { modelCatalog } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
@@ -38,8 +38,8 @@ function ModelRuleList({ label, rules, models, disabled, onChange }: {
 }
 
 /**
- * The models a provider hides from the lists where a model is chosen: the rules that hide some, the rules that show some
- * again, and the models they hide. It is folded under a line that says how many it hides: few people need it.
+ * The models a provider hides from the lists where a model is chosen: how many it hides, the rules that hide some, the
+ * rules that show some again, and the models they hide.
  * `providerId` is the saved provider whose models are read for the preview, or null while it is not ready.
  */
 export function ProviderModelVisibility({ epoch, revision, providerId, hide, show, disabled, readModels, preview: readPreview = modelCatalog.visibility, onChange }: {
@@ -51,10 +51,8 @@ export function ProviderModelVisibility({ epoch, revision, providerId, hide, sho
   onChange: (change: { modelsHide?: readonly ModelRuleDraft[]; modelsShow?: readonly ModelRuleDraft[] }) => void;
 }) {
   const { t } = useShellLanguage();
-  const [open, setOpen] = useState(false);
   const [models, setModels] = useState<readonly ModelEntry[] | null>(null);
   const datalist = useId();
-  const body = useId();
   useEffect(() => {
     setModels(null);
     if (!providerId) return;
@@ -93,26 +91,21 @@ export function ProviderModelVisibility({ epoch, revision, providerId, hide, sho
       : counted.complete ? t("All models are shown") : t("Rules: {count}", { count: rules }))
     : rules ? t("Rules: {count}", { count: rules }) : t("All models are shown");
   return <section className="provider-model-visibility provider-settings-wide" aria-label={t("Hidden models")}>
-    <Button variant="minimal" fill alignText="start" className="provider-model-visibility-toggle" aria-expanded={open} aria-controls={body}
-      icon={<AppIcon name={open ? "chevronDown" : "chevronRight"} size={14} />} onClick={() => setOpen(value => !value)}>
-      <span className="provider-model-visibility-title">{t("Hidden models")}</span>
-      <Tag minimal round intent={problem !== null ? "warning" : counted?.count ? "primary" : "none"}>{summary}</Tag>
-    </Button>
-    <Collapse isOpen={open} keepChildrenMounted>
-      <div id={body} className="provider-model-visibility-body">
-        <p className="provider-model-visibility-help">{t("Hide models of this provider from the lists where a model is chosen. A rule is a model id, whatever its case, an exact id, or a regular expression. To offer only a few models, hide them all with the regular expression .* and show those few.")}</p>
-        <ModelRuleList label="Hide" rules={hide} models={datalist} disabled={disabled} onChange={modelsHide => onChange({ modelsHide })} />
-        <ModelRuleList label="Show anyway" rules={show} models={datalist} disabled={disabled} onChange={modelsShow => onChange({ modelsShow })} />
-        {models && <datalist id={datalist}>{models.map(model => <option key={model.id} value={model.id}>{model.name !== model.id ? model.name : undefined}</option>)}</datalist>}
-        <div className="provider-model-visibility-preview" aria-live="polite">
-          {problem !== null ? <span className="provider-model-visibility-problem" role="alert">{problem || t("A rule does not read.")}</span>
-            : !counted ? <span className="bp6-text-muted">{t("Test the provider to see the models these rules hide.")}</span>
-            : !counted.count ? <span className="bp6-text-muted">{t(counted.complete ? "No model is hidden." : "The rules took too long to match: try a simpler regular expression.")}</span>
-            : <><span className="provider-model-visibility-preview-label">{t("Hidden by these rules:")}</span>{counted.hidden.slice(0, previewLimit).map(model => <Tag key={model.id} minimal title={model.name !== model.id ? model.name : undefined}>{model.id}</Tag>)}
-              {counted.count > previewLimit && <span className="bp6-text-muted">{t("and {count} more", { count: counted.count - Math.min(previewLimit, counted.hidden.length) })}</span>}
-              {!counted.complete && <span className="bp6-text-muted">{t("The rules took too long to match: try a simpler regular expression.")}</span>}</>}
-        </div>
+    <header className="provider-form-section-title"><AppIcon name="hide" size={14} /><span>{t("Hidden models")}</span>
+      <Tag minimal round intent={problem !== null ? "warning" : counted?.count ? "primary" : "none"}>{summary}</Tag></header>
+    <div className="provider-model-visibility-body">
+      <p className="provider-model-visibility-help">{t("Hide models of this provider from the lists where a model is chosen. A rule is a model id, whatever its case, an exact id, or a regular expression. To offer only a few models, hide them all with the regular expression .* and show those few.")}</p>
+      <ModelRuleList label="Hide" rules={hide} models={datalist} disabled={disabled} onChange={modelsHide => onChange({ modelsHide })} />
+      <ModelRuleList label="Show anyway" rules={show} models={datalist} disabled={disabled} onChange={modelsShow => onChange({ modelsShow })} />
+      {models && <datalist id={datalist}>{models.map(model => <option key={model.id} value={model.id}>{model.name !== model.id ? model.name : undefined}</option>)}</datalist>}
+      <div className="provider-model-visibility-preview" aria-live="polite">
+        {problem !== null ? <span className="provider-model-visibility-problem" role="alert">{problem || t("A rule does not read.")}</span>
+          : !counted ? <span className="bp6-text-muted">{t("Test the provider to see the models these rules hide.")}</span>
+          : !counted.count ? <span className="bp6-text-muted">{t(counted.complete ? "No model is hidden." : "The rules took too long to match: try a simpler regular expression.")}</span>
+          : <><span className="provider-model-visibility-preview-label">{t("Hidden by these rules:")}</span>{counted.hidden.slice(0, previewLimit).map(model => <Tag key={model.id} minimal title={model.name !== model.id ? model.name : undefined}>{model.id}</Tag>)}
+            {counted.count > previewLimit && <span className="bp6-text-muted">{t("and {count} more", { count: counted.count - Math.min(previewLimit, counted.hidden.length) })}</span>}
+            {!counted.complete && <span className="bp6-text-muted">{t("The rules took too long to match: try a simpler regular expression.")}</span>}</>}
       </div>
-    </Collapse>
+    </div>
   </section>;
 }

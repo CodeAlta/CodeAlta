@@ -63,6 +63,6 @@ export function ProviderModelPicker({ epoch, providerId, disabled, value, fallba
     </div>}>
     <Button disabled={disabled || !providerId} aria-label={t("Choose a model")} aria-haspopup="menu"
       title={providerId ? t("Choose a model") : t("Save provider connection changes before listing models.")}
-      icon={<AppIcon name="chevronDown" size={14} />}>{t("Models")}</Button>
+      icon={<AppIcon name="chevronDown" size={14} />} />
   </PopoverNext>;
 }

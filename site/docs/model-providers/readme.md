@@ -36,6 +36,17 @@ An agent can do the same for you, also when you ask from the [mobile app](../plu
 
 ## The provider form
 
+In CodeAlta Desktop, the form of a provider shows its state beside its name (**Ready**, **Signed out**, **Failed**) and has four tabs:
+
+| Tab | What it holds |
+| --- | --- |
+| **General** | The name, key and type of the provider; its account (sign-in, the CLI it runs, **Usage**) or its connection (**API URL**, API key); the model, reasoning and context size of new sessions |
+| **Sessions** | **Permissions**, **Requests at once**, **Sandbox**, **Code Mode** and **Spaces** |
+| **Models** | **Model order** and **Hidden models** |
+| **Advanced** | **Icon** and **Icon color**; the **Account folder** and the **Environment** of the program an agent provider runs; the configuration file |
+
+A tab with a red dot holds the field that keeps the form from being saved. **Sandbox**, **Code Mode** and **Spaces** are marked **Saved at once**: a choice there applies as you make it, and **Save and apply** and **Revert** leave it alone.
+
 The provider editor can:
 
 - add, delete, enable and disable providers;
@@ -60,9 +71,17 @@ A **Default** checkbox beside a field means the field uses the default of the pr
 
 ### Default model
 
-In CodeAlta Desktop, the **Models** button beside **Default model** lists the models of the provider: search by name or id and choose one, then **Save and apply**. You can also type a model id, or clear the field with **Use the default**.
+In CodeAlta Desktop, the arrow beside **Default model** lists the models of the provider: search by name or id and choose one, then **Save and apply**. You can also type a model id, or clear the field with **Use the default**.
 
 When the provider no longer lists the default model, for example a model it retired, the list says so: choose another one. Until then, a new session without a model takes the first model the provider lists.
+
+### Environment of a provider
+
+A provider that runs a program ([Claude Code](setup.md#claude-code-settings), [Codex CLI](setup.md#codex-cli), an [ACP agent](acp-agents.md)) has an **Environment** on its **Advanced** tab in CodeAlta Desktop: the variables that program starts with, a row each.
+
+- **Add a variable**, then type its name and its value.
+- For a token or a key, use the key button of the row instead of typing the value: choose a [secret](../secrets/readme.md) of this computer, or **Use a vault item…** to take it from a [vault](../secrets/vaults.md). The row then shows the name of the secret and where it is kept, never its value, and the file holds `${secret:NAME}`.
+- The pencil of such a row goes back to a typed value.
 
 ### Changes and deleted providers
 
@@ -201,11 +220,11 @@ The models of a provider come from its API when it lists them. CodeAlta complete
 
 ### Hidden models
 
-A provider can list models you never use, such as the models of other vendors that an agent offers. **Hidden models**, at the end of the form of the provider in CodeAlta Desktop, keeps them out of the model pickers, the Models page and the tiers:
+A provider can list models you never use, such as the models of other vendors that an agent offers. **Hidden models**, on the **Models** tab of the form of the provider in CodeAlta Desktop, keeps them out of the model pickers, the Models page and the tiers:
 
 - **Hide** lists the rules that hide models, **Show anyway** the rules that bring some back. A rule is a model id (whatever its case), an exact id, or a regular expression.
 - To offer only a few models, hide them all with the regular expression `.*` and show those few.
-- While the provider is ready, the section lists the models your rules hide, as you type them. **Save and apply** applies them.
+- While the provider is ready, the section says how many models your rules hide and lists them, as you type them. **Save and apply** applies them.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-provider-hidden-models.webp" alt="The Hidden models section of a Claude Code provider under its Usage section: one rule hides every model, three rules show opus, sonnet and the version 5 models again, and the seven models hidden are listed" loading="lazy">

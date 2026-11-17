@@ -1399,8 +1399,62 @@ dialog.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dv
 .provider-settings-name strong, .provider-settings-name small { overflow-wrap: anywhere; }
 .provider-settings-name small { color: var(--muted); }
 .provider-settings-tags { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.provider-settings-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 20px; }
-.provider-settings-fields .bp6-form-group { margin: 0 0 10px; }
+/* The form of a provider: its state beside its name, then tabs. A tab is a column of groups of fields, each under a title
+   with an icon, and of the cards of its account and its usage; the fields of every group share one grid of columns. */
+.provider-settings-form .provider-settings-state.bp6-tag { margin-inline-end: 12px; }
+.provider-settings-form > .provider-state-problem.bp6-callout { display: flex; align-items: center; gap: 8px; width: auto; margin: 10px 16px 0; }
+.provider-settings-form > .provider-state-problem.bp6-callout > svg { flex: none; }
+.provider-form-tabs.bp6-tabs { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.provider-form-tabs > .bp6-tab-list { flex: none; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.provider-form-tabs > .bp6-tab-list > .bp6-tab { margin: 0 18px 0 0; font-size: 13px; line-height: 34px; }
+.provider-form-tab { display: inline-flex; align-items: center; gap: 6px; }
+/* A tab that holds the field that keeps the form from being saved. */
+.provider-form-tab[data-problem]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.provider-form-panel.bp6-tab-panel { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px; margin: 0; padding: 14px 16px 16px; container-type: inline-size; }
+.provider-form-panel.bp6-tab-panel[aria-hidden="true"] { display: none; }
+.provider-form-panel.bp6-tab-panel > * { margin: 0; }
+.provider-form-section { display: grid; gap: 8px; min-width: 0; }
+.provider-form-section-title { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; user-select: none; }
+.provider-form-section-title > svg { flex: none; }
+.provider-form-section-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
+.provider-form-section-title > .bp6-tag { order: 1; letter-spacing: 0; text-transform: none; }
+.provider-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-items: start; gap: 0 16px; }
+.provider-form-grid .bp6-form-group { min-width: 0; margin: 0 0 8px; }
+.provider-form-grid .bp6-form-helper-text { font-size: 12px; }
+/* A field that takes the columns left on its row, where the form has more than two; a row of its own otherwise. */
+.provider-settings-rest { grid-column: 1 / -1; }
+@container (min-width: 700px) { .provider-settings-rest { grid-column: span 2; } }
+/* Where the key of a provider is kept, under its fields: the secret, its vault, and the buttons that move it there. */
+.provider-key-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; font-size: 12.5px; }
+.provider-key-sources:empty { display: none; }
+.provider-key-sources > .provider-key-secret { margin-top: 0; }
+/* The icon at the start of a field that says what it holds: an address, a variable, a key. */
+.provider-input-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: var(--muted); }
+/* A button beside the fields of a group stands on the line of their inputs. */
+.provider-form-action { align-self: end; margin-bottom: 8px; }
+.provider-form-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--muted); font-size: 12.5px; }
+.provider-form-note { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+.provider-form-note > svg { vertical-align: -2px; }
+/* The limits of a subscription stand side by side where the form has the room. */
+.provider-form-panel .subscription-limits { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 20px; }
+.provider-form-panel .subscription-limit-foot { justify-content: flex-start; }
+.provider-form-panel .subscription-limit-foot > span:empty { display: none; }
+.provider-form-panel .subscription-limit-foot > span:last-child { margin-left: 0; text-align: left; }
+/* The variables of the program of a provider: a row each, its value a text or a secret of this computer. */
+.provider-environment { display: grid; gap: 6px; min-width: 0; }
+.provider-environment-row { display: grid; grid-template-columns: minmax(120px, 34%) auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; min-width: 0; }
+.provider-environment-row .bp6-input { font-family: var(--code-font); font-size: 12.5px; }
+.provider-environment-equals { color: var(--muted); font-family: var(--code-font); }
+.provider-environment-secret { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; padding: 0 3px 0 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); font-size: 12.5px; }
+.provider-environment-secret > svg { flex: none; }
+.provider-environment-secret > code { flex: 0 1 auto; min-width: 4ch; max-width: 60%; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.provider-environment-secret-kind { flex: none; color: var(--muted); }
+.provider-environment-secret-source { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.provider-environment-secret > .bp6-tag { flex: none; }
+.provider-environment-secret > .bp6-button { flex: none; margin-inline-start: auto; }
+.provider-environment-add.bp6-button { justify-self: start; }
+.provider-environment-secrets.bp6-menu { max-height: min(420px, 60vh); overflow-y: auto; }
+.provider-environment-secrets-hint { max-width: 280px; padding: 4px 8px 6px; color: var(--muted); font-size: 12px; list-style: none; }
 .provider-model-field { display: flex; gap: 6px; min-width: 0; }
 .provider-model-field > .bp6-input-group { flex: 1; min-width: 0; }
 .provider-model-picker { width: min(380px, calc(100vw - 40px)); padding: 8px; }
@@ -1631,11 +1685,9 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .managed-policy-support { margin: 0; font-size: 12.5px; }
 .managed-policy-lock { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .managed-policy-lock > svg { flex: none; }
-/* The models a provider hides: one line that says how many, the rules below it once opened. */
-.provider-model-visibility { margin: 2px 0 12px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
-.provider-model-visibility-toggle .bp6-button-text { display: flex; align-items: center; gap: 8px; }
-.provider-model-visibility-title { font-size: 13px; font-weight: 650; }
-.provider-model-visibility-body { display: grid; gap: 12px; padding: 6px 10px 8px 32px; }
+/* The models a provider hides: a title that says how many, then the rules. */
+.provider-model-visibility { display: grid; gap: 8px; min-width: 0; }
+.provider-model-visibility-body { display: grid; gap: 12px; }
 .provider-model-visibility-help { max-width: 80ch; margin: 0; color: var(--muted); font-size: 12.5px; }
 .provider-model-rules { display: grid; gap: 6px; justify-items: start; }
 .provider-model-rules-label { font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -1817,6 +1869,11 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
   .settings-split > .settings-split-detail.bp6-section { min-height: 0; overflow-y: auto; }
   .settings-split-detail > .bp6-section-header { position: sticky; top: 0; z-index: 2; background-color: inherit; }
   .settings-split-detail > .settings-split-footer { position: sticky; bottom: 0; z-index: 2; background-color: inherit; }
+  /* The form of a provider keeps its title, its tabs and its buttons in place: the tab shown scrolls alone, when it has to. */
+  .settings-split > .provider-settings-form.settings-split-detail.bp6-section { display: flex; flex-direction: column; align-self: stretch; overflow: hidden; }
+  .provider-settings-form > :not(.provider-form-tabs) { flex: none; }
+  .provider-settings-form > .provider-form-tabs.bp6-tabs { flex: 1 1 auto; }
+  .provider-form-panel.bp6-tab-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   /* The text of a prompt takes the room left under its fields, which scroll on their own: one scroll in the editor, not two. */
   .prompt-settings-form > .settings-editor-fields.bp6-section-card { flex: 0 1 auto; min-height: 0; max-height: 35%; overflow-y: auto; }
   .settings-split .prompt-settings-editor.bp6-section-card { flex: 1 1 0; min-height: 180px; }

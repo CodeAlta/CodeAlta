@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from "react";
-import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, TextArea, type Intent } from "@blueprintjs/core";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tab, Tabs, Tag, type Intent } from "@blueprintjs/core";
 import { globalConfig, managedPolicy, modelCatalog, providerLogin, providerUsage, sandboxSettings, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogModel, type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
@@ -13,12 +13,13 @@ import { ProviderModelVisibility } from "./ProviderModelVisibility";
 import { hasSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
-import { AppIcon } from "./AppIcon";
+import { AppIcon, type IconName } from "./AppIcon";
 import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerRules, providerFormDirty, providerProblem, providerStateProblem, requestLimit, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerRules, providerFormDirty, providerProblem, providerProblemTab, providerStateProblem, requestLimit, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm, type ProviderFormTab } from "./providerForm";
+import { ProviderEnvironment } from "./ProviderEnvironment";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -27,7 +28,7 @@ import { useShellLanguage } from "./shellLanguage";
 import { ClaudeCodeCli, type ClaudeCliApi } from "./claudeCli/ClaudeCodeCli";
 import { sameConfigDir } from "./claudeCli/claudeCli";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
-import { PluginProviderFields } from "./pluginProviders/PluginProviderFields";
+import { PluginProviderFields, pluginSettingsOf } from "./pluginProviders/PluginProviderFields";
 import { PluginProviderPanel } from "./pluginProviders/PluginProviderPanel";
 import { ProviderCatalogDialog } from "./pluginProviders/ProviderCatalogDialog";
 import { pluginFieldsProblem, pluginSettingValues, pluginType } from "./pluginProviders/pluginProviderForm";
@@ -46,18 +47,21 @@ const groupTitles: Readonly<Record<ProviderGroupKind, MessageKey>> = { favorites
 // A text field that can be left to its default: blank shows the default as its placeholder with a "Default"
 // tag, and an overridden value has a button that goes back to it. `unset` says what a blank field without a
 // default stands for.
-function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
+function DefaultedInput({ id, value, fallback, unset, disabled, onChange, icon }: {
   id: string; value: string; fallback: string | null; unset?: string; disabled: boolean; onChange: (value: string) => void;
+  /** An icon at the start of the field that says what it holds. */
+  icon?: IconName;
 }) {
   const { t } = useShellLanguage();
   return <InputGroup id={id} value={value} disabled={disabled} spellCheck={false} onChange={event => onChange(event.target.value)}
+    leftElement={icon ? <span className="provider-input-icon"><AppIcon name={icon} size={14} /></span> : undefined}
     placeholder={fallback ?? unset ?? t("Provider default")}
     rightElement={value ? <Button variant="minimal" size="small" disabled={disabled} icon={<AppIcon name="reset" size={13} />}
       aria-label={t("Use the default")} title={fallback ? t("Use the default: {value}", { value: fallback }) : t("Use the default")} onClick={() => onChange("")} />
       : <Tag minimal className="provider-default-tag">{t("Default")}</Tag>} />;
 }
 
-// The size of context of the sessions of a provider: one of the sizes of its default model, read from the provider once
+// The size of context of the new sessions of a provider, when their model offers it: one of the sizes of its default model, read from the provider once
 // it is saved and ready (a read would start one that is not). Shown where that model has several sizes, or a size is saved.
 function ProviderContextSize({ epoch, providerId, model, value, disabled, readModels, onChange }: {
   epoch: string; providerId: string | null; model: string | null; value: number | null; disabled: boolean;
@@ -76,9 +80,20 @@ function ProviderContextSize({ epoch, providerId, model, value, disabled, readMo
   const found = models?.find(item => item.id === defaultModel);
   const sizes = found?.contextSizes ?? [];
   if (!sizes.length && !value) return null;
-  return <FormGroup label={t("Context size")} labelFor="provider-context-size" helperText={t("Default size for this provider's sessions, when their model offers it.")}>
+  return <FormGroup label={t("Context size")} labelFor="provider-context-size">
     <ContextSizeSelect id="provider-context-size" value={value} context={{ contextSizes: sizes, contextSize: found?.inputTokens }} disabled={disabled} onChange={onChange} />
   </FormGroup>;
+}
+
+// A group of fields of the form, under a title whose icon says what they are about.
+// `immediate` marks a group whose choices are saved as they are made, not by Save and apply.
+function FormSection({ icon, title, immediate = false, children }: { icon: IconName; title: string; immediate?: boolean; children: ReactNode }) {
+  const { t } = useShellLanguage();
+  return <section className="provider-form-section" aria-label={title}>
+    <header className="provider-form-section-title"><AppIcon name={icon} size={14} /><span>{title}</span>
+      {immediate && <Tag minimal round title={t("This choice is saved as soon as it is made: Save and apply and Revert do not change it.")}>{t("Saved at once")}</Tag>}</header>
+    <div className="provider-form-grid">{children}</div>
+  </section>;
 }
 
 /**
@@ -132,6 +147,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   const [catalogType, setCatalogType] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderForm | null>(null);
+  // The tab of the form that is shown; it stays when another provider is selected, so that providers are compared on one tab.
+  const [tab, setTab] = useState<ProviderFormTab>("general");
   const [notice, setNotice] = useState<ConfigNotice | null>(null);
   const files = useSettingsFiles({ page: "config", epoch, projectId: null, onOpened: onOpenFile, setNotice, api: filesApi });
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
@@ -215,12 +232,22 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
     const value = state?.availability;
     return { label: value ?? t("Not loaded"), intent: value === "Ready" ? "success" : value === "Failed" || value === "Unsupported" ? "danger" : value ? "warning" : "none" };
   };
+  // The modes a provider that runs an agent starts its sessions in: those of its plugin, or of the CLI; null for a provider that has none.
+  const permissionModes = !form ? null : formPlugin ? (formPlugin.permissionModes.length > 0 ? formPlugin.permissionModes.filter(mode => mode !== "default") : null)
+    : runsOwnCli(form.type) ? listing?.permissionModes ?? [] : null;
+  // A tab that holds the field that keeps the form from being saved is marked while another one is shown.
+  const problemTab = dirty ? providerProblemTab(problem) : null;
+  const tabTitle = (id: ProviderFormTab, icon: IconName, label: MessageKey) => <span className="provider-form-tab" data-problem={problemTab === id && tab !== id ? "" : undefined}
+    title={problemTab === id && tab !== id && problem ? t(problem) : undefined}>
+    <AppIcon name={icon} size={14} />{t(label)}</span>;
   const signedOut = original && original.type === form?.type && isSignedOut(availability.get(original.key.toLowerCase())?.reason);
   // What the form says of the state of the saved provider, above its fields: why it is not ready, and what to do.
   const stateProblem = original && original.type === form?.type ? providerStateProblem(availability.get(original.key.toLowerCase()), original.enabled) : null;
   function choose(key: string) {
     if (busy || key === selected || !listing) return;
     setSelected(key); setNotice(null); setDiagnostic(null);
+    // A new provider starts with its key, its type and its connection.
+    if (key === newProvider) setTab("general");
     setForm(providerForm(key === newProvider ? null : providers.find(provider => provider.key === key) ?? null, listing.defaultProvider, listing.providerTypes));
   }
   const edit = (change: Partial<ProviderForm>) => setForm(current => current ? { ...current, ...change } : current);
@@ -317,7 +344,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
 
   const tourSteps: GuidedTourStep[] = !tour || !listing ? [] : providerTourSteps(providers).map(step => ({
     id: step.id, title: t(step.title, step.parameters), body: t(step.body, step.parameters), placement: step.target === "account" ? "top" : "right",
-    enter: step.provider === null ? undefined : () => choose(step.provider!),
+    // The provider and its sign-in are on the first tab.
+    enter: step.provider === null ? undefined : () => { setTab("general"); choose(step.provider!); },
     target: () => page.current?.querySelector(step.target === "list" ? ".provider-settings-list" : step.target === "account" ? ".provider-account"
       : `[data-provider-key="${CSS.escape(step.provider ?? "")}"]`) ?? null,
   }));
@@ -392,132 +420,175 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
         </div>
         {form && <Section className="provider-settings-form settings-split-detail" icon={shownLogo ? <Logo brand={shownLogo} size={20} fallback="model" /> : undefined} title={original ? original.effectiveName : t("New provider")}
           subtitle={original ? `${original.key} · ${original.type}` : t("Not saved yet")}
-          rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"
-            onChange={event => edit({ enabled: event.currentTarget.checked, makeDefault: event.currentTarget.checked && form.makeDefault })} />}>
-          <SectionCard className="provider-settings-fields">
-            {stateProblem && !notice && <Callout intent={stateProblem.intent} compact className="provider-settings-wide provider-state-problem" role="status"
-              icon={<AppIcon name={stateProblem.signIn ? "user" : "error"} size={16} />}>{t(stateProblem.key, { provider: original!.effectiveName })}</Callout>}
-            <FormGroup label={t("Provider key")} labelFor="provider-key" helperText={original ? t("Sessions refer to a provider by its key; renaming it does not update them.") : undefined}>
-              <InputGroup id="provider-key" value={form.key} disabled={busy} maxLength={64} spellCheck={false} onChange={event => edit({ key: event.target.value })} placeholder="my-provider" /></FormGroup>
-            <FormGroup label={t("Adapter type")} labelFor="provider-type">
-              <HTMLSelect id="provider-type" fill value={form.type} disabled={busy} onChange={event => edit({ type: event.target.value })}
-                options={[...new Set([form.type, ...listing.providerTypes])]} /></FormGroup>
-            <FormGroup label={t("Display name")} labelFor="provider-name">
-              <DefaultedInput id="provider-name" value={form.displayName} fallback={fallback("displayName") ?? (form.key.trim() || null)} disabled={busy} onChange={displayName => edit({ displayName })} /></FormGroup>
-            <FormGroup label={t("Icon")} labelFor="provider-icon">
-              <ProviderIconPicker id="provider-icon" value={form.icon} automatic={automaticLogo!} shown={shownLogo!} disabled={busy} onChange={icon => edit({ icon })} /></FormGroup>
-            <FormGroup label={t("Icon color")} labelFor="provider-color">
-              <ProviderColorInput id="provider-color" value={form.color} disabled={busy} onChange={color => edit({ color })} /></FormGroup>
-            <FormGroup label={t("Default model")} labelFor="provider-model">
-              <div className="provider-model-field">
-                <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} />
-                <ProviderModelPicker key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider} disabled={busy || probing}
-                  value={form.model} fallback={fallback("model")} readModels={readModels} onChange={model => edit({ model })} />
-              </div></FormGroup>
-            <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
-              <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
-                <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
-                {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
-              </HTMLSelect></FormGroup>
-            <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
-              providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
-              model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />
-            {/* Beyond it, the requests of the sessions wait their turn: a turn, for an agent that runs its own loop. A provider of a
-                model server has none: the slots of its models decide, and their machine holds the queue. */}
-            {!original?.modelServer && <FormGroup label={t("Requests at once")} labelFor="provider-max-requests" helperText={t("The most requests this provider gets at once; the sessions beyond it wait their turn.")}>
-              <InputGroup id="provider-max-requests" value={form.maxConcurrentRequests} disabled={busy} inputMode="numeric" spellCheck={false}
-                intent={form.maxConcurrentRequests.trim() && requestLimit(form.maxConcurrentRequests) === null ? "danger" : "none"}
-                placeholder={form.type === "codex" ? "16" : t("No limit")} onChange={event => edit({ maxConcurrentRequests: event.target.value })} /></FormGroup>}
-            {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
-            {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
-              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
-            {/* The sandbox of the sessions of a saved provider, and of some of its models; each choice is saved at once. */}
-            {sandbox && original && <FormGroup label={t("Sandbox")} labelFor="provider-sandbox" className="provider-settings-wide">
-              <ProviderSandboxField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
-                api={sandbox} readModels={readModels} /></FormGroup>}
-            {/* The mode of Code Mode of a saved provider, and of some of its models; each choice is saved at once. */}
-            {codeMode && original && <FormGroup label={t("Code Mode")} labelFor="provider-code-mode" className="provider-settings-wide">
-              <ProviderCodeModeField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
-                api={codeMode} readModels={readModels} /></FormGroup>}
-            {/* Blank is the order of the type: the agents of a plugin may sort their models by default. */}
-            <FormGroup label={t("Model order")} labelFor="provider-models-order">
-              <HTMLSelect id="provider-models-order" fill value={form.modelsOrder} disabled={busy} onChange={event => edit({ modelsOrder: event.target.value })}>
-                <option value="">{t("Default ({value})", { value: modelsOrderLabel(formPlugin?.modelsOrder ?? "provider", t) })}</option>
-                {[...new Set([...modelsOrders, ...(form.modelsOrder ? [form.modelsOrder] : [])])].map(order => <option key={order} value={order}>{modelsOrderLabel(order, t)}</option>)}
-              </HTMLSelect></FormGroup>
-            {runsOwnCli(form.type) && <FormGroup label={t("Account folder")} labelFor="provider-config-dir"
-              helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
-              <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}
-                onChange={event => edit({ configDir: event.target.value })} /></FormGroup>}
-            {runsOwnCli(form.type) && <FormGroup label={t("Environment")} labelFor="provider-environment"
-              helperText={t("Variables the CLI of this provider starts with, NAME=value, one per line. In a sandbox on macOS, a token of its account (CLAUDE_CODE_OAUTH_TOKEN, made with claude setup-token) signs it in.")}>
-              <TextArea id="provider-environment" fill rows={Math.min(6, Math.max(2, form.environment.split("\n").length))} value={form.environment} disabled={busy} spellCheck={false}
-                placeholder="CLAUDE_CODE_OAUTH_TOKEN=…" onChange={event => edit({ environment: event.target.value })} /></FormGroup>}
-            {runsOwnCli(form.type) && <FormGroup label="ANTHROPIC_API_KEY" labelFor="provider-anthropic-key"
-              helperText={t("When this variable is set. Without an answer saved by Claude Code, sessions do not start.")}>
-              <HTMLSelect id="provider-anthropic-key" fill value={form.anthropicApiKey} disabled={busy} onChange={event => edit({ anthropicApiKey: event.target.value })}>
-                <option value="">{t("Follow the answer saved by Claude Code")}</option>
-                <option value="ignore">{t("Ignore it: use my Claude login")}</option>
-                <option value="use">{t("Use it: bill its API account")}</option>
-              </HTMLSelect></FormGroup>}
-            {formPlugin && <PluginProviderFields key={`${original?.key ?? "new"}:${form.type}`} type={formPlugin} values={form.plugin} disabled={busy} onChange={plugin => edit({ plugin })} />}
-            {formPlugin && formPlugin.permissionModes.length > 0 && <FormGroup label={t("Permissions")} labelFor="provider-permission-mode">
-              <HTMLSelect id="provider-permission-mode" fill value={form.permissionMode} disabled={busy} onChange={event => edit({ permissionMode: event.target.value })}>
-                <option value="">default</option>
-                {formPlugin.permissionModes.filter(mode => mode !== "default").map(mode => <option key={mode} value={mode}>{mode}</option>)}
-              </HTMLSelect></FormGroup>}
-            {runsOwnCli(form.type) && <FormGroup label={t("Permissions")} labelFor="provider-permission-mode"
-              helperText={t("The mode the CLI starts a session in. What the mode does not decide by itself is asked here.")}>
-              <HTMLSelect id="provider-permission-mode" fill value={form.permissionMode} disabled={busy} onChange={event => edit({ permissionMode: event.target.value })}>
-                <option value="">{t("The setting of the CLI")}</option>
-                {[...new Set([...(form.permissionMode ? [form.permissionMode] : []), ...listing.permissionModes])].map(mode => <option key={mode} value={mode}>{mode}</option>)}
-              </HTMLSelect></FormGroup>}
-            {!runsOwnCli(form.type) && !formPlugin && <FormGroup label={t("API URL")} labelFor="provider-url">
-              <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
-            {formPlugin
-              ? original && original.type === form.type
-                ? <PluginProviderPanel key={`${original.key}:plugin`} epoch={epoch} providerKey={original.key} api={plugins}
-                    capabilities={availability.get(original.key.toLowerCase())?.capabilities ?? null} signedOut={!!signedOut}
-                    blocked={dirty ? t("Save before signing in.") : null} runInTerminal={runInTerminal}
-                    onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }}
-                    // Signed in: the test shows its state, and the rest of the window (new sessions, the tiers) reads the providers again.
-                    onSignedIn={() => void test().finally(() => onApplied?.())} />
-                : <Callout compact className="provider-settings-wide" icon={<AppIcon name="plugin" size={16} />}>{t("Save the provider, then sign in and test it here.")}</Callout>
-              : runsOwnCli(form.type)
-              ? <ClaudeCodeCli epoch={epoch} api={cli} providerKey={original?.type === form.type ? original.key : null} configDir={form.configDir}
-                  command={original?.type === form.type ? original.command : null} />
-              : usesAccountSignIn(form.type)
-              ? original && original.type === form.type
-                ? <ProviderAccount epoch={epoch} providerKey={original.key} api={login} blocked={dirty ? "Save before signing in." : null}
-                  onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }} />
-                : <Callout compact className="provider-settings-wide" icon={<AppIcon name="user" size={16} />}>{t("This provider signs in with its account. Save it, then sign in here.")}</Callout>
-              : <>
-                <FormGroup label={t("API key environment variable")} labelFor="provider-key-env" helperText={t("Preferred: the key stays out of the configuration file.")}>
-                  <DefaultedInput id="provider-key-env" value={form.apiKeyEnv} fallback={fallback("apiKeyEnv")} disabled={busy} onChange={apiKeyEnv => edit({ apiKeyEnv })} /></FormGroup>
-                <FormGroup label={t("API key")} labelFor="provider-secret" helperText={original?.hasApiKey ? t("A key is stored in the configuration file. Leave blank to keep it.") : t("Stored as plain text in the configuration file.")}>
-                  <InputGroup id="provider-secret" type="password" autoComplete="off" value={form.apiKey} disabled={busy || form.clearApiKey}
-                    onChange={event => edit({ apiKey: event.target.value })} placeholder={original?.hasApiKey ? "••••••••" : ""} />
-                  {original?.hasApiKey && <Checkbox checked={form.clearApiKey} disabled={busy} label={t("Remove the stored key")}
-                    onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}
-                  {original && original.type === form.type && <ProviderKeySecret key={original.key} provider={original} disabled={busy || dirty}
-                    onKeep={name => void settle(() => secretKeys.keepKeyAsSecret({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
-                      { timeoutMilliseconds: 60000 }), original.key)} />}
-                  {original && original.type === form.type && <ProviderKeyVault key={`${original.key}:vault`} epoch={epoch} provider={original} disabled={busy || dirty}
-                    onUse={name => settle(() => secretKeys.useSecretForKey({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
-                      { timeoutMilliseconds: 60000 }), original.key)} />}</FormGroup>
-              </>}
-            {original && original.type === form.type && hasSubscriptionUsage(form.type)
-              && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
-            {/* The organization of a Copilot account can set a policy that every session follows. */}
-            {original && original.type === form.type && form.type === "copilot" && <ManagedPolicyPanel key={`${original.key}:policy`} epoch={epoch} api={policy} />}
-            <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
-              onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
-            {/* Few people need it: folded, last, under a line that says what it hides. */}
-            {/* The keys of the children of this card are distinct: React leaves behind a copy of a child whose key another one has. */}
-            <ProviderModelVisibility key={`${original?.key ?? newProvider}:visibility`} epoch={epoch} revision={listing.revision}
-              providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
-              hide={form.modelsHide} show={form.modelsShow} disabled={busy} readModels={readModels} onChange={change => edit(change)} />
-          </SectionCard>
+          rightElement={<>
+            {/* What the provider is doing, beside its name: the same words as on its row. */}
+            {original && <Tag minimal round className="provider-settings-state" intent={status(original.key, original.enabled).intent}>{status(original.key, original.enabled).label}</Tag>}
+            <Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"
+              onChange={event => edit({ enabled: event.currentTarget.checked, makeDefault: event.currentTarget.checked && form.makeDefault })} /></>}>
+          {stateProblem && !notice && <Callout intent={stateProblem.intent} compact className="provider-state-problem" role="status"
+            icon={<AppIcon name={stateProblem.signIn ? "user" : "error"} size={16} />}>{t(stateProblem.key, { provider: original!.effectiveName })}</Callout>}
+          {/* Every panel stays mounted: a sign-in that runs in one goes on while another is shown. */}
+          <Tabs id="provider-form-tabs" className="provider-form-tabs" selectedTabId={tab} animate={false} onChange={next => setTab(next as ProviderFormTab)}>
+            {/* What most people set: the name, the account or the connection, the usage, and what a new session starts with. */}
+            <Tab id="general" title={tabTitle("general", "provider", "General")} panelClassName="provider-form-panel" panel={<>
+              <FormSection icon="provider" title={t("Provider")}>
+                <FormGroup label={t("Display name")} labelFor="provider-name">
+                  <DefaultedInput id="provider-name" value={form.displayName} fallback={fallback("displayName") ?? (form.key.trim() || null)} disabled={busy} onChange={displayName => edit({ displayName })} /></FormGroup>
+                {/* Said only when it matters: once the key of a saved provider is changed. */}
+                <FormGroup label={t("Provider key")} labelFor="provider-key"
+                  helperText={original && form.key.trim().toLowerCase() !== original.key.toLowerCase() ? t("Sessions refer to a provider by its key; renaming it does not update them.") : undefined}>
+                  <InputGroup id="provider-key" value={form.key} disabled={busy} maxLength={64} spellCheck={false} onChange={event => edit({ key: event.target.value })} placeholder="my-provider" /></FormGroup>
+                <FormGroup label={t("Adapter type")} labelFor="provider-type">
+                  <HTMLSelect id="provider-type" fill value={form.type} disabled={busy} onChange={event => edit({ type: event.target.value })}
+                    options={[...new Set([form.type, ...listing.providerTypes])]} /></FormGroup>
+              </FormSection>
+              {formPlugin
+                ? <>
+                  {original && original.type === form.type
+                    && <PluginProviderPanel key={`${original.key}:plugin`} epoch={epoch} providerKey={original.key} api={plugins}
+                        capabilities={availability.get(original.key.toLowerCase())?.capabilities ?? null} signedOut={!!signedOut}
+                        blocked={dirty ? t("Save before signing in.") : null} runInTerminal={runInTerminal}
+                        onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }}
+                        // Signed in: the test shows its state, and the rest of the window (new sessions, the tiers) reads the providers again.
+                        onSignedIn={() => void test().finally(() => onApplied?.())} />}
+                  {pluginSettingsOf(formPlugin, "main").length > 0 && <FormSection icon="terminal" title={t("Agent")}>
+                    <PluginProviderFields key={`${original?.key ?? "new"}:${form.type}`} epoch={epoch} type={formPlugin} part="main" values={form.plugin} disabled={busy} onChange={plugin => edit({ plugin })} />
+                  </FormSection>}
+                  {!(original && original.type === form.type) && <Callout compact icon={<AppIcon name="plugin" size={16} />}>{t("Save the provider, then sign in and test it here.")}</Callout>}
+                </>
+                : runsOwnCli(form.type)
+                ? <ClaudeCodeCli epoch={epoch} api={cli} providerKey={original?.type === form.type ? original.key : null} configDir={form.configDir}
+                    command={original?.type === form.type ? original.command : null} />
+                : usesAccountSignIn(form.type)
+                ? original && original.type === form.type
+                  ? <ProviderAccount epoch={epoch} providerKey={original.key} api={login} blocked={dirty ? "Save before signing in." : null}
+                    onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }} />
+                  : <Callout compact icon={<AppIcon name="user" size={16} />}>{t("This provider signs in with its account. Save it, then sign in here.")}</Callout>
+                : <FormSection icon="globe" title={t("Connection")}>
+                  {/* An address is long: it has a line of its own. */}
+                  <FormGroup label={t("API URL")} labelFor="provider-url" className="provider-settings-wide">
+                    <DefaultedInput id="provider-url" icon="globe" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>
+                  <FormGroup label={t("API key environment variable")} labelFor="provider-key-env" helperText={t("Preferred: the key stays out of the configuration file.")}>
+                    <DefaultedInput id="provider-key-env" icon="terminal" value={form.apiKeyEnv} fallback={fallback("apiKeyEnv")} disabled={busy} onChange={apiKeyEnv => edit({ apiKeyEnv })} /></FormGroup>
+                  {/* A key typed here goes into the file; one kept as a secret is named under the fields. */}
+                  <FormGroup label={t("API key")} labelFor="provider-secret" helperText={original?.hasApiKey ? t("A key is stored in the configuration file. Leave blank to keep it.")
+                    : original?.apiKeySecret ? undefined : t("Stored as plain text in the configuration file.")}>
+                    <InputGroup id="provider-secret" type="password" autoComplete="off" value={form.apiKey} disabled={busy || form.clearApiKey}
+                      leftElement={<span className="provider-input-icon"><AppIcon name="secret" size={14} /></span>}
+                      onChange={event => edit({ apiKey: event.target.value })} placeholder={original?.hasApiKey ? "••••••••" : ""} />
+                    {original?.hasApiKey && <Checkbox checked={form.clearApiKey} disabled={busy} label={t("Remove the stored key")}
+                      onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}</FormGroup>
+                  {!original && <p className="provider-settings-wide provider-form-note"><AppIcon name="secret" size={13} /> {t("Once the provider is saved, its key can be kept as a secret or taken from a vault here.")}</p>}
+                  {original && original.type === form.type && <div className="provider-settings-wide provider-key-sources">
+                    <ProviderKeySecret key={original.key} provider={original} disabled={busy || dirty}
+                      onKeep={name => void settle(() => secretKeys.keepKeyAsSecret({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
+                        { timeoutMilliseconds: 60000 }), original.key)} />
+                    <ProviderKeyVault key={`${original.key}:vault`} epoch={epoch} provider={original} disabled={busy || dirty}
+                      onUse={name => settle(() => secretKeys.useSecretForKey({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
+                        { timeoutMilliseconds: 60000 }), original.key)} /></div>}
+                </FormSection>}
+              {original && original.type === form.type && hasSubscriptionUsage(form.type)
+                && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
+              {/* The organization of a Copilot account can set a policy that every session follows. */}
+              {original && original.type === form.type && form.type === "copilot" && <ManagedPolicyPanel key={`${original.key}:policy`} epoch={epoch} api={policy} />}
+              <FormSection icon="newSession" title={t("New sessions")}>
+                <FormGroup label={t("Default model")} labelFor="provider-model">
+                  <div className="provider-model-field">
+                    <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} />
+                    <ProviderModelPicker key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider} disabled={busy || probing}
+                      value={form.model} fallback={fallback("model")} readModels={readModels} onChange={model => edit({ model })} />
+                  </div></FormGroup>
+                <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
+                  <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
+                    <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
+                    {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
+                  </HTMLSelect></FormGroup>
+                <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
+                  providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
+                  model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />
+                <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
+                  onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
+              </FormSection>
+            </>} />
+            {/* How the sessions of the provider run: what they may do, how many at once, and where. */}
+            <Tab id="sessions" title={tabTitle("sessions", "chat", "Sessions")} panelClassName="provider-form-panel" panel={<>
+              {(permissionModes || !original?.modelServer) && <FormSection icon="shield" title={t("Permissions and limits")}>
+                {permissionModes && <FormGroup label={t("Permissions")} labelFor="provider-permission-mode"
+                  helperText={runsOwnCli(form.type) ? t("The mode the CLI starts a session in. What the mode does not decide by itself is asked here.") : undefined}>
+                  <HTMLSelect id="provider-permission-mode" fill value={form.permissionMode} disabled={busy} onChange={event => edit({ permissionMode: event.target.value })}>
+                    <option value="">{runsOwnCli(form.type) ? t("The setting of the CLI") : "default"}</option>
+                    {[...new Set([...(form.permissionMode ? [form.permissionMode] : []), ...permissionModes])].map(mode => <option key={mode} value={mode}>{mode}</option>)}
+                  </HTMLSelect></FormGroup>}
+                {/* Beyond it, the requests of the sessions wait their turn: a turn, for an agent that runs its own loop. A provider of a
+                    model server has none: the slots of its models decide, and their machine holds the queue. */}
+                {!original?.modelServer && <FormGroup label={t("Requests at once")} labelFor="provider-max-requests" helperText={t("The most requests this provider gets at once; the sessions beyond it wait their turn.")}>
+                  <InputGroup id="provider-max-requests" value={form.maxConcurrentRequests} disabled={busy} inputMode="numeric" spellCheck={false}
+                    intent={form.maxConcurrentRequests.trim() && requestLimit(form.maxConcurrentRequests) === null ? "danger" : "none"}
+                    placeholder={form.type === "codex" ? "16" : t("No limit")} onChange={event => edit({ maxConcurrentRequests: event.target.value })} /></FormGroup>}
+              </FormSection>}
+              {/* The sandbox of the sessions of a saved provider, and of some of its models; each choice is saved at once. */}
+              {sandbox && original && <FormSection icon="sandbox" title={t("Sandbox")} immediate>
+                <div className="provider-settings-wide"><ProviderSandboxField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
+                  api={sandbox} readModels={readModels} /></div></FormSection>}
+              {/* The mode of Code Mode of a saved provider, and of some of its models; each choice is saved at once. */}
+              {codeMode && original && <FormSection icon="code" title={t("Code Mode")} immediate>
+                <div className="provider-settings-wide"><ProviderCodeModeField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
+                  api={codeMode} readModels={readModels} /></div></FormSection>}
+              {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
+              {spaceScope && original && <FormSection icon="space" title={t("Spaces")} immediate>
+                <div className="provider-settings-wide"><ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></div></FormSection>}
+              {!original && (sandbox || codeMode || spaceScope) && <p className="provider-form-note">{t("Save the provider to choose its sandbox, its Code Mode and its spaces.")}</p>}
+            </>} />
+            {/* The models the provider lists: their order, and the ones it hides. */}
+            <Tab id="models" title={tabTitle("models", "model", "Models")} panelClassName="provider-form-panel" panel={<>
+              <FormSection icon="list" title={t("Model list")}>
+                {/* Blank is the order of the type: the agents of a plugin may sort their models by default. */}
+                <FormGroup label={t("Model order")} labelFor="provider-models-order">
+                  <HTMLSelect id="provider-models-order" fill value={form.modelsOrder} disabled={busy} onChange={event => edit({ modelsOrder: event.target.value })}>
+                    <option value="">{t("Default ({value})", { value: modelsOrderLabel(formPlugin?.modelsOrder ?? "provider", t) })}</option>
+                    {[...new Set([...modelsOrders, ...(form.modelsOrder ? [form.modelsOrder] : [])])].map(order => <option key={order} value={order}>{modelsOrderLabel(order, t)}</option>)}
+                  </HTMLSelect></FormGroup>
+                <div className="provider-form-action"><Button icon={<AppIcon name="model" size={15} />} onClick={onOpenModels}>{t("Browse models")}</Button></div>
+              </FormSection>
+              {/* The keys of the children of this panel are distinct: React leaves behind a copy of a child whose key another one has. */}
+              <ProviderModelVisibility key={`${original?.key ?? newProvider}:visibility`} epoch={epoch} revision={listing.revision}
+                providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
+                hide={form.modelsHide} show={form.modelsShow} disabled={busy} readModels={readModels} onChange={change => edit(change)} />
+            </>} />
+            {/* What few people change: how the provider looks, what its program starts with, and the configuration file. */}
+            <Tab id="advanced" title={tabTitle("advanced", "settings", "Advanced")} panelClassName="provider-form-panel" panel={<>
+              <FormSection icon="palette" title={t("Appearance")}>
+                <FormGroup label={t("Icon")} labelFor="provider-icon">
+                  <ProviderIconPicker id="provider-icon" value={form.icon} automatic={automaticLogo!} shown={shownLogo!} disabled={busy} onChange={icon => edit({ icon })} /></FormGroup>
+                <FormGroup label={t("Icon color")} labelFor="provider-color">
+                  <ProviderColorInput id="provider-color" value={form.color} disabled={busy} onChange={color => edit({ color })} /></FormGroup>
+              </FormSection>
+              {runsOwnCli(form.type) && <FormSection icon="terminal" title={t("Claude Code CLI")}>
+                <FormGroup label={t("Account folder")} labelFor="provider-config-dir"
+                  helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
+                  <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}
+                    onChange={event => edit({ configDir: event.target.value })} /></FormGroup>
+                <FormGroup label="ANTHROPIC_API_KEY" labelFor="provider-anthropic-key"
+                  helperText={t("When this variable is set. Without an answer saved by Claude Code, sessions do not start.")}>
+                  <HTMLSelect id="provider-anthropic-key" fill value={form.anthropicApiKey} disabled={busy} onChange={event => edit({ anthropicApiKey: event.target.value })}>
+                    <option value="">{t("Follow the answer saved by Claude Code")}</option>
+                    <option value="ignore">{t("Ignore it: use my Claude login")}</option>
+                    <option value="use">{t("Use it: bill its API account")}</option>
+                  </HTMLSelect></FormGroup>
+                <FormGroup label={t("Environment")} className="provider-settings-wide"
+                  helperText={t("Variables the CLI of this provider starts with. In a sandbox on macOS, a token of its account (CLAUDE_CODE_OAUTH_TOKEN, made with claude setup-token) signs it in: keep it as a secret, with the key button of its row.")}>
+                  <ProviderEnvironment id="provider-environment" epoch={epoch} value={form.environment} disabled={busy} namePlaceholder="CLAUDE_CODE_OAUTH_TOKEN"
+                    onChange={environment => edit({ environment })} /></FormGroup>
+              </FormSection>}
+              {formPlugin && pluginSettingsOf(formPlugin, "advanced").length > 0 && <FormSection icon="terminal" title={formPlugin.name}>
+                <PluginProviderFields key={`${original?.key ?? "new"}:${form.type}`} epoch={epoch} type={formPlugin} part="advanced" values={form.plugin} disabled={busy} onChange={plugin => edit({ plugin })} />
+              </FormSection>}
+              <FormSection icon="config" title={t("Configuration file")}>
+                <div className="provider-settings-wide provider-form-file"><span>{t("Every other provider setting is in the configuration file.")}</span>
+                  <Button icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration}>{t("Open the configuration file")}</Button></div>
+              </FormSection>
+            </>} />
+          </Tabs>
           <SectionCard className="provider-settings-footer settings-split-footer">
             {problem && dirty && <span className="provider-settings-problem" role="alert">{t(problem)}</span>}
             {movedSessions > 0
@@ -533,8 +604,6 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <span className="provider-settings-spacer" />
             {original && <Button icon={probing ? <ActivitySpinner size={14} /> : <AppIcon name="check" size={15} />} disabled={!original.enabled || probing || busy || dirty}
               title={dirty ? t("Save before testing.") : undefined} onClick={() => void test()}>{t(probing ? "Testing selected provider…" : "Test selected provider")}</Button>}
-            <Button icon={<AppIcon name="model" size={15} />} onClick={onOpenModels}>{t("Browse models")}</Button>
-            <Button variant="minimal" icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration} title={t("Every other provider setting is in the configuration file.")}>{t("Configuration file")}</Button>
             {original && !formPlugin && <Button variant="minimal" icon={<AppIcon name="duplicate" size={15} />} disabled={busy || dirty}
               title={t(dirty ? "Save before duplicating." : "Another account of the same type: a copy of this provider with a folder of its own.")} onClick={duplicate}>{t("Duplicate")}</Button>}
             {/* The question is of one provider: it closes once answered, and when another provider is selected. */}

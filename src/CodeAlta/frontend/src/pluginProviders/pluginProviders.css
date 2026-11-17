@@ -6,7 +6,6 @@
 
 .provider-plugin-tag.bp6-tag { font-size: 10px; letter-spacing: .04em; }
 
-.plugin-provider-advanced { margin: -4px 0 6px; }
 .plugin-provider-textarea.bp6-input { font-family: var(--mono-font, ui-monospace, monospace); font-size: 12px; resize: vertical; }
 
 .plugin-provider-panel { display: grid; gap: 8px; margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
@@ -17,7 +16,7 @@
 .plugin-provider-progress { display: grid; gap: 4px; font-size: 12px; }
 .plugin-provider-capabilities { display: flex; flex-wrap: wrap; gap: 6px; }
 .plugin-provider-unsupported.bp6-tag { opacity: .7; text-decoration: line-through; text-decoration-thickness: 1px; }
-.plugin-provider-sign-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plugin-provider-sign-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
 .plugin-provider-terminal-method { display: grid; gap: 6px; width: 100%; font-size: 12px; }
 .plugin-provider-terminal-method > .bp6-button { justify-self: start; }
 

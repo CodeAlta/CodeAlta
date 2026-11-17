@@ -61,7 +61,7 @@ A secret kept in a vault is a name of CodeAlta for one field of a vault item: th
 
 - **Add from a vault…**, at the top of the page, makes a secret of an item of a vault.
 - On a secret of this computer, the vault button of its row does the same for that secret: the item of the vault replaces its value. The old value is deleted, and stays masked.
-- In **Settings > Providers**, **Use a vault item…** under the key of a provider does the same for that key.
+- In **Settings > Providers**, **Use a vault item…** under the key of a provider does the same for that key, and the key button of a row of its [Environment](../model-providers/readme.md#environment-of-a-provider) does it for a variable.
 
 Type a few letters of the item in the search field: at the top it looks into every vault, inside a vault or an item it filters the list. Open the item, and its hidden field (the password, the credential) is picked; pick another field if you need it. The name of the secret follows the item, such as `GITHUB_PASSWORD`, until you type your own. The window shows names only: a value never reaches it.
 

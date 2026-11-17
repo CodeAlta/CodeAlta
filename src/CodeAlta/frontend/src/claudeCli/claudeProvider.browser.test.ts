@@ -5,6 +5,8 @@ import { testLimit } from "../testTime";
 
 const options = { entry: "../claudeCli/claudeProvider.mount.tsx", fixture: "claudeFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000 } as const;
 const panel = `document.querySelector('.provider-claude-cli')`;
+// The folder of the account, the environment and the icon are on the Advanced tab of the form.
+const tab = `document.querySelector('.provider-form-tabs [role="tab"][aria-selected="true"]')?.textContent`;
 
 test("the Claude Code form offers the pinned CLI, shows its download and gives the login command of the account", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
@@ -12,10 +14,16 @@ test("the Claude Code form offers the pinned CLI, shows its download and gives t
     assert.match(await page.evaluate(`${panel}.textContent`) as string, /tested with Claude Code 2\.1\.292.*\.local\\bin\\claude\.exe is used/);
     assert.equal(await page.evaluate(`${panel}.querySelector('code').textContent`), `& "$HOME\\.local\\bin\\claude.exe"`);
 
+    // The CLI, its download and its sign-in are what the form opens on.
+    assert.equal(await page.evaluate(tab), "General");
+    assert.equal(await page.evaluate(`!!${panel}.closest('.bp6-tab-panel[aria-hidden="false"]')`), true, "the CLI is on the tab that is shown");
+
     // The folder of the account goes into the command as it is typed.
+    await page.clickText('.provider-form-tabs [role="tab"]', 'Advanced');
     await page.click('#provider-config-dir');
     await page.type('~/.claude-business');
     await page.until(`${panel}.querySelector('code').textContent.startsWith('$env:CLAUDE_CONFIG_DIR="$HOME\\\\.claude-business"; ')`, "the folder in the command");
+    await page.clickText('.provider-form-tabs [role="tab"]', 'General');
 
     // The download is proposed, and its progress shown until the version is the pinned one.
     const download = `[...document.querySelectorAll('.provider-claude-cli button')].findIndex(button => /^Download 2\\.1\\.292 \\(108\\.5 MiB\\)$/.test(button.textContent.trim()))`;
@@ -37,13 +45,41 @@ test("the Claude Code form offers the pinned CLI, shows its download and gives t
   }, options);
 });
 
+test("the environment of a provider is edited a row at a time, and a value that names a secret shows the secret", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    const rows = `document.querySelectorAll('.provider-environment-row').length`;
+    await page.until(`document.querySelector('.provider-environment-add')`, "the form");
+    await page.clickText('.provider-form-tabs [role="tab"]', 'Advanced');
+    assert.equal(await page.evaluate(rows), 0);
+    // A new row takes the focus on its name, which holds no "=".
+    await page.clickText('.provider-environment button', 'Add a variable');
+    await page.until(`document.activeElement?.closest('.provider-environment-name')`, "the focus on the name of the new row");
+    await page.type('HTTPS=PROXY');
+    await page.until(`document.querySelector('.provider-environment-name input').value === 'HTTPSPROXY'`, "the name without =");
+    await page.click('.provider-environment-value input');
+    await page.type('http://proxy.local:8080/?a=b');
+    // A value that is a reference to a secret is shown as the secret, and the pencil goes back to a typed value.
+    await page.clickText('.provider-environment button', 'Add a variable');
+    await page.until(`${rows} === 2 && document.activeElement?.closest('.provider-environment-row') === document.querySelectorAll('.provider-environment-row')[1]`, "the second row");
+    await page.type('CLAUDE_CODE_OAUTH_TOKEN');
+    await page.click('.provider-environment-value input', 1);
+    await page.type('${secret:CLAUDE_TOKEN}');
+    await page.until(`document.querySelector('.provider-environment-secret')?.dataset.secret === 'CLAUDE_TOKEN'`, "the secret in place of the text");
+    assert.equal(await page.evaluate(`document.querySelector('[aria-label="Remove the variable: CLAUDE_CODE_OAUTH_TOKEN"]') !== null`), true, "the buttons of a row name its variable");
+    await page.clickText('.provider-settings-footer button', 'Save and apply');
+    await page.until(`claudeFixture.state.saved.length === 1`, "the save");
+    assert.deepEqual(await page.evaluate(`claudeFixture.state.saved[0].provider.environment`),
+      [{ name: "HTTPSPROXY", value: "http://proxy.local:8080/?a=b" }, { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "${secret:CLAUDE_TOKEN}" }]);
+  }, options);
+});
+
 test("each account shows its spaces on its row and in its form, where a click changes them", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const chip = (key: string) => `document.querySelector('[data-provider-key="${key}"] .space-scope')`;
     await page.until(`${chip("claude-tools")}?.textContent === 'Only: Work'`, "the account of Work");
     assert.equal(await page.evaluate(`${chip("claude-code")}.textContent`), "All spaces");
     // The form of the selected provider has the same choice.
-    await page.until(`document.querySelector('.provider-settings-form .space-scope')?.closest('.bp6-form-group')?.querySelector('label')?.textContent.trim() === 'Spaces'`,
+    await page.until(`document.querySelector('.provider-settings-form .space-scope')?.closest('.provider-form-section')?.getAttribute('aria-label') === 'Spaces'`,
       "the field");
     await page.click('[data-provider-key="claude-code"] .space-scope-button');
     await page.until(`!!document.querySelector('.space-scope-menu')`, "the spaces");
@@ -106,6 +142,7 @@ test("a favorite provider comes first, and the enabled providers before the disa
 test("changing the folder of a provider that has sessions asks first, and Duplicate adds another account", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-config-dir')`, "the form");
+    await page.clickText('.provider-form-tabs [role="tab"]', 'Advanced');
     await page.click('#provider-config-dir');
     await page.type('~/.claude-work');
     await page.clickText('.provider-settings-footer button', 'Save and apply');

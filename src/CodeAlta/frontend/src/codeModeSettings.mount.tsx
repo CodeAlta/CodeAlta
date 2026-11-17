@@ -43,7 +43,7 @@ createRoot(document.getElementById("root")!).render(<StrictMode>
   <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => {} }}>
     <div className="ide-shell" style={{ padding: 12, overflow: "auto", height: "100%", boxSizing: "border-box" }}>
       <CodeModeSettings epoch="epoch" api={api} filesApi={filesApi} onOpenScope={scope => state.opened.push(scope)} />
-      <div className="provider-settings-fields" style={{ marginTop: 16, maxWidth: 640 }}>
+      <div style={{ marginTop: 16, maxWidth: 640 }}>
         <ProviderCodeModeField epoch="epoch" providerKey="copilot" providerName="Copilot" api={scopes} readModels={readModels} />
       </div>
     </div>

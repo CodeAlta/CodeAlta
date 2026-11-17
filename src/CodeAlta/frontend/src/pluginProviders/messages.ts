@@ -15,7 +15,6 @@ export const pluginProviderMessages = {
   // The form of a provider of a plugin.
   "A line of the environment has no name before =.": ["Una línea del entorno no tiene nombre antes de =.", "Une ligne de l’environnement n’a pas de nom avant =.", "Eine Zeile der Umgebung hat keinen Namen vor =.", "環境の行に = の前の名前がありません。", "环境中有一行在 = 之前没有名称。"],
   "One per line.": ["Uno por línea.", "Un par ligne.", "Einer pro Zeile.", "1 行に 1 つ。", "每行一个。"],
-  "NAME=value, one per line.": ["NOMBRE=valor, uno por línea.", "NOM=valeur, un par ligne.", "NAME=Wert, einer pro Zeile.", "NAME=値、1 行に 1 つ。", "NAME=值，每行一个。"],
   "Update to {version}": ["Actualizar a {version}", "Mettre à jour vers {version}", "Auf {version} aktualisieren", "{version} に更新", "更新到 {version}"],
   "Updating…": ["Actualizando…", "Mise à jour…", "Wird aktualisiert…", "更新中…", "正在更新…"],
   "Sign in": ["Iniciar sesión", "Se connecter", "Anmelden", "サインイン", "登录"],

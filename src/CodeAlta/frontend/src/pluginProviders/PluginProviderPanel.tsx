@@ -12,8 +12,8 @@ import { terminalCommandLine } from "./terminalCommand";
 export type PluginProviderApi = Pick<typeof globalConfig, "pluginProviderDetails" | "updatePluginProvider" | "pluginProviderSignIn">;
 
 /**
- * What a provider of a plugin runs, as its plugin says it (the command of an ACP agent), with the update its catalog
- * offers, what it can and cannot do once tested, and its sign-in.
+ * The account of a provider of a plugin and what it runs: its sign-in first, then its command as its plugin says it (the
+ * command of an ACP agent) with the update its catalog offers, and what it can and cannot do once tested.
  */
 export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, capabilities, signedOut, blocked, onChanged, onSignedIn, runInTerminal }: {
   epoch: string; providerKey: string; api?: PluginProviderApi;
@@ -112,8 +112,26 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
 
   const windows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
   return <div className="provider-settings-wide plugin-provider-panel">
+    <div className="plugin-provider-sign-in">
+      <AppIcon name="user" size={16} /><strong>{t("Account")}</strong>
+      {signedOut && <Tag minimal intent="warning">{t("Not signed in")}</Tag>}
+      <span className="provider-settings-spacer" />
+      {methods === null
+        ? <Button size="small" intent={signedOut ? "primary" : "none"} disabled={loadingMethods || !!busy || !!blocked} title={blocked ?? undefined}
+            icon={loadingMethods ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void readMethods()}>{t("Sign in")}</Button>
+        : methods.map(method => method.terminalCommand
+          ? <div key={method.id} className="plugin-provider-terminal-method">
+              <span>{method.description ?? t("Run this command in a terminal to sign in, then test the provider again.")}</span>
+              <Copyable value={terminalCommandLine(method.terminalCommand, method.terminalEnvironment ?? [], windows)} label={method.label} code />
+              {runInTerminal && <Button size="small" icon={<AppIcon name="terminal" size={13} />}
+                onClick={() => runInTerminal(terminalCommandLine(method.terminalCommand!, method.terminalEnvironment ?? [], windows))}>{t("Run in a terminal")}</Button>}
+            </div>
+          : <Button key={method.id} size="small" intent="primary" disabled={!!busy} title={method.description ?? undefined}
+              icon={signingMethod === method.id ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void signIn(method)}>
+              {signingMethod === method.id ? t("Signing in…") : method.label}</Button>)}
+    </div>
     <div className="plugin-provider-command">
-      <span className="plugin-provider-label">{t("Command")}</span>
+      <AppIcon name="terminal" size={16} /><span className="plugin-provider-label">{t("Command")}</span>
       {details?.summary ? <code title={details.summary}>{details.summary}</code> : details ? <span className="bp6-text-muted">—</span> : <ActivitySpinner size={12} />}
       {details?.update && <Button size="small" intent="primary" variant="outlined" disabled={!!busy} icon={busy === "update" ? <ActivitySpinner size={12} /> : <AppIcon name="download" size={13} />}
         onClick={() => void update()}>{busy === "update" ? t("Updating…") : t("Update to {version}", { version: details.update })}</Button>}
@@ -129,21 +147,6 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
             className={capability.supported ? undefined : "plugin-provider-unsupported"} title={capability.detail ?? undefined}
             icon={<AppIcon name={capability.supported ? "check" : "minus"} size={12} />}>{capability.label}</Tag>)
         : <small className="bp6-text-muted">{t("Test the provider to see what it can do.")}</small>}
-    </div>
-    <div className="plugin-provider-sign-in">
-      {methods === null
-        ? <Button size="small" intent={signedOut ? "warning" : "none"} disabled={loadingMethods || !!busy || !!blocked} title={blocked ?? undefined}
-            icon={loadingMethods ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void readMethods()}>{t("Sign in")}</Button>
-        : methods.map(method => method.terminalCommand
-          ? <div key={method.id} className="plugin-provider-terminal-method">
-              <span>{method.description ?? t("Run this command in a terminal to sign in, then test the provider again.")}</span>
-              <Copyable value={terminalCommandLine(method.terminalCommand, method.terminalEnvironment ?? [], windows)} label={method.label} code />
-              {runInTerminal && <Button size="small" icon={<AppIcon name="terminal" size={13} />}
-                onClick={() => runInTerminal(terminalCommandLine(method.terminalCommand!, method.terminalEnvironment ?? [], windows))}>{t("Run in a terminal")}</Button>}
-            </div>
-          : <Button key={method.id} size="small" intent="primary" disabled={!!busy} title={method.description ?? undefined}
-              icon={signingMethod === method.id ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void signIn(method)}>
-              {signingMethod === method.id ? t("Signing in…") : method.label}</Button>)}
     </div>
     {busy === "signIn" && <Callout compact intent="primary" className="provider-account-running" icon={<ActivitySpinner size={16} />}>
       <p>{t(!prompt ? "Starting the sign-in…" : prompt.userCode ? "Enter this code on the sign-in page to finish:" : prompt.browserOpened

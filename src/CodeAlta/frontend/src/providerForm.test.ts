@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerRules, providerProblem, providerStateProblem, requestLimit, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerRules, providerProblem, providerProblemTab, providerStateProblem, requestLimit, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -18,6 +18,18 @@ test("a form starts from the written values, never from the stored secret", () =
     apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, maxConcurrentRequests: "", plugin: {} });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
+});
+
+test("a problem of the form names the tab that holds its field", () => {
+  const form = providerForm(local, "local", types);
+  const tabOf = (change: Partial<typeof form>) => providerProblemTab(validateProviderForm({ ...form, ...change }, [{ key: "local" }], "local"));
+  assert.equal(tabOf({}), null, "a form that can be saved marks no tab");
+  assert.equal(tabOf({ key: "" }), "general");
+  assert.equal(tabOf({ apiUrl: "localhost" }), "general");
+  assert.equal(tabOf({ maxConcurrentRequests: "none" }), "sessions");
+  assert.equal(tabOf({ color: "blue" }), "advanced");
+  assert.equal(tabOf({ type: "claude-code", apiUrl: "", configDir: "claude-work" }), "advanced");
+  assert.equal(tabOf({ type: "claude-code", apiUrl: "", environment: "=token" }), "advanced");
 });
 
 test("the rules of the models are read as the file writes them, and a list left as it was is sent as null", () => {
