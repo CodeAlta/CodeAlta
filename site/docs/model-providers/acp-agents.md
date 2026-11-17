@@ -26,8 +26,8 @@ A session of an ACP agent is a CodeAlta session like the others: you can continu
 After the test, the tags of the provider say what the agent can do: take CodeAlta's instructions in its system prompt, call CodeAlta's tools, read images, resume a session after a restart.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-acp-provider.webp" alt="The form of the Copilot (ACP) provider with its command, its arguments, its permission mode, the tags of what the agent can do and the Sign in button" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Copilot from the registry, tested: the command it runs, and what the agent can do.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-acp-provider.webp" alt="The form of the GitHub Copilot agent on its General tab: the Account card with Sign in, the command it runs and the tags of what the agent can do, then its command and arguments" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Copilot from the registry, tested: its sign-in, the command it runs, and what the agent can do.</figcaption>
 </figure>
 
 An agent named like a provider you already have is added with **(ACP)** after its name, such as **Copilot (ACP)** beside the **Copilot** provider of CodeAlta.

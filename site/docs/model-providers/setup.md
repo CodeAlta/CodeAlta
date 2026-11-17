@@ -172,8 +172,8 @@ To add it in CodeAlta Desktop: **Settings > Providers > Add provider > Codex CLI
 Then **Test selected provider** to see its models. Codex keeps its sign-in in its own folder; CodeAlta never reads it.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-codex-cli.webp" alt="Settings > Providers with the Codex CLI provider selected: its form with Code Mode, its permissions, the version of Codex that CodeAlta downloaded, what it supports and its Sign in button" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The Codex CLI provider: the version of Codex that CodeAlta runs, and <strong>Sign in</strong>.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-codex-cli.webp" alt="Settings > Providers with a Codex CLI provider that was just added: it is marked Signed out, its form says to sign in, and its Account card has Sign in, the version of Codex that CodeAlta downloaded and what it supports" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Codex CLI provider before its first sign-in: <strong>Sign in</strong>, and the version of Codex that CodeAlta runs.</figcaption>
 </figure>
 
 ```toml

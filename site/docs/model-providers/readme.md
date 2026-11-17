@@ -63,8 +63,8 @@ The provider editor can:
 - open the whole file in an editor that checks it as you type (the **Configuration file** page of CodeAlta Desktop).
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-add-provider.webp" alt="The Providers page of Settings with the Add provider menu open on the built-in providers" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Add provider: the built-in providers you do not have yet, and Custom provider for an entry of your own.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-add-provider.webp" alt="The Providers page of Settings with the Add provider menu open on the built-in providers, the agents (ACP registry, Codex CLI) and Custom provider" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Add provider: the built-in providers you do not have yet, the agents, and Custom provider for an entry of your own.</figcaption>
 </figure>
 
 A **Default** checkbox beside a field means the field uses the default of the provider. Uncheck it to set your own value; check it again to remove that value from the file.
@@ -82,6 +82,11 @@ A provider that runs a program ([Claude Code](setup.md#claude-code-settings), [C
 - **Add a variable**, then type its name and its value.
 - For a token or a key, use the key button of the row instead of typing the value: choose a [secret](../secrets/readme.md) of this computer, or **Use a vault item…** to take it from a [vault](../secrets/vaults.md). The row then shows the name of the secret and where it is kept, never its value, and the file holds `${secret:NAME}`.
 - The pencil of such a row goes back to a typed value.
+
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-provider-environment.webp" alt="The Advanced tab of a Codex CLI provider: its Environment has a row HTTPS_PROXY with a typed address and a row CODEX_PROXY_TOKEN whose value is the secret CODEX_PROXY_TOKEN, each with a key button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An <strong>Environment</strong> with a typed value and a value read from a secret.</figcaption>
+</figure>
 
 ### Changes and deleted providers
 
@@ -226,9 +231,9 @@ A provider can list models you never use, such as the models of other vendors th
 - To offer only a few models, hide them all with the regular expression `.*` and show those few.
 - While the provider is ready, the section says how many models your rules hide and lists them, as you type them. **Save and apply** applies them.
 
-<figure class="alta-figure my-4" style="max-width: 30rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-provider-hidden-models.webp" alt="The Hidden models section of a Claude Code provider under its Usage section: one rule hides every model, three rules show opus, sonnet and the version 5 models again, and the seven models hidden are listed" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Every model hidden but a few, under the usage of the subscription.</figcaption>
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-provider-hidden-models.webp" alt="The Models tab of an OpenRouter provider: under Hidden models, one rule hides every model, three rules show the Claude 5, GPT-6 and Gemini 4 Argon models again, the title says 433 of 470 models hidden and the first of them are listed" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Every model hidden but a few, on the <strong>Models</strong> tab of a provider that lists hundreds.</figcaption>
 </figure>
 
 The rules are `models_hide` and `models_show` in the [configuration file](configuration.md#models-of-a-provider).
