@@ -1512,6 +1512,8 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsFalse(send.Completion.IsCompleted);
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSend(new("next", f.SessionId, "text")).Kind);
         f.Provider.ReleaseAbort.TrySetResult();
+        // Entering the abort route does not mean cancellation has reached the provider's send token.
+        await f.ObserveReadiness(f.Provider.SendCancelled.Task, send, "send cancellation");
         f.Provider.ReleaseSend.TrySetResult();
         await f.Observe(abort.Completion);
         Assert.AreEqual(OwnedSessionCommandOutcome.Cancelled, (await f.Observe(send.Completion)).Outcome);
