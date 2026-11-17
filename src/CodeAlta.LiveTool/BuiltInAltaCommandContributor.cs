@@ -2464,11 +2464,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var metricsBySessionId = includeMetrics
             ? await BuildCompactMetricsForListAsync(context, emitted).ConfigureAwait(false)
             : null;
-        foreach (var info in emitted)
+        var sandboxes = await SessionSandboxRecordsAsync(context, emitted).ConfigureAwait(false);
+        for (var index = 0; index < emitted.Count; index++)
         {
+            var info = emitted[index];
             SessionMetrics? metrics = null;
             metricsBySessionId?.TryGetValue(info.Session.SessionId, out metrics);
-            WriteSession(context, "alta.session.item", info, includeChildren: false, infos, metrics, await SessionSandboxRecordAsync(context, info.Session.SessionId).ConfigureAwait(false));
+            WriteSession(context, "alta.session.item", info, includeChildren: false, infos, metrics, sandboxes?[index]);
         }
 
         WriteSummary(context, "alta.session.summary", emitted.Count, truncated);
@@ -7214,6 +7216,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static async Task<object?> SessionSandboxRecordAsync(AltaCommandContext context, string sessionId)
         => context.Services.Get<SessionRuntimeService>() is { } runtime
             ? SandboxRecord(await runtime.GetSessionSandboxAsync(sessionId, context.CancellationToken).ConfigureAwait(false))
+            : null;
+
+    // The sandboxes of listed sessions for their records, in their order, resolved from the listed sessions at once; null
+    // where the host has no runtime.
+    private static async Task<object?[]?> SessionSandboxRecordsAsync(AltaCommandContext context, IReadOnlyList<AltaSessionInfo> infos)
+        => context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? [.. (await runtime.GetSessionSandboxesAsync([.. infos.Select(static info => info.Session)], context.CancellationToken).ConfigureAwait(false)).Select(SandboxRecord)]
             : null;
 
     private static void WriteSessionMetrics(AltaCommandContext context, string type, AltaSessionInfo info, SessionMetrics metrics)
