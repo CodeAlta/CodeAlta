@@ -244,107 +244,62 @@ public sealed class SourceLocatorTests
     [TestMethod]
     public async Task AnAnswerOfUnknownLengthIsReadOnlyUpToTheLimit()
     {
-        // 64 MB in chunks, without a Content-Length: the reader has to stop near the limit of 8 MB, not take it all first.
-        // What it reads is counted on its side: what the server wrote says nothing, since the server's writes complete,
-        // unsent, once the reader went away.
-        await using var server = await LocalServer.StartAsync(app =>
+        const string script = "const ok = 'é';";
+        var smallUri = new Uri("http://127.0.0.1:5173/small.js");
+        var largeUri = new Uri("http://127.0.0.1:5173/big.js");
+        // StreamContent cannot compute the length of a non-seekable body. Count reads, not writes, without a socket.
+        using var body = new CountingBody(16 * 1024 * 1024);
+        using var client = new HttpClient(new SourceHandler(request =>
         {
-            app.MapGet("/small.js", async (HttpContext context) =>
-            {
-                await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("const ok = 'é';"));
-            });
-            app.MapGet("/big.js", async (HttpContext context) =>
-            {
-                var chunk = new byte[1024 * 1024];
-                Array.Fill(chunk, (byte)'x');
-                try
-                {
-                    context.Response.ContentType = "text/javascript";
-                    for (var index = 0; index < 64; index++) await context.Response.Body.WriteAsync(chunk, context.RequestAborted);
-                }
-                catch (Exception exception) when (exception is IOException or OperationCanceledException)
-                {
-                    // The reader stopped.
-                }
-            });
-        });
-
-        var counting = new CountingHandler(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false });
-        using var client = new HttpClient(counting, disposeHandler: true);
+            if (request.RequestUri == smallUri) return new ByteArrayContent(Encoding.UTF8.GetBytes(script));
+            if (request.RequestUri == largeUri) return new StreamContent(body);
+            throw new InvalidOperationException($"Unexpected source request: {request.RequestUri}");
+        }));
         var fetch = LoopbackFetch(client, NoReservedPorts);
-        Assert.AreEqual("const ok = 'é';", await fetch(new Uri(server.Origin + "/small.js"), CancellationToken.None));
-        Assert.IsNull(await fetch(new Uri(server.Origin + "/big.js"), CancellationToken.None));
-        var read = Interlocked.Read(ref counting.Read);
-        Assert.IsTrue(read <= 9L * 1024 * 1024, $"The answer was read past the limit before it was refused: {read} bytes.");
+        Assert.AreEqual(script, await fetch(smallUri, CancellationToken.None));
+        Assert.IsNull(await fetch(largeUri, CancellationToken.None));
+        Assert.IsGreaterThan(8 * 1024 * 1024, body.BytesRead, "The reader must reach the limit before refusing the body.");
+        Assert.IsLessThanOrEqualTo(9 * 1024 * 1024, body.BytesRead, "The reader must not buffer the whole body.");
     }
 
-    // Counts the bytes read from the answers of a client.
-    private sealed class CountingHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
+    private sealed class SourceHandler(Func<HttpRequestMessage, HttpContent> getContent) : HttpMessageHandler
     {
-        public long Read;
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var response = await base.SendAsync(request, cancellationToken);
-            response.Content = new CountingContent(response.Content, this);
-            return response;
-        }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = getContent(request),
+            });
     }
 
-    private sealed class CountingContent : HttpContent
+    private sealed class CountingBody(int length) : Stream
     {
-        private readonly HttpContent _inner;
-        private readonly CountingHandler _owner;
-
-        public CountingContent(HttpContent inner, CountingHandler owner)
-        {
-            (_inner, _owner) = (inner, owner);
-            foreach (var header in inner.Headers) Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
-
-        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context) => _inner.CopyToAsync(stream);
-
-        protected override bool TryComputeLength(out long length)
-        {
-            length = 0;
-            return false;
-        }
-
-        protected override async Task<Stream> CreateContentReadStreamAsync() => new CountingStream(await _inner.ReadAsStreamAsync(), _owner);
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) _inner.Dispose();
-            base.Dispose(disposing);
-        }
-    }
-
-    private sealed class CountingStream(Stream inner, CountingHandler owner) : Stream
-    {
+        public int BytesRead { get; private set; }
         public override bool CanRead => true;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException();
         public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
         public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => Count(inner.Read(buffer, offset, count));
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => Count(await inner.ReadAsync(buffer, cancellationToken));
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            var read = Math.Min(buffer.Length, length - BytesRead);
+            buffer[..read].Fill((byte)'x');
+            BytesRead += read;
+            return read;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Read(buffer.Span));
+        }
+
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) inner.Dispose();
-            base.Dispose(disposing);
-        }
-
-        private int Count(int read)
-        {
-            Interlocked.Add(ref owner.Read, read);
-            return read;
-        }
     }
 
     [TestMethod]

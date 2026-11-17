@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Catalog.Tests;
@@ -944,21 +945,28 @@ public sealed class ApplicationDatabaseTests
     public async Task Maintenance_MakesTheFirstCopyAfterItsDelay()
     {
         using var temp = TempFolder.Create();
+        var clock = new MaintenanceClock();
+        var startDelay = TimeSpan.FromSeconds(20); // not a limit
+        var interval = TimeSpan.FromHours(1); // not a limit
         await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
         {
             DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
-            MaintenanceStartDelay = TimeSpan.FromMilliseconds(10),
-            MaintenanceInterval = TimeSpan.FromHours(1),
+            TimeProvider = clock,
+            MaintenanceStartDelay = startDelay,
+            MaintenanceInterval = interval,
         });
         await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));
 
         database.StartMaintenance();
         database.StartMaintenance();
-        for (var attempt = 0; attempt < 200 && database.GetBackupPaths().Count == 0; attempt++)
-        {
-            await Task.Delay(50);
-        }
+        var first = await clock.NextTimerAsync().WithinAsync(TestTime.Seconds(10));
+        Assert.AreEqual(startDelay, first.DueTime);
+        Assert.AreEqual(0, database.GetBackupPaths().Count);
+        first.Fire();
 
+        // The next delay is scheduled after the backup attempt has finished.
+        var next = await clock.NextTimerAsync().WithinAsync(TestTime.Seconds(15));
+        Assert.AreEqual(interval, next.DueTime);
         Assert.AreEqual(1, database.GetBackupPaths().Count);
     }
 
@@ -1194,6 +1202,30 @@ public sealed class ApplicationDatabaseTests
         public void Advance(TimeSpan time) => _now += time;
 
         public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    // Records the one-shot delays of the maintenance loop instead of running them on the wall clock.
+    private sealed class MaintenanceClock : TimeProvider
+    {
+        private readonly Channel<ManualTimer> _timers = Channel.CreateUnbounded<ManualTimer>();
+
+        public Task<ManualTimer> NextTimerAsync() => _timers.Reader.ReadAsync().AsTask();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(dueTime, callback, state);
+            _timers.Writer.TryWrite(timer);
+            return timer;
+        }
+
+        public sealed class ManualTimer(TimeSpan dueTime, TimerCallback callback, object? state) : ITimer
+        {
+            public TimeSpan DueTime { get; } = dueTime;
+            public void Fire() => callback(state);
+            public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException();
+            public void Dispose() { }
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
     }
 
     // A clock whose time never passes.
