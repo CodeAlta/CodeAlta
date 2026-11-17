@@ -168,6 +168,7 @@ import {
   UsersRound,
   CircleCheckBig,
   HardDrive,
+  Heart,
 } from "lucide-react";
 
 const icons = {
@@ -181,6 +182,7 @@ const icons = {
   newFolder: FolderPlus,
   collapseAll: CopyMinus,
   star: Star,
+  heart: Heart,
   tag: Tag,
   bookmark: Bookmark,
   bookmarkAdd: BookmarkPlus,

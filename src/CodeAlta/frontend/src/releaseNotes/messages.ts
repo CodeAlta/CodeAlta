@@ -35,5 +35,7 @@ export const releaseNotesMessages = {
   "A new version is out: {version}.": ["Hay una versión nueva: {version}.", "Une nouvelle version est sortie : {version}.", "Eine neue Version ist erschienen: {version}.",
     "新しいバージョン {version} が公開されました。", "新版本 {version} 已发布。"],
   "You run the latest version.": ["Usas la versión más reciente.", "Vous utilisez la dernière version.", "Sie verwenden die neueste Version.", "最新バージョンを使用中です。", "你正在使用最新版本。"],
+  "Like CodeAlta? Star it on GitHub": ["¿Te gusta CodeAlta? Dale una estrella en GitHub", "Vous aimez CodeAlta ? Donnez-lui une étoile sur GitHub",
+    "Gefällt Ihnen CodeAlta? Geben Sie ihm einen Stern auf GitHub", "CodeAlta が気に入ったら GitHub でスターを", "喜欢 CodeAlta？在 GitHub 上为它加星"],
   "Read the release notes": ["Leer las notas de la versión", "Lire les notes de version", "Versionshinweise lesen", "リリースノートを読む", "阅读发行说明"],
 } as const;

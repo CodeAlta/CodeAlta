@@ -22,6 +22,8 @@ test("the release notes say a newer version is out, show its notes, and update t
     assert.equal(await page.evaluate(`[...document.querySelectorAll('.release-notes-meta .bp6-tag')].map(tag => tag.textContent).join()`), "Latest");
     await page.clickText(".release-notes-meta .bp6-button", "View on GitHub");
     assert.deepEqual(await page.evaluate(`releaseNotesFixture.state.opened`), ["https://github.com/CodeAlta/CodeAlta/releases/tag/4.1.0"]);
+    await page.clickText(".release-notes-footer .bp6-button", "Like CodeAlta? Star it on GitHub");
+    assert.equal(await page.evaluate(`releaseNotesFixture.state.opened.at(-1)`), "https://github.com/CodeAlta/CodeAlta");
     await page.clickText(".release-notes-running .bp6-button", "Update to 4.1.0");
     assert.equal(await page.evaluate(`releaseNotesFixture.state.installs`), 1);
     await page.evaluate(`document.activeElement?.blur()`);

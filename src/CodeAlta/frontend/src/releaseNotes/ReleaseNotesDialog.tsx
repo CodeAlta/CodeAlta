@@ -7,6 +7,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { MarkdownContent, MarkdownLinksContext } from "../MarkdownContent";
+import { StarOnGitHub } from "../StarOnGitHub";
 import { useShellLanguage } from "../shellLanguage";
 import { createReleaseNotesImages, matchesRelease, sameVersion, shownVersion } from "./releaseNotes";
 import "./releaseNotes.css";
@@ -120,6 +121,7 @@ export function ReleaseNotesDialog({ version: initial = null, api = releaseNotes
       </article>
       <footer className="release-notes-footer">
         <Checkbox checked={hideOnStartup} label={t("Don't show again on startup")} onChange={event => onHideOnStartup(event.currentTarget.checked)} />
+        <StarOnGitHub />
         <Button intent="primary" text={t("Close")} onClick={onClose} />
       </footer>
     </div>

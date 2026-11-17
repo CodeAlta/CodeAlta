@@ -157,7 +157,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       assert.deepEqual(await text("[data-list=projects] .landing-card-project"), ["Work"]);
 
       // The documentation is the one of the application, opened by the command of the window. A window that cannot run the command now
-      // says so: the page never sends to the web.
+      // says so: the documentation never sends to the web.
       await press(".landing-hero-actions button", "Documentation");
       assert.deepEqual(await state("runs"), ["documentation"]);
       assert.deepEqual(await state("unavailable"), []);
@@ -167,6 +167,10 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       await press(".landing-explore button", "Documentation");
       assert.deepEqual(await state("unavailable"), ["Documentation", "Documentation"]);
       assert.equal(await count(".landing a[href]"), 0, "nothing of the page is a link to the web");
+      // The one way to the web: the invitation to star CodeAlta, opened by the window in the browser.
+      assert.deepEqual(await state("opened"), []);
+      await press(".landing-hero .star-on-github", "Like CodeAlta? Star it on GitHub");
+      assert.deepEqual(await state("opened"), ["https://github.com/CodeAlta/CodeAlta"]);
       await press(".landing-explore button", "Settings");
       assert.equal((await state<string[]>("runs")).at(-1), "settings");
       assert.equal((await state<string[]>("unavailable")).length, 2, "a command that ran says nothing");
@@ -380,7 +384,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       assert.deepEqual(await evaluate("(() => { const e = document.querySelector('.landing'); return [e.scrollWidth <= e.clientWidth, document.documentElement.scrollWidth <= document.documentElement.clientWidth]; })()"), [true, true]);
       // Everything the page draws is inside it.
       const outside = await evaluate<string[]>(`(() => { const box = document.querySelector('.landing').getBoundingClientRect();
-        return Array.from(document.querySelectorAll('.landing-hero, .landing-hero-actions button, .landing-step, .landing-step button, .landing-card, .landing-row, .landing-card-actions button, .landing-links button, .landing-footer label'))
+        return Array.from(document.querySelectorAll('.landing-hero, .landing-hero-actions button, .landing-hero .star-on-github, .landing-step, .landing-step button, .landing-card, .landing-row, .landing-card-actions button, .landing-links button, .landing-footer label'))
           .filter(e => { const r = e.getBoundingClientRect(); return r.width === 0 || r.left < box.left - 0.5 || r.right > box.right + 0.5; }).map(e => e.className + ':' + e.textContent.slice(0, 30)); })()`);
       assert.deepEqual(outside, []);
       assert.deepEqual(await text(".landing-hero-actions button"), ["New session", "Open a project", "Documentation"]);

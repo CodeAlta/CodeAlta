@@ -2,6 +2,7 @@
 import { StrictMode, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { MarkdownLinksContext } from "../MarkdownContent";
 import { PluginUiContext, noPluginContributions, type PluginPane, type PluginUiValue } from "../pluginUi";
 import { LandingCanvas } from "./LandingCanvas";
 import { createLandingPreferences, type LandingPreferenceStore } from "./landingPreferences";
@@ -28,6 +29,8 @@ const fresh = () => ({
   cards: [] as Wire[], cardsFail: false,
   providers: { ready: 1, detecting: false } as LandingProviders | null,
   started: [] as string[],
+  // The addresses the page opened in the browser.
+  opened: [] as string[],
 });
 const state = fresh();
 
@@ -55,6 +58,7 @@ const lent: Omit<LandingShell, "epoch" | "version" | "space" | "projects" | "ses
 };
 const ui: PluginUiValue = { epoch: "epoch-1", projectId: null, contributions: noPluginContributions, run: () => { },
   runNamed: (name, pluginKey, pane) => { state.named.push({ name, pluginKey, pane }); } };
+const openLink = (address: string) => { state.opened.push(address); };
 const openCanvas = (request: { pluginKey: string; canvasId: string; projectId: string | null; key: string | null }) => { state.canvases.push({ ...request }); };
 
 /** A card as the host lists it; the test overrides what it wants. */
@@ -89,8 +93,8 @@ function draw() {
   const shell: LandingShell = { ...lent, version: shown.version, epoch: shown.epoch, space: shown.space, projects: shown.projects, sessions: shown.sessions };
   // Under StrictMode, as in the application: React then runs each effect of a new component twice.
   flushSync(() => root.render(createElement(StrictMode, null, createElement(PluginUiContext.Provider, { value: ui },
-    createElement("div", { id: "frame", style: { width: shown.width ?? undefined, padding: 12, boxSizing: "border-box" } },
-      createElement(LandingCanvas, { shell, visible: shown.visible, dark: shown.dark, openCanvas, preferences }))))));
+    createElement(MarkdownLinksContext.Provider, { value: openLink }, createElement("div", { id: "frame", style: { width: shown.width ?? undefined, padding: 12, boxSizing: "border-box" } },
+      createElement(LandingCanvas, { shell, visible: shown.visible, dark: shown.dark, openCanvas, preferences })))))));
 }
 
 const fixture = {

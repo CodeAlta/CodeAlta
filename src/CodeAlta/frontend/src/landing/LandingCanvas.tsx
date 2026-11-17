@@ -7,6 +7,7 @@ import { PluginUiContext, pluginsChangedEvent, type PluginUiValue } from "../plu
 import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
+import { StarOnGitHub } from "../StarOnGitHub";
 import { cardCommand, documentationCommand, onboardingSteps, readLandingCards, recentProjects, recentSessions, sameLandingCards,
   type LandingCardAction, type LandingCardView } from "./landingModel";
 import { landingPreferences, useLandingPreferences, type LandingPreferenceStore } from "./landingPreferences";
@@ -160,7 +161,7 @@ export function LandingCanvas({ shell, visible, dark, openCanvas, preferences = 
 
   // Every button of the page is a command of the window, run the way the palette runs it: one that cannot run now says so.
   const run = (command: string, label: string) => { if (!shell.run(command)) shell.notifyUnavailable(label); };
-  // The documentation is the one shipped with the application, in its own viewer: the page never sends to the web.
+  // The documentation is the one shipped with the application, in its own viewer: it never sends to the web.
   const openDocumentation = () => run(documentationCommand, t("Documentation"));
   const activate = (card: LandingCardView, action: LandingCardAction) => {
     if (action.disabled) return;
@@ -193,6 +194,7 @@ export function LandingCanvas({ shell, visible, dark, openCanvas, preferences = 
             <Button icon={<AppIcon name="open" size={15} />} onClick={() => run("open", t("Open a project"))}>{t("Open a project")}</Button>
             <Button variant="minimal" icon={<AppIcon name="fileText" size={15} />} onClick={openDocumentation}>{t("Documentation")}</Button>
           </div>
+          <StarOnGitHub />
         </div>
       </header>
 
