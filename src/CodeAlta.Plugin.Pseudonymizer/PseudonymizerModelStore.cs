@@ -165,12 +165,19 @@ public sealed class PseudonymizerModelStore : IDisposable
         {
             if (_stopping.IsCancellationRequested) return false;
             if (IsBusy(language!)) return true;
-            _waiting.Enqueue(language!);
-            if (_running) return true;
+            if (_running)
+            {
+                _waiting.Enqueue(language!);
+                return true;
+            }
+
+            // It downloads from now on, not once its task runs: who asked reads the state right after this.
             _running = true;
+            _download = Downloading(language!);
         }
 
-        _ = Task.Run(DownloadWaitingAsync);
+        Changed?.Invoke(this, EventArgs.Empty);
+        _ = Task.Run(() => DownloadAsync(language!));
         return true;
     }
 
@@ -214,24 +221,14 @@ public sealed class PseudonymizerModelStore : IDisposable
     private bool IsBusy(string language)
         => _download is { State: PseudonymizerDownloadState.Downloading } running && running.Language == language || _waiting.Contains(language);
 
-    // Downloads the waiting languages one after the other, then stops.
-    private async Task DownloadWaitingAsync()
+    private static PseudonymizerDownload Downloading(string language)
+        => new(PseudonymizerDownloadState.Downloading, language, 0, PseudonymizerLanguages.PresetOf(language)!.Size, null);
+
+    // Downloads a language, whose download the state already says, then the waiting ones one after the other, and stops.
+    private async Task DownloadAsync(string language)
     {
         while (true)
         {
-            string language;
-            lock (_gate)
-            {
-                if (!_waiting.TryDequeue(out language!) || _stopping.IsCancellationRequested)
-                {
-                    _running = false;
-                    return;
-                }
-
-                _download = new PseudonymizerDownload(PseudonymizerDownloadState.Downloading, language, 0, PseudonymizerLanguages.PresetOf(language)!.Size, null);
-            }
-
-            Changed?.Invoke(this, EventArgs.Empty);
             PseudonymizerDownload ended;
             try
             {
@@ -243,8 +240,17 @@ public sealed class PseudonymizerModelStore : IDisposable
                 ended = new PseudonymizerDownload(PseudonymizerDownloadState.Failed, language, 0, 0, exception is PinnedDownloadException download ? download.Code : exception.Message);
             }
 
-            lock (_gate) _download = ended;
+            bool last;
+            lock (_gate)
+            {
+                last = !_waiting.TryDequeue(out var next) || _stopping.IsCancellationRequested;
+                if (last) _running = false;
+                else language = next!;
+                _download = last ? ended : Downloading(language);
+            }
+
             Changed?.Invoke(this, EventArgs.Empty);
+            if (last) return;
         }
     }
 

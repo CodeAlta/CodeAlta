@@ -62,10 +62,24 @@ internal sealed class NerModels : IDisposable
             && preset.Files.All(file => new FileInfo(Path.Combine(directory, file.Name)) is { Exists: true } info && info.Length == file.Size);
     }
 
-    /// <summary>Downloads the ONNX Runtime and models of the catalog that are not there yet.</summary>
+    /// <summary>
+    /// Downloads the ONNX Runtime and models of the catalog that are not there yet. A model that is there and not whole (a
+    /// file cut short or missing) is removed first, and downloaded again.
+    /// </summary>
     /// <exception cref="PinnedDownloadException">A download failed.</exception>
+    /// <exception cref="IOException">A damaged model cannot be removed.</exception>
+    /// <exception cref="UnauthorizedAccessException">A damaged model cannot be removed.</exception>
     public async Task InstallAsync(IReadOnlyList<NerModelPreset> presets, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
     {
+        // The download takes a folder that has its marker for an installation, and would leave a damaged one as it is.
+        foreach (var preset in presets)
+        {
+            var directory = DirectoryOf(preset);
+            if (IsInstalled(preset) || !Directory.Exists(directory)) continue;
+            Unload(directory);
+            Directory.Delete(directory, recursive: true);
+        }
+
         using var downloads = new PinnedDownloader(null, new ProductInfoHeaderValue("CodeAlta", typeof(NerModels).Assembly.GetName().Version?.ToString(3) ?? "1.0"));
         if (_host.OnnxRuntimeLibrary() is null) await _host.InstallOnnxRuntimeAsync(downloads, progress, cancellationToken).ConfigureAwait(false);
         foreach (var preset in presets)

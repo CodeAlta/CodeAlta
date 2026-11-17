@@ -63,6 +63,77 @@ public sealed class PseudonymizerModelsTests
     }
 
     [TestMethod]
+    public void TheDescriptionOfAModelOfTheCatalog_IsACopy_AndTheCatalogIsNotChangedThroughIt()
+    {
+        var preset = NerModelCatalog.Find(NerModelCatalog.EnglishId)!;
+        var description = preset.Description;
+        description.Id = "changed";
+        description.Model = "changed.onnx";
+        description.Tokenizer.File = "changed.txt";
+
+        Assert.AreEqual(NerModelCatalog.EnglishId, preset.Id);
+        Assert.AreEqual("bert-en-8e892123e8b7", preset.FolderName);
+        Assert.AreEqual("model_quantized.onnx", preset.Description.Model);
+        Assert.AreEqual("vocab.txt", preset.Description.Tokenizer.File);
+    }
+
+    [TestMethod]
+    public async Task ADownload_IsSaidAsSoonAsItIsAsked_AndEndsOnItsOutcome()
+    {
+        using var folder = new TemporaryFolder();
+        var host = new Host(folder.Path) { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        using var models = new PseudonymizerModelStore(host);
+        var service = new PseudonymizerService(models, Epoch);
+
+        // The window reads the models right after it asked for the download: both answers say it runs.
+        var asked = service.Install(new(Epoch, "french"));
+        Assert.AreEqual("downloading", asked.Download!.State);
+        Assert.AreEqual("french", asked.Download.Language);
+        Assert.AreEqual("downloading", service.Models(new(Epoch)).Download!.State);
+        Assert.IsTrue(models.Install(PseudonymizerLanguages.English), "Another model waits its turn.");
+        Assert.AreEqual("french", models.Download.Language);
+
+        host.Gate.SetResult();
+        await WaitForAsync(() => models.Download.State != PseudonymizerDownloadState.Downloading);
+        Assert.AreEqual(PseudonymizerDownloadState.Failed, models.Download.State, "The host of this test downloads nothing.");
+        Assert.AreEqual("english", models.Download.Language, "The model that waited was tried after the first.");
+    }
+
+    [TestMethod]
+    public async Task ADamagedModel_IsRemoved_ToBeDownloadedAgain()
+    {
+        using var folder = new TemporaryFolder();
+        var host = new Host(folder.Path);
+        using var models = new PseudonymizerModelStore(host);
+        var english = Directory.CreateDirectory(Path.Combine(host.ModelsRoot, "bert-en-8e892123e8b7")).FullName;
+        // What an interrupted copy or a disk error leaves: the marker of a whole download, and a model cut short.
+        foreach (var (name, size) in new[] { ("model_quantized.onnx", 1024L), ("vocab.txt", 213450L), ("config.json", 999L) })
+        {
+            using var file = File.Create(Path.Combine(english, name));
+            file.SetLength(size);
+        }
+
+        File.WriteAllText(Path.Combine(english, "model.json"), "{}");
+        Assert.IsFalse(models.IsReady(PseudonymizerLanguages.English));
+
+        Assert.IsTrue(models.Install(PseudonymizerLanguages.English));
+        await WaitForAsync(() => models.Download.State != PseudonymizerDownloadState.Downloading);
+
+        Assert.IsFalse(Directory.Exists(english), "The damaged folder is removed: the download does not take it for an installation.");
+        Assert.AreNotEqual(PseudonymizerDownloadState.Done, models.Download.State, "Nothing says the model is installed while it is not.");
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (!condition())
+        {
+            Assert.IsTrue(DateTime.UtcNow < deadline, "The download did not end.");
+            await Task.Delay(20);
+        }
+    }
+
+    [TestMethod]
     public async Task TheLanguageOfAProject_ChoosesTheIdentifiersOfItsCountries()
     {
         const string text = "SSN 219-09-9999.\nNuméro de sécurité sociale 1 85 05 75 112 345 29.\nsophie@exemple.fr";
@@ -83,10 +154,16 @@ public sealed class PseudonymizerModelsTests
     {
         public string ModelsRoot { get; } = System.IO.Path.Combine(root, "models");
 
+        // What a download waits for before it fails, when a test holds it.
+        public TaskCompletionSource? Gate { get; init; }
+
         public string? OnnxRuntimeLibrary() => null;
 
-        public Task InstallOnnxRuntimeAsync(PinnedDownloader downloads, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
-            => throw new PlatformNotSupportedException("No download in a test.");
+        public async Task InstallOnnxRuntimeAsync(PinnedDownloader downloads, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
+        {
+            if (Gate is { } gate) await gate.Task.WaitAsync(cancellationToken);
+            throw new PlatformNotSupportedException("No download in a test.");
+        }
 
         public IWorkerProcess StartWorker() => throw new InvalidOperationException("No worker in a test.");
     }

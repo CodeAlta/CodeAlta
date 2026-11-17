@@ -26,17 +26,26 @@ internal sealed record NerModelFile(string Name, string Repository, string Commi
 /// <param name="Files">The files to download.</param>
 internal sealed record NerModelPreset(NerModelDescription Description, IReadOnlyList<NerModelFile> Files)
 {
+    // The catalog keeps its models for the life of the application, and the properties of a description can be set (it is
+    // read from a file): the preset keeps a description of its own, and gives a copy of it.
+    private readonly NerModelDescription _description = Copy(Description);
+
+    /// <summary>Gets how it is run, its id and its name, as a copy: changing it changes nothing of the model.</summary>
+    public NerModelDescription Description => Copy(_description);
+
     /// <summary>Gets its id: the choice of the setting and the start of the name of its folder.</summary>
-    public string Id => Description.Id;
+    public string Id => _description.Id;
 
     /// <summary>Gets the name shown.</summary>
-    public string Name => Description.Name ?? Description.Id;
+    public string Name => _description.Name ?? _description.Id;
 
     /// <summary>Gets the size of the download.</summary>
     public long Size => Files.Sum(static file => file.Size);
 
     /// <summary>Gets the name of its folder: its id and the start of the commit of its graph.</summary>
-    public string FolderName => $"{Id}-{Files.First(file => file.Name == Description.Model).Commit[..12]}";
+    public string FolderName => $"{Id}-{Files.First(file => file.Name == _description.Model).Commit[..12]}";
+
+    private static NerModelDescription Copy(NerModelDescription description) => description with { Tokenizer = description.Tokenizer with { } };
 }
 
 /// <summary>
