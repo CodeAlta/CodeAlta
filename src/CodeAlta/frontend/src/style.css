@@ -1441,11 +1441,6 @@ dialog.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dv
 .provider-form-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--muted); font-size: 12.5px; }
 .provider-form-note { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
 .provider-form-note > svg { vertical-align: -2px; }
-/* The limits of a subscription stand side by side where the form has the room. */
-.provider-form-panel .subscription-limits { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 20px; }
-.provider-form-panel .subscription-limit-foot { justify-content: flex-start; }
-.provider-form-panel .subscription-limit-foot > span:empty { display: none; }
-.provider-form-panel .subscription-limit-foot > span:last-child { margin-left: 0; text-align: left; }
 /* The variables of the program of a provider: a row each, its value a text or a secret of this computer. */
 .provider-environment { display: grid; gap: 6px; min-width: 0; }
 .provider-environment-row { display: grid; grid-template-columns: minmax(120px, 34%) auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; min-width: 0; }
