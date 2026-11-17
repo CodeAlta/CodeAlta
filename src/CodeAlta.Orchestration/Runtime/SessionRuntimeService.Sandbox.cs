@@ -152,6 +152,7 @@ public sealed partial class SessionRuntimeService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sandboxes, in the order of <paramref name="sessions"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="sessions"/> or one of them is null.</exception>
+    /// <exception cref="OperationCanceledException">The listing was canceled.</exception>
     public async Task<IReadOnlyList<SessionSandbox>> GetSessionSandboxesAsync(IReadOnlyList<SessionViewDescriptor> sessions, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sessions);
@@ -160,6 +161,7 @@ public sealed partial class SessionRuntimeService
         var sandboxes = new SessionSandbox[sessions.Count];
         for (var index = 0; index < sessions.Count; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var session = sessions[index] ?? throw new ArgumentNullException(nameof(sessions), "A session is null.");
             var subject = _entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated ? SandboxSubject.Of(entry) : SandboxSubject.Of(session);
             sandboxes[index] = await ResolveSandboxAsync(scopes, subject, cancellationToken).ConfigureAwait(false);
