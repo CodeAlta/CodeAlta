@@ -51,6 +51,17 @@ internal static class AgentPdfInputs
     /// <returns>The conversation to send; <paramref name="messages"/> itself when it names no PDF.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="messages"/> is null.</exception>
     public static IReadOnlyList<AgentConversationMessage> Resolve(IReadOnlyList<AgentConversationMessage> messages, AgentModelInfo? model, AgentPdfInputCache? cache)
+        => Resolve(messages, model, cache, asText: false);
+
+    /// <summary>Gives the PDF references of a conversation the form the model of a request takes, or their text.</summary>
+    /// <param name="messages">The conversation of the request.</param>
+    /// <param name="model">The model of the request.</param>
+    /// <param name="cache">The reads of the run, or null to read every file again.</param>
+    /// <param name="asText">Whether each PDF goes as the Markdown it was converted to, whatever the model reads: the PDFs of a
+    /// confidential session, whose text is pseudonymized before it is sent.</param>
+    /// <returns>The conversation to send; <paramref name="messages"/> itself when it names no PDF.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="messages"/> is null.</exception>
+    public static IReadOnlyList<AgentConversationMessage> Resolve(IReadOnlyList<AgentConversationMessage> messages, AgentModelInfo? model, AgentPdfInputCache? cache, bool asText)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!messages.Any(static message => message.Parts.Any(IsReference)))
@@ -58,7 +69,7 @@ internal static class AgentPdfInputs
             return messages;
         }
 
-        var acceptsPdf = AcceptsPdf(model);
+        var acceptsPdf = !asText && AcceptsPdf(model);
         return messages
             .Select(message => message.Parts.Any(IsReference)
                 ? message with { Parts = message.Parts.Select(part => IsReference(part) ? Resolve((AgentMessagePart.Uri)part, acceptsPdf, cache) : part).ToArray() }

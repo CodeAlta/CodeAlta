@@ -211,6 +211,9 @@ export const speech = Object.freeze({
   listen: async () => (async function* (): AsyncGenerator<{ state: string; finalText: string; partialText: string; error: string | null }> { })(),
   stop: async () => ({ status: "unavailable", text: "", error: null }),
 });
+// A browser preview runs no model: no language of a secure project is offered there.
+const noPseudonymizer = async () => ({ status: "unavailable", languages: [], download: null });
+export const pseudonymizer = Object.freeze({ models: noPseudonymizer, install: noPseudonymizer, delete: noPseudonymizer });
 // A browser preview downloads nothing: the Claude Code CLI is not known there.
 export const claudeCli = Object.freeze({
   read: async () => ({ status: "unavailable", supported: false, version: "", size: "0", pinnedPath: null, installedPath: null, installedVersion: null, windows: false, home: null }),

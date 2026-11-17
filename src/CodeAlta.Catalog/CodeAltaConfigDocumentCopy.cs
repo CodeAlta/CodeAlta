@@ -57,6 +57,7 @@ internal static class CodeAltaConfigDocumentCopy
                 Title = sessions.Title, PromptSuggestions = sessions.PromptSuggestions, ClaudeCodeConversations = sessions.ClaudeCodeConversations,
             } : null,
             Review = document.Review is { } review ? new CodeAltaReviewSettingsDocument { BeforeCommit = review.BeforeCommit } : null,
+            Privacy = document.Privacy is { } privacy ? new CodeAltaPrivacySettingsDocument { Pseudonymize = privacy.Pseudonymize } : null,
             Commits = document.Commits is { } commits ? new CodeAltaCommitSettingsDocument { CoAuthor = commits.CoAuthor, CoAuthorTrailer = commits.CoAuthorTrailer } : null,
             ExternalWriting = document.ExternalWriting is { } external
                 ? new CodeAltaExternalWritingSettingsDocument { Attribution = external.Attribution, Instruction = external.Instruction }

@@ -71,6 +71,13 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("review")]
     public CodeAltaReviewSettingsDocument? Review { get; set; }
 
+    /// <summary>
+    /// Gets or sets the pseudonymization of what sessions send to their providers. The user's file turns it on for every
+    /// session; a project file can only turn it on for the sessions of its project, never off.
+    /// </summary>
+    [JsonPropertyName("privacy")]
+    public CodeAltaPrivacySettingsDocument? Privacy { get; set; }
+
     /// <summary>Gets or sets the choices for the commits agents make. Read from the user's file only.</summary>
     [JsonPropertyName("commits")]
     public CodeAltaCommitSettingsDocument? Commits { get; set; }
@@ -253,6 +260,17 @@ public sealed class CodeAltaReviewSettingsDocument
     /// </summary>
     [JsonPropertyName("before_commit")]
     public bool? BeforeCommit { get; set; }
+}
+
+/// <summary>Represents the pseudonymization of what sessions send to their providers.</summary>
+public sealed class CodeAltaPrivacySettingsDocument
+{
+    /// <summary>
+    /// Gets or sets whether the sessions are confidential: what they send to their provider is pseudonymized first, and
+    /// nothing is sent when it cannot be. False when absent.
+    /// </summary>
+    [JsonPropertyName("pseudonymize")]
+    public bool? Pseudonymize { get; set; }
 }
 
 /// <summary>Represents the choices for the commits agents make.</summary>

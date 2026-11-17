@@ -357,6 +357,22 @@ public sealed class PluginBeforeAgentRunContext : PluginOperationContext
     public IReadOnlyList<string>? SandboxMcpServers { get; init; }
 }
 
+/// <summary>The confidential session a plugin is asked a boundary for (<see cref="PluginBase.GetProviderBoundary"/>).</summary>
+public sealed class PluginProviderBoundaryContext
+{
+    /// <summary>Gets the session.</summary>
+    public required string SessionId { get; init; }
+
+    /// <summary>Gets the project of the session, or <see langword="null"/> for a session without a project.</summary>
+    public string? ProjectId { get; init; }
+
+    /// <summary>Gets the folder the session works in, or <see langword="null"/> when it is not known.</summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>Gets the space of the session, or <see langword="null"/>.</summary>
+    public string? SpaceId { get; init; }
+}
+
 /// <summary>Context of a tool-call hook (<see cref="PluginBase.OnToolCallAsync"/>): a call of any tool of a session.</summary>
 public sealed class PluginToolCallContext : PluginOperationContext
 {

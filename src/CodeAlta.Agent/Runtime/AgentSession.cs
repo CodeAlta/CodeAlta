@@ -48,8 +48,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private volatile AgentRunTrace? _runTrace;
     private readonly IAgentSessionJournalStore _store;
     private readonly IModelProviderTurnExecutor _turnExecutor;
-    // What sends the requests of the session: the turn executor, behind the request gate of the provider when it has one.
+    // What sends the requests of the session: the turn executor, behind the request gate of the provider when it has
+    // one, behind the boundary of a confidential session when the host gives one (ComposeRequestExecutor).
     private IModelProviderTurnExecutor _requestExecutor;
+    private ProviderRequestGate? _requestGate;
     private IReadOnlyList<AgentModelInfo> _cachedModels;
     private readonly AgentCompactionSummarizer _compactionSummarizer;
     // What the summary requests of the compaction that runs used, and the run it belongs to.
@@ -187,8 +189,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// </summary>
     internal ProviderRequestGate? RequestGate
     {
-        get => (_requestExecutor as ProviderRequestGatedTurnExecutor)?.Gate;
-        init => _requestExecutor = value is null ? _turnExecutor : new ProviderRequestGatedTurnExecutor(_turnExecutor, value);
+        get => _requestGate;
+        init
+        {
+            _requestGate = value;
+            _requestExecutor = ComposeRequestExecutor();
+        }
     }
 
     // earlierHistory: what the journal holds before history, for a session read again without all of it.
@@ -221,12 +227,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _toolImages = new AgentSessionToolImages(store as IAgentSessionAttachmentStore, summary.SessionId);
         _readFileGuard = new AgentReadFileGuard(AgentBuiltInToolOptions.DefaultReadFileLines, AgentBuiltInToolOptions.MaxReadFileLines);
         _turnExecutor = turnExecutor;
-        _requestExecutor = turnExecutor;
         _cachedModels = cachedModels ?? LoadConstructorModelCache(provider, turnExecutor);
         _compactionSummarizer = new AgentCompactionSummarizer(
             new AgentTurnExecutorCompactionSummaryExecutor(new SessionRequestExecutor(this)),
             RecordCompactionSummaryUsageAsync);
         _options = options;
+        _requestExecutor = ComposeRequestExecutor();
         _permissionMode = NormalizeOptionalText(options.PermissionMode);
         _titleMode = (int)(options.TitleMode ?? AgentSessionTitles.DefaultMode);
         _promptSuggestions = options.PromptSuggestions;
@@ -2453,7 +2459,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ToolInterceptor = _options.ToolInterceptor,
             // A provider that runs its own tools starts its process where the router of the session says: its sandbox.
             ProcessHost = _options.BuiltInToolRouter?.ProcessHost,
-            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
+            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs,
+                asText: PdfsAsText).ToArray(),
             EarlierConversation = _earlierConversation,
             // The tools of scripts only are never offered to the model: a script calls them through its tool call.
             Tools = ModelTools(tools, takesOver: _turnExecutor is not IAgentProviderToolHost),
@@ -3669,7 +3676,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 return await _requestExecutor.ExecuteTurnAsync(
                         request with
                         {
-                            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(_conversation, request.ModelInfo), request.ModelInfo, _pdfInputs).ToArray(),
+                            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(_conversation, request.ModelInfo), request.ModelInfo, _pdfInputs,
+                                asText: PdfsAsText).ToArray(),
                             State = _state,
                         },
                         (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
@@ -5719,6 +5727,18 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ? condensed
             : condensed[..237] + "...";
     }
+
+    // The boundary comes first: what is pseudonymized waits for no request slot of the provider while it is prepared.
+    private IModelProviderTurnExecutor ComposeRequestExecutor()
+    {
+        IModelProviderTurnExecutor executor = _requestGate is { } gate ? new ProviderRequestGatedTurnExecutor(_turnExecutor, gate) : _turnExecutor;
+        return _options.ProviderBoundary is { } boundary
+            ? new ProviderBoundaryTurnExecutor(executor, boundary, _turnExecutor is IAgentProviderToolHost or IAgentProviderKeptConversation)
+            : executor;
+    }
+
+    // The PDFs of a confidential session go as their text, which its boundary pseudonymizes, whatever the model reads.
+    private bool PdfsAsText => _options.ProviderBoundary?.IsConfidential == true;
 
     // The requests of the compaction summaries go through the request executor of the session, known once it is initialized.
     private sealed class SessionRequestExecutor(AgentSession owner) : IModelProviderTurnExecutor

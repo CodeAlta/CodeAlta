@@ -127,10 +127,13 @@ public sealed partial class SessionRuntimeService
         return null;
     }
 
-    private async ValueTask<AgentToolInterceptor?> CreateToolInterceptorAsync(SessionViewDescriptor session, ProjectDescriptor? project,
+    private AgentToolInterceptor? CreateToolInterceptor(SessionToolHookScope scope)
+        => ToolInterceptorOf is { } create ? create(scope) : null;
+
+    // The session, its project, its folder and its space, as the hooks of the plugins are told them.
+    private async ValueTask<SessionToolHookScope> CreateHookScopeAsync(SessionViewDescriptor session, ProjectDescriptor? project,
         string? workingDirectory, CancellationToken cancellationToken)
     {
-        if (ToolInterceptorOf is not { } create) return null;
         string? spaceId;
         try
         {
@@ -142,10 +145,10 @@ public sealed partial class SessionRuntimeService
             spaceId = null;
         }
 
-        return create(new SessionToolHookScope(session.SessionId, project?.Id, workingDirectory, spaceId)
+        return new SessionToolHookScope(session.SessionId, project?.Id, workingDirectory, spaceId)
         {
             ParentSessionId = NormalizeOptionalText(session.ParentSessionId) ?? NormalizeOptionalText(session.CreatedBy?.SourceSessionId),
             CreatedBy = session.CreatedBy,
-        });
+        };
     }
 }

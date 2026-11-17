@@ -1,0 +1,10700 @@
+{
+ "source": "https://github.com/microsoft/presidio (presidio-analyzer/tests), commit fd78e974fbf9e15dad1f90de4fc125db39ef4200",
+ "license": "MIT License, Copyright (c) Microsoft Corporation. The cases of the tests of the predefined recognizers of Presidio, which the ported recognizers must pass as Presidio's do.",
+ "cases": [
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078-051121 07805-1121",
+   "count": 2,
+   "spans": [
+    [
+     0,
+     10
+    ],
+    [
+     11,
+     21
+    ]
+   ],
+   "min": [
+    0,
+    0
+   ],
+   "max": [
+    0.3,
+    0.3
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078051121",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0
+   ],
+   "max": [
+    0.4
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078-05-1123",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078.05.1123",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078 05 1123",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "abc 078 05 1123 abc",
+   "count": 1,
+   "spans": [
+    [
+     4,
+     15
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4321",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4322",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4323",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4324",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4325",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4326",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4327",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4328",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4329",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "219-09-9999",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "0780511201",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078051120",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "000000000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "666000000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078-05-0000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078 00 1123",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "693-09.4444",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "987-65-4320",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "078-05-1120",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "123-45-6789",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "000-12-3456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_SSN",
+   "test": "test_when_snn_in_text_than_all_us_ssns_are_found",
+   "text": "666-12-3456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "911-701234 91170-1234",
+   "count": 2,
+   "spans": [
+    [
+     0,
+     10
+    ],
+    [
+     11,
+     21
+    ]
+   ],
+   "min": [
+    0,
+    0
+   ],
+   "max": [
+    0.3,
+    0.3
+   ]
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "911701234",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.4
+   ]
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "911-70-1234",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "911-53-1234",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "911-64-1234",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "911-89-1234",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_ITIN",
+   "test": "test_when_itin_in_text_then_all_us_itins_found",
+   "text": "my tax id 911-89-1234",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_us_passports_found",
+   "text": "912803456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "US_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_us_passports_found",
+   "text": "Z12803456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "US_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_us_passports_found",
+   "text": "A12803456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "US_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_us_passports_found",
+   "text": "my travel document is A12803456",
+   "count": 1,
+   "spans": [
+    [
+     22,
+     31
+    ]
+   ],
+   "min": [
+    0
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "US_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_us_passports_found",
+   "text": "my travel passport is A12803456",
+   "count": 1,
+   "spans": [
+    [
+     22,
+     31
+    ]
+   ],
+   "min": [
+    0
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "US_BANK_NUMBER",
+   "test": "test_when_bank_in_text_then_all_us_banks_found",
+   "text": "945456787654",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     12
+    ]
+   ],
+   "min": [
+    0.05
+   ],
+   "max": [
+    0.05
+   ]
+  },
+  {
+   "entity": "US_BANK_NUMBER",
+   "test": "test_when_bank_in_text_then_all_us_banks_found",
+   "text": "1234567",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_DRIVER_LICENSE",
+   "test": "test_when_driver_licenes_in_text_then_all_us_driver_licenses_found",
+   "text": "H12234567",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.4
+   ]
+  },
+  {
+   "entity": "US_DRIVER_LICENSE",
+   "test": "test_when_driver_licenes_in_text_then_all_us_driver_licenses_found",
+   "text": "C12T345672",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_DRIVER_LICENSE",
+   "test": "test_when_driver_licenes_in_text_then_all_us_driver_licenses_found",
+   "text": "123456789 1234567890 12345679012 123456790123 1234567901234 1234",
+   "count": 5,
+   "spans": [
+    [
+     0,
+     9
+    ],
+    [
+     10,
+     20
+    ],
+    [
+     21,
+     32
+    ],
+    [
+     33,
+     45
+    ],
+    [
+     46,
+     59
+    ]
+   ],
+   "min": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "max": [
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.02
+   ]
+  },
+  {
+   "entity": "US_DRIVER_LICENSE",
+   "test": "test_when_driver_licenes_in_text_then_all_us_driver_licenses_found",
+   "text": "ABCDEFG ABCDEFGH ABCDEFGHI",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_DRIVER_LICENSE",
+   "test": "test_when_driver_licenes_in_text_then_all_us_driver_licenses_found",
+   "text": "ABCD ABCDEFGHIJ",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "ABA_ROUTING_NUMBER",
+   "test": "test_when_aba_routing_numbers_then_succeed",
+   "text": "121000358",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "ABA_ROUTING_NUMBER",
+   "test": "test_when_aba_routing_numbers_then_succeed",
+   "text": "3222-7162-7",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "ABA_ROUTING_NUMBER",
+   "test": "test_when_aba_routing_numbers_then_succeed",
+   "text": "121042882",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "ABA_ROUTING_NUMBER",
+   "test": "test_when_aba_routing_numbers_then_succeed",
+   "text": "0711-0130-7",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "ABA_ROUTING_NUMBER",
+   "test": "test_when_aba_routing_numbers_then_succeed",
+   "text": "421042111",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "ABA_ROUTING_NUMBER",
+   "test": "test_when_aba_routing_numbers_then_succeed",
+   "text": "1234-0000-0",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1234567893",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1245319599",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1003000126",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1234-567-893",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     12
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1234 567 893",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     12
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "NPI: 1234567893",
+   "count": 1,
+   "spans": [
+    [
+     5,
+     15
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "Provider identifier 1245319599",
+   "count": 1,
+   "spans": [
+    [
+     20,
+     30
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "NPI 1234567893 and NPI 1245319599",
+   "count": 2,
+   "spans": [
+    [
+     4,
+     14
+    ],
+    [
+     23,
+     33
+    ]
+   ],
+   "min": [
+    1,
+    1
+   ],
+   "max": [
+    1,
+    1
+   ]
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "0234567893",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "3234567893",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "9234567893",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "123456789",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "12345678934",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1111111112",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_NPI",
+   "test": "test_when_npi_in_text_then_all_us_npis_are_found",
+   "text": "1234567890",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4-TE5-MK73",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4TE5MK73",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.4
+   ]
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "Patient 1EG4-TE5-MK73 and 2AG9-XC4-NN22",
+   "count": 2,
+   "spans": [
+    [
+     8,
+     21
+    ],
+    [
+     26,
+     39
+    ]
+   ],
+   "min": [
+    0.5,
+    0.5
+   ],
+   "max": [
+    0.6,
+    0.6
+   ]
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "9XX9-XX9-XX99",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "Medicare ID: 3CD5-FG7-HJ89",
+   "count": 1,
+   "spans": [
+    [
+     13,
+     26
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "The MBI is 4EF6GH8JK12 for this patient",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     22
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.4
+   ]
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1SG4-TE5-MK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4-LE5-MK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4-TE5-OK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4-TE5-MI73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1BG4-TE5-MK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4-ZE5-MK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "AEG4-TE5-MK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "12G4-TE5-MK73",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4TE5MK7",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1EG4TE5MK734",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "US_MBI",
+   "test": "test_when_mbi_in_text_then_all_us_mbis_are_found",
+   "text": "1eg4-te5-mk73",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "UK_NHS",
+   "test": "test_when_nhs_in_text_then_all_uk_nhses_found",
+   "text": "401-023-2137",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     12
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_NHS",
+   "test": "test_when_nhs_in_text_then_all_uk_nhses_found",
+   "text": "221 395 1837",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     12
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_NHS",
+   "test": "test_when_nhs_in_text_then_all_uk_nhses_found",
+   "text": "0032698674",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_NHS",
+   "test": "test_when_nhs_in_text_then_all_uk_nhses_found",
+   "text": "401-023-2138",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "AA 12 34 56 B",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "hh 01 02 03 d",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "tw987654a",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "nino: PR 123612C",
+   "count": 1,
+   "spans": [
+    [
+     6,
+     16
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "Here is my National Insurance Number YZ 61 48 68 B",
+   "count": 1,
+   "spans": [
+    [
+     37,
+     50
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "my AB123456C",
+   "count": 1,
+   "spans": [
+    [
+     3,
+     12
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "contact AB 12 34 56 C now",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     21
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "AA 12 34 56 H",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "AB 12 34 56 1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "ab1234561",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "FQ 00 00 00 C",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "BG123612A",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "my BG123612A",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "nino BG 12 36 12 A",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "nino: nt 99 88 77 a",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_NINO",
+   "test": "test_when_nino_in_text_then_all_uk_ninos_found",
+   "text": "This isn't a valid national insurance number UV 98 76 54 B",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "AB1234567",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "XY9876543",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "ab1234567",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "My passport number is CD7654321 and it expires soon",
+   "count": 1,
+   "spans": [
+    [
+     22,
+     31
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "Passports: AB1234567 and XY9876543",
+   "count": 2,
+   "spans": [
+    [
+     11,
+     20
+    ],
+    [
+     25,
+     34
+    ]
+   ],
+   "min": [
+    0.1,
+    0.1
+   ],
+   "max": [
+    0.1,
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "A12345678",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "ABC123456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "AB123456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "AB12345678",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "123456789",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "AB 1234567",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "1234567AB",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_PASSPORT",
+   "test": "test_when_passport_in_text_then_all_uk_passports_found",
+   "text": "XYZAB1234567QRS",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "M1 1AA",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "M60 1NW",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "W1A 1HQ",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "CR2 6XH",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "DN55 1PT",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "EC1A 1BB",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "GIR 0AA",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "M11AA",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     5
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "EC1A1BB",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "DN551PT",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "GIR0AA",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "My address is SW1A 1AA in London",
+   "count": 1,
+   "spans": [
+    [
+     14,
+     22
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "Send to postcode EC2A 1NT please",
+   "count": 1,
+   "spans": [
+    [
+     17,
+     25
+    ]
+   ],
+   "min": [
+    0.1
+   ],
+   "max": [
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "From SW1A 1AA to EC1A 1BB",
+   "count": 2,
+   "spans": [
+    [
+     5,
+     13
+    ],
+    [
+     17,
+     25
+    ]
+   ],
+   "min": [
+    0.1,
+    0.1
+   ],
+   "max": [
+    0.1,
+    0.1
+   ]
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "QA1 1AA",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "VA1 1AA",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "XA1 1AA",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "M1 1CA",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "M1 1AI",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "1A1 1AA",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_POSTCODE",
+   "test": "test_when_postcode_in_text_then_all_uk_postcodes_found",
+   "text": "ABCM11AADEF",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "MORGA607054SM9IJ",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "MORGA657054SM9IJ",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "FO999512018AA1AB",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "SMIT9801015JK2CD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "Licence: MORGA607054SM9IJ ok",
+   "count": 1,
+   "spans": [
+    [
+     9,
+     25
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "morga607054sm9ij",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "JONES710153J99EF",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "SMITH802290AB1CD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "SMITH812310AB1CD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "SMITH851010AB1CD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_valid_uk_driving_licences",
+   "text": "SMITH862310AB1CD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.3
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "9",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_DRIVING_LICENCE",
+   "test": "test_invalid_uk_driving_licences",
+   "text": "M",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB51 ABC",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "BD62XYZ",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "LN14-HGT",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "aa02 aaa",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "My car reg is AB51 ABC and it expires",
+   "count": 1,
+   "spans": [
+    [
+     14,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "Vehicles AB51 ABC and BD62XYZ were seen",
+   "count": 2,
+   "spans": [
+    [
+     9,
+     17
+    ],
+    [
+     22,
+     29
+    ]
+   ],
+   "min": [
+    1,
+    1
+   ],
+   "max": [
+    1,
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB70 DEF",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "IB51 ABC",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AQ51 ABC",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB00 ABC",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB35 ABC",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB49 ABC",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB80 ABC",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "AB51 AIB",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "A123 BCD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    0.2
+   ],
+   "max": [
+    0.2
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "K1 ABC",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "min": [
+    0.2
+   ],
+   "max": [
+    0.2
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "M456DEF",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.2
+   ],
+   "max": [
+    0.2
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "I123 BCD",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "O123 BCD",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "ABC 123D",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    0.15
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "ABC 1D",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "min": [
+    0.15
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "DEF456G",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.15
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "ABC 123I",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "ABC 123Z",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "hello world",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "1234567890",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "test": "test_when_vehicle_reg_in_text_then_all_uk_registrations_found",
+   "text": "XXXAB51ABCYYY",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "4012888888881881 4012-8888-8888-1881 4012 8888 8888 1881",
+   "count": 3,
+   "spans": [
+    [
+     0,
+     16
+    ],
+    [
+     17,
+     36
+    ],
+    [
+     37,
+     56
+    ]
+   ],
+   "min": [
+    1,
+    1,
+    1
+   ],
+   "max": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "1748503543012",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "122000000000003",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     15
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "my credit card: 122000000000003",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     31
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "371449635398431",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     15
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "5555555555554444",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "5019717010103742",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "30569309025904",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     14
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "6011000400000000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "3528000700000000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "6759649826438453",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "5555555555554444",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "4111111111111111",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "4917300800000000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "4484070000000000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "4012-8888-8888-1882",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "my credit card number is 4012-8888-8888-1882",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "36168002586008",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CREDIT_CARD",
+   "test": "test_when_all_credit_cards_then_succeed",
+   "text": "my credit card number is 36168002586008",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "16Yeky6GMjeNkAiNcBY7ZhrLoMSgg1BoyZ",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     42
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     62
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "16Yeky6GMjeNkAiNcBY7ZhrLoMSgg1BoyZ 3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+   "count": 2,
+   "spans": [
+    [
+     0,
+     34
+    ],
+    [
+     35,
+     69
+    ]
+   ],
+   "min": [
+    1,
+    1
+   ],
+   "max": [
+    1,
+    1
+   ]
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "my wallet address is: 16Yeky6GMjeNkAiNcBY7ZhrLoMSgg1BoyZ",
+   "count": 1,
+   "spans": [
+    [
+     22,
+     56
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "16Yeky6GMjeNkAiNcBY7ZhrLoMSgg1BoyZ2",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "my wallet address is: 16Yeky6GMjeNkAiNcBY7ZhrLoMSgg1BoyZ2",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "CRYPTO",
+   "test": "test_when_all_cryptos_then_succeed",
+   "text": "8f953371d3e85eddb89b05ed6b9e680791055315c73e1025ab5dba7bb2aee189",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "info@presidio.site",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "my email address is info@presidio.site",
+   "count": 1,
+   "spans": [
+    [
+     20,
+     38
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "try one of these emails: info@presidio.site or anotherinfo@presidio.site",
+   "count": 2,
+   "spans": [
+    [
+     25,
+     43
+    ],
+    [
+     47,
+     72
+    ]
+   ],
+   "min": [
+    1,
+    1
+   ],
+   "max": [
+    1,
+    1
+   ]
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "user@xn--80ak6aa92e.com",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "a@xn--d1acufc.xn--p1ai",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "my email is user@xn--80ak6aa92e.com today",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     35
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "my email is info@presidio.",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "EMAIL_ADDRESS",
+   "test": "test_when_all_email_addresses_then_succeed",
+   "text": "this is not an email: hello-world here",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "microsoft.com 192.168.0.1",
+   "count": 1,
+   "spans": [
+    [
+     14,
+     25
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "my ip: 192.168.0",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "microsoft.com 684D:1111:222:3333:4444:5555:6:77",
+   "count": 1,
+   "spans": [
+    [
+     14,
+     47
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "my ip: 684D:1111:222:3333:4444:5555:6:77",
+   "count": 1,
+   "spans": [
+    [
+     7,
+     40
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "684D:1111:222:3333:4444:5555:77",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "2345:0425:2CA1:0000:0000:0567:5673:23b5",
+   "count": 1,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "2345:0425:2CA1::0567:5673:23b5",
+   "count": 1,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "2400:c401::5054:ff:fe1b:b031",
+   "count": 1,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "Use local ipv6 ::",
+   "count": 1,
+   "spans": [
+    [
+     15,
+     17
+    ]
+   ],
+   "min": [
+    0.05
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "my ip: ::1",
+   "count": 1,
+   "spans": [
+    [
+     7,
+     10
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "connecting from ::1",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     19
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_all_ips_then_succeed",
+   "text": "src=:: dst=::1",
+   "count": 2,
+   "spans": [
+    [
+     4,
+     6
+    ],
+    [
+     11,
+     14
+    ]
+   ],
+   "min": [
+    0.05,
+    0.6
+   ],
+   "max": [
+    0.15,
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "2400:c401::5054:ff:fe1b:b031",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "fe80::1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "2001:db8::8a2e:370:7334",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "2001:db8:85a3::8a2e:370",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "2001:db8::1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "fe80::1%eth0",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     12
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_compression_then_succeed",
+   "text": "A099::09C0:876A:130B",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_in_context_then_succeed",
+   "text": "Server IP: 2001:db8::1",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     22
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_in_context_then_succeed",
+   "text": "Connect to [2001:db8::1]:8080",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     23
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_in_context_then_succeed",
+   "text": "my ip is 2400:c401::5054:ff:fe1b:b031",
+   "count": 1,
+   "spans": [
+    [
+     9,
+     37
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_in_context_then_succeed",
+   "text": "Gateway: fe80::1 on interface",
+   "count": 1,
+   "spans": [
+    [
+     9,
+     16
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_in_context_then_succeed",
+   "text": "Visit http://[2001:db8::1]/path",
+   "count": 1,
+   "spans": [
+    [
+     14,
+     25
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv6_in_context_then_succeed",
+   "text": "SSH to user@2001:db8::1",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     23
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:192.0.2.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:10.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     15
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:172.16.0.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     17
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:127.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:255.255.255.255",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:0.0.0.0",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     14
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:0:192.168.1.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:0000:10.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "Mapped: ::ffff:192.168.1.1",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     26
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "Connect to ::ffff:10.0.0.1 now",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     26
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "[::ffff:192.168.1.1]:80",
+   "count": 1,
+   "spans": [
+    [
+     1,
+     19
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::192.168.1.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::10.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:256.0.0.1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_mapped_then_full_span_redacted",
+   "text": "::ffff:192.168.1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "2001:db8::192.168.1.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "2001:db8:1::192.0.2.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "64:ff9b::192.0.2.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "2001:db8:85a3::8a2e:192.168.0.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     31
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "0:0:0:0:0:FFFF:129.144.52.38",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "2001:db8:0:0:0:0:192.168.1.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "NAT64: 64:ff9b::198.51.100.1",
+   "count": 1,
+   "spans": [
+    [
+     7,
+     28
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "Tunnel to 2001:db8::10.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     28
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ipv4_embedded_then_full_span_redacted",
+   "text": "2001:db8::256.1.1.1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_multiple_ips_then_all_found",
+   "text": "IPv4: 192.168.1.1, IPv6: 2001:db8::1",
+   "count": 2,
+   "spans": [
+    [
+     6,
+     17
+    ],
+    [
+     25,
+     36
+    ]
+   ],
+   "min": [
+    0.6,
+    0.6
+   ],
+   "max": [
+    0.81,
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_multiple_ips_then_all_found",
+   "text": "Primary: 10.0.0.1, Secondary: 172.16.0.1",
+   "count": 2,
+   "spans": [
+    [
+     9,
+     17
+    ],
+    [
+     30,
+     40
+    ]
+   ],
+   "min": [
+    0.6,
+    0.6
+   ],
+   "max": [
+    0.81,
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_multiple_ips_then_all_found",
+   "text": "IPs: 192.168.1.1, 10.0.0.1, 2001:db8::1",
+   "count": 3,
+   "spans": [
+    [
+     5,
+     16
+    ],
+    [
+     18,
+     26
+    ],
+    [
+     28,
+     39
+    ]
+   ],
+   "min": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "max": [
+    0.81,
+    0.81,
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "MAC address aa:bb:cc:dd:ee:ff",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "Time 12:34:56",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "Ratio 1:2:3:4",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "CSS color #ff00aa",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "Version 1.2.3",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "Port 80:443",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "abc:def:ghi",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "123:abc",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "file:///path/to/file",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "std::cout",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": "MyClass::toString",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_non_ip_pattern_then_no_match",
+   "text": ":::",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "IP192.168.1.1text",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "text192.168.1.1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "(192.168.1.1)",
+   "count": 1,
+   "spans": [
+    [
+     1,
+     12
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "'2001:db8::1'",
+   "count": 1,
+   "spans": [
+    [
+     1,
+     12
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "IP: 192.168.1.1.",
+   "count": 1,
+   "spans": [
+    [
+     4,
+     15
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "192.168.1.1,",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "[2001:db8::1]",
+   "count": 1,
+   "spans": [
+    [
+     1,
+     12
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "Server IP: 2400:c401::5054:ff:fe1b:b031.",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     39
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "2001:db8::1.",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "fe80::1text",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "text2001:db8::1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_ip_at_boundary_then_correct_span",
+   "text": "192.168.1.1.1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "256.256.256.256",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "192.168.1.256",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "gggg:hhhh::1234",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "192.168.1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "300.168.1.1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "12345:db8::1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "2001::db8::1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "2001::25de::cade",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "192.168.2.1@eth0",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     11
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "text::ffff:192.0.2.1",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     20
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_invalid_ip_then_no_match",
+   "text": "foo2001:db8::10.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     13,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "localhost 127.0.0.1",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     19
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Broadcast 255.255.255.255",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     25
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Private 10.0.0.0",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     16
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Link-local 169.254.1.1",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     22
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Subnet 172.16.0.0",
+   "count": 1,
+   "spans": [
+    [
+     7,
+     17
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Default 0.0.0.0",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     15
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Unspecified ::",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     14
+    ]
+   ],
+   "min": [
+    0.05
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Loopback ::1",
+   "count": 1,
+   "spans": [
+    [
+     9,
+     12
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_special_ip_variants_then_succeed",
+   "text": "Multicast ff02::1",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     17
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "192.168.1.0/24",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     14
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "10.0.0.0/8",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "0.0.0.0/0",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "192.168.1.1/32",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     14
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "2001:db8::/32",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "fe80::/10",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     9
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "::1/128",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     7
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "::/0",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     4
+    ]
+   ],
+   "min": [
+    0.05
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "::/128",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "min": [
+    0.05
+   ],
+   "max": [
+    0.15
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "::ffff:192.168.1.0/96",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "64:ff9b::192.0.2.0/96",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "Subnet: 192.168.1.0/24",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     22
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "Prefix: 2001:db8::/32",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "Route is 10.0.0.0/8.",
+   "count": 1,
+   "spans": [
+    [
+     9,
+     19
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "Use 2001:db8::/32.",
+   "count": 1,
+   "spans": [
+    [
+     4,
+     17
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "10.0.0.0/123",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "IP_ADDRESS",
+   "test": "test_when_cidr_notation_then_largest_span_redacted",
+   "text": "2001:db8::/9999",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     10
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.81
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "My MAC address is 00:1A:2B:3C:4D:5E",
+   "count": 1,
+   "spans": [
+    [
+     18,
+     35
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Device MAC: AA:BB:CC:DD:EE:FF",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     29
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "MAC: 01:23:45:67:89:AB",
+   "count": 1,
+   "spans": [
+    [
+     5,
+     22
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Lowercase MAC: 0a:23:f5:67:89:ac",
+   "count": 1,
+   "spans": [
+    [
+     15,
+     32
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "My MAC address is 00-1A-2B-3C-4D-5E",
+   "count": 1,
+   "spans": [
+    [
+     18,
+     35
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Hardware address: AA-BB-CC-DD-EE-FF",
+   "count": 1,
+   "spans": [
+    [
+     18,
+     35
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "MAC: 01-23-45-67-89-AB",
+   "count": 1,
+   "spans": [
+    [
+     5,
+     22
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Lowercase MAC: 01-b3-4a-67-d9-cf",
+   "count": 1,
+   "spans": [
+    [
+     15,
+     32
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Mixedcase MAC: 0d-B3-4a-6A-d9-cF",
+   "count": 1,
+   "spans": [
+    [
+     15,
+     32
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Cisco MAC: 0012.3456.789A",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     25
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "My MAC is 0012.3456.789a",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     24
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Physical address is aabb.ccdd.eeff",
+   "count": 1,
+   "spans": [
+    [
+     20,
+     34
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "MACs: 00:11:22:33:44:55 and AA-BB-CC-DD-EE-FF",
+   "count": 2,
+   "spans": [
+    [
+     6,
+     23
+    ],
+    [
+     28,
+     45
+    ]
+   ],
+   "min": [
+    0.6,
+    0.6
+   ],
+   "max": [
+    0.6,
+    0.6
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "ethernet mac address: 00:1A:2B:3C:4D:5E",
+   "count": 1,
+   "spans": [
+    [
+     22,
+     39
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "The hardware address is AA-BB-CC-DD-EE-FF",
+   "count": 1,
+   "spans": [
+    [
+     24,
+     41
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Not a MAC: 00:1A:2B:3C:4D",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Invalid: ZZ:ZZ:ZZ:ZZ:ZZ:ZZ",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Broadcast: FF:FF:FF:FF:FF:FF",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Invalid: 00:00:00:00:00:00",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "MAC_ADDRESS",
+   "test": "test_when_mac_addresses_then_succeed",
+   "text": "Mixed test cases for hyphens and colons: 10:2F:33-AC-29-C3",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "https://www.microsoft.com/",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://www.microsoft.com/",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     25
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://www.microsoft.com",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://microsoft.com",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://microsoft.site",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://microsoft.webcam",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://microsoft.vlaanderen",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "https://webhook.site/a8eedfd6-9d8a-44e0-b0fc-cc7d517db5dc?q=1&b=2",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     65
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "https://www.microsoft.com/store/abc/",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "microsoft.com",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     13
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "my domains: microsoft.com google.co.il",
+   "count": 2,
+   "spans": [
+    [
+     12,
+     25
+    ],
+    [
+     26,
+     38
+    ]
+   ],
+   "min": [
+    0.5,
+    0.5
+   ],
+   "max": [
+    0.5,
+    0.5
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "\"https://presidio.dataprivacystack.org/\"",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     40
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "'https://presidio.dataprivacystack.org/'",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     40
+    ]
+   ],
+   "min": [
+    0.6
+   ],
+   "max": [
+    0.6
+   ]
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "www.microsoft",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "http://microsoft",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "URL",
+   "test": "test_when_all_urls_then_succeed",
+   "text": "'www.microsoft'",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Request ID: 550e8400-e29b-41d4-a716-446655440000",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     48
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "User UUID: 6fa459ea-ee8a-3ca4-894e-db77e160355e",
+   "count": 1,
+   "spans": [
+    [
+     11,
+     47
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Trace: f47ac10b-58cc-1372-8567-0e02b2c3d479",
+   "count": 1,
+   "spans": [
+    [
+     7,
+     43
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "DCE UUID: 550e8400-e29b-21d4-a716-446655440000",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     46
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "6ba7b810-9dad-31d1-80b4-00c04fd430c8",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Object id 74738ff5-5367-5958-9aee-98fffdcd1876 created",
+   "count": 1,
+   "spans": [
+    [
+     10,
+     46
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Sortable ID: 1ec9414c-232a-6b00-b3c8-9e6bdeced846",
+   "count": 1,
+   "spans": [
+    [
+     13,
+     49
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "New record: 018f4f8e-9a3b-7c3d-8e9f-1a2b3c4d5e6f",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     48
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Custom UUID: 550e8400-e29b-81d4-a716-446655440000",
+   "count": 1,
+   "spans": [
+    [
+     13,
+     49
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "GUID: 550E8400-E29B-41D4-A716-446655440000",
+   "count": 1,
+   "spans": [
+    [
+     6,
+     42
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "unique identifier: 550e8400-e29b-41d4-a716-446655440000",
+   "count": 1,
+   "spans": [
+    [
+     19,
+     55
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "The guid is 6fa459ea-ee8a-3ca4-894e-db77e160355e",
+   "count": 1,
+   "spans": [
+    [
+     12,
+     48
+    ]
+   ],
+   "min": [
+    0.5
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "IDs: 550e8400-e29b-41d4-a716-446655440000 and f47ac10b-58cc-1372-8567-0e02b2c3d479",
+   "count": 2,
+   "spans": [
+    [
+     5,
+     41
+    ],
+    [
+     46,
+     82
+    ]
+   ],
+   "min": [
+    0.5,
+    0.5
+   ],
+   "max": [
+    0.5,
+    0.5
+   ]
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Not a UUID: 550e8400-e29b-41d4-a716",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Invalid: zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Nil UUID: 00000000-0000-0000-0000-000000000000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Bad version: 550e8400-e29b-01d4-a716-446655440000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Bad version: 550e8400-e29b-91d4-a716-446655440000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "UUID",
+   "test": "test_when_uuids_then_succeed",
+   "text": "Bad variant: 550e8400-e29b-41d4-1716-446655440000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AL47212110090000000235698741",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AL47 2121 1009 0000 0002 3569 8741",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AL47 212A 1009 0000 0002 3569 8741",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AL47 212A 1009 0000 0002 3569 874",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AL47 2121 1009 0000 0002 3569 8740",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AD1200012030200359100100",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AD12 0001 2030 2003 5910 0100",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AD12000A2030200359100100",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AD12000A203020035910010",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AD12 0001 2030 2003 5910 0101",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AT611904300234573201",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AT61 1904 3002 3457 3201",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AT61 1904 A002 3457 3201",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AT61 1904 3002 3457 320",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AT61 1904 3002 3457 3202",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AZ21NABZ00000000137010001944",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AZ21 NABZ 0000 0000 1370 1000 1944",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AZ21NABZ000000001370100019",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AZ21NABZ0000000013701000194",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AZ21NABZ00000000137010001945",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BH67BMAG00001299123456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BH67 BMAG 0000 1299 1234 56",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BH67BMA100001299123456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BH67BMAG0000129912345",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BH67BMAG00001299123457",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BY13NBRB3600900000002Z00AB00",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BY13 NBRB 3600 9000 0000 2Z00 AB00",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BY13NBRBA600900000002Z00AB00",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BY13 NBRB 3600 9000 0000 2Z00 AB0",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BY13NBRB3600900000002Z00AB01",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BE68539007547034",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     16
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BE71 0961 2345 6769",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     19
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BE71 A961 2345 6769",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BE6853900754703",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BE71 0961 2345 6760",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BA391290079401028494",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BA39 1290 0794 0102 8494",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BA39 A290 0794 0102 8494",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BA39129007940102849",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BA39 1290 0794 0102 8495",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BR9700360305000010009795493P1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BR97 0036 0305 0000 1000 9795 493P 1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BR97 0036 A305 0000 1000 9795 493P 1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BR9700360305000010009795493P",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BR97 0036 0305 0000 1000 9795 493P 2",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BG80BNBG96611020345678",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BG80 BNBG 9661 1020 3456 78",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BG80 BNBG 9661 A020 3456 78",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BG80BNBG9661102034567",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "BG80 BNBG 9661 1020 3456 79",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CR05015202001026284066",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CR05 0152 0200 1026 2840 66",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CR05 0152 0200 1026 2840 6A",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CR05 0152 0200 1026 2840 6",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CR05 0152 0200 1026 2840 67",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HR1210010051863000160",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HR12 1001 0051 8630 0016 0",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HR12 001 0051 8630 0016 A",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HR121001005186300016",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HR12 1001 0051 8630 0016 1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CY17002001280000001200527600",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CY17 0020 0128 0000 0012 0052 7600",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CY17 0020 A128 0000 0012 0052 7600",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CY17 0020 0128 0000 0012 0052 760",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CY17 0020 0128 0000 0012 0052 7601",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CZ6508000000192000145399",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CZ65 0800 0000 1920 0014 5399",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CZ65 0800 A000 1920 0014 5399",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CZ65 0800 0000 1920 0014 539",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CZ65 0800 0000 1920 0014 5390",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DK5000400440116243",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DK50 0040 0440 1162 43",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DK50 0040 A440 1162 43",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DK50 0040 0440 1162 4",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DK50 0040 0440 1162 44",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DO28BAGR00000001212453611324",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DO28 BAGR 0000 0001 2124 5361 1324",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DO28 BAGR A000 0001 2124 5361 1324",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DO28 BAGR 0000 0001 2124 5361 132",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DO28 BAGR 0000 0001 2124 5361 1325",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TL380080012345678910157",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TL38 0080 0123 4567 8910 157",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TL38 A080 0123 4567 8910 157",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TL38 0080 0123 4567 8910 158",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EE382200221020145685",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EE38 2200 2210 2014 5685",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EE38 A200 2210 2014 5685",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EE38 2200 2210  014 5686",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FO6264600001631634",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FO62 6460 0001 6316 34",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FO62 A460 0001 6316 34",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FO62 6460 0001 6316 35",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FI2112345600000785",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FI21 1234 5600 0007 85",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FI21 A234 5600 0007 85",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FI21 1234 5600 0007 86",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FR1420041010050500013M02606",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FR14 2004 1010 0505 0001 3M02 606",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     33
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FR14 A004 1010 0505 0001 3M02 606",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "FR14 2004 1010 0505 0001 3M02 607",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GE29NB0000000101904917",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GE29 NB00 0000 0101 9049 17",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GE29 NBA0 0000 0101 9049 17",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GE29 NB00 0000 0101 9049 18",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DE89370400440532013000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DE89 3704 0044 0532 0130 00",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DE89 A704 0044 0532 0130 00",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "DE89 3704 0044 0532 0130 01",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GI75NWBK000000007099453",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GI75 NWBK 0000 0000 7099 453",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GI75 aWBK 0000 0000 7099 453",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GI75 NWBK 0000 0000 7099 454",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GR1601101250000000012300695",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GR16 0110 1250 0000 0001 2300 695",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     33
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GR16 A110 1250 0000 0001 2300 695",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GR16 0110 1250 0000 0001 2300 696",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GL8964710001000206",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GL89 6471 0001 0002 06",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GL89 A471 0001 0002 06",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GL89 6471 0001 0002 07",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GT82TRAJ01020000001210029690",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GT82 TRAJ 0102 0000 0012 1002 9690",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "G T82 TRAJ 0102 0000 0012 1002 9690",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GT82 TRAJ 0102 0000 0012 1002 9691",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HU42117730161111101800000000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HU42 1177 3016 1111 1018 0000 0000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HU42 A177 3016 1111 1018 0000 0000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "HU42 1177 3016 1111 1018 0000 0001",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IS140159260076545510730339",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IS14 0159 2600 7654 5510 7303 39",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     32
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IS14 A159 2600 7654 5510 7303 39",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IS14 0159 2600 7654 5510 7303 30",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IE29AIBK93115212345678",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IE29 AIBK 9311 5212 3456 78",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IE29 AIBK A311 5212 3456 78",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IE29 AIBK 9311 5212 3456 79",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL620108000000099999999",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL62 0108 0000 0009 9999 999",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL62 A108 0000 0009 9999 999",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL62 0108 0000 0009 9999 990",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IT60X0542811101000000123456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IT60 X054 2811 1010 0000 0123 456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     33
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IT60 XW54 2811 1010 0000 0123 456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IT60 X054 2811 1010 0000 0123 457",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "JO94CBJO0010000000000131000302",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     30
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "JO94 CBJO 0010 0000 0000 0131 0003 02",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     37
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "JO94 CBJO A010 0000 0000 0131 0003 02",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "JO94 CBJO 0010 0000 0000 0131 0003 03",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KZ86125KZT5004100100",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KZ86 125K ZT50 0410 0100",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KZ86 A25K ZT50 0410 0100",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KZ86 125K ZT50 0410 0101",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "XK051212012345678906",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "XK05 1212 0123 4567 8906",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "XK05 A212 0123 4567 8906",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "XK05 1212 0123 4567 8907",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KW81CBKU0000000000001234560101",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     30
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KW81 CBKU 0000 0000 0000 1234 5601 01",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     37
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KW81 aBKU 0000 0000 0000 1234 5601 01",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "KW81 CBKU 0000 0000 0000 1234 5601 02",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LV80BANK0000435195001",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LV80 BANK 0000 4351 9500 1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LV80 bANK 0000 4351 9500 1",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LV80 BANK 0000 4351 9500 2",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LB62099900000001001901229114",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LB62 0999 0000 0001 0019 0122 9114",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LB62 A999 0000 0001 0019 0122 9114",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LB62 0999 0000 0001 0019 0122 9115",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LI21088100002324013AA",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LI21 0881 0000 2324 013A A",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LI21 A881 0000 2324 013A A",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LI21 0881 0000 2324 013A B",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LT121000011101001000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LT12 1000 0111 0100 1000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LT12 A000 0111 0100 1000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LT12 1000 0111 0100 1001",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LU280019400644750000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     20
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LU28 0019 4006 4475 0000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LU28 A019 4006 4475 0000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LU28 0019 4006 4475 0001",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MT84MALT011000012345MTLCAST001S",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     31
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MT84 MALT 0110 0001 2345 MTLC AST0 01S",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     38
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MT84 MALT A110 0001 2345 MTLC AST0 01S",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MT84 MALT 0110 0001 2345 MTLC AST0 01T",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MR1300020001010000123456753",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MR13 0002 0001 0100 0012 3456 753",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     33
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MR13 A002 0001 0100 0012 3456 753",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MR13 0002 0001 0100 0012 3456 754",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MU17BOMM0101101030300200000MUR",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     30
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MU17 BOMM 0101 1010 3030 0200 000M UR",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     37
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MU17 BOMM A101 1010 3030 0200 000M UR",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MU17 BOMM 0101 1010 3030 0200 000M US",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MD24AG000225100013104168",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MD24 AG00 0225 1000 1310 4168",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MD24 AG00 0225 1000 1310 416",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MD24 AG00 0225 1000 1310 4169",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MC5811222000010123456789030",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MC58 1122 2000 0101 2345 6789 030",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     33
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MC58 A122 2000 0101 2345 6789 030",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MC58 1122 2000 0101 2345 6789 031",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ME25505000012345678951",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ME25 5050 0001 2345 6789 51",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ME25 A050 0001 2345 6789 51",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ME25 5050 0001 2345 6789 52",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NL91ABNA0417164300",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NL91 ABNA 0417 1643 00",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NL91 1BNA 0417 1643 00",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NL91 ABNA 0417 1643 01",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MK07250120000058984",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     19
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MK07 2501 2000 0058 984",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MK07 A501 2000 0058 984",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "MK07 2501 2000 0058 985",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NO9386011117947",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     15
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NO93 8601 1117 947",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     18
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NO93 A601 1117 947",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "NO93 8601 1117 948",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PK36SCBL0000001123456702",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PK36 SCBL 0000 0011 2345 6702",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PK36 SCBL A000 0011 2345 6702",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PK36 SCBL 0000 0011 2345 6703",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PS92PALS000000000400123456702",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PS92 PALS 0000 0000 0400 1234 5670 2",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PS92 PALS A000 0000 0400 1234 5670 2",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PS92 PALS 0000 0000 0400 1234 5670 3",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PL61109010140000071219812874",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PL61 1090 1014 0000 0712 1981 2874",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     34
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PL61 A090 1014 0000 0712 1981 2874",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PL61 1090 1014 0000 0712 1981 2875",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PT50000201231234567890154",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     25
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PT50 0002 0123 1234 5678 9015 4",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     31
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PT50 A002 0123 1234 5678 9015 4",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "PT50 0002 0123 1234 5678 9015 5",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "QA58DOHB00001234567890ABCDEFG",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "QA58 DOHB 0000 1234 5678 90AB CDEF G",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "QA58 0OHB 0000 1234 5678 90AB CDEF G",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "QA58 DOHB 0000 1234 5678 90AB CDEF H",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RO49AAAA1B31007593840000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RO49 AAAA 1B31 0075 9384 0000",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RO49 0AAA 1B31 0075 9384 0000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RO49 AAAA 1B31 0075 9384 0001",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SM86U0322509800000000270100",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SM86 U032 2509 8000 0000 0270 100",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     33
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SM86 0032 2509 8000 0000 0270 100",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SM86 U032 2509 8000 0000 0270 101",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SA0380000000608010167519",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SA03 8000 0000 6080 1016 7519",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SA03 A000 0000 6080 1016 7519",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SA03 8000 0000 6080 1016 7510",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RS35260005601001611379",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RS35 2600 0560 1001 6113 79",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RS35 A600 0560 1001 6113 79",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "RS35 2600 0560 1001 6113 70",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SK3112000000198742637541",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SK31 1200 0000 1987 4263 7541",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SK31 A200 0000 1987 4263 7541",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SK31 1200 0000 1987 4263 7542",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SI56263300012039086",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     19
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SI56 2633 0001 2039 086",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SI56 A633 0001 2039 086",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SI56 2633 0001 2039 087",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ES9121000418450200051332",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ES91 2100 0418 4502 0005 1332",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ES91 A100 0418 4502 0005 1332",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "ES91 2100 0418 4502 0005 1333",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SE4550000000058398257466",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SE45 5000 0000 0583 9825 7466",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SE45 A000 0000 0583 9825 7466",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SE45 5000 0000 0583 9825 7467",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CH9300762011623852957",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     21
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CH93 0076 2011 6238 5295 7",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CH93 A076 2011 6238 5295 7",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CH93 0076 2011 6238 5295 8",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TN5910006035183598478831",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TN59 1000 6035 1835 9847 8831",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TN59 A000 6035 1835 9847 8831",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CH93 0076 2011 6238 5295 9",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TR330006100519786457841326",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     26
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TR33 0006 1005 1978 6457 8413 26",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     32
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TR33 A006 1005 1978 6457 8413 26",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "TR33 0006 1005 1978 6457 8413 27",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AE070331234567890123456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AE07 0331 2345 6789 0123 456",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AE07 A331 2345 6789 0123 456",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AE07 0331 2345 6789 0123 457",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GB29NWBK60161331926819",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GB29 NWBK 6016 1331 9268 19",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GB29 1WBK 6016 1331 9268 19",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "GB29 NWBK 6016 1331 9268 10",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VA59001123000012345678",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     22
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VA59 0011 2300 0012 3456 78",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     27
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VA59 A011 2300 0012 3456 78",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VA59 0011 2300 0012 3456 79",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VG96VPVG0000012345678901",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     24
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VG96 VPVG 0000 0123 4567 8901",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VG96 VPVG A000 0123 4567 8901",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "VG96 VPVG 0000 0123 4567 8902",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EG380019000500000000263180002",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EG38 0019 0005 0000 0000 2631 8000 2",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EG38A019000500000000263180002",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "EG380019000500000000263180003",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "UA213223130000026007233566001",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     29
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "UA21 3223 1300 0002 6007 2335 6600 1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     36
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "UA21A223130000026007233566001",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "UA213223130000026007233566002",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IQ98NBIQ850123456789012",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     23
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IQ98 NBIQ 8501 2345 6789 012",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IQ98NBIQ850123456789013",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LC55HEMM000100010012001200023015",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     32
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LC55 HEMM 0001 0001 0012 0012 0002 3015",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     39
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LC55HEMM000100010012001200023016",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SC18SSCB11010000000000001497USD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     31
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SC18 SSCB 1101 0000 0000 0000 1497 USD",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     38
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "SC18SSCB11010000000000001497USE",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LY83002048000020100120361",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     25
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LY83 0020 4800 0020 1001 2036 1",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     31
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "LY83002048000020100120362",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "this is an iban VG96 VPVG 0000 0123 4567 8901 in a sentence",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     45
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "this is an iban VG96 VPVG 0000 0123 4567 8901 X in a sentence",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     45
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AB150120690000003111141",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AB150120690000003111141",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL15 0120 6900 0000",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL15 0120 6900 0000 3111 0120 6900 0000 3111 141",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "IL150120690000003111141",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AM47212110090000000235698740",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "list of ibans: AL47212110090000000235698741, AL47212110090000000235698741",
+   "count": 2,
+   "spans": [
+    [
+     15,
+     43
+    ],
+    [
+     45,
+     73
+    ]
+   ],
+   "min": [
+    1,
+    1
+   ],
+   "max": [
+    1,
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "Dash as iban separator: AL47-2121-1009-0000-0002-3569-8741",
+   "count": 1,
+   "spans": [
+    [
+     24,
+     58
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "Slash as iban separator: AL47/2121/1009/0000/0002/3569/8741",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "Dalla's Pizza | 3843 Peartree Road, Bamblee, SD 20241 440-600-5124",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "AL47212110090000000235698741 ALL CAPS",
+   "count": 1,
+   "spans": [
+    [
+     0,
+     28
+    ]
+   ],
+   "min": [
+    1
+   ],
+   "max": [
+    1
+   ]
+  },
+  {
+   "entity": "IBAN_CODE",
+   "test": "test_when_all_ibans_then_succeed",
+   "text": "CY17 0020 0128 0000 0012 0052 7601 failed",
+   "count": 0,
+   "spans": [],
+   "min": [],
+   "max": []
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "My US number is (415) 555-0132, and my international one is +1 415 555 0132",
+   "count": 2,
+   "spans": [
+    [
+     16,
+     30
+    ],
+    [
+     60,
+     75
+    ]
+   ],
+   "min": [
+    0.4,
+    0.4
+   ],
+   "max": [
+    0.4,
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "My Israeli number is 09-7625400",
+   "count": 1,
+   "spans": [
+    [
+     21,
+     31
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "_: (415)555-0132",
+   "count": 1,
+   "spans": [
+    [
+     3,
+     16
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "United States: (415)555-0132",
+   "count": 1,
+   "spans": [
+    [
+     15,
+     28
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "US: 415-555-0132",
+   "count": 1,
+   "spans": [
+    [
+     4,
+     16
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "_: +55 11 98456 5666",
+   "count": 1,
+   "spans": [
+    [
+     3,
+     20
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "Brazil: +55 11 98456 5666",
+   "count": 1,
+   "spans": [
+    [
+     8,
+     25
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "BR: +55 11 98456 5666",
+   "count": 1,
+   "spans": [
+    [
+     4,
+     21
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "My Japanese number is 090-1234-5678",
+   "count": 1,
+   "spans": [
+    [
+     22,
+     35
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "My CN number is 13812345678",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     27
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_all_phones_then_succeed",
+   "text": "My UK number is 020 7946 0958",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     29
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR",
+    "JP",
+    "CN"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_phone_with_leniency_then_succeed",
+   "text": "My US number is (415) 555-0132, and my international one is415-555-0132",
+   "count": 1,
+   "spans": [
+    [
+     16,
+     30
+    ]
+   ],
+   "min": [
+    0.4
+   ],
+   "max": [
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR"
+   ]
+  },
+  {
+   "entity": "PHONE_NUMBER",
+   "test": "test_when_phone_with_leniency_then_succeed",
+   "text": "My US number is (415) 555-0132, and my international one is 91-415-555-0132",
+   "count": 2,
+   "spans": [
+    [
+     16,
+     30
+    ],
+    [
+     60,
+     75
+    ]
+   ],
+   "min": [
+    0.4,
+    0.4
+   ],
+   "max": [
+    0.4,
+    0.4
+   ],
+   "regions": [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "IL",
+    "IN",
+    "CA",
+    "BR"
+   ]
+  }
+ ]
+}

@@ -245,6 +245,13 @@ public class AgentSessionCreateOptions
     public CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? ToolInterceptor { get; init; }
 
     /// <summary>
+    /// Gets or initializes what decides, at each request of the session, whether it is confidential, and gives the boundary
+    /// its requests then pass through before the provider (<see cref="CodeAlta.Agent.Runtime.IAgentProviderBoundary"/>).
+    /// <see langword="null"/> for a session whose requests go as they are.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.IAgentProviderBoundarySource? ProviderBoundary { get; init; }
+
+    /// <summary>
     /// Gets or initializes where the built-in tools of the session run, and whether a run may start: set for a
     /// session whose tools may run in a sandbox. <see langword="null"/> where they run in this process.
     /// </summary>

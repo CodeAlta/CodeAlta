@@ -711,6 +711,7 @@ public sealed partial class SessionViewJournalStore
             Sandbox = state.Sandbox,
             TitleMode = state.TitleMode,
             ReviewBeforeCommit = state.ReviewBeforeCommit,
+            Confidential = state.Confidential,
             ReviewNoted = state.ReviewNoted,
             Options = state.Options,
             SandboxNoted = state.SandboxNoted,

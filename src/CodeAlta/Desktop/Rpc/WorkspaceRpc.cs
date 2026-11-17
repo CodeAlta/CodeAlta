@@ -45,6 +45,14 @@ internal sealed partial class WorkspaceService
                 with { UnreadableProjectFiles = UnreadableFiles(snapshot.UnreadableProjects) };
         };
 
+    // Marks the secure projects, whose sessions are confidential, which the window shows with a padlock.
+    internal static WorkspaceSnapshot WithPrivacy(WorkspaceSnapshot snapshot, CodeAltaConfigStore config)
+        => snapshot with
+        {
+            Projects = [.. snapshot.Projects.Select(project => project.MachineId is null && config.IsProjectPseudonymized(project.Path)
+                ? project with { Secure = true } : project)],
+        };
+
     // The project files the snapshot skipped, for the window to say so; a few, each path bounded as the others.
     internal static string[]? UnreadableFiles(IReadOnlyList<UnreadableProjectFile> unreadable)
         => unreadable.Count == 0 ? null
@@ -467,6 +475,11 @@ internal sealed record WorkspaceProject(string Id, string Name, string Path, boo
     // The name of that repository, which the window shows before the name of the sub-project away from its group.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RepositoryName { get; init; }
+
+    // Whether the project is secure: its sessions are confidential ([privacy] pseudonymize of its configuration); absent
+    // for a normal project.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Secure { get; init; }
 }
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,

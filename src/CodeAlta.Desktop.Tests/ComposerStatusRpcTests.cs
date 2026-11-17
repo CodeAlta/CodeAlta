@@ -43,8 +43,8 @@ public sealed class ComposerStatusRpcTests
         var global = await fixture.Service.ReadAsync(new(Epoch, null), default);
         var project = await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id), default);
 
-        Assert.AreEqual(new ComposerStatusItem("mcp", "mcp-status", "MCP", "2/2 · tools not loaded", "info", "mcp"), global.Items.Single());
-        Assert.AreEqual(new ComposerStatusItem("mcp", "mcp-status", "MCP", "3/3 · tools not loaded", "info", "mcp"), project.Items.Single());
+        Assert.AreEqual(new ComposerStatusItem("mcp", "mcp-status", "MCP", "2/2 · tools not loaded", "info", "mcp", BuiltIn: true), global.Items.Single());
+        Assert.AreEqual(new ComposerStatusItem("mcp", "mcp-status", "MCP", "3/3 · tools not loaded", "info", "mcp", BuiltIn: true), project.Items.Single());
     }
 
     [TestMethod]

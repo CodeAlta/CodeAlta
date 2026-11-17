@@ -11,6 +11,7 @@ import { useSurfaceDensity } from "./promptSurface/PromptSurfaceParts";
 import { McpSessionDialog, type ReadMcp } from "./mcpSession/McpSessionDialog";
 import { settingsNavigation } from "./settingsNavigation";
 import { useShellLanguage } from "./shellLanguage";
+import { isBuiltInPluginKey, pluginShortText, settingText } from "./settings/settingsCatalog";
 
 const refreshMilliseconds = 10_000;
 type Read = (request: ComposerStatusRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<unknown>;
@@ -29,7 +30,7 @@ export function ComposerStatus({ epoch, projectId, sessionId, read, readMcp }: {
   /** Reads the MCP servers and tools of the session for the window of the MCP item; without it, the item opens Settings. */
   readMcp?: ReadMcp;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const [mcpShown, setMcpShown] = useState(false);
   const plugins = useContext(PluginUiContext);
   const observing = useContext(PaneObservingContext);
@@ -62,11 +63,13 @@ export function ComposerStatus({ epoch, projectId, sessionId, read, readMcp }: {
     onClose={() => setMcpShown(false)} onOpenSettings={() => { setMcpShown(false); settingsNavigation.open("mcp"); }} />, document.body) : null;
   if (items.length === 0) return mcpWindow;
   return <span className="composer-plugin-status">{items.map(item => {
+    const label = pluginShortText(locale, item.label, item.builtIn), whole = pluginShortText(locale, item.text, item.builtIn);
     // The whole text where there is room; its first part ("1/1") otherwise, the whole in the tooltip.
-    const text = item.text && density !== "wide" ? shortStatusText(item.text) : item.text;
-    const about = [item.label, item.text].filter(Boolean).join(" ");
+    const text = whole && density !== "wide" ? shortStatusText(whole) : whole;
+    const about = [label, whole].filter(Boolean).join(" ");
+    const command = item.commandId ? plugins.contributions.commands.find(candidate => candidate.id === item.commandId) : undefined;
     const content = <>{icons[item.pluginId] && <AppIcon name={icons[item.pluginId]} size={14} />}
-      {item.label && <strong>{item.label}</strong>}{text && <span className="composer-plugin-status-text">{text}</span>}
+      {label && <strong>{label}</strong>}{text && <span className="composer-plugin-status-text">{text}</span>}
       <span className="composer-plugin-status-dot" aria-hidden="true" /></>;
     return item.pluginId === "mcp" && readMcp
       ? <Button key={item.key} variant="minimal" size="small" className="composer-plugin-status-item" data-tone={item.tone} title={`${about}\n${t("Show MCP servers and tools")}`}
@@ -76,7 +79,7 @@ export function ComposerStatus({ epoch, projectId, sessionId, read, readMcp }: {
         onClick={() => settingsNavigation.open(item.settingsPage!)}>{content}</Button>
       : item.commandId
       ? <Button key={item.key} variant="minimal" size="small" className="composer-plugin-status-item" data-tone={item.tone}
-        title={[about, plugins.contributions.commands.find(command => command.id === item.commandId)?.description].filter(Boolean).join("\n")}
+        title={[about, command?.description && settingText(locale, command.description, isBuiltInPluginKey(command.pluginKey))].filter(Boolean).join("\n")}
         onClick={() => plugins.run(item.commandId!, { projectId, sessionId })}>{content}</Button>
       : <span key={item.key} className="composer-plugin-status-item" data-tone={item.tone} title={about}>{content}</span>;
   })}{mcpWindow}</span>;

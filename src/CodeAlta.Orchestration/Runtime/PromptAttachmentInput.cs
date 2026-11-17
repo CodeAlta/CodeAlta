@@ -35,9 +35,32 @@ public static class PromptAttachmentInput
         SessionViewDescriptor session, CatalogOptions catalog, string path, AgentModelInfo? model, CancellationToken cancellationToken)
         => MaterializeAsync(session, catalog, path, model, documents: null, cancellationToken);
 
+    /// <summary>
+    /// The same as <see cref="MaterializeAsync(SessionViewDescriptor, CatalogOptions, string, AgentModelInfo?, CancellationToken)"/> for a session
+    /// that may be confidential: its PDFs are converted to Markdown whatever the model reads, since only text is pseudonymized.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="catalog">Where the copies are saved.</param>
+    /// <param name="path">The file of the attachments.</param>
+    /// <param name="model">The model of the session.</param>
+    /// <param name="confidential">Whether the session is confidential.</param>
+    /// <param name="cancellationToken">Stops the save.</param>
+    /// <returns>The input items, in their order.</returns>
+    /// <exception cref="ArgumentException">The attachments were not found.</exception>
+    /// <exception cref="NotSupportedException">An image is sent to a model that does not read images.</exception>
+    /// <exception cref="IOException">A copy could not be saved.</exception>
+    public static Task<IReadOnlyList<AgentInputItem>> MaterializeAsync(
+        SessionViewDescriptor session, CatalogOptions catalog, string path, AgentModelInfo? model, bool confidential, CancellationToken cancellationToken)
+        => MaterializeAsync(session, catalog, path, model, documents: null, confidential, cancellationToken);
+
     /// <summary>The same as <see cref="MaterializeAsync(SessionViewDescriptor, CatalogOptions, string, AgentModelInfo?, CancellationToken)"/> with the converter of a test.</summary>
-    internal static async Task<IReadOnlyList<AgentInputItem>> MaterializeAsync(
+    internal static Task<IReadOnlyList<AgentInputItem>> MaterializeAsync(
         SessionViewDescriptor session, CatalogOptions catalog, string path, AgentModelInfo? model, AttachedDocumentConverter? documents, CancellationToken cancellationToken)
+        => MaterializeAsync(session, catalog, path, model, documents, confidential: false, cancellationToken);
+
+    private static async Task<IReadOnlyList<AgentInputItem>> MaterializeAsync(
+        SessionViewDescriptor session, CatalogOptions catalog, string path, AgentModelInfo? model, AttachedDocumentConverter? documents, bool confidential,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -48,16 +71,17 @@ public static class PromptAttachmentInput
             throw new NotSupportedException("This model does not read images.");
 
         documents ??= new AttachedDocumentConverter();
-        return await SaveAsync(session, catalog, frozen, Guid.NewGuid().ToString("N"), model, documents, cancellationToken).ConfigureAwait(false);
+        return await SaveAsync(session, catalog, frozen, Guid.NewGuid().ToString("N"), model, documents, confidential, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Saves attachments the caller already checked and returns the input items, in their order. A send of the window and
     /// <see cref="MaterializeAsync(SessionViewDescriptor, CatalogOptions, string, AgentModelInfo?, CancellationToken)"/> share this.
+    /// The PDFs of a confidential session are converted to Markdown whatever the model reads, since only text is pseudonymized.
     /// </summary>
     internal static async Task<IReadOnlyList<AgentInputItem>> SaveAsync(
         SessionViewDescriptor session, CatalogOptions catalog, IReadOnlyList<OwnedPromptImage> attachments, string batchId,
-        AgentModelInfo? model, AttachedDocumentConverter documents, CancellationToken cancellationToken)
+        AgentModelInfo? model, AttachedDocumentConverter documents, bool confidential, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -78,7 +102,7 @@ public static class PromptAttachmentInput
                 continue;
             }
 
-            if (NeedsConversion(attachment.MediaType, model))
+            if (NeedsConversion(attachment.MediaType, model) || confidential && attachment.MediaType == AgentPdfInputs.MediaType)
                 await documents.ConvertAsync(attachment.Path, cancellationToken).ConfigureAwait(false);
             items.Add(new AgentInputItem.LocalFile(attachment.Path, attachment.Title, attachment.MediaType));
         }

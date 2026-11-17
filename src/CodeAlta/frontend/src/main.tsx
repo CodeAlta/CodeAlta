@@ -197,6 +197,8 @@ import { LabelSettings } from "./labels/LabelSettings";
 import { ProjectLabelBadges, ProjectLabelsPopover } from "./labels/ProjectLabels";
 import { labelMoveTarget, useRailDrag, type RailDrag, type RailDrop } from "./labels/labelDrag";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
+import { ProjectSecurityPopover, projectSecurityApi } from "./explorer/ProjectSecurityPopover";
+import { PseudonymizerModelsCard, pseudonymizerPageKey } from "./settings/PseudonymizerModelsCard";
 import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
 import { TerminalPanel } from "./terminal/TerminalPanel";
 import { createAutomationsHub } from "./automations/automationsHub";
@@ -5945,6 +5947,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     } finally { if (creationAlive.current) setArchiveBusy(false); }
   }
 
+  // A project made secure, or normal again, in its security popover: the padlock of its row follows once the projects
+  // are read again.
+  async function projectSecurityChanged(project: WorkspaceProject, secure: boolean) {
+    const epoch = currentHostEpoch.current;
+    if (!epoch || !creationAlive.current) return;
+    showToast({ message: t(secure ? "{name} is pseudonymized: its sessions send pseudonyms in place of personal data." : "{name} is no longer pseudonymized. Its sessions that were confidential stay so.", { name: project.name }),
+      intent: "none", icon: "lock", timeout: 6000 });
+    const version = browserRevision.current;
+    try {
+      const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+      if (creationAlive.current && currentHostEpoch.current === epoch && version === browserRevision.current && fresh.configured)
+        publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    } catch { /* The list is read again later. */ }
+  }
+
   // Deleting the selected project is asked about beside its row, every time: its sessions go with it.
   function projectDeleteScope(): ProjectDeleteTarget | null {
     const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);
@@ -6231,6 +6248,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               worktrees: owned ? project => openWorktrees(project) : undefined,
               subProjects: owned ? (project, own) => openSubProjects(project.id, own) : undefined,
               sandbox: owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: sandboxSettings } : undefined,
+              security: owned && status?.hostEpoch ? (project, close) => <ProjectSecurityPopover epoch={status.hostEpoch!} project={project} api={projectSecurityApi}
+                onClose={close} onChanged={secure => void projectSecurityChanged(project, secure)} /> : undefined,
               labels: owned && labelsState.available ? (project, close) => <ProjectLabelsPopover projectId={project.id} projectName={project.name} labels={ownLabels(spaceLabels)}
                 assign={labelsHub.assign} create={(name, projectIds) => labelsHub.create(name, { space: labelSpace }, projectIds)} onClose={close} /> : undefined,
               search: owned && searchOn ? { excluded: project => isExcluded(localSearchHub.getSnapshot(), "project", project.id),
@@ -6673,8 +6692,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         canEdit={owned && !!mutation?.capability.canMutate()} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
-      : settingsSection === "plugin" && pluginPage && !pluginPage.canvasId ? <PluginSettingsForm key={pluginPageId(pluginPage)} page={pluginPage} entries={pluginSettingEntries(pluginPage)}
-        source={settingValues} revision={settingsRevision} framed />
+      : settingsSection === "plugin" && pluginPage && !pluginPage.canvasId ? pluginPage.pluginKey === pseudonymizerPageKey
+        // The Pseudonymizer: what each project chooses is in its Project security, and the models it downloads are freed here.
+        ? <PluginSettingsForm key={pluginPageId(pluginPage)} page={pluginPage} entries={pluginSettingEntries(pluginPage).filter(entry => !entry.scopes.includes("project"))}
+          source={settingValues} revision={settingsRevision} framed extra={owned && status?.hostEpoch ? <PseudonymizerModelsCard epoch={status.hostEpoch} /> : undefined} />
+        : <PluginSettingsForm key={pluginPageId(pluginPage)} page={pluginPage} entries={pluginSettingEntries(pluginPage)} source={settingValues} revision={settingsRevision} framed />
       : settingsSection === "plugin" && pluginPage ? <PluginCanvasSettingsPage key={`${pluginPage.pluginKey}/${pluginPage.canvasId}`} page={pluginPage} hub={canvasHub}
         settings={pluginSettingEntries(pluginPage).length ? <PluginSettingsForm page={pluginPage} entries={pluginSettingEntries(pluginPage)} source={settingValues} revision={settingsRevision} framed={false} /> : undefined}
         control={canvasControl(pluginSettingsTab(pluginPage))} onLeave={() => navigate("plugins")}

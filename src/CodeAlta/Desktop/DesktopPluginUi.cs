@@ -288,43 +288,56 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         => Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits), Tone = "warning" }, routed: true);
 
     /// <inheritdoc />
-    public async ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default)
+    public ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default)
+        => ConfirmAsync(title, message, null, cancellationToken);
+
+    // The dialogs below take the plugin that asks, when the host knows it: the window translates the texts of a plugin of the application.
+    private async ValueTask<bool> ConfirmAsync(string title, string message, string? pluginKey, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(message);
         var answer = await AskAsync(new PluginUiEvent("ask")
         {
             // Without buttons the page shows its own Yes and No, in the language of the window.
-            Dialog = "confirm", Title = Cut(title, MaximumTitleUnits), Message = Cut(message, MaximumMessageUnits),
+            Dialog = "confirm", PluginKey = pluginKey, Title = Cut(title, MaximumTitleUnits), Message = Cut(message, MaximumMessageUnits),
         }, null, cancellationToken).ConfigureAwait(false);
         return answer is { Cancelled: false, Button: "yes" };
     }
 
     /// <inheritdoc />
-    public async ValueTask<string?> InputAsync(string title, string? initialText = null, CancellationToken cancellationToken = default)
+    public ValueTask<string?> InputAsync(string title, string? initialText = null, CancellationToken cancellationToken = default)
+        => InputAsync(title, initialText, null, cancellationToken);
+
+    private async ValueTask<string?> InputAsync(string title, string? initialText, string? pluginKey, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         var answer = await AskAsync(new PluginUiEvent("ask")
         {
-            Dialog = "input", Title = Cut(title, MaximumTitleUnits), Text = Cut(initialText ?? string.Empty, MaximumTextUnits),
+            Dialog = "input", PluginKey = pluginKey, Title = Cut(title, MaximumTitleUnits), Text = Cut(initialText ?? string.Empty, MaximumTextUnits),
         }, null, cancellationToken).ConfigureAwait(false);
         return answer is { Cancelled: false } ? answer.Text ?? string.Empty : null;
     }
 
     /// <inheritdoc />
-    public async ValueTask<string?> EditTextAsync(string title, string text, CancellationToken cancellationToken = default)
+    public ValueTask<string?> EditTextAsync(string title, string text, CancellationToken cancellationToken = default)
+        => EditTextAsync(title, text, null, cancellationToken);
+
+    private async ValueTask<string?> EditTextAsync(string title, string text, string? pluginKey, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(text);
         var answer = await AskAsync(new PluginUiEvent("ask")
         {
-            Dialog = "edit", Title = Cut(title, MaximumTitleUnits), Text = Cut(text, MaximumTextUnits),
+            Dialog = "edit", PluginKey = pluginKey, Title = Cut(title, MaximumTitleUnits), Text = Cut(text, MaximumTextUnits),
         }, null, cancellationToken).ConfigureAwait(false);
         return answer is { Cancelled: false } ? answer.Text ?? string.Empty : null;
     }
 
     /// <inheritdoc />
-    public async ValueTask<T?> SelectAsync<T>(string title, IReadOnlyList<PluginSelectItem<T>> items, CancellationToken cancellationToken = default)
+    public ValueTask<T?> SelectAsync<T>(string title, IReadOnlyList<PluginSelectItem<T>> items, CancellationToken cancellationToken = default)
+        => SelectAsync(title, items, null, cancellationToken);
+
+    private async ValueTask<T?> SelectAsync<T>(string title, IReadOnlyList<PluginSelectItem<T>> items, string? pluginKey, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(items);
@@ -332,7 +345,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         var shown = items.Take(MaximumItems).ToArray();
         var answer = await AskAsync(new PluginUiEvent("ask")
         {
-            Dialog = "select", Title = Cut(title, MaximumTitleUnits),
+            Dialog = "select", PluginKey = pluginKey, Title = Cut(title, MaximumTitleUnits),
             Items = [.. shown.Select(static item => new PluginUiChoice(Cut(item.Label, MaximumTitleUnits),
                 item.Description is null ? null : Cut(item.Description, MaximumTitleUnits), item.IsSelected))],
         }, null, cancellationToken).ConfigureAwait(false);
@@ -347,7 +360,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
         => ShowDialogForResultAsync(request, null, cancellationToken);
 
-    // The plugin that asks, when the host knows it: the module of the script of the dialog is served for that plugin.
+    // The module of the script of the dialog is served for the plugin that asks.
     private async ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, string? pluginKey, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -370,6 +383,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
                 PluginDialogKind.Custom when request.Html is not null => "html",
                 _ => "message",
             },
+            PluginKey = pluginKey,
             Title = Cut(request.Title, MaximumTitleUnits),
             Message = request.Message is null ? null : Cut(request.Message, MaximumMessageUnits),
             Text = request.InitialText is null ? null : Cut(request.InitialText, MaximumTextUnits),
@@ -685,14 +699,14 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
 
         public ValueTask NotifyAsync(string message, CancellationToken cancellationToken = default) => owner.NotifyAsync(message, cancellationToken);
 
-        public ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default) => owner.ConfirmAsync(title, message, cancellationToken);
+        public ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default) => owner.ConfirmAsync(title, message, pluginKey, cancellationToken);
 
-        public ValueTask<string?> InputAsync(string title, string? initialText = null, CancellationToken cancellationToken = default) => owner.InputAsync(title, initialText, cancellationToken);
+        public ValueTask<string?> InputAsync(string title, string? initialText = null, CancellationToken cancellationToken = default) => owner.InputAsync(title, initialText, pluginKey, cancellationToken);
 
-        public ValueTask<string?> EditTextAsync(string title, string text, CancellationToken cancellationToken = default) => owner.EditTextAsync(title, text, cancellationToken);
+        public ValueTask<string?> EditTextAsync(string title, string text, CancellationToken cancellationToken = default) => owner.EditTextAsync(title, text, pluginKey, cancellationToken);
 
         public ValueTask<T?> SelectAsync<T>(string title, IReadOnlyList<PluginSelectItem<T>> items, CancellationToken cancellationToken = default)
-            => owner.SelectAsync(title, items, cancellationToken);
+            => owner.SelectAsync(title, items, pluginKey, cancellationToken);
 
         public async ValueTask ShowDialogAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
             => _ = await owner.ShowDialogForResultAsync(request, pluginKey, cancellationToken).ConfigureAwait(false);

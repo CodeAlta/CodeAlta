@@ -25,6 +25,7 @@ internal sealed partial class WorkspaceService
         if (!ValidEpoch(epoch)) throw new ArgumentException("A canonical host epoch is required.", nameof(epoch));
         _importCatalog = catalog;
         _importEpoch = epoch;
+        _privacy = new CodeAltaConfigStore(catalog.Options);
         _directoryCompletionReader = (directory, prefix) => Task.Run(() => DirectoryCompletionReader.Read(directory, prefix));
         _import = async path => await catalog.GetByPathAsync(path, CancellationToken.None).ConfigureAwait(false)
             ?? await catalog.UpsertFromPathAsync(path, ProjectOrigins.Window, CancellationToken.None).ConfigureAwait(false);

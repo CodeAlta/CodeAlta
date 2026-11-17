@@ -1,10 +1,10 @@
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Card } from "@blueprintjs/core";
 import type { PluginSettingsPage } from "../canvases/canvasPages";
 import { SettingsPage } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import { SettingControl } from "./SettingControl";
-import type { SettingEntry } from "./settingsCatalog";
+import { settingText, type SettingEntry } from "./settingsCatalog";
 import type { SettingValueSource } from "./settingValues";
 
 /**
@@ -28,28 +28,30 @@ export const pluginPageId = (page: Pick<PluginSettingsPage, "pluginKey" | "canva
 /**
  * The settings a plugin declares, drawn from their descriptors and grouped under their headings: each one is saved at
  * once in the configuration, and the plugin is told. `framed` draws the frame of a page of Settings around them, for a
- * plugin that has no settings canvas; otherwise they go above the canvas.
+ * plugin that has no settings canvas; otherwise they go above the canvas. `extra` is a card of the window after them, for
+ * what a built-in plugin shows that is no setting.
  */
-export function PluginSettingsForm({ page, entries, source, revision, framed }: {
-  page: PluginSettingsPage; entries: readonly SettingEntry[]; source: SettingValueSource; revision: unknown; framed: boolean;
+export function PluginSettingsForm({ page, entries, source, revision, framed, extra }: {
+  page: PluginSettingsPage; entries: readonly SettingEntry[]; source: SettingValueSource; revision: unknown; framed: boolean; extra?: ReactNode;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
+  const text = (entry: SettingEntry, value: string) => settingText(locale, value, entry.builtIn);
   const groups: { heading: string | null; entries: SettingEntry[] }[] = [];
   for (const entry of entries) {
     const last = groups.at(-1);
     if (last && last.heading === entry.section) last.entries.push(entry); else groups.push({ heading: entry.section, entries: [entry] });
   }
   const cards = <div className="settings-grid plugin-settings-form">{groups.map((group, index) => <Card key={`${group.heading ?? ""}:${index}`} className="appearance-settings">
-    {group.heading && <h2>{group.heading}</h2>}
+    {group.heading && <h2>{text(group.entries[0], group.heading)}</h2>}
     {group.entries.map(entry => <Fragment key={entry.id}>
       <div className="settings-field" data-setting={entry.id}>
-        <span className="settings-field-label">{entry.label}</span>
-        <div className="settings-field-control"><SettingControl entry={entry} source={source} revision={revision} label={entry.label} /></div>
-        {entry.help && <p className="settings-field-help">{entry.help}</p>}
+        <span className="settings-field-label">{text(entry, entry.label)}</span>
+        <div className="settings-field-control"><SettingControl entry={entry} source={source} revision={revision} label={text(entry, entry.label)} /></div>
+        {entry.help && <p className="settings-field-help">{text(entry, entry.help)}</p>}
         {entry.applies === "nextStart" && <p className="settings-field-help">{t("Applies at next startup")}</p>}
       </div>
     </Fragment>)}
-  </Card>)}</div>;
+  </Card>)}{extra}</div>;
   if (!framed) return cards;
   return <SettingsPage className="plugin-typed-settings" label={page.title} group="Extensions" title={{ text: page.title }} notice={null} loading={false} busy={false} onReload={() => { }}>
     {cards}

@@ -23,6 +23,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     private DesktopSkillUsage? _skillUsage;
     // The reading of the policy of the organizations of the Copilot accounts, which the host started and disposes.
     private CopilotManagedPolicySource? _copilotPolicies;
+    // The models that find names in the documents of secure projects: the Pseudonymizer plugin and the window share them.
+    private CodeAlta.Plugin.Pseudonymizer.PseudonymizerModelStore? _pseudonymizerModels;
     private Task? _hostDisposal;
     private Task? _closeFlow;
     private bool _nativeConfirmed;
@@ -621,7 +623,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
-                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost, options.Profile), PluginSafeMode = DesktopPlugins.SafeMode,
+                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost, options.Profile,
+                    _pseudonymizerModels ??= new CodeAlta.Plugin.Pseudonymizer.PseudonymizerModelStore(new DesktopPseudonymizerModels(catalog))), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore,
                     privateNetworks, pluginMachines),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
@@ -662,6 +665,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
                 await CloseStepAsync(closing, "reminders", async () => { if (reminders is not null) await reminders.DisposeAsync(); });
                 await CloseStepAsync(closing, "providers", async () => { if (providers is not null) await providers.DrainAsync(); });
+                await CloseStepAsync(closing, "pseudonymizer models", () => { _pseudonymizerModels?.Dispose(); return ValueTask.CompletedTask; }); // A download stops; the workers of the models end.
                 await CloseStepAsync(closing, "models.dev catalog", async () => { if (modelsDev is not null) await modelsDev.DisposeAsync(); }); // Its refresh stops; the runtimes that borrowed it ended with their sessions.
                 await CloseStepAsync(closing, "tool endpoints", () => toolEndpoints.DisposeAsync()); // The agents of the providers of plugins ended with their sessions.
                 await CloseStepAsync(closing, "provider sign-in", async () => { if (providerLogin is not null) await providerLogin.CloseAsync(); }); // A running sign-in is canceled and joined.
@@ -1317,6 +1321,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
                     speech.DictatingChanged += dictating => search?.Meaning?.SetDictating(dictating);
                     builder.AddSpeechService(speech);
+                    builder.AddPseudonymizerService(roots.Home is null && _pseudonymizerModels is { } pseudonymizerModels ? new PseudonymizerService(pseudonymizerModels, epoch) : new PseudonymizerService());
                     // On explicit roots the state is read and checked, and nothing is downloaded.
                     claudeCli = new ClaudeCliService(catalog, epoch)
                     {
@@ -1849,6 +1854,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddManagedPolicyService(new ManagedPolicyService());
             builder.AddSandboxSettingsService(new SandboxSettingsService());
             builder.AddSpeechService(new SpeechService());
+            builder.AddPseudonymizerService(new PseudonymizerService());
             builder.AddModelServersService(new ModelServersService());
             builder.AddClaudeCliService(new ClaudeCliService());
             builder.AddMcpServersService(new McpServersService());

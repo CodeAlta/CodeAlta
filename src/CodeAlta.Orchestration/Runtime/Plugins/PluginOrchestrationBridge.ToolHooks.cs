@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
@@ -33,6 +34,53 @@ public sealed partial class PluginOrchestrationBridge
     {
         ArgumentNullException.ThrowIfNull(scope);
         return new PluginToolInterceptor(this, scope);
+    }
+
+    /// <summary>
+    /// Gets the boundary the requests of a confidential session pass through: the one the running plugins that apply to
+    /// the session give (<see cref="PluginBase.GetProviderBoundary"/>), asked at each request.
+    /// </summary>
+    /// <param name="scope">The session.</param>
+    /// <returns>The boundary; <see langword="null"/> when no running plugin that applies to the session gives one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is <see langword="null"/>.</exception>
+    /// <exception cref="AgentProviderBoundaryException">Two plugins give one, or a plugin failed to: the session sends nothing.</exception>
+    public IAgentProviderBoundary? GetProviderBoundary(SessionToolHookScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        var context = new PluginProviderBoundaryContext
+        {
+            SessionId = scope.SessionId,
+            ProjectId = scope.ProjectId,
+            WorkingDirectory = scope.WorkingDirectory,
+            SpaceId = scope.SpaceId,
+        };
+        IAgentProviderBoundary? found = null;
+        // The plugins the tool hooks of the session are run for: a plugin of another project or space is not asked.
+        var applicable = _adapter.GetApplicableActivePlugins(_getActivePlugins(),
+            new PluginAdapterOperationOptions { ProjectId = scope.ProjectId, ProjectPath = scope.WorkingDirectory, SessionId = scope.SessionId, SpaceId = scope.SpaceId });
+        foreach (var active in applicable)
+        {
+            if (active.Instance is not { } plugin) continue;
+            IAgentProviderBoundary? boundary;
+            try
+            {
+                boundary = plugin.GetProviderBoundary(context);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                throw new AgentProviderBoundaryException($"The plugin {active.Descriptor.DisplayName ?? active.Descriptor.TypeName} could not prepare the pseudonymization of this session: nothing was sent.", exception);
+            }
+
+            if (boundary is null) continue;
+            if (found is not null)
+            {
+                throw new AgentProviderBoundaryException("Two plugins pseudonymize this session: turn one of them off. Nothing was sent.");
+            }
+
+            found = boundary;
+        }
+
+        return found;
     }
 
     private sealed class PluginToolInterceptor(PluginOrchestrationBridge bridge, SessionToolHookScope scope) : AgentToolInterceptor

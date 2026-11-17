@@ -185,6 +185,8 @@ public sealed partial class SessionViewJournalStore
             TitleMode = sourceLocal?.TitleMode,
             // A fork keeps the choice of review; what its agent was told is in the conversation it continues.
             ReviewBeforeCommit = sourceLocal?.ReviewBeforeCommit,
+            // A fork of a confidential session continues a history that must not go in clear: it is confidential too.
+            Confidential = sourceLocal?.Confidential,
             ReviewNoted = sourceLocal?.ReviewNoted,
             // A fork keeps the options of its source, narrowed by those of the session that forks it, which the runtime gave it.
             Options = CodeAlta.Agent.AgentSessionOptions.Stored(CodeAlta.Agent.AgentSessionOptions.Of(sourceLocal?.Options).Within(target.Options)),

@@ -4,7 +4,9 @@ export type ComposerStatusView = Readonly<{ key: string; pluginId: string; label
   /** The Settings page the item opens, or null when it opens nothing. */
   settingsPage: string | null;
   /** The plugin command the item runs, or null. */
-  commandId: string | null }>;
+  commandId: string | null;
+  /** The plugin is one of the application: its label and its text are translated. */
+  builtIn: boolean }>;
 
 const tones: readonly string[] = ["info", "success", "warning", "error", "muted"];
 const maximumItems = 8, maximumText = 160;
@@ -29,7 +31,8 @@ export function composerStatusItems(reply: unknown, projectId: string | null): C
     items.push({ key, pluginId: item.pluginId, label: item.label, text: item.text,
       tone: tones.includes(item.tone as string) ? item.tone as ComposerStatusTone : "info",
       settingsPage: name(item.settingsPage) ? item.settingsPage : null,
-      commandId: typeof item.commandId === "string" && item.commandId.length > 0 && item.commandId.length <= 512 ? item.commandId : null });
+      commandId: typeof item.commandId === "string" && item.commandId.length > 0 && item.commandId.length <= 512 ? item.commandId : null,
+      builtIn: item.builtIn === true });
   }
   return items;
 }
@@ -38,6 +41,7 @@ export function composerStatusItems(reply: unknown, projectId: string | null): C
 export function sameComposerStatus(left: readonly ComposerStatusView[], right: readonly ComposerStatusView[]): boolean {
   return left.length === right.length && left.every((item, index) => {
     const other = right[index];
-    return item.key === other.key && item.label === other.label && item.text === other.text && item.tone === other.tone && item.settingsPage === other.settingsPage && item.commandId === other.commandId;
+    return item.key === other.key && item.label === other.label && item.text === other.text && item.tone === other.tone && item.settingsPage === other.settingsPage && item.commandId === other.commandId
+      && item.builtIn === other.builtIn;
   });
 }

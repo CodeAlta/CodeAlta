@@ -2377,7 +2377,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         var ownTitleMode = AgentSessionTitles.ParseMode(startNewSession ? session.TitleMode : savedLocalState?.TitleMode);
         var titleMode = ownTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
-        var toolInterceptor = await CreateToolInterceptorAsync(session, project, options.WorkingDirectory, cancellationToken).ConfigureAwait(false);
+        var hookScope = await CreateHookScopeAsync(session, project, options.WorkingDirectory, cancellationToken).ConfigureAwait(false);
+        var toolInterceptor = CreateToolInterceptor(hookScope);
+        var providerBoundary = await CreateProviderBoundarySourceAsync(session, hookScope, cancellationToken).ConfigureAwait(false);
         var sessionOptions = new AgentSessionResumeOptions
         {
             SessionId = requestedSessionId,
@@ -2428,6 +2430,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     : [.. options.ProjectRoots, .. ProjectResourceRoots.WorktreeWriteRoots(project, worktree)]),
             CommandGuard = CreateCommandGuard(session.SessionId),
             ToolInterceptor = toolInterceptor,
+            ProviderBoundary = providerBoundary,
             // Where its built-in tools run: in the worker of its sandbox while it is sandboxed, read at each call.
             BuiltInToolRouter = CreateSandboxToolRouter(session.SessionId, options.ProviderKey ?? session.ResolvedProviderKey, options.ProjectRoots),
             OnPermissionRequest = options.OnPermissionRequest,

@@ -185,7 +185,10 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
       <button type="button" title={`${repository ? `${repository} › ` : ""}${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
         data-scope={project.id} data-sub-project={project.subPath ? "true" : undefined} onClick={event => select(project.id, event.detail > 0)} onDoubleClick={() => onKeep?.(project.id)}>
         {twist(project.id)}
-        <span className="project-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name={project.archived ? "archive" : open(project.id) ? "open" : "folder"} size={15} /></span>
+        {project.secure && !project.archived
+          ? <span className="project-icon" data-file-tone="teal" data-secure="true"
+            title={t("Pseudonymized project: its sessions send pseudonyms in place of personal data")}><AppIcon name="lock" size={15} /></span>
+          : <span className="project-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name={project.archived ? "archive" : open(project.id) ? "open" : "folder"} size={15} /></span>}
         {repository && <span className="project-repository-prefix">{repository} ›</span>}<strong>{project.name}</strong>{!labels?.groups.length && labels?.badges?.(project)}{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
       </button>
       {tree && <button type="button" className="icon-button project-row-action project-favorite-trigger" data-on={favorite}

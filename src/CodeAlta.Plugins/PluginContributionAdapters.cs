@@ -1145,8 +1145,17 @@ public sealed partial class PluginContributionAdapterService
         return active is not null && active.Instance is not null && active.RuntimeContext.IsValid;
     }
 
-    private IEnumerable<ActivePluginInstance> GetApplicableActivePlugins(IReadOnlyList<ActivePluginInstance> activePlugins, PluginAdapterOperationOptions? options)
+    /// <summary>
+    /// Gets the plugins of a snapshot that apply to an operation, as the hooks are run for it: those that are running,
+    /// available in its space, and global or of its project.
+    /// </summary>
+    /// <param name="activePlugins">The active plugins.</param>
+    /// <param name="options">The scope of the operation: its project and its space.</param>
+    /// <returns>The plugins that apply, in their order.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="activePlugins"/> is <see langword="null"/>.</exception>
+    public IEnumerable<ActivePluginInstance> GetApplicableActivePlugins(IReadOnlyList<ActivePluginInstance> activePlugins, PluginAdapterOperationOptions? options)
     {
+        ArgumentNullException.ThrowIfNull(activePlugins);
         var inheritedRoots = InheritedRootsOf(options);
         return activePlugins.Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
             && IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId), plugin.RuntimeContext.Scope, options?.SpaceId)

@@ -8,6 +8,7 @@ using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Mobile;
 using CodeAlta.Plugin.Jira;
+using CodeAlta.Plugin.Pseudonymizer;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
@@ -108,7 +109,7 @@ internal static class DesktopPlugins
     /// <param name="profileRoot">The CodeAlta folder of a separate profile (<see cref="BuiltInsFor"/>); null for <c>~/.alta</c>.</param>
     internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands,
         ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null, Search.DesktopSearchRelay? search = null,
-        BrowserPluginHost? browser = null, string? profileRoot = null)
+        BrowserPluginHost? browser = null, string? profileRoot = null, PseudonymizerModelStore? pseudonymizerModels = null)
     {
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -121,11 +122,29 @@ internal static class DesktopPlugins
         builtIns = [.. builtIns, Fleet.DesktopFleetPlugin.Definition()];
         // The mobile view is the window's too: a phone connects to the desktop application.
         builtIns = [.. builtIns, MobileDefinition];
+        // The pseudonymization of confidential sessions is a feature of the window: elsewhere they send nothing.
+        builtIns = [.. builtIns, PseudonymizerDefinitionFor(pseudonymizerModels)];
         if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];
         // The settings of the window, which `alta settings` finds, reads and shows: the plugin tells the sessions so.
         builtIns = [.. builtIns, Settings.DesktopSettingsPlugin.Definition()];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
+
+    /// <summary>The plugin that pseudonymizes what confidential sessions send, off until the user turns it on; without models.</summary>
+    internal static BuiltInPluginDefinition PseudonymizerDefinition { get; } = PseudonymizerDefinitionFor(null);
+
+    /// <summary>The plugin that pseudonymizes what confidential sessions send, with the models of the application.</summary>
+    /// <param name="models">The models the window shares with the plugin; null for a plugin that runs no model.</param>
+    internal static BuiltInPluginDefinition PseudonymizerDefinitionFor(PseudonymizerModelStore? models) => new()
+    {
+        Id = PseudonymizerPlugin.PluginId, DisplayName = "Pseudonymizer",
+        Description = "Pseudonymizes what confidential sessions send to their providers, and puts the real values back in the answers.",
+        PluginType = typeof(PseudonymizerPlugin),
+        Factory = models is null ? static () => new PseudonymizerPlugin() : () => new PseudonymizerPlugin(models),
+        // Off until a project is made secure, which turns it on.
+        EnabledByDefault = false,
+        Frontends = PluginFrontends.Desktop,
+    };
 
     /// <summary>The plugin that gives a session the tools of Chrome DevTools MCP over a web browser of this computer.</summary>
     /// <param name="host">What the application gives the plugin.</param>
