@@ -37,6 +37,7 @@ A prompt, an MCP server or a skill is easier to inspect and review. Use a plugin
 | [Jira](jira.md) | The issues of a Jira project, for projects that name one. |
 | [MCP](mcp.md) | Model Context Protocol servers, their tools for agents, `alta mcp` and the MCP Servers page. |
 | [Mobile](mobile.md) | In CodeAlta Desktop: your sessions on a phone, through Tailscale or Dev Tunnels. Off until you turn it on. |
+| [Pseudonymizer](pseudonymizer.md) | In CodeAlta Desktop: pseudonyms in place of the personal data that the sessions of a pseudonymized project send to their provider, found on your computer. |
 | [Statistics](statistics.md) | A statistics card for each turn, `alta statistics`, and in CodeAlta Desktop the Statistics page. |
 | [UI tools](../ui-tools.md) | In CodeAlta Desktop: tools an agent uses to see and drive the window. |
 | [Browser](../browser.md) | In CodeAlta Desktop and `altacli`: tools an agent uses to drive Chrome, Edge, Firefox or Safari. |

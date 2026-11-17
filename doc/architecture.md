@@ -65,7 +65,7 @@ Dependencies point down: frontends → Automations/Orchestration/LiveTool/Hostin
 
 1. The frontend (or an agent through `alta`) sends a command to `SessionRuntimeService`, bound to the exact session it targets.
 2. The session actor admits it; `AgentHub` attaches the session to its provider runtime.
-3. The agent runtime builds the request from the journal's last compaction, calls the provider or the turn executor, runs tool calls through the plugins' tool hooks and then the session's guards and permissions, and appends every event to the journal; the database row follows in the same write.
+3. The agent runtime builds the request from the journal's last compaction, calls the provider or the turn executor, runs tool calls through the plugins' tool hooks and then the session's guards and permissions, and appends every event to the journal; the database row follows in the same write. The request of a confidential session (its project is pseudonymized, or a session of its lineage was) passes through the provider boundary a plugin gives, which pseudonymizes what goes out and restores what comes back; without a boundary, or when it cannot analyze the request, nothing is sent. The journal and the tools keep the real values.
 4. Events flow back as `SessionRuntimeEvent`s to every frontend and plugin that observes them.
 
 ## State
