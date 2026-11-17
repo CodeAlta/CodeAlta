@@ -2594,6 +2594,13 @@ public sealed partial class AltaLiveToolTests
         Assert.Contains(taskId, listed.Stdout);
         var own = await dispatcher.InvokeAsync(["task", "list"], caller: caller).ConfigureAwait(false);
         Assert.DoesNotContain(taskId, own.Stdout);
+
+        // A project whose folder is gone gets no task: writing one would make the folder again.
+        Directory.Delete(codePath, recursive: true);
+        var gone = await dispatcher.InvokeAsync(["task", "create", "--project", code.Id, "--title", "Too late", "--content", "Body."], caller: caller).ConfigureAwait(false);
+        Assert.AreNotEqual(AltaExitCodes.Success, gone.ExitCode);
+        Assert.Contains("project.folderMissing", gone.Stderr + gone.Stdout);
+        Assert.IsFalse(Directory.Exists(codePath));
     }
 
     [TestMethod]

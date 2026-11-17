@@ -96,10 +96,12 @@ export function WorkItemTags({ item, projectName, shortId, tags }: { item: WorkI
  * few lines, opens its full text, and is decided there: started (in a new worktree, in this session, in a new
  * session), kept for later, or dismissed. A task the session started itself says so, until the user puts it away.
  */
-export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, memory, dockPreference, runsWith = null, onStart, onOpenList }: {
+export function WorkItemCards({ hub, items, projectId, preferredStart, busy, hidden = false, memory, dockPreference, runsWith = null, onStart, onOpenList }: {
   hub: WorkItemsHub;
   /** The items this session shows, in the order of the cards. */
   items: readonly WorkItem[];
+  /** The project of the session that shows the cards: it does itself the work of that project only. */
+  projectId?: string | null;
   preferredStart: string;
   /** The keys of the items an action is running on. */
   busy: ReadonlySet<string>;
@@ -177,6 +179,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const project = item.kind === "task" ? itemProject : undefined;
   // The item belongs to its own project, which is not always the one of the session that shows it.
   const worktree = !itemProject?.noRepository;
+  const here = projectId === undefined || item.projectId === projectId;
   const suggestion = project?.tagProposals?.find(proposal => proposal.newTag && proposal.sessionId === item.proposedBy && proposal.tasks.some(match => match.id === item.id)) ?? null;
   const suggestionTasks = project && suggestion ? workItems([project], new Set()).filter(task => task.kind === "task" && suggestion.tasks.some(match => match.id === task.id)) : [];
   const review = () => { if (project && suggestion) setReviewing({ projectId: project.projectId, projectName: null, proposal: suggestion, tasks: suggestionTasks }); };
@@ -276,7 +279,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
           {suggestion && <NewTagQuestion proposal={suggestion} count={suggestionTasks.length} onReview={review} onDecline={decline} />}
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
-            : <>{runsField(true)}<WorkStartButtons preferred={preferredStart} here worktree={worktree} disabled={working} compact onStart={start} /></>}
+            : <>{runsField(true)}<WorkStartButtons preferred={preferredStart} here={here} worktree={worktree} disabled={working} compact onStart={start} /></>}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>
         </section>}
     {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
@@ -293,7 +296,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
         <div className="work-window-text">{item.summary && <p className="work-window-summary">{item.summary}</p>}<WorkItemText hub={hub} item={item} /></div>
         <footer className="work-window-actions">
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
-            : <>{runsField(false)}<WorkStartButtons preferred={preferredStart} here worktree={worktree} disabled={working} onStart={way => { setDetail(false); start(way); }} /></>}
+            : <>{runsField(false)}<WorkStartButtons preferred={preferredStart} here={here} worktree={worktree} disabled={working} onStart={way => { setDetail(false); start(way); }} /></>}
           <span className="work-window-decisions">
             {decisions}
             <Button variant="minimal" size="small" icon={<AppIcon name="list" size={14} />} onClick={() => { setDetail(false); onOpenList(item); }}>{t("Show in Work items")}</Button>

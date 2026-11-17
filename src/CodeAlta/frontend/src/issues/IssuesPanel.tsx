@@ -344,7 +344,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   // Whether the work starts on a branch of its own: as the user chose it the last time in this project, else on when the
   // project has a scheme of its own. Off, a worktree gets an alta/ branch and the folder of the project stays on its branch.
   const [ownBranchChoices, setOwnBranchChoices] = useState<Readonly<Record<string, boolean>>>({});
-  const ownBranch = !!project && (ownBranchChoices[project.id] ?? readOwnBranch(project.id) ?? branchScheme?.configured ?? false);
+  const ownBranch = !!project && !project.noRepository && (ownBranchChoices[project.id] ?? readOwnBranch(project.id) ?? branchScheme?.configured ?? false);
   const chooseOwnBranch = (value: boolean) => {
     if (!project) return;
     writeOwnBranch(project.id, value);
@@ -383,7 +383,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const read = detail?.key === currentKey ? detail : null;
   const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} images={trackerImages} />;
   // The choice of a branch of its own sits with what the session runs with: the field of its name shows only when it is on.
-  const branchToggle = current?.kind === "issue" && <Checkbox className="issue-branch-toggle" checked={ownBranch} onChange={event => chooseOwnBranch(event.currentTarget.checked)}
+  const branchToggle = current?.kind === "issue" && !project?.noRepository && <Checkbox className="issue-branch-toggle" checked={ownBranch} onChange={event => chooseOwnBranch(event.currentTarget.checked)}
     label={t("Own branch")} title={t("On: the work starts on a new branch of this name, in a new worktree or in the folder of the project. Off: a new worktree gets an alta/ branch, and the folder of the project stays on its branch.")} />;
   const runsWith = (runChoices.provider || branchToggle) && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
     {runChoices.provider && <>
@@ -403,7 +403,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const branchField = current && current.kind === "issue" && currentStartKey && ownBranch && <BranchField value={branchOf(current, currentStartKey)} proposed={proposedBranch(current)}
     problem={branchScheme?.problem ?? null} settings={schemeButton}
     onChange={value => setBranchEdits(edits => new Map(edits).set(currentStartKey, value))} />;
-  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting.has(startingKey(current) ?? "")} runsWith={runsWith} branch={branchField}
+  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} worktree={!project?.noRepository} starting={starting.has(startingKey(current) ?? "")} runsWith={runsWith} branch={branchField}
     onStart={way => void start(current, way)}
     onOpen={() => openLink(current.url)} onCopy={() => void navigator.clipboard?.writeText(current.url).catch(() => { })} />;
   return <div className="work-page issues-page" onPointerDown={onActivate}>
@@ -620,8 +620,10 @@ function IssueHeading({ item, service, busy, action }: { item: IssueRow; service
   </header>;
 }
 
-function IssueActions({ item, service, preferredStart, starting, runsWith, branch, onStart, onOpen, onCopy }: {
+function IssueActions({ item, service, preferredStart, worktree, starting, runsWith, branch, onStart, onOpen, onCopy }: {
   item: IssueRow; service: string; preferredStart: string; starting: boolean;
+  /** The folder of the project is in a git repository: the work can start in a new worktree. */
+  worktree: boolean;
   /** The Agent chip of the session started on the item. */
   runsWith?: ReactNode;
   /** The field of the branch of a new worktree started on an issue. */
@@ -637,7 +639,7 @@ function IssueActions({ item, service, preferredStart, starting, runsWith, branc
     {item.place && <p className="issue-elsewhere">{t("This pull request is of {place}, not of the repository of this project: open it on {service}.", { place: item.place, service })}</p>}
     {startable && runsWith}
     {startable && branch}
-    {startable && <WorkStartButtons preferred={preferredStart === "session" ? "session" : "worktree"} here={false} disabled={starting} onStart={onStart} />}
+    {startable && <WorkStartButtons preferred={preferredStart === "session" ? "session" : "worktree"} here={false} worktree={worktree} disabled={starting} onStart={onStart} />}
     <div className="work-detail-buttons">
       <Button size="small" icon={<AppIcon name="openExternal" size={14} />} onClick={onOpen}>{t("Open on {service}", { service })}</Button>
       <Button size="small" variant="minimal" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} onClick={() => { onCopy(); setCopied(true); }}>{t(copied ? "Copied" : "Copy link")}</Button>

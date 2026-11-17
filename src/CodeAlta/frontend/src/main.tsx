@@ -3748,7 +3748,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       // The selected session, as its menu archives it, under the same locks.
       case "archiveSession": return ownedSession && !!selectedSession && !selectedSession.archived && !sessionArchiveBusy && selectedSessionAccess(selectedSession).archive;
-      case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
+      case "reviewChanges": return ownedSession && !!selectedSession?.projectId
+        && !currentSnapshot.current?.projects.some(project => project.id === selectedSession.projectId && project.noRepository);
       case "expandPrompt": case "insertEquation": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       // The composer in front attaches, when it can (an editable session or a new-session draft).
       case "attachFiles": case "attachFolder": case "attachIssues":
@@ -6459,7 +6460,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
                 })() : undefined}
-                workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
+                workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} projectId={row.projectId ?? null} preferredStart={workState.settings.start} busy={workBusy}
                   memory={overlayMemory.proposals(row.id)} dockPreference={proposalsDock}
                   runsWith={{ providers: runProviders, sessionSettings: sessionSettingsFor,
                     showing: status?.hostEpoch ? { key: `${status.hostEpoch}\n${row.id}`, read: signal => readShowingSession(status.hostEpoch!, row.id, signal) } : null }}
@@ -7152,8 +7153,8 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     ? <WorkspaceChip epoch={epoch} project={{ id, name, path, repositoryName: project?.repositoryName ?? null, subPath: project?.subPath ?? null }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
       // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
       folderSwitch={switchFolder && epoch && sessionId && !place && !archived && !noRepository ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
-      onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
-      onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
+      onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived && !noRepository}
+      onShowChanges={showChanges && !archived && !noRepository ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
       // The code editor where the session works: the worktree while its folder is there.
       onOpenEditor={openEditor && !archived ? () => openEditor({ id, path }, worktreeRoot && !worktreeMissing && sessionId ? worktreeRoot : null) : undefined}

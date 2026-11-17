@@ -388,6 +388,12 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.unknownTag", unknown, Command);
         }
 
+        // A project of the catalog whose folder was moved or deleted: writing the task would make the folder again.
+        if (!Directory.Exists(project.ProjectPath))
+        {
+            return NotFound(context, "project.folderMissing", $"The folder of the project '{project.DisplayName}' is missing: {project.ProjectPath}");
+        }
+
         WorkTaskCreation creation;
         try
         {
