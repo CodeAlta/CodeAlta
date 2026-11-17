@@ -93,6 +93,7 @@ public sealed class NotesPlugin : PluginBase
 
 - The class is public, inherits `PluginBase` and has a public constructor without parameters. One file can declare several plugin classes.
 - The key of `[Plugin("...")]` is unique among the plugins: use the id of the folder.
+- The card of the plugin in Settings > Plugins takes `Icon = "notebook-pen"` (a Lucide icon name) and `Color = "#f59e0b"` from `[Plugin(...)]`, written as plain string literals, with `Version`, `Author` and `Tags`. Its picture is a file `plugin.webp`, `plugin.png` or `plugin.jpg` beside `plugin.cs` (2 MB at most), shown as a wide 8:3 band from its middle.
 - CodeAlta calls each `Get...()` method once, when the plugin starts. Return a fixed set of contributions; compute what changes inside their callbacks (`GetStatus`, `CreateContent`, a command handler).
 - `System`, `System.IO`, `System.Linq`, `System.Collections.Generic`, `System.Threading.Tasks` and `System.Net.Http` are imported. `CodeAlta.Plugins.Abstractions`, `CodeAlta.Agent`, `CodeAlta.Plugins.Tui` and `XenoAtom.Terminal.UI` are referenced.
 - Add a NuGet package with `#:package Name@Version` at the top of the file.

@@ -43,6 +43,23 @@ public sealed class PluginAttribute : Attribute
     public string? Description { get; init; }
 
     /// <summary>
+    /// Gets or sets the icon of the plugin where plugins are listed: the name of a Lucide icon, such as
+    /// <c>git-commit-horizontal</c>.
+    /// </summary>
+    /// <remarks>
+    /// Write it as a plain string literal: the list of plugins also reads it from the source of a plugin that is turned off.
+    /// The picture of the card of the plugin is a file <c>plugin.webp</c>, <c>plugin.png</c> or <c>plugin.jpg</c> beside
+    /// <c>plugin.cs</c>.
+    /// </remarks>
+    public string? Icon { get; init; }
+
+    /// <summary>
+    /// Gets or sets the color of the plugin where plugins are listed, as <c>#rgb</c> or <c>#rrggbb</c>: its icon is
+    /// drawn in it. Write it as a plain string literal, as <see cref="Icon"/>.
+    /// </summary>
+    public string? Color { get; init; }
+
+    /// <summary>
     /// Gets or sets the plugin version string.
     /// </summary>
     public string? Version { get; init; }
@@ -179,6 +196,16 @@ public sealed record PluginDescriptor
     public string? Description { get; init; }
 
     /// <summary>
+    /// Gets the name of the icon of the plugin where plugins are listed.
+    /// </summary>
+    public string? Icon { get; init; }
+
+    /// <summary>
+    /// Gets the color of the plugin where plugins are listed, as <c>#rgb</c> or <c>#rrggbb</c>.
+    /// </summary>
+    public string? Color { get; init; }
+
+    /// <summary>
     /// Gets the version string.
     /// </summary>
     public string? Version { get; init; }
@@ -284,6 +311,8 @@ public static class PluginDescriptorFactory
             AssemblyName = assemblyName,
             DisplayName = attribute?.DisplayName ?? pluginType.Name,
             Description = attribute?.Description,
+            Icon = attribute?.Icon,
+            Color = attribute?.Color,
             Version = attribute?.Version,
             Authors = authors,
             License = attribute?.License,

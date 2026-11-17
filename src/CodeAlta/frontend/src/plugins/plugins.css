@@ -1,0 +1,60 @@
+/* Settings > Plugins: a card per plugin, with a search and filters above them. */
+
+/* The search and the filters stay in view while the cards scroll under them. */
+.plugin-toolbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: -6px 0; padding: 6px 0; background: var(--panel); }
+.plugin-toolbar-search.bp6-input-group { flex: 1 1 220px; min-width: 0; }
+.plugin-toolbar-search-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: var(--muted); }
+.plugin-toolbar-images.bp6-control { flex: none; margin: 0 0 0 4px; color: var(--muted); font-size: 12.5px; }
+.plugin-none.bp6-non-ideal-state { padding: 36px 0; }
+
+/* The cards fill the page in columns of one width: a row has as many as the page has room for. */
+.plugin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); align-items: stretch; gap: 14px; }
+.plugin-card.bp6-card { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; border-radius: 10px;
+  transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease; }
+.plugin-card.bp6-card:hover { border-color: color-mix(in srgb, var(--plugin-accent) 55%, var(--line)); box-shadow: 0 4px 18px rgba(0, 0, 0, .22); }
+
+/* The picture: the plugin's own, or the picture of plugins in its color. */
+.plugin-card-cover { position: relative; flex: none; aspect-ratio: 8 / 3; overflow: hidden;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--plugin-accent) 42%, #161b27), #1b2130 62%, color-mix(in srgb, var(--plugin-accent) 16%, #1b2130)); }
+.plugin-card-cover > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.plugin-card-cover::after { content: ""; position: absolute; inset: auto 0 0; height: 38%; background: linear-gradient(to top, color-mix(in srgb, var(--panel) 72%, transparent), transparent); pointer-events: none; }
+/* The picture of a plugin that has none is the same for all: it takes the color of the plugin. */
+.plugin-card-tint { position: absolute; inset: 0; background: var(--plugin-accent); mix-blend-mode: hue; pointer-events: none; }
+.plugin-card[data-off] .plugin-card-cover { filter: grayscale(.85) brightness(.82); }
+
+.plugin-card-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 6px; min-width: 0; padding: 0 14px 10px; }
+.plugin-card-head { display: flex; align-items: flex-end; gap: 10px; min-width: 0; margin-top: -18px; }
+.plugin-card[data-compact] .plugin-card-head { align-items: center; margin-top: 12px; }
+/* The badge of the icon stands over the foot of the picture. */
+.plugin-card-icon { position: relative; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px;
+  color: var(--plugin-accent); background: color-mix(in srgb, var(--plugin-accent) 16%, var(--panel)); box-shadow: 0 0 0 3px var(--panel); }
+.plugin-card[data-compact] .plugin-card-icon { width: 34px; height: 34px; border-radius: 8px; box-shadow: none; }
+.plugin-card[data-off] .plugin-card-icon { color: var(--muted); background: var(--panel-2); }
+.plugin-card-title { display: grid; flex: 1 1 auto; gap: 1px; min-width: 0; padding-top: 20px; }
+.plugin-card[data-compact] .plugin-card-title { padding-top: 0; }
+.plugin-card-title > strong { overflow: hidden; font-size: 14.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-card-title > small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-card[data-off] .plugin-card-title > strong { color: var(--muted); }
+.plugin-card-kind { flex: none; align-self: flex-end; padding-bottom: 2px; }
+.plugin-card[data-compact] .plugin-card-kind { align-self: center; padding-bottom: 0; }
+.plugin-card-kind .bp6-tag { font-size: 11px; }
+.plugin-card-description { display: -webkit-box; flex: none; margin: 2px 0 0; overflow: hidden; color: var(--muted); font-size: 12.5px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.plugin-card-status, .plugin-card-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+.plugin-card-chips { margin-top: 2px; }
+.plugin-card-chips .bp6-tag { max-width: 100%; font-size: 11.5px; }
+.plugin-card-chips .bp6-tag > .bp6-fill { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-card .plugin-failure { display: block; color: var(--red); font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+.plugin-card .settings-file-location { min-width: 0; margin-top: 2px; font-size: 11.5px; }
+/* Without pictures the cards are compact: more of them in a row, two lines of description, a lower foot. */
+.plugin-cards:has(> .plugin-card[data-compact]) { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.plugin-card[data-compact] .plugin-card-description { -webkit-line-clamp: 2; }
+.plugin-card[data-compact] .plugin-card-body { padding-bottom: 8px; }
+.plugin-card[data-compact] .plugin-card-foot { min-height: 34px; padding-block: 3px; }
+.plugin-card-popover { min-width: 260px; max-width: min(380px, calc(100vw - 32px)); padding: 10px 12px; }
+
+/* The foot: where the plugin is used, then its buttons and its switch, on one line at the bottom of the card. */
+.plugin-card-foot { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 6px 10px 6px 12px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel-2) 55%, transparent); }
+.plugin-card-foot-start { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; }
+.plugin-card-foot-start .space-scope-picker, .plugin-card-foot-start .space-scope-button.bp6-button { min-width: 0; max-width: 100%; }
+.plugin-card-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+.plugin-card-actions .bp6-switch { margin: 0 0 0 6px; }

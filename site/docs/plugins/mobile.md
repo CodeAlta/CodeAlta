@@ -145,7 +145,7 @@ CodeAlta makes the tunnel once, in your account, and keeps it, open to your acco
 
 ## Spaces
 
-With more than the Default space, the **Mobile** row of **Settings > Plugins** has a chip with its [spaces](../spaces.md#what-a-space-has). The phone then lists, opens and acts on the sessions of those spaces only, and a new session goes to one of them. A plugin in every space shows every session. The limit holds for the other machines too: their sessions, questions, images and notifications are kept to those spaces, and a session whose space cannot be matched is not shown. The choices of a new session (agent prompts, providers, models) are those of the machine, not of one space.
+With more than the Default space, the **Mobile** card of **Settings > Plugins** has a chip with its [spaces](../spaces.md#what-a-space-has). The phone then lists, opens and acts on the sessions of those spaces only, and a new session goes to one of them. A plugin in every space shows every session. The limit holds for the other machines too: their sessions, questions, images and notifications are kept to those spaces, and a session whose space cannot be matched is not shown. The choices of a new session (agent prompts, providers, models) are those of the machine, not of one space.
 
 ## Security
 
@@ -164,7 +164,7 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 
 ## Settings
 
-**Settings > Extensions > Mobile** is there while the plugin is on. The gear button of the **Mobile** row of **Settings > Plugins** goes to it too.
+**Settings > Extensions > Mobile** is there while the plugin is on. The gear button of the **Mobile** card of **Settings > Plugins** goes to it too.
 
 <figure class="alta-figure my-4" style="max-width: 44rem;">
   <img src="{{site.basepath}}/img/alta-desktop-mobile-settings.webp" alt="Settings, Mobile page of CodeAlta Desktop: the two ports, the address on the tailnet (blurred) and Reset access" loading="lazy">

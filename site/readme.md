@@ -222,7 +222,7 @@ og_type: website
             <p>Ask your agent to create a plugin - a canvas, a dialog, a tool, a command or a button. Add it to one project or your whole workspace. Turn your ideas into the tools you want to use.</p>
             <a href="{{site.basepath}}/docs/plugins/">Explore plugins <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
-          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins window with built-in integrations and the configurable Statistics buttons" width="2400" height="1500" loading="lazy"></div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins page of Settings with a card and a picture for each plugin: MCP, Git, Jira, Statistics, the landing page, UI tools, ACP agents and Mobile" width="2400" height="1500" loading="lazy"></div>
         </section>
         <section class="alta-story-step" id="feature-statistics" aria-labelledby="feature-title-statistics" tabindex="-1">
           <div class="alta-story-copy">

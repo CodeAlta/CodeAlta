@@ -400,6 +400,7 @@ import "./scriptCard/scriptCard.css";
 import "./resumeCard/resumeCard.css";
 import "./editor/editor.css";
 import "./pluginProviders/pluginProviders.css";
+import "./plugins/plugins.css";
 import "./review/review.css";
 import "./windows/windows.css";
 import "./explorer/explorer.css";

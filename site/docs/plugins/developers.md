@@ -75,7 +75,7 @@ public sealed class HelloPlugin : PluginBase
 }
 ```
 
-Click **Build and reload** on the plugin's row in **Settings > Plugins**: `/hello` appears among the commands of the search (`Ctrl+P`). In CodeAlta TUI, restart.
+Click **Build and reload** on the plugin's card in **Settings > Plugins**: `/hello` appears among the commands of the search (`Ctrl+P`). In CodeAlta TUI, restart.
 
 A plugin is a public class that inherits `PluginBase`, with a public parameterless constructor. The `[Plugin]` attribute is optional, and one file can declare several plugins.
 
@@ -88,16 +88,29 @@ What CodeAlta does with the folder:
 
 Add NuGet packages with `#:package Name@Version` at the top of `plugin.cs`, and more source files with `#:include`. An optional `README.md` beside `plugin.cs` describes the plugin in the plugin list.
 
+### The card of a plugin
+
+In CodeAlta Desktop, **Settings > Plugins** shows a plugin as a card. Give yours its own look:
+
+```csharp
+[Plugin("notes", DisplayName = "Notes", Description = "Keeps short notes.",
+    Icon = "notebook-pen", Color = "#f59e0b", Version = "1.2.0", Author = "Ada", Tags = ["writing"])]
+```
+
+- `Icon` is the name of a [Lucide](https://lucide.dev/icons) icon and `Color` a color as `#rgb` or `#rrggbb`: the icon is drawn in that color. Write both as plain string literals, so that the card of a plugin that is turned off has them too.
+- `Version`, `Author` and `Tags` are shown on the card, and the search finds the plugin by them.
+- The picture of the card is a file `plugin.webp`, `plugin.png` or `plugin.jpg` beside `plugin.cs`, 2 MB at most. The card shows the middle of it as a wide band (8:3, such as 680x255 pixels): keep what matters in the middle, away from the bottom left corner, where the icon stands. Without a picture, the card draws the icon on the color of the plugin.
+
 ## Build and reload
 
 In CodeAlta Desktop, **Settings > Plugins** is where you work on a source plugin, for all your projects (**User**) or for one (**Project**).
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins page of Settings with a source plugin, its Reload and Edit buttons, and New plugin" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The last row is a source plugin, with a button to build and reload it and one to edit it.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins page of Settings: a card with a picture for each plugin that ships with CodeAlta, a search and filters above them, New plugin, and the card of a source plugin after them" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The card of a source plugin has a button to build and reload it and one to edit it.</figcaption>
 </figure>
 
-The row of a source plugin has:
+The card of a source plugin has:
 
 - **Build and reload**: builds the plugin and replaces the running one. Its commands, shortcuts, status items and pickers change at once.
 - **Edit in the code editor**: opens the plugin folder in a **Plugin** tab.

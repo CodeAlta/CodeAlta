@@ -45,16 +45,20 @@ A prompt, an MCP server or a skill is easier to inspect and review. Use a plugin
 
 Open plugin management with `Ctrl+G Ctrl+N`, `/plugins` or `/plugin`.
 
-{{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
+{{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the plugins of CodeAlta" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-In CodeAlta Desktop, **Settings > Plugins** lists the plugins:
+In CodeAlta Desktop, **Settings > Plugins** shows a card for each plugin, with its picture, its icon, who made it and what it does:
 
+- **Search plugins** finds a plugin by its name, its description, its author, its tags or the titles of its canvases.
+- The filters beside it keep the plugins of one source (**Built-in**, **User**, **Project**) and those that are **On** or **Off**; each source says how many plugins it has.
+- **Pictures** turns the pictures of the cards off, for a more compact page. The choice is kept.
 - A switch starts or stops each plugin at once.
+- A card lists the canvases of its plugin, and **Buttons** shows the buttons it puts in the window, each with its switch.
 - A source plugin also has **Build and reload**, **Edit in the code editor** and a red **Remove**; **New plugin** creates one (see [Plugin development](developers.md#build-and-reload)).
 - A failed build shows its compiler errors; a plugin made for the TUI only is marked as not supported.
 - Turning off or reloading a plugin whose agents are working (an ACP agent, for instance) asks first: the turns of those sessions stop, and they can go on later.
 - With more than the Default space, a user plugin has a chip with its [spaces](../spaces.md#what-a-space-has). It adds nothing (tools, buttons, canvases, prompt text) to sessions of other spaces; its background work keeps running. A project plugin follows its project.
-- A configuration file that does not parse, an unreadable plugin folder, or a folder whose name is not a plugin id is named in red above the list.
+- A configuration file that does not parse, an unreadable plugin folder, or a folder whose name is not a plugin id is named in red above the cards.
 
 The CodeAlta TUI dialog shows each plugin's scope and state, its diagnostics (discovery, build, load, contributions, unload), what it contributes, unknown config entries, and actions to open its source and README. For a summary without the interface:
 

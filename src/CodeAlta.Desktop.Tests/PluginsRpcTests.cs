@@ -66,6 +66,69 @@ public sealed class PluginsRpcTests
     }
 
     [TestMethod]
+    public async Task List_SaysHowTheCardOfASourcePackageLooks_FromItsSourceAndItsPicture()
+    {
+        using var fixture = await Fixture.CreateAsync(GlobalConfiguration);
+        var sample = Path.Combine(fixture.Projects.Options.GlobalRoot, "plugins", "sample-plugin");
+        var plain = (await fixture.Service.ListAsync(new(Epoch, null), default)).Plugins.Single(plugin => plugin.Id == "sample-plugin");
+        Assert.IsTrue(plain is { Icon: null, Color: null, Version: null, Author: null, Tags: null, Image: null }, "A package that says nothing has the card of plugins.");
+        Assert.AreEqual("unknown", (await fixture.Service.ImageAsync(new(Epoch, null, "Global", "sample-plugin"), default)).Status);
+
+        // The plugin does not run here: what its attribute says is read from its source.
+        File.WriteAllText(Path.Combine(sample, "plugin.cs"), """
+            using CodeAlta.Plugins.Abstractions;
+
+            // A comment with [Plugin("other", Icon = "bug")] in a string is not the attribute: "] Icon = \"wrong\"".
+            [Plugin("sample-plugin", DisplayName = "Sample \"one\"", Description = "Says ] and ) in a text.",
+                Icon = "notebook-pen", Color = "#FF8800", Version = "1.2.0", Author = "Ada", Tags = ["notes"])]
+            public sealed class SamplePlugin : PluginBase { private const string Icon = "not-this"; }
+            """);
+        var picture = new byte[] { 0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4 };
+        File.WriteAllBytes(Path.Combine(sample, "plugin.webp"), picture);
+        var listed = (await fixture.Service.ListAsync(new(Epoch, null), default)).Plugins.Single(plugin => plugin.Id == "sample-plugin");
+        Assert.AreEqual("notebook-pen", listed.Icon);
+        Assert.AreEqual("#ff8800", listed.Color);
+        Assert.AreEqual("1.2.0", listed.Version);
+        Assert.AreEqual("Ada", listed.Author);
+        Assert.IsNotNull(listed.Image);
+
+        var image = await fixture.Service.ImageAsync(new(Epoch, null, "Global", "sample-plugin"), default);
+        Assert.AreEqual("ok", image.Status);
+        Assert.AreEqual("image/webp", image.Mime);
+        CollectionAssert.AreEqual(picture, Convert.FromBase64String(image.Data!));
+        Assert.AreEqual(listed.Image, image.Token, "The picture read is the one the listing named.");
+
+        // Another picture has another token; one that is too large, or that is not a picture file, is none.
+        File.WriteAllBytes(Path.Combine(sample, "plugin.webp"), [.. picture, 5]);
+        Assert.AreNotEqual(listed.Image, (await fixture.Service.ListAsync(new(Epoch, null), default)).Plugins.Single(plugin => plugin.Id == "sample-plugin").Image);
+        File.WriteAllBytes(Path.Combine(sample, "plugin.webp"), new byte[PluginPresentation.MaximumImageLength + 1]);
+        File.WriteAllText(Path.Combine(sample, "plugin.svg"), "<svg/>");
+        Assert.IsNull((await fixture.Service.ListAsync(new(Epoch, null), default)).Plugins.Single(plugin => plugin.Id == "sample-plugin").Image);
+        Assert.AreEqual("unknown", (await fixture.Service.ImageAsync(new(Epoch, null, "Global", "sample-plugin"), default)).Status);
+        File.WriteAllBytes(Path.Combine(sample, "plugin.png"), picture);
+        Assert.AreEqual("image/png", (await fixture.Service.ImageAsync(new(Epoch, null, "Global", "sample-plugin"), default)).Mime);
+
+        // A request that names no package, or another host, reads nothing.
+        Assert.AreEqual("invalid", (await fixture.Service.ImageAsync(new(Epoch, null, "Global", "..\\sample-plugin"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.ImageAsync(new(Epoch, null, "Elsewhere", "sample-plugin"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.ImageAsync(new("another", null, "Global", "sample-plugin"), default)).Status);
+        Assert.AreEqual("unavailable", (await new PluginsService().ImageAsync(new(Epoch, null, "Global", "sample-plugin"), default)).Status);
+    }
+
+    [TestMethod]
+    public void TheIconAndTheColorOfAPlugin_AreWhatALibraryIconAndAColorAre()
+    {
+        Assert.AreEqual("git-commit-horizontal", PluginPresentation.Icon(" git-commit-horizontal "));
+        foreach (var refused in new[] { null, "", "Git", "a b", "../icon.svg", "<svg>", new string('a', 65) }) Assert.IsNull(PluginPresentation.Icon(refused), refused);
+        Assert.AreEqual("#abc", PluginPresentation.Color("#ABC"));
+        Assert.AreEqual("#12ab9f", PluginPresentation.Color(" #12AB9F "));
+        foreach (var refused in new[] { null, "", "red", "#12", "#12345", "#1234567", "url(x)" }) Assert.IsNull(PluginPresentation.Color(refused), refused);
+        // A source without the attribute, or that is not there, says nothing.
+        Assert.AreEqual(default, PluginPresentation.ReadSource(Path.Combine(Path.GetTempPath(), "CodeAlta-missing-" + Guid.NewGuid().ToString("N"), "plugin.cs")));
+        Assert.AreEqual(default, PluginPresentation.ReadSource(null));
+    }
+
+    [TestMethod]
     public async Task SetEnabled_WritesTheOverrideAndKeepsEveryOtherSetting()
     {
         using var fixture = await Fixture.CreateAsync(GlobalConfiguration);

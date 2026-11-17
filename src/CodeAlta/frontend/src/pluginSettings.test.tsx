@@ -4,13 +4,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CanvasItem, PluginsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { PluginProblems, PluginRows, pluginCanvases, pluginFailure, pluginRows, pluginSettingsPageOf } from "./PluginSettings";
+import { PluginProblems, PluginRows, pluginCanvases, pluginFacts, pluginFailure, pluginRows, pluginSettingsPageOf } from "./PluginSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
 const entry = (id: string, change: Partial<PluginsEntry> = {}): PluginsEntry => ({
   id, name: id, description: null, kind: "Source", scope: "Global", state: "Enabled", enabled: true, enabledGlobal: null, enabledProject: null,
-  runtime: "running", runtimeMessage: null, folder: `plugin:global:${id}`, path: `/home/.alta/plugins/${id}`, loadable: true, changed: false, errors: null, ...change,
+  runtime: "running", runtimeMessage: null, folder: `plugin:global:${id}`, path: `/home/.alta/plugins/${id}`, loadable: true, changed: false, errors: null,
+  icon: null, color: null, version: null, author: null, tags: null, image: null, ...change,
 });
 const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
 function render(listed: readonly PluginsEntry[], change: { locale?: typeof locales[number]; edit?: boolean; remove?: boolean; disabled?: boolean } = {}) {
@@ -19,7 +20,7 @@ function render(listed: readonly PluginsEntry[], change: { locale?: typeof local
     createElement(PluginRows, { rows: pluginRows(listed, key => translate(locale, key)), disabled: change.disabled ?? false, onToggle: never, onReload: never,
       onEdit: change.edit === false ? undefined : never, onDelete: change.remove === false ? undefined : never, platform: "windows", onReveal: never })));
 }
-const cards = (html: string) => html.split('<div class="bp6-card').slice(1);
+const cards = (html: string) => html.split('<div class="plugin-card ').slice(1);
 const card = (html: string, name: string) => cards(html).find(value => value.includes(`<strong>${name}</strong>`)) ?? assert.fail(`no row for ${name}`);
 
 test("the plugins that ship with CodeAlta come first and are on until configuration says otherwise", () => {
@@ -185,7 +186,7 @@ test("a row lists the canvases its plugin declares, with their scope, before any
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
       createElement(PluginRows, { rows, canvases: declared, disabled: false, onToggle: never, onReload: never, platform: "windows", onReveal: never })));
     const notes = cards(html).find(value => value.includes("<strong>Notes</strong>")) ?? assert.fail("no row for Notes");
-    assert.equal((notes.match(/class="plugin-canvas"/gu) ?? []).length, 2, locale);
+    assert.equal((notes.match(/class="[^"]*\bplugin-canvas"/gu) ?? []).length, 2, locale);
     for (const [title, scope] of [["Board", "Project"], ["Run", "Session"]]) {
       assert.ok(notes.includes(translate(locale, "Canvas: {title} ({scope})", { title, scope: translate(locale, scope as "Project" | "Session") })), `${locale} ${title}`);
     }
@@ -211,7 +212,7 @@ test("a plugin with a settings page has a gear beside its switch while it is on,
     const row = draw(on, page => opened.push(page));
     assert.ok(row.includes(`aria-label="${label}"`), `${locale}: ${row}`);
     assert.ok(row.indexOf(`aria-label="${label}"`) < row.indexOf("bp6-switch"), "the gear comes before the switch");
-    assert.equal((row.match(/class="plugin-canvas"/gu) ?? []).length, 1, "the tab is listed, the settings page is not");
+    assert.equal((row.match(/class="[^"]*\bplugin-canvas"/gu) ?? []).length, 1, "the tab is listed, the settings page is not");
     assert.ok(!draw(on).includes(`aria-label="${label}"`), "without a way to go there, no gear");
     assert.ok(!draw([]).includes(`aria-label="${label}"`), "a plugin that is off has no gear");
   }
@@ -244,4 +245,37 @@ test("the landing page is a plugin that ships with CodeAlta: its row has its swi
     assert.ok(!on.includes("bp6-intent-danger") && !on.includes(translate(locale, "Edit {name}", { name: "Landing page" })), on);
   }
   if (locales.length > 1) assert.notEqual(translate(locales[1], "The welcome page: recent sessions and projects, the documentation and the cards of plugins."), english("The welcome page: recent sessions and projects, the documentation and the cards of plugins."));
+});
+
+test("a card has the picture, the icon and the color of its plugin, and is compact without pictures", () => {
+  const listed = [entry("notes", { name: "Notes", icon: "notebook-pen", color: "#ff8800", version: "1.2.0", author: "Ada", tags: ["writing", "markdown"], image: "1f-8dc" }),
+    entry("plain", { enabled: false, state: "Disabled", runtime: null })];
+  const draw = (change: { showImages?: boolean; images?: ReadonlyMap<string, string> } = {}) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(PluginRows, { rows: pluginRows(listed, english), disabled: false, onToggle: never, onReload: never, platform: "windows", onReveal: never, ...change })));
+  const html = draw({ images: new Map([["Global:notes", "data:image/webp;base64,AAAA"]]) });
+  // A plugin that ships with CodeAlta has its picture among the files of the application, and its color.
+  const mcp = card(html, "MCP");
+  assert.ok(mcp.includes('<img src="plugin-covers/mcp.webp"') && mcp.includes("--plugin-accent:#2dd4bf") && mcp.includes("<small>CodeAlta</small>"), mcp);
+  // A source plugin says who made it, its version and its tags, in its own color, with the picture of its folder.
+  const notes = card(html, "Notes");
+  assert.ok(notes.includes('<img src="data:image/webp;base64,AAAA"') && notes.includes("--plugin-accent:#ff8800"), notes);
+  assert.ok(notes.includes("<small>Ada · Version 1.2.0</small>") && notes.includes(">writing<") && notes.includes(">markdown<"), notes);
+  // Without a picture, the card has the picture of plugins in the color of the plugin; a plugin that says nothing is named by its id.
+  const plain = card(html, "plain");
+  assert.ok(plain.includes('<img src="plugin-covers/plugin.webp"') && plain.includes('class="plugin-card-tint"') && plain.includes("<small>plain</small>") && plain.includes('data-off=""'), plain);
+  assert.ok(!notes.includes("plugin-card-tint") && !mcp.includes("plugin-card-tint"), "a picture of its own keeps its colors");
+  assert.ok(card(draw(), "Notes").includes('<img src="plugin-covers/plugin.webp"'), "until its picture is read, a card has the picture of plugins");
+  // Pictures off: no card has one, and every card says it is compact.
+  const compact = draw({ showImages: false, images: new Map([["Global:notes", "data:image/webp;base64,AAAA"]]) });
+  assert.ok(!compact.includes("plugin-card-cover") && !compact.includes("<img"), compact);
+  assert.equal(cards(compact).filter(value => value.includes('data-compact=""')).length, cards(compact).length);
+});
+
+test("the search and the filters of the page read the words of a row", () => {
+  const declared = [canvas("board", { pluginKey: "global:notes", package: "plugin:global:notes", title: "Kanban" })];
+  const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes.", author: "Ada", tags: ["writing"] }), entry("local", { scope: "Project", folder: "plugin:project:p:local" })], english);
+  const facts = (id: string, builtIn = false) => pluginFacts(rows.find(row => row.id === id && row.builtIn === builtIn)!, declared);
+  assert.deepEqual(facts("notes"), { id: "notes", name: "Notes", description: "Keeps notes.", enabled: true, builtIn: false, project: false, words: ["Ada", "writing", "Kanban"] });
+  assert.equal(facts("local").project, true);
+  assert.deepEqual([facts("git", true).builtIn, facts("git", true).project, facts("mobile", true).enabled], [true, false, false]);
 });

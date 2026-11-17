@@ -233,11 +233,11 @@ public override IEnumerable<PluginUiContribution> GetUiContributions()
   <figcaption class="small text-secondary mt-2">Buttons of plugins in the title bar: Statistics, and the two of the <code>canvas-checklist</code> sample with the number of items left.</figcaption>
 </figure>
 
-Users hide a button with a right click and turn it back on in **Settings > Plugins**. In a narrow window the buttons fold into one menu.
+Users hide a button with a right click and turn it back on in **Settings > Plugins**, under **Buttons** on the card of its plugin. In a narrow window the buttons fold into one menu.
 
-<figure class="alta-figure my-4" style="max-width: 52rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-plugin-buttons-settings.webp" alt="The Plugins page of Settings: under Statistics and under the Canvas checklist plugin, a line for each button with its place, Title bar or Project menu, and a switch" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Settings > Plugins lists the canvases and the buttons of each plugin, with a switch for each button.</figcaption>
+<figure class="alta-figure my-4" style="max-width: 26rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-plugin-buttons-settings.webp" alt="The Statistics card of the Plugins page of Settings with Buttons open: a line for each of its three buttons with its place, Title bar, Project menu or Session menu, and a switch" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The card of a plugin lists its canvases, and <strong>Buttons</strong> has a switch for each of its buttons.</figcaption>
 </figure>
 
 ## Welcome page cards
@@ -324,7 +324,7 @@ Agents use `alta canvas`: `list` and `show` read the canvases and what each show
 
 ## Settings page
 
-A plugin whose settings need more than a line of configuration gives them a Settings page: a canvas with `Placement = PluginCanvasPlacement.Settings`. Settings lists it in the **Extensions** group, after Plugins and MCP Servers, and the plugin's row in **Settings > Plugins** gets a gear button to it. It is drawn like a tab (fragment, script, `canvas.Rpc`, Blueprint), under the canvas title and description:
+A plugin whose settings need more than a line of configuration gives them a Settings page: a canvas with `Placement = PluginCanvasPlacement.Settings`. Settings lists it in the **Extensions** group, after Plugins and MCP Servers, and the plugin's card in **Settings > Plugins** gets a gear button to it. It is drawn like a tab (fragment, script, `canvas.Rpc`, Blueprint), under the canvas title and description:
 
 ```csharp
 yield return new PluginCanvasContribution

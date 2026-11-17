@@ -28,7 +28,7 @@ test("a settings page says where its files are, and opens, copies and shows them
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsFiles.neoastra.mount.ts", import.meta.url)) }));
       } }] });
     await writeFile(join(root, "style.css"), await readFile(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
-      + await readFile(new URL("./style.css", import.meta.url), "utf8"));
+      + await readFile(new URL("./style.css", import.meta.url), "utf8") + await readFile(new URL("./plugins/plugins.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
@@ -94,8 +94,8 @@ test("a settings page says where its files are, and opens, copies and shows them
     await act(`${button(`${rows}[0]`, "Reveal in File Explorer")}.click()`);
     assert.deepEqual(await evaluate(calls("files.reveal")), [{ expectedEpoch: "epoch", projectId: "p", kind: "plugins", scope: "Global", id: null, part: null }]);
 
-    // The row of a source plugin has the path of its folder, shown in the file manager by the id of that folder.
-    const card = (name: string) => `[...document.querySelectorAll('.settings-editor-rows .bp6-card')].find(value => value.querySelector('strong').textContent === ${JSON.stringify(name)})`;
+    // The card of a source plugin has the path of its folder, shown in the file manager by the id of that folder.
+    const card = (name: string) => `[...document.querySelectorAll('.plugin-cards .plugin-card')].find(value => value.querySelector('strong').textContent === ${JSON.stringify(name)})`;
     assert.equal(await evaluate(`${card("commits")}.querySelector('.settings-file-location code').title`), `${home}\\commits`);
     assert.equal(await evaluate(`${card("MCP")}.querySelector('.settings-file-location')`), null, "A plugin that ships with CodeAlta has no folder.");
     await act(`${button(card("commits"), "Reveal in File Explorer")}.click()`);
@@ -190,14 +190,15 @@ test("a settings page says where its files are, and opens, copies and shows them
     // Malformed metadata must not collapse rows, suppress their details or send an empty name to removal.
     await command("Page.navigate", { url: pathToFileURL(page).href + "?skills=invalid" });
     const skillRows = "[...document.querySelectorAll('.skill-settings .settings-editor-rows .bp6-card')]";
+    const skillRow = (name: string) => `${skillRows}.find(value => value.querySelector('strong').textContent === ${JSON.stringify(name)})`;
     const skillDetail = "document.querySelector('.skill-detail')";
     await until(`${skillRows}.length === 4`, "unnamed skills and duplicate names each have their own row");
     assert.deepEqual(await evaluate(`${skillRows}.map(row => row.querySelector('input').disabled)`), [true, true, false, false], "only usable names have enablement switches");
     assert.equal(await evaluate("document.querySelector('.settings-scope [aria-checked=true]')?.textContent"), "Global");
-    await act(`${card("Broken second")}.querySelector('strong').click()`);
+    await act(`${skillRow("Broken second")}.querySelector('strong').click()`);
     await until(`${skillDetail}?.querySelector('.skill-detail-diagnostics')?.textContent.includes('Broken second: invalid YAML.')`, "the second unnamed skill has its own diagnostic");
-    assert.equal(await evaluate(`${card("Broken second")}.getAttribute('aria-current')`), "true");
-    assert.equal(await evaluate(`${card("Broken first")}.getAttribute('aria-current')`), null);
+    assert.equal(await evaluate(`${skillRow("Broken second")}.getAttribute('aria-current')`), "true");
+    assert.equal(await evaluate(`${skillRow("Broken first")}.getAttribute('aria-current')`), null);
     assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta", spaceId: null });
     await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for broken-second')`, "the right body is shown");
     assert.ok((await evaluate(`${skillDetail}.textContent`) as string).includes("C:\\skills\\broken-second\\SKILL.md"));
@@ -231,21 +232,21 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${confirm} !== null`);
     assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Remove Broken second?");
     await act(`${confirm}.querySelector('button').click()`);
-    await until(`${card("Broken second")} === undefined`);
+    await until(`${skillRow("Broken second")} === undefined`);
     assert.deepEqual(await evaluate(calls("skills.delete")), [{ expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta", spaceId: null }]);
-    assert.equal(await evaluate(`${card("Broken first")} !== undefined`), true, "the first unnamed skill stays");
+    assert.equal(await evaluate(`${skillRow("Broken first")} !== undefined`), true, "the first unnamed skill stays");
     await until(`${confirm} === null`, "the first confirmation has closed");
 
     // The same is true for two files with the same nonempty name and source.
-    await act(`${card("Duplicate second")}.querySelector('strong').click()`);
+    await act(`${skillRow("Duplicate second")}.querySelector('strong').click()`);
     await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for duplicate-second')`);
-    assert.equal(await evaluate(`${card("Duplicate second")}.getAttribute('aria-current')`), "true");
+    assert.equal(await evaluate(`${skillRow("Duplicate second")}.getAttribute('aria-current')`), "true");
     assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta", spaceId: null });
-    await act(`${trash("Duplicate second")}.click()`);
+    await act(`${skillRow("Duplicate second")}.querySelector('button.bp6-intent-danger').click()`);
     await until(`${confirm} !== null`);
     assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Remove Duplicate second?");
     await act(`${confirm}.querySelector('button').click()`);
-    await until(`${card("Duplicate second")} === undefined`);
+    await until(`${skillRow("Duplicate second")} === undefined`);
     assert.deepEqual(await evaluate(`${calls("skills.delete")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta", spaceId: null });
     assert.deepEqual(await evaluate(`${skillRows}.map(row => row.querySelector('strong').textContent)`), ["Broken first", "Duplicate first"]);
 

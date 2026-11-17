@@ -27,6 +27,9 @@ internal sealed class PluginsService
     /// <summary>The most compiler errors listed for one plugin.</summary>
     internal const int MaximumErrors = 5;
 
+    /// <summary>The most tags listed for one plugin.</summary>
+    internal const int MaximumTags = 8;
+
     private const int MaximumIdLength = 128;
     private const int MaximumDescriptionLength = 512;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -174,10 +177,21 @@ internal sealed class PluginsService
                 // A plugin that runs says its own name and what it does; the README of its package otherwise.
                 var running = status?.Plugins.Count == 1 ? status.Plugins[0] : null;
                 var description = Text(running?.Description) ?? (discovered ? Describe(entry.ReadmePath) : null);
+                var directory = discovered ? Path.GetDirectoryName(entry.SourcePath) : null;
+                // How its card looks: what the plugin says while it runs, what its source says otherwise.
+                var written = running is null && discovered ? PluginPresentation.ReadSource(entry.SourcePath) : default;
                 plugins.Add(new(id, Text(running?.DisplayName) ?? entry.DisplayName, description, discovered ? "Source" : "Config",
                     entry.Scope.ToString(), enabledGlobal, enabledProject, enabled,
                     discovered ? entry.State.ToString() : enabled ? "Configured" : nameof(PluginManagementState.Disabled), runtime, message,
-                    folder?.Id, discovered ? Path.GetDirectoryName(entry.SourcePath) : null, status is not null, status?.SourceChanged ?? false, Errors(status)));
+                    folder?.Id, directory, status is not null, status?.SourceChanged ?? false, Errors(status))
+                {
+                    Icon = running is null ? written.Icon : PluginPresentation.Icon(running.Icon),
+                    Color = running is null ? written.Color : PluginPresentation.Color(running.Color),
+                    Version = running is null ? written.Version : Text(running.Version),
+                    Author = running is null ? written.Author : Text(running.Authors.FirstOrDefault()),
+                    Tags = running?.Tags is { Count: > 0 } tags ? [.. tags.Take(MaximumTags).Select(Clean)] : null,
+                    Image = PluginPresentation.FindImage(directory)?.Token,
+                });
             }
 
             return new("ok", request.ProjectId, plugins, omitted, problems);
@@ -437,6 +451,32 @@ internal sealed class PluginsService
     }
 
     /// <summary>
+    /// Reads the picture of the card of a source package: the file <c>plugin.webp</c>, <c>plugin.png</c> or
+    /// <c>plugin.jpg</c> of its folder, in base64 with its media type.
+    /// </summary>
+    [NeoRpcMethod("image")]
+    public async Task<PluginsImageResponse> ImageAsync(PluginsPackageRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_projects is null || _store is null) return new("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch");
+        var (status, root) = await RootAsync(request.ProjectId, request.Scope, cancellationToken).ConfigureAwait(false);
+        if (root is null) return new(status);
+        if (!ValidId(request.Id)) return new("invalid");
+        if (PluginPresentation.FindImage(Path.Combine(root.RootPath, request.Id!)) is not { } image) return new("unknown");
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(image.Path, cancellationToken).ConfigureAwait(false);
+            // The file may have grown since it was looked at.
+            return bytes.Length is 0 or > PluginPresentation.MaximumImageLength ? new("unknown") : new("ok", image.Mime, Convert.ToBase64String(bytes), image.Token);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new("read_failed");
+        }
+    }
+
+    /// <summary>
     /// Says what the running host did with an enabled source package: <c>running</c> when one of its plugins is
     /// active, <c>unsupported</c> when none supports this application, <c>failed</c> with the first error when
     /// its build or start failed, and <c>stopped</c> when the host has not started it (enabled since the start).
@@ -566,7 +606,32 @@ internal sealed record PluginsProblem(string Kind, string? Path, string? Message
 /// <param name="Errors">The compiler errors of its last build when that build failed.</param>
 internal sealed record PluginsEntry(string Id, string Name, string? Description, string Kind, string Scope, bool? EnabledGlobal,
     bool? EnabledProject, bool Enabled, string State, string? Runtime = null, string? RuntimeMessage = null,
-    string? Folder = null, string? Path = null, bool Loadable = false, bool Changed = false, IReadOnlyList<string>? Errors = null);
+    string? Folder = null, string? Path = null, bool Loadable = false, bool Changed = false, IReadOnlyList<string>? Errors = null)
+{
+    /// <summary>The name of the icon of a source package, as its plugin gives it (a Lucide icon); null for the icon of plugins.</summary>
+    public string? Icon { get; init; }
+
+    /// <summary>The color of a source package, as <c>#rgb</c> or <c>#rrggbb</c>; null when its plugin gives none.</summary>
+    public string? Color { get; init; }
+
+    /// <summary>The version its plugin gives.</summary>
+    public string? Version { get; init; }
+
+    /// <summary>The author its plugin gives.</summary>
+    public string? Author { get; init; }
+
+    /// <summary>The tags its plugin gives while it runs.</summary>
+    public IReadOnlyList<string>? Tags { get; init; }
+
+    /// <summary>
+    /// For a source package whose folder has a picture for its card, a token that changes when the picture does;
+    /// <c>plugins.image</c> reads the picture.
+    /// </summary>
+    public string? Image { get; init; }
+}
+
+/// <summary>The picture of the card of a source package, in base64, with its media type and the token of the listing.</summary>
+internal sealed record PluginsImageResponse(string Status, string? Mime = null, string? Data = null, string? Token = null);
 internal sealed record PluginsSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Id, bool Enabled);
 
 /// <summary>Names a source package: the scope is <c>Global</c> or <c>Project</c>, the project the one of a project package.</summary>

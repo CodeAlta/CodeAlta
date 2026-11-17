@@ -1,5 +1,5 @@
-import { useContext, useEffect, useState, type ReactNode } from "react";
-import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Button, FormGroup, InputGroup, NonIdealState, PopoverNext, SegmentedControl, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { plugins, projectFiles, type CanvasItem, type PluginsEntry, type PluginsProblem } from "#neoastra";
 import { canvasPlacement, canvasScope, pluginSettingsPage, type PluginSettingsPage } from "./canvases/canvasPages";
@@ -7,6 +7,10 @@ import { AppIcon, type IconName } from "./AppIcon";
 import { BrandIcon } from "./BrandIcon";
 import { pluginBrand } from "./brands";
 import { PluginButtonSwitches } from "./pluginButtons/PluginButtonSwitches";
+import { PluginIcon } from "./pluginButtons/PluginIcon";
+import { PluginCard } from "./plugins/PluginCard";
+import { hasPluginFilters, matchesPluginFilters, noPluginFilters, persistPluginView, pluginAccent, pluginSourceCounts, pluginViewKey, restorePluginView,
+  type PluginFacts, type PluginFilters, type PluginSourceFilter, type PluginStateFilter } from "./plugins/pluginView";
 import { PluginButtonsContext, readPluginButtons, type PluginButtonView } from "./pluginButtons/pluginButtonModel";
 import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
@@ -18,17 +22,20 @@ import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 // The plugins that ship with CodeAlta are enabled unless configuration says otherwise, except the ones that are off until
 // the user turns them on (`off`), and the host lists them only once configuration names them.
-const builtIn: readonly { id: string; name: string; description: MessageKey; icon?: IconName; off?: true }[] = [
-  { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools." },
-  { id: "git", name: "Git", description: "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available." },
-  { id: "jira", name: "Jira", description: "The issues of a Jira project, for the projects whose configuration names one." },
-  { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
-  { id: "landing", name: "Landing page", description: "The welcome page: recent sessions and projects, the documentation and the cards of plugins." },
-  { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
-  { id: "acp", name: "ACP agents", description: "Coding agents of the Agent Client Protocol registry, as model providers." },
+// Each has the color of its card and its picture, a file of the application (public/plugin-covers/<id>.webp).
+const builtIn: readonly { id: string; name: string; description: MessageKey; icon?: IconName; color: string; off?: true }[] = [
+  { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools.", color: "#2dd4bf" },
+  { id: "git", name: "Git", description: "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available.", color: "#f4683c" },
+  { id: "jira", name: "Jira", description: "The issues of a Jira project, for the projects whose configuration names one.", color: "#4c9aff" },
+  { id: "statistics", name: "Statistics", description: "Per-turn and session statistics.", icon: "usage", color: "#a78bfa" },
+  { id: "landing", name: "Landing page", description: "The welcome page: recent sessions and projects, the documentation and the cards of plugins.", icon: "home", color: "#f5b942" },
+  { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them.", icon: "window", color: "#84cc16" },
+  { id: "acp", name: "ACP agents", description: "Coding agents of the Agent Client Protocol registry, as model providers.", icon: "subAgents", color: "#e879f9" },
   // It publishes this computer on the tailnet: off until the user turns it on.
-  { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", icon: "smartphone", off: true },
+  { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", icon: "smartphone", color: "#34d399", off: true },
 ];
+/** The picture of the card of a plugin that ships with CodeAlta, among the files of the application; `plugin` is the one of a plugin that has none. */
+export const builtInCover = (id: string) => `plugin-covers/${id}.webp`;
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };
 // What the running application did with an enabled plugin, when that is not simply "running".
 const runtimeTag: Record<string, { label: MessageKey; intent: Intent }> = {
@@ -54,7 +61,9 @@ export function pluginFailure(status: string, message?: string | null): Settings
 }
 
 /** One row of the page: a plugin that ships with CodeAlta, or one that configuration or a plugin folder names. */
-export type PluginRow = Readonly<{ id: string; name: string; description: string | null; enabled: boolean; entry: PluginsEntry | null; builtIn: boolean; icon?: IconName }>;
+export type PluginRow = Readonly<{ id: string; name: string; description: string | null; enabled: boolean; entry: PluginsEntry | null; builtIn: boolean; icon?: IconName;
+  /** The color of its card, and the address of its picture when the application has it: the picture of a source plugin is read from its folder. */
+  color: string; cover?: string | null }>;
 
 /** What tells a row from the others: a source plugin of a project and one of the user can have the same id. */
 export const pluginRowKey = (row: PluginRow) => `${row.entry?.scope ?? ""}:${row.id}`;
@@ -71,10 +80,16 @@ export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey)
       // until it is turned on follows the global switch alone, which is the one its host reads.
       const global = listed.find(value => value.id === plugin.id)?.enabledGlobal;
       const configured = plugin.off ? global ?? false : entry?.enabled ?? global ?? true;
-      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true, icon: plugin.icon }; }),
+      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true, icon: plugin.icon, color: plugin.color, cover: builtInCover(plugin.id) }; }),
     ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id))
-      .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false })),
+      .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false, color: pluginAccent(entry.id, entry.color) })),
   ];
+}
+
+/** What the filters and the search of the page read of a row: its words are its author, its tags and the titles of its canvases. */
+export function pluginFacts(row: PluginRow, canvases: readonly CanvasItem[] = []): PluginFacts {
+  return { id: row.id, name: row.name, description: row.description, enabled: row.enabled, builtIn: row.builtIn, project: !row.builtIn && row.entry?.scope === "Project",
+    words: [row.entry?.author, ...(row.entry?.tags ?? []), ...pluginCanvases(row, canvases).map(canvas => canvas.title)] };
 }
 
 /**
@@ -116,10 +131,11 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
 }
 
 /**
- * The list of the page. A source plugin says what the running application did with it and what its last build
+ * The cards of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings, question = null, typedSettings }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings, question = null, typedSettings,
+  showImages = true, images }: {
   rows: readonly PluginRow[]; disabled: boolean;
   /** A question about one row (stopping a plugin whose agents are at work), shown beside it: the key of the row and the question. */
   question?: Readonly<{ key: string; node: ReactNode }> | null;
@@ -140,45 +156,101 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   onOpenSettings?: (page: PluginSettingsPage) => void;
   /** The pages of the plugins that declare settings without a settings canvas, by the id of the plugin. */
   typedSettings?: ReadonlyMap<string, PluginSettingsPage>;
+  /** Whether the cards have their picture; without it they are compact. */
+  showImages?: boolean;
+  /** The pictures of the source plugins that have one in their folder, by the key of their row. */
+  images?: ReadonlyMap<string, string>;
 }) {
   const { t } = useShellLanguage();
-  return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
+  return <div className="plugin-cards" role="list" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
       const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) ?? typedSettings?.get(row.id) ?? null : null;
       const key = pluginRowKey(row);
-      return <Card key={key}>
-      {question?.key === key && question.node}
-      <span className="settings-editor-logo">{pluginBrand(row.id) ? <BrandIcon name={pluginBrand(row.id)!} size={20} /> : <AppIcon name={row.icon ?? "plugin"} size={18} />}</span>
-      <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
-        {pluginCanvases(row, canvases).filter(canvas => canvasPlacement(canvas) === "Tab").map(canvas => <small key={canvas.id} className="plugin-canvas">{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</small>)}
-        {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
-        {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
+      const own = buttons && row.enabled ? buttons.filter(button => button.pluginId === row.id) : [];
+      const tabs = pluginCanvases(row, canvases).filter(canvas => canvasPlacement(canvas) === "Tab");
+      // The logo of a brand has its own colors; any other icon is drawn in the color of the plugin.
+      const icon = (size: number) => pluginBrand(row.id) && row.builtIn ? <BrandIcon name={pluginBrand(row.id)!} size={size} />
+        : source?.icon ? <PluginIcon icon={source.icon} size={size} /> : <AppIcon name={row.icon ?? "plugin"} size={size} />;
+      const byline = [source?.author, source?.version ? t("Version {version}", { version: source.version }) : null].filter(Boolean).join(" · ") || (row.builtIn ? "CodeAlta" : row.id);
+      return <PluginCard key={key} id={row.id} name={row.name} byline={byline} description={row.description} accent={row.color} off={!row.enabled}
+        showCover={showImages} cover={row.cover ?? images?.get(key) ?? null} plainCover={builtInCover("plugin")} icon={icon(20)}
+        overlay={question?.key === key ? question.node : null}
+        kind={<Tag minimal round>{t(row.builtIn ? "Built-in" : entry?.scope === "Project" ? "Project" : "User")}</Tag>}
+        status={<>
+          {(entry && entry.kind === "Source" && entry.state !== "Enabled" && entry.state !== "Disabled" || entry?.runtime && runtimeTag[entry.runtime] && !(entry.runtime === "failed" && entry.state === "Failed")
+            || source?.changed && source.runtime === "running") && <div className="plugin-card-status">
+            {entry && entry.kind === "Source" && entry.state !== "Enabled" && entry.state !== "Disabled"
+              && <Tag minimal round intent={stateIntent[entry.state] ?? "none"}>{entry.state}</Tag>}
+            {entry?.runtime && runtimeTag[entry.runtime] && !(entry.runtime === "failed" && entry.state === "Failed")
+              && <Tag minimal round intent={runtimeTag[entry.runtime].intent}>{t(runtimeTag[entry.runtime].label)}</Tag>}
+            {source?.changed && source.runtime === "running" && <Tag minimal round intent="warning">{t("Source changed")}</Tag>}
+          </div>}
+          {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
+          {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
+        </>}
+        footStart={entry?.scope !== "Project" ? <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} /> : null}
+        actions={<>
+          {source?.loadable && row.enabled && <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={disabled}
+            aria-label={t("Reload {name}", { name: row.name })} title={t("Build and reload")} onClick={() => onReload(source, row)} />}
+          {source?.folder && source.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
+            aria-label={t("Edit {name}", { name: row.name })} title={t("Edit in the code editor")}
+            onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
+          {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
+          {settings && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} aria-label={t("Settings of {name}", { name: row.name })}
+            title={t("Settings of {name}", { name: row.name })} onClick={() => onOpenSettings?.(settings)} />}
+          <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked, row)} />
+        </>}>
+        {(tabs.length > 0 || own.length > 0 || (source?.tags?.length ?? 0) > 0) && <div className="plugin-card-chips">
+          {tabs.map(canvas => <Tag key={canvas.id} minimal className="plugin-canvas" icon={<AppIcon name="canvases" size={12} />}>{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</Tag>)}
+          {/* The buttons the plugin puts in the window, each with its switch, behind one chip: a card stays a card. */}
+          {own.length > 0 && <PopoverNext placement="bottom-start" content={<div className="plugin-card-popover"><PluginButtonSwitches buttons={own} /></div>}>
+            <Tag minimal interactive className="plugin-card-buttons" icon={<AppIcon name="columns" size={12} />} aria-haspopup="dialog">{t("Buttons: {count}", { count: own.length })}</Tag>
+          </PopoverNext>}
+          {source?.tags?.map(tag => <Tag key={tag} minimal round className="plugin-card-tag">{tag}</Tag>)}
+        </div>}
         {source?.path && <SettingsFileLocation path={source.path} platform={platform}
           onReveal={source.folder && onReveal ? () => onReveal({ id: source.folder!, path: source.path!, name: source.id }) : undefined} />}
-        {buttons && row.enabled && <PluginButtonSwitches buttons={buttons.filter(button => button.pluginId === row.id)} />}</span>
-      <span className="settings-editor-tags"><Tag minimal round>{t(row.builtIn ? "Built-in" : entry?.scope === "Project" ? "Project" : "User")}</Tag>
-        {entry && entry.kind === "Source" && entry.state !== "Enabled" && entry.state !== "Disabled"
-          && <Tag minimal round intent={stateIntent[entry.state] ?? "none"}>{entry.state}</Tag>}
-        {entry?.runtime && runtimeTag[entry.runtime] && !(entry.runtime === "failed" && entry.state === "Failed")
-          && <Tag minimal round intent={runtimeTag[entry.runtime].intent}>{t(runtimeTag[entry.runtime].label)}</Tag>}
-        {source?.changed && source.runtime === "running" && <Tag minimal round intent="warning">{t("Source changed")}</Tag>}
-        {source?.loadable && row.enabled && <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={disabled}
-          aria-label={t("Reload {name}", { name: row.name })} title={t("Build and reload")} onClick={() => onReload(source, row)} />}
-        {source?.folder && source.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
-          aria-label={t("Edit {name}", { name: row.name })} title={t("Edit in the code editor")}
-          onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
-        {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
-        {entry?.scope !== "Project" && <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} />}
-        {settings && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} aria-label={t("Settings of {name}", { name: row.name })}
-          title={t("Settings of {name}", { name: row.name })} onClick={() => onOpenSettings?.(settings)} />}
-        <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked, row)} /></span>
-    </Card>; })}
-  </CardList>;
+      </PluginCard>; })}
+  </div>;
 }
 
 /**
- * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
- * code editor, built again in the running application, and created from here.
+ * Reads the pictures of the source plugins that have one in their folder, once each: a picture is read again when its
+ * file changes, which the token of the listing says. While the cards have no picture, nothing is read.
+ */
+function usePluginImages(api: Pick<typeof plugins, "image">, epoch: string | null, projectId: string | null, listed: readonly PluginsEntry[], wanted: boolean): ReadonlyMap<string, string> {
+  const [images, setImages] = useState<ReadonlyMap<string, string>>(new Map());
+  // What was read, by the row and the token of its picture.
+  const read = useRef(new Map<string, string>());
+  const wantedKey = listed.filter(entry => entry.kind === "Source" && entry.image).map(entry => `${entry.scope}:${entry.id}:${entry.image}`).join("\n");
+  useEffect(() => {
+    if (!wanted || !epoch) return;
+    const abort = new AbortController();
+    const withPicture = listed.filter(entry => entry.kind === "Source" && entry.image);
+    const publish = () => { if (!abort.signal.aborted) setImages(new Map(withPicture.flatMap(entry => {
+      const data = read.current.get(`${entry.scope}:${entry.id}:${entry.image}`);
+      return data ? [[`${entry.scope}:${entry.id}`, data] as const] : [];
+    }))); };
+    publish();
+    void (async () => {
+      for (const entry of withPicture) {
+        const key = `${entry.scope}:${entry.id}:${entry.image}`;
+        if (read.current.has(key)) continue;
+        try {
+          const reply = await api.image({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { signal: abort.signal, timeoutMilliseconds: 15000 });
+          if (abort.signal.aborted) return;
+          if (reply.status === "ok" && reply.mime && reply.data) { read.current.set(key, `data:${reply.mime};base64,${reply.data}`); publish(); }
+        } catch { /* The card draws the picture of a plugin that has none. */ }
+      }
+    })();
+    return () => abort.abort();
+  }, [api, epoch, projectId, wantedKey, wanted]);
+  return images;
+}
+
+/**
+ * Settings page for plugins: a card per plugin with its switch, found by a search and filters. A source plugin is
+ * also opened in the code editor, built again in the running application, and created from here.
  */
 export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings, askBeforeStop = true, onStopQuestionDismissed, typedSettings }: {
   epoch: string | null; project: SettingsProject;
@@ -217,6 +289,14 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
   const disabled = busy || working;
   const listed = listing?.plugins ?? [];
   const rows = pluginRows(listed, t);
+  // The pictures of the cards are on or off, as the user left them; the search and the filters start empty each time.
+  const [view, setView] = useState(() => restorePluginView(() => localStorage.getItem(pluginViewKey)));
+  const showImages = (images: boolean) => { const next = { ...view, images }; setView(next); persistPluginView(value => localStorage.setItem(pluginViewKey, value), next); };
+  const [filters, setFilters] = useState<PluginFilters>(noPluginFilters);
+  const facts = rows.map(row => pluginFacts(row, canvases));
+  const shown = rows.filter((_, index) => matchesPluginFilters(facts[index], filters));
+  const counts = pluginSourceCounts(facts, filters);
+  const images = usePluginImages(api, epoch, projectId, listed, view.images);
   // The buttons that running plugins put in the window, to be shown or hidden here.
   const buttonsHost = useContext(PluginButtonsContext);
   const [buttons, setButtons] = useState<readonly PluginButtonView[]>([]);
@@ -307,7 +387,24 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled || !!stopping} question={question} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} typedSettings={typedSettings} />
+      <div className="plugin-toolbar" role="search" aria-label={t("Find a plugin")}>
+        <InputGroup className="plugin-toolbar-search" type="search" value={filters.query} placeholder={t("Search plugins")} aria-label={t("Search plugins")}
+          leftElement={<span className="plugin-toolbar-search-icon"><AppIcon name="search" size={14} /></span>}
+          onChange={event => setFilters(current => ({ ...current, query: event.target.value }))} />
+        <SegmentedControl size="small" aria-label={t("Where the plugins come from")} value={filters.source}
+          onValueChange={value => setFilters(current => ({ ...current, source: value as PluginSourceFilter }))}
+          options={[{ label: `${t("All")} ${counts.all}`, value: "all" }, { label: `${t("Built-in")} ${counts.builtIn}`, value: "builtIn" },
+            { label: `${t("User")} ${counts.user}`, value: "user" }, ...(project ? [{ label: `${t("Project")} ${counts.project}`, value: "project" }] : [])]} />
+        <SegmentedControl size="small" aria-label={t("Whether the plugins are turned on")} value={filters.state}
+          onValueChange={value => setFilters(current => ({ ...current, state: value as PluginStateFilter }))}
+          options={[{ label: t("Any state"), value: "all" }, { label: t("On"), value: "on" }, { label: t("Off"), value: "off" }]} />
+        <Switch className="plugin-toolbar-images" checked={view.images} label={t("Pictures")} alignIndicator="end" onChange={event => showImages(event.currentTarget.checked)} />
+      </div>
+      {shown.length > 0
+        ? <PluginRows spaceScope={spaceScope} rows={shown} canvases={canvases} disabled={disabled || !!stopping} question={question} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} typedSettings={typedSettings}
+            showImages={view.images} images={images} />
+        : <NonIdealState className="plugin-none" icon={<AppIcon name="search" size={32} />} title={t("No plugin matches")}
+            action={hasPluginFilters(filters) ? <Button onClick={() => setFilters(noPluginFilters)}>{t("Clear the search and the filters")}</Button> : undefined} />}
     </>}
   </SettingsPage>;
 }
