@@ -148,6 +148,13 @@ export function searchArchivedSessions(snapshot: WorkspaceSnapshot, archived: re
     .map(result => ({ ...result, key: `archived:${result.session.id}`, archived: true }));
 }
 
+// The id of a Claude Code session is a random UUID: a short word is in many of them by chance ("be", "add", "42"), so
+// a word finds a session by its id only as the start of it, from its first group on.
+const claudeCodeIdWord = 8;
+function claudeCodeIdScore(id: string, word: string): number | null {
+  return word.length >= claudeCodeIdWord && id.toLowerCase().startsWith(word) ? (word.length === id.length ? 90 : 1090) : null;
+}
+
 /**
  * The Claude Code sessions started elsewhere that a query finds, among the sessions: by their title, then by the name of
  * the project that lists them, then by the folder they started in, then by their id. Only once something is typed, and only
@@ -163,8 +170,14 @@ export function searchClaudeCodeConversations(conversations: readonly WorkspaceC
     if (projectId !== undefined && conversation.projectId !== projectId) continue;
     const project = conversation.projectId === null ? null : projects.get(conversation.projectId);
     if (project === undefined || project?.archived) continue;
-    const score = fieldsScore(words, [[plainTitle(conversation.title), 0], [project?.name ?? "", 60], [conversation.tag ?? conversation.startDirectory ?? "", 70],
-      [conversation.cliSessionId, 90]]);
+    const fields = [[plainTitle(conversation.title), 0], [project?.name ?? "", 60], [conversation.tag ?? conversation.startDirectory ?? "", 70]] as const;
+    let score: number | null = 0;
+    for (const word of words) {
+      const text = fieldsScore([word], fields), id = claudeCodeIdScore(conversation.cliSessionId, word);
+      const best = text === null ? id : id === null ? text : Math.min(text, id);
+      if (best === null) { score = null; break; }
+      score += best;
+    }
     if (score === null) continue;
     results.push({ kind: "claude-code", key: `claude-code:${conversation.cliSessionId}`, score, conversation, project, providerId });
   }

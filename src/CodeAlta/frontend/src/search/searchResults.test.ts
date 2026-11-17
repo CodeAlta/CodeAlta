@@ -182,7 +182,15 @@ test("the Claude Code sessions started elsewhere are found once something is typ
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["stride"])), ["c5", "c1"], "by the name of the project");
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["gal"])), ["c5"], "by where it started");
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["users"])), ["c2"]);
-  assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["c5"])), ["c5"], "by its id, as a session of CodeAlta is");
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["shader"], "p1")), ["c1"], "the search of one project");
   assert.deepEqual(searchClaudeCodeConversations(all, null, listed, ["shader"], null), [], "the search of the chats");
+
+  // Their ids are random UUIDs: one is found by its start, from its first group on, never by a few letters it holds by chance.
+  const review = "be31f0a2-7c1d-4e5b-9a10-3f2c8d6e7b90", backend = "0f9d44c1-add0-4b42-8be5-6a1e2c3d4f50";
+  const named = [conversation(review, "Review", "p1", day(9)), conversation(backend, "Fix the bell", "p1", day(2))];
+  assert.deepEqual(ids(searchClaudeCodeConversations(named, null, listed, ["be"])), [backend], "a word of a title, not the start of an id");
+  assert.deepEqual(searchClaudeCodeConversations(named, null, listed, ["add0"]), []);
+  assert.deepEqual(ids(searchClaudeCodeConversations(named, null, listed, ["be31f0a2"])), [review], "the first group of its id");
+  assert.deepEqual(ids(searchClaudeCodeConversations(named, null, listed, [review])), [review], "its whole id");
+  assert.deepEqual(ids(searchClaudeCodeConversations(named, null, listed, ["be31f0a2", "review"])), [review], "with a word of its title");
 });
