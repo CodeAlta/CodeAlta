@@ -1,6 +1,9 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Orchestration.Runtime.Plugins;
+using CodeAlta.Plugins;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
@@ -119,6 +122,68 @@ public sealed class ProviderBoundaryTests
     }
 
     [TestMethod]
+    public async Task WhatAnAttemptTheProviderStartedAgainHeldBack_IsNotShown()
+    {
+        // The first attempt ends in the middle of a token, which its stream holds back; the provider then starts again.
+        var inner = new AttemptsTurnExecutor([("first", $"Bonjour {Token[..5]}"), ("second", $"Salut {Token[..5]}"), ("second", $"{Token[5..]} !")]);
+        var executor = new ProviderBoundaryTurnExecutor(inner, new FixedSource(new ReplacingBoundary()), providerRunsOwnTools: false);
+        var shown = new List<(string? Attempt, string Text)>();
+        await executor.ExecuteTurnAsync(CreateRequest("Bonjour"), (delta, _) =>
+        {
+            shown.Add((delta.AttemptId, delta.Text));
+            return ValueTask.CompletedTask;
+        });
+
+        Assert.AreEqual("Bonjour ", string.Concat(shown.Where(static part => part.Attempt == "first").Select(static part => part.Text)), "The held end of the attempt that was started again is dropped.");
+        Assert.AreEqual($"Salut {Name} !", string.Concat(shown.Where(static part => part.Attempt == "second").Select(static part => part.Text)));
+    }
+
+    [TestMethod]
+    public async Task ASourceThatSaysConfidential_AndGivesNoBoundary_SendsNothing()
+    {
+        var inner = new StreamingTurnExecutor(["Done."]);
+        var executor = new ProviderBoundaryTurnExecutor(inner, new NoBoundarySource(), providerRunsOwnTools: false);
+
+        await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => executor.ExecuteTurnAsync(CreateRequest("Bonjour"), static (_, _) => ValueTask.CompletedTask));
+        Assert.AreEqual(0, inner.Calls);
+    }
+
+    [TestMethod]
+    public async Task APluginOfAnotherProject_IsNotAskedTheBoundaryOfASession()
+    {
+        using var temp = TestTempDirectory.Create();
+        var registry = new PluginContributionRegistry();
+        var activation = await new PluginRuntimeActivator(registry).ActivateAsync(
+            new DiscoveredPluginType { Type = typeof(BoundaryPlugin), Descriptor = PluginDescriptorFactory.FromType(typeof(BoundaryPlugin)) }, null, null,
+            new PluginActivationOptions
+            {
+                HostInfo = new PluginHostInfo { ApplicationName = "CodeAlta.Tests", Version = "1.0.0", HostApiVersion = "1.0.0", UserDataDirectory = temp.Path, IsHeadless = true },
+            });
+        Assert.IsTrue(activation.Succeeded, string.Join(Environment.NewLine, activation.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        var global = activation.ActivePlugin!;
+        // The same plugin as one of the project "project-a" only.
+        using var lifetime = new PluginActivationLifetime(default);
+        var scoped = new ActivePluginInstance(global.Instance!, global.Descriptor, null, null,
+            new PluginRuntimeContext
+            {
+                Plugin = global.Descriptor,
+                Services = global.RuntimeContext.Services,
+                Logger = global.RuntimeContext.Logger,
+                PackageDirectory = "",
+                Host = global.RuntimeContext.Host,
+                LifetimeCancellationToken = lifetime.Token,
+                Scope = PluginScope.Project,
+                ScopeProjectId = "project-a",
+            },
+            [], registry, new PluginRuntimeTaskService(lifetime.Token), lifetime);
+        var bridge = new PluginOrchestrationBridge(new PluginContributionAdapterService(registry), () => [scoped]);
+
+        Assert.IsNotNull(bridge.GetProviderBoundary(new SessionToolHookScope("session-a", "project-a", temp.Path, null)));
+        Assert.IsNull(bridge.GetProviderBoundary(new SessionToolHookScope("session-b", "project-b", temp.Path, null)), "A plugin of another project does not answer for the session.");
+        await global.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
     public async Task AProviderThatRunsItsOwnTools_IsRefused_InAConfidentialSession()
     {
         var inner = new StreamingTurnExecutor(["Done."]);
@@ -224,6 +289,21 @@ public sealed class ProviderBoundaryTests
         public ValueTask<IAgentProviderBoundary?> GetBoundaryAsync(AgentTurnRequest request, CancellationToken cancellationToken) => ValueTask.FromResult(boundary);
     }
 
+    // A plugin that gives a boundary to every session it is asked for.
+    [Plugin("boundary-fixture", DisplayName = "Boundary fixture")]
+    public sealed class BoundaryPlugin : PluginBase
+    {
+        public override IAgentProviderBoundary? GetProviderBoundary(PluginProviderBoundaryContext context) => new ReplacingBoundary();
+    }
+
+    // A source at fault: it says the session is confidential and gives no boundary.
+    private sealed class NoBoundarySource : IAgentProviderBoundarySource
+    {
+        public bool IsConfidential => true;
+
+        public ValueTask<IAgentProviderBoundary?> GetBoundaryAsync(AgentTurnRequest request, CancellationToken cancellationToken) => ValueTask.FromResult<IAgentProviderBoundary?>(null);
+    }
+
     private sealed class RefusingSource : IAgentProviderBoundarySource
     {
         public bool IsConfidential => true;
@@ -298,6 +378,22 @@ public sealed class ProviderBoundaryTests
             Requests.Add(string.Join("\n", request.Conversation.Select(static message => message.ToJson())));
             var answer = answers[Math.Min(Requests.Count - 1, answers.Length - 1)](request);
             return Task.FromResult(new AgentTurnResponse { AssistantMessage = answer });
+        }
+    }
+
+    // Streams scripted parts, each of an attempt: the answer is what the last attempt streamed.
+    private sealed class AttemptsTurnExecutor(IReadOnlyList<(string Attempt, string Part)> parts) : IModelProviderTurnExecutor
+    {
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
+        {
+            foreach (var (attempt, part) in parts)
+            {
+                await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "text-1", Text = part, AttemptId = attempt }, cancellationToken);
+            }
+
+            var last = parts[^1].Attempt;
+            var text = string.Concat(parts.Where(part => part.Attempt == last).Select(static part => part.Part));
+            return new AgentTurnResponse { AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(text)]) };
         }
     }
 

@@ -37,11 +37,11 @@ public sealed partial class PluginOrchestrationBridge
     }
 
     /// <summary>
-    /// Gets the boundary the requests of a confidential session pass through: the one the running plugins give
-    /// (<see cref="PluginBase.GetProviderBoundary"/>), asked at each request.
+    /// Gets the boundary the requests of a confidential session pass through: the one the running plugins that apply to
+    /// the session give (<see cref="PluginBase.GetProviderBoundary"/>), asked at each request.
     /// </summary>
     /// <param name="scope">The session.</param>
-    /// <returns>The boundary; <see langword="null"/> when no running plugin gives one.</returns>
+    /// <returns>The boundary; <see langword="null"/> when no running plugin that applies to the session gives one.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="scope"/> is <see langword="null"/>.</exception>
     /// <exception cref="AgentProviderBoundaryException">Two plugins give one, or a plugin failed to: the session sends nothing.</exception>
     public IAgentProviderBoundary? GetProviderBoundary(SessionToolHookScope scope)
@@ -55,7 +55,10 @@ public sealed partial class PluginOrchestrationBridge
             SpaceId = scope.SpaceId,
         };
         IAgentProviderBoundary? found = null;
-        foreach (var active in _getActivePlugins())
+        // The plugins the tool hooks of the session are run for: a plugin of another project or space is not asked.
+        var applicable = _adapter.GetApplicableActivePlugins(_getActivePlugins(),
+            new PluginAdapterOperationOptions { ProjectId = scope.ProjectId, ProjectPath = scope.WorkingDirectory, SessionId = scope.SessionId, SpaceId = scope.SpaceId });
+        foreach (var active in applicable)
         {
             if (active.Instance is not { } plugin) continue;
             IAgentProviderBoundary? boundary;

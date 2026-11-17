@@ -40,7 +40,12 @@ internal sealed class ProviderBoundaryTurnExecutor(
         try
         {
             boundary = await source.GetBoundaryAsync(request, cancellationToken).ConfigureAwait(false);
-            if (boundary is null) return await ExecuteInnerAsync(request, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+            if (boundary is null)
+            {
+                // A source that says the session is confidential and gives no boundary is at fault: nothing goes as it is.
+                if (source.IsConfidential) throw new AgentProviderBoundaryException();
+                return await ExecuteInnerAsync(request, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+            }
 
             // An agent that reads files and runs commands itself sends what it reads to its provider without CodeAlta.
             if (providerRunsOwnTools)
@@ -153,10 +158,13 @@ internal sealed class ProviderBoundaryTurnExecutor(
     private sealed class DeltaRestorer(IAgentProviderBoundary boundary, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate)
     {
         private readonly Dictionary<(string? AttemptId, string ContentId), (IAgentBoundaryTextStream Stream, AgentTurnDelta Last)> _streams = [];
+        // The attempt of the last part: the one the answer is made of.
+        private string? _attemptId;
 
         public ValueTask WriteAsync(AgentTurnDelta delta, CancellationToken cancellationToken)
         {
             var key = (delta.AttemptId, delta.ContentId);
+            _attemptId = delta.AttemptId;
             var stream = _streams.TryGetValue(key, out var held) ? held.Stream : boundary.CreateResponseStream(delta.Kind, delta.ContentId);
             _streams[key] = (stream, delta);
             var text = stream.Write(delta.Text);
@@ -167,8 +175,10 @@ internal sealed class ProviderBoundaryTurnExecutor(
 
         public async ValueTask FlushAsync(CancellationToken cancellationToken)
         {
-            foreach (var (stream, last) in _streams.Values)
+            foreach (var (key, (stream, last)) in _streams)
             {
+                // What an attempt the provider started again held back is no part of the answer.
+                if (!string.Equals(key.AttemptId, _attemptId, StringComparison.Ordinal)) continue;
                 var text = stream.Flush();
                 if (text.Length > 0) await onUpdate(last with { Text = text, Details = null }, cancellationToken).ConfigureAwait(false);
             }
