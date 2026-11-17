@@ -540,6 +540,36 @@ public sealed class DesktopWorkspaceTests
         [session.SessionId] = new() { SessionId = session.SessionId, Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! },
     };
 
+    [TestMethod]
+    public void Snapshot_MarksTheProjectsOutsideGit_AndNoOther()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-repositories-");
+        try
+        {
+            var repository = Directory.CreateDirectory(Path.Combine(root.FullName, "repository")).FullName;
+            Directory.CreateDirectory(Path.Combine(repository, ".git"));
+            var inside = Directory.CreateDirectory(Path.Combine(repository, "services", "billing")).FullName;
+            var notes = Directory.CreateDirectory(Path.Combine(root.FullName, "notes")).FullName;
+            var snapshot = new WorkspaceSnapshot(true,
+            [
+                new WorkspaceProject("repository", "repository", repository, false),
+                new WorkspaceProject("billing", "billing", inside, false),
+                new WorkspaceProject("notes", "notes", notes, false),
+                new WorkspaceProject("old", "old", notes, true),
+                new WorkspaceProject("machine", "pc", "machine:pc", false) { MachineId = "pc" },
+            ], [], false, false, false);
+
+            var marked = WorkspaceService.WithRepositories(snapshot, static path => CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(path) is not null);
+
+            CollectionAssert.AreEqual(new[] { "notes" }, marked.Projects.Where(static project => project.NoRepository == true).Select(static project => project.Id).ToArray(),
+                "a folder under a repository is in it; an archived project and a machine are not asked");
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
     private static ProjectDescriptor Project(string id) => new()
     {
         Id = id, DisplayName = id, ProjectPath = "/literal/" + id, Archived = true,

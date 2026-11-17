@@ -125,9 +125,12 @@ export function workItemTone(item: Pick<WorkItem, "kind" | "category">): WorkTon
 
 export const workKindIcon = (kind: string): IconName => kind === "plan" ? "plan" : kind === "review" ? "eye" : "task";
 
-/** The ways of starting an item, the one the user prefers first. `here` needs a session to start it in. */
-export function startChoices(preferred: string, here: boolean): readonly WorkStart[] {
-  const available = workStarts.filter(start => here || start !== "here");
+/**
+ * The ways of starting an item, the one the user prefers first. `here` needs a session to start it in, and a worktree
+ * a project whose folder is in a git repository.
+ */
+export function startChoices(preferred: string, here: boolean, worktree = true): readonly WorkStart[] {
+  const available = workStarts.filter(start => (here || start !== "here") && (worktree || start !== "worktree"));
   const first = available.find(start => start === preferred) ?? available[0];
   return [first, ...available.filter(start => start !== first)];
 }

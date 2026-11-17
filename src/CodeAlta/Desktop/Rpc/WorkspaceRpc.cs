@@ -41,7 +41,8 @@ internal sealed partial class WorkspaceService
             var actual = read(token);
             var snapshot = await actual.ConfigureAwait(false);
             var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
-            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce())
+            return WithRepositories(ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce()),
+                    static path => CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(path) is not null)
                 with { UnreadableProjectFiles = UnreadableFiles(snapshot.UnreadableProjects) };
         };
 
@@ -51,6 +52,14 @@ internal sealed partial class WorkspaceService
         {
             Projects = [.. snapshot.Projects.Select(project => project.MachineId is null && config.IsProjectPseudonymized(project.Path)
                 ? project with { Secure = true } : project)],
+        };
+
+    // Marks the projects whose folder is in no git repository: the window offers them no worktree and no branch.
+    internal static WorkspaceSnapshot WithRepositories(WorkspaceSnapshot snapshot, Func<string, bool> inRepository)
+        => snapshot with
+        {
+            Projects = [.. snapshot.Projects.Select(project => project.MachineId is null && !project.Archived && !inRepository(project.Path)
+                ? project with { NoRepository = true } : project)],
         };
 
     // The project files the snapshot skipped, for the window to say so; a few, each path bounded as the others.
@@ -462,6 +471,11 @@ internal sealed record WorkspaceProject(string Id, string Name, string Path, boo
     // The state of that machine: "online", "connecting", "offline" or "unauthorized"; absent for a project of the catalog.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MachineState { get; init; }
+
+    // Whether the folder of the project is in no git repository: it has no worktree, no branch and no commit; absent
+    // for a project in a repository, for an archived one and for one that stands for a machine.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NoRepository { get; init; }
 
     // The repository project whose map declares this sub-project, which the Explorer lists it under; absent for a
     // project that is no sub-project.

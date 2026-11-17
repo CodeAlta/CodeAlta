@@ -211,7 +211,8 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 tagQuestion={proposals.find(shown => shown.proposal.newTag && shown.projectId === current.projectId && shown.tasks.some(task => task.id === current.id)) ?? null}
                 onReviewTag={setReviewing} onDeclineTag={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
-                preferredStart={state.settings.start} onStart={(way, request) => start(current, way, request)} onAct={(action, value) => act(current, action, value)}
+                preferredStart={state.settings.start} worktree={!state.projects.find(project => project.projectId === current.projectId)?.noRepository}
+                onStart={(way, request) => start(current, way, request)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
                 epoch={epoch} reload={reload} reviewSessions={reviewSessions(sessions, current.projectId, null, current.runner)} onOpenReviewSession={id => onOpenSession(id, current.projectId)}
                 onOpenFile={() => onOpenFile(current.projectId, current.file)} />
@@ -376,7 +377,7 @@ function ShortIdCopy({ shortId }: { shortId: string }) {
     <code>{shortId}</code><AppIcon name={copied ? "check" : "copy"} size={12} /></button>;
 }
 
-function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
+function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, worktree, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
   epoch, reload, reviewSessions: reviewTo, onOpenReviewSession, tags, tagQuestion, onReviewTag, onDeclineTag }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
   /** The tags of the project of the item. */
@@ -386,6 +387,8 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
   /** The host's epoch: a plan that is not done takes comments; null shows it without. */
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
+  /** The folder of the project of the item is in a git repository: the work can start in a new worktree. */
+  worktree: boolean;
   providers: readonly RunProvider[]; sessionSettings: ((projectId: string) => SessionSettingsApi | null) | null;
   onStart: (start: WorkStart, request: SessionStartRequest | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
 }) {
@@ -414,7 +417,7 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
     </header>
     <div className="work-detail-actions">
       {startable && <WorkRunsWithField id={`work-${item.kind}-${item.id}`} providers={providers} runs={runs} disabled={busy} />}
-      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, runs.request())} />}
+      {startable && <WorkStartButtons preferred={preferredStart} here={false} worktree={worktree} disabled={busy} onStart={way => onStart(way, runs.request())} />}
       <div className="work-detail-buttons">
         {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Backlog")}</Button>}
         {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to Inbox")}</Button>}

@@ -35,14 +35,16 @@ const dockIcons: Readonly<Record<DockSide, IconName>> = Object.freeze({ left: "a
 const dockLabels: Readonly<Record<DockSide, MessageKey>> = Object.freeze({ left: "Left of Notes", right: "Right of Notes", above: "Above Notes", below: "Below Notes" });
 
 /** The buttons that start the work of an item: the way the user prefers first, the others beside it. */
-export function WorkStartButtons({ preferred, here, disabled, compact = false, onStart }: {
+export function WorkStartButtons({ preferred, here, worktree = true, disabled, compact = false, onStart }: {
   preferred: string;
   /** A session shows the item: it can do the work itself. */
   here: boolean;
+  /** The folder of the project of the item is in a git repository: the work can start in a new worktree. */
+  worktree?: boolean;
   disabled: boolean; compact?: boolean; onStart: (start: WorkStart) => void;
 }) {
   const { t } = useShellLanguage();
-  const [first, ...others] = startChoices(preferred, here);
+  const [first, ...others] = startChoices(preferred, here, worktree);
   return <div className="work-starts" data-compact={compact || undefined}>
     <Button className="work-start-primary" intent="primary" disabled={disabled} icon={<AppIcon name={startIcon(first)} size={15} />} title={t(startDetail(first))}
       onClick={() => onStart(first)}>{t(startLabel(first))}</Button>
@@ -171,7 +173,10 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   // The session works on it: there is nothing to start or to decide, only to see.
   const running = item.stage === "running";
   // A new tag the session proposed with this task: the card asks about it beside the decisions, and its review is the one of Work items.
-  const project = item.kind === "task" ? workState.projects.find(candidate => candidate.projectId === item.projectId) : undefined;
+  const itemProject = workState.projects.find(candidate => candidate.projectId === item.projectId);
+  const project = item.kind === "task" ? itemProject : undefined;
+  // The item belongs to its own project, which is not always the one of the session that shows it.
+  const worktree = !itemProject?.noRepository;
   const suggestion = project?.tagProposals?.find(proposal => proposal.newTag && proposal.sessionId === item.proposedBy && proposal.tasks.some(match => match.id === item.id)) ?? null;
   const suggestionTasks = project && suggestion ? workItems([project], new Set()).filter(task => task.kind === "task" && suggestion.tasks.some(match => match.id === task.id)) : [];
   const review = () => { if (project && suggestion) setReviewing({ projectId: project.projectId, projectName: null, proposal: suggestion, tasks: suggestionTasks }); };
@@ -271,7 +276,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
           {suggestion && <NewTagQuestion proposal={suggestion} count={suggestionTasks.length} onReview={review} onDecline={decline} />}
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
-            : <>{runsField(true)}<WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start} /></>}
+            : <>{runsField(true)}<WorkStartButtons preferred={preferredStart} here worktree={worktree} disabled={working} compact onStart={start} /></>}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>
         </section>}
     {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
@@ -288,7 +293,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
         <div className="work-window-text">{item.summary && <p className="work-window-summary">{item.summary}</p>}<WorkItemText hub={hub} item={item} /></div>
         <footer className="work-window-actions">
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
-            : <>{runsField(false)}<WorkStartButtons preferred={preferredStart} here disabled={working} onStart={way => { setDetail(false); start(way); }} /></>}
+            : <>{runsField(false)}<WorkStartButtons preferred={preferredStart} here worktree={worktree} disabled={working} onStart={way => { setDetail(false); start(way); }} /></>}
           <span className="work-window-decisions">
             {decisions}
             <Button variant="minimal" size="small" icon={<AppIcon name="list" size={14} />} onClick={() => { setDetail(false); onOpenList(item); }}>{t("Show in Work items")}</Button>

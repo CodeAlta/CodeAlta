@@ -91,7 +91,10 @@ internal sealed class WorkItemsService
                 [.. tags.Tags.Select(static tag => new WorkItemTagRow(tag.Name, tag.Description, tag.OpenTasks, tag.Listed))],
                 tags.Declined,
                 [.. _items.ListTagProposals(project.Id).Select(static proposal => new WorkItemTagProposalRow(proposal.Name, proposal.Description, proposal.NewTag, proposal.SessionId,
-                    [.. proposal.Tasks.Select(static match => new WorkItemTagMatchRow(match.TaskId, match.Reason))]))]));
+                    [.. proposal.Tasks.Select(static match => new WorkItemTagMatchRow(match.TaskId, match.Reason))]))])
+            {
+                NoRepository = CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(project.ProjectPath) is null ? true : null,
+            });
         }
 
         return new("ok", rows, Settings(_items.Settings));
@@ -340,7 +343,12 @@ internal sealed record WorkItemsListResponse(string Status, IReadOnlyList<WorkIt
 /// <param name="DeclinedTags">The names the user declined when an agent proposed them.</param>
 /// <param name="TagProposals">The tag proposals of the project that wait for the user.</param>
 internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItemRow> Tasks, IReadOnlyList<WorkItemRow> Plans, bool Truncated,
-    IReadOnlyList<WorkItemTagRow>? Tags = null, IReadOnlyList<string>? DeclinedTags = null, IReadOnlyList<WorkItemTagProposalRow>? TagProposals = null);
+    IReadOnlyList<WorkItemTagRow>? Tags = null, IReadOnlyList<string>? DeclinedTags = null, IReadOnlyList<WorkItemTagProposalRow>? TagProposals = null)
+{
+    /// <summary>Gets whether the folder of the project is in no git repository: its work starts in no worktree; absent in a repository.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NoRepository { get; init; }
+}
 
 /// <param name="Name">The name of the tag.</param>
 /// <param name="Description">What a new tag is for; null for an existing one.</param>

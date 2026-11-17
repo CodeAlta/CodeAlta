@@ -3259,7 +3259,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The next session of the selected project works where its chip says. The cloud, kept for a project whose space no
   // longer has Claude Code, reads as the folder of the project.
   const storedPlace = selectedProject ? workPlaces.get(selectedProject.id) ?? inProjectFolder : inProjectFolder;
-  const draftPlace = storedPlace.cloud && !cloudOffered ? inProjectFolder : storedPlace;
+  // A project outside git has its folder alone: no worktree is prepared for it, whatever was chosen before it left git.
+  const draftPlace = (storedPlace.cloud && !cloudOffered) || (storedPlace.worktree && selectedProject?.noRepository) ? inProjectFolder : storedPlace;
   const draftProjectId = selectedProject && !selectedProject.archived ? selectedProject.id : null;
   // The machine the next session starts on: this computer, or a paired machine the Run on chip names (the machine of its
   // row, for the sessions of a machine of no project here). Its project, provider and model are that machine's.
@@ -7141,6 +7142,8 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const worktreeRoot = session?.worktreeRoot ?? null;
   // A session of a paired machine works in a folder of that machine: its changes, editor, terminals and worktrees are not here.
   const remote = !!session?.machineId || !!project?.machineId;
+  // A project outside git has no other folder to send its session to.
+  const noRepository = !!project?.noRepository;
   return useMemo(() => {
     const worktree = sessionWorktree({ worktreePath, worktreeName, worktreeRoot, worktreeMissing });
     // The changes of where the session works: its worktree while the folder is there.
@@ -7148,7 +7151,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     return ({ context: !remote && id !== undefined && name !== undefined && path !== undefined
     ? <WorkspaceChip epoch={epoch} project={{ id, name, path, repositoryName: project?.repositoryName ?? null, subPath: project?.subPath ?? null }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
       // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
-      folderSwitch={switchFolder && epoch && sessionId && !place && !archived ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
+      folderSwitch={switchFolder && epoch && sessionId && !place && !archived && !noRepository ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
@@ -7161,7 +7164,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, project?.repositoryName, project?.subPath, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote]);
+  }, [epoch, id, name, path, project?.repositoryName, project?.subPath, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote, noRepository]);
 }
 
 // The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.

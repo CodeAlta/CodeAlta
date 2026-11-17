@@ -21,12 +21,14 @@ While an agent works, it can find something that is not part of what you asked: 
 
 The cards are docked to Notes and move with them when you drag Notes. To choose the side, drag the header of a card (or its chip) onto one of the arrows that appear around Notes, or use the **Place the proposals** button in the header of the card: **Left of Notes**, **Right of Notes**, **Above Notes**, **Below Notes**, or **Automatic**, which puts the cards on the left and on another side when there is no room. Notes make room for the side you chose, without changing their own place. The side you choose is the one of every session of the window. Cards you put away stay away, also when you come back from another space, until the session proposes something new.
 
+A task belongs to the project whose files it changes. An agent that works in one project, such as a folder of notes, can propose a task for another one: the card shows in the session that proposed it, and the task is written and started in the project it belongs to.
+
 You decide on each card:
 
 {.table}
 | Choice | What happens |
 |---|---|
-| **Start in a new worktree** | A new session does the task in its own [worktree](worktrees.md), on a new branch. |
+| **Start in a new worktree** | A new session does the task in its own [worktree](worktrees.md), on a new branch. Not offered when the project of the task is not in a git repository. |
 | **Do it in this session** | The session does it after its current work. |
 | **Start in a new session** | A new session does it in the folder of the project. |
 | **Backlog** | You keep the task, out of the way, in the **Backlog** of the Work items tab. |

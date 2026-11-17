@@ -2550,6 +2550,53 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task TaskCreate_ForAnotherProject_LandsInThatProject_ProposedByTheCallingSession()
+    {
+        using var root = TempDirectory.Create();
+        // The session works in a folder of notes, which is no git repository; the task belongs to the code it is about.
+        var notesPath = Directory.CreateDirectory(Path.Combine(root.Path, "notes")).FullName;
+        var codePath = Directory.CreateDirectory(Path.Combine(root.Path, "code")).FullName;
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var notes = await projectCatalog.UpsertFromPathAsync(notesPath).ConfigureAwait(false);
+        var code = await projectCatalog.UpsertFromPathAsync(codePath).ConfigureAwait(false);
+        var providerId = new ModelProviderId("work-model");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId));
+        await using var _ = runtime.ConfigureAwait(false);
+        var items = new CodeAlta.Catalog.WorkItems.WorkItemService(new CodeAltaConfigStore(options), Path.Combine(root.Path, "state"));
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime)
+            .Add(items)
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+        var session = await dispatcher.InvokeAsync(["session", "create", "--project", notes.Id, "--title", "Notes", "--model-ref", $"{providerId.Value}:gpt-work@low"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(session.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId, SourceProjectId = notes.Id };
+
+        // By its path, as an agent that knows the folder of the other project names it.
+        var created = await dispatcher.InvokeAsync(["task", "create", "--project", codePath, "--title", "Fix the parser", "--content", "Body."], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, created.ExitCode, created.Stderr);
+        var record = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.task.created");
+        Assert.AreEqual(code.Id, record.GetProperty("projectId").GetString());
+        var taskId = record.GetProperty("id").GetString()!;
+
+        Assert.IsTrue(File.Exists(Path.Combine(codePath, ".alta", "tasks", taskId + ".md")), "the task is written in the project it belongs to");
+        Assert.IsFalse(Directory.Exists(Path.Combine(notesPath, ".alta", "tasks")), "and not in the project of the session that proposes it");
+        // The session that proposed it shows it: its link names that session, with what it runs with.
+        var link = items.GetLink(code.Id, CodeAlta.Catalog.WorkItems.WorkItemKinds.Task, taskId)!;
+        Assert.AreEqual(sessionId, link.ProposedBy);
+        Assert.AreEqual(new CodeAlta.Catalog.WorkItems.WorkItemSelection("work-model", "gpt-work", "low"), link.RunsWith);
+
+        // The session finds it again in the project it belongs to, and nothing in its own.
+        var listed = await dispatcher.InvokeAsync(["task", "list", "--project", code.Id], caller: caller).ConfigureAwait(false);
+        Assert.Contains(taskId, listed.Stdout);
+        var own = await dispatcher.InvokeAsync(["task", "list"], caller: caller).ConfigureAwait(false);
+        Assert.DoesNotContain(taskId, own.Stdout);
+    }
+
+    [TestMethod]
     public async Task PlanList_InAnExternalWorktree_IncludesIgnoredWorktreeOnlyPlans()
     {
         using var root = TempDirectory.Create();

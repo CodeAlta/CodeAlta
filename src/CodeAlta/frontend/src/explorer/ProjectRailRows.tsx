@@ -195,7 +195,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         aria-label={t(favorite ? "Remove {name} from favorites" : "Add {name} to favorites", { name: project.name })}
         title={t(favorite ? "Remove from favorites" : "Add to favorites")} onClick={() => tree.setFavorite(project, !favorite)}>
         <AppIcon name="star" size={14} /></button>}
-      {changes && !project.archived && <button type="button" className="icon-button project-row-action project-changes-trigger" data-open={changing}
+      {changes && !project.archived && !project.noRepository && <button type="button" className="icon-button project-row-action project-changes-trigger" data-open={changing}
         aria-label={t("Changes of {name}", { name: project.name })} title={t(changing ? "Show the changes" : "Open the changes")} onClick={() => changes.show(project)}>
         <AppIcon name="changes" size={15} /></button>}
       {editor && !project.archived && <button type="button" className="icon-button project-row-action project-editor-trigger" data-open={editing}

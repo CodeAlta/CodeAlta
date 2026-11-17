@@ -104,6 +104,8 @@ test("the preferred way of starting comes first, and only a session can do the w
   assert.deepEqual(startChoices("here", true), ["here", "worktree", "session"]);
   assert.deepEqual(startChoices("here", false), ["worktree", "session"], "the Work items tab has no session to do it in");
   assert.deepEqual(startChoices("unknown", true), ["worktree", "session", "here"]);
+  assert.deepEqual(startChoices("worktree", true, false), ["session", "here"], "a project outside git has no worktree to start in");
+  assert.deepEqual(startChoices("worktree", false, false), ["session"]);
 });
 
 test("the list is one stage of one project, of one kind, matching what is typed", () => {

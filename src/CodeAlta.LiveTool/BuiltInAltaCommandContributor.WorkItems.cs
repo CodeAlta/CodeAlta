@@ -93,11 +93,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("content=", "The description. Prefer --stdin for several lines.", value => options.Content = value);
         command.Add("stdin", "Read the description from stdin.", value => options.UseStdin = value is not null);
         command.Add("tag=", "A tag of the project (`alta tag list`) whose description fits the task. Repeat it for several.", value => { if (value is not null) options.Tags.Add(value); });
-        command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session.", value => options.Project = value);
+        command.Add("project=", "The project the task belongs to, the one whose files it changes: id, slug or path. Defaults to the project of the calling session.", value => options.Project = value);
         command.Add(async (_, _) => await HandleTaskCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
             "Write the description in Markdown for someone who was not there: `## Why` (what you saw, with the file and line or the command output that shows it), `## What to do` (the change, concretely) and `## Where` (the files or the area). Keep it short: a task is small enough to do in one sitting.",
+            "A task for another project than the one of the calling session is created there with `--project`: the user sees it in the session that proposed it, and it is started in the project it belongs to.",
             "Example: `alta task create --title \"Report the provider error in the model list\" --kind gap --summary \"The model list shows nothing when a provider fails; it should say why.\" --stdin`.");
         return command;
     }
