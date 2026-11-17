@@ -59,12 +59,12 @@ public sealed class NerWorkerTests
     {
         var worker = new StuckWorker();
         var client = new NerWorkerClient(() => worker, new NerWorkerLoad("model", "runtime", 1));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)); // not a limit
 
         var classify = client.ClassifyAsync([[1, 2]], cancellation.Token).AsTask();
 
         // A frame written to a worker that reads nothing never ends: the request would never give its turn back.
-        Assert.AreSame(classify, await Task.WhenAny(classify, Task.Delay(TimeSpan.FromSeconds(30))), "The request ends when it is cancelled.");
+        Assert.AreSame(classify, await Task.WhenAny(classify, Task.Delay(TestTime.Seconds(30))), "The request ends when it is cancelled.");
         await Assert.ThrowsAsync<OperationCanceledException>(() => classify);
         Assert.IsTrue(worker.Killed);
         Assert.AreEqual(1, worker.Writes, "Only the request was written: nothing after the worker stopped reading.");

@@ -125,7 +125,7 @@ public sealed class PseudonymizerModelsTests
 
     private static async Task WaitForAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(30);
         while (!condition())
         {
             Assert.IsTrue(DateTime.UtcNow < deadline, "The download did not end.");
