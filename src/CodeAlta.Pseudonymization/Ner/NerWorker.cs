@@ -308,18 +308,23 @@ public sealed class NerWorkerClient : ITokenClassifier, IDisposable
         }
     }
 
-    private void Forget()
+    private void Forget(bool exit = false)
     {
-        if (_worker is { } worker) Stop(worker);
+        if (_worker is { } worker) Stop(worker, exit);
         _worker = null;
     }
 
-    private static void Stop(IWorkerProcess worker)
+    // A worker that failed or did not answer in time may no longer read: it is killed, and nothing is written to it first,
+    // which could wait for ever. Only a worker that waits for a request (exit) is asked to end before it is killed.
+    private static void Stop(IWorkerProcess worker, bool exit = false)
     {
         try
         {
-            WorkerFrames.Write(worker.Input, NerFrameKind.Exit, 0, []);
-            worker.Input.Flush();
+            if (exit)
+            {
+                WorkerFrames.Write(worker.Input, NerFrameKind.Exit, 0, []);
+                worker.Input.Flush();
+            }
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
         {
@@ -338,7 +343,7 @@ public sealed class NerWorkerClient : ITokenClassifier, IDisposable
         {
             if (_disposed) return;
             _disposed = true;
-            Forget();
+            Forget(exit: true);
         }
         finally
         {

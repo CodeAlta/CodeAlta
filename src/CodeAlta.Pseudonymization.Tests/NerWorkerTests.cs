@@ -54,6 +54,84 @@ public sealed class NerWorkerTests
         CollectionAssert.IsSubsetOf(new[] { "PERSONNE:Durand", "PERSONNE:Sophie Martin", "LIEU:Montauban" }, found, string.Join(" | ", found));
     }
 
+    [TestMethod]
+    public async Task AWorkerThatNoLongerReads_IsKilled_AndNothingIsWrittenToItFirst()
+    {
+        var worker = new StuckWorker();
+        var client = new NerWorkerClient(() => worker, new NerWorkerLoad("model", "runtime", 1));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        var classify = client.ClassifyAsync([[1, 2]], cancellation.Token).AsTask();
+
+        // A frame written to a worker that reads nothing never ends: the request would never give its turn back.
+        Assert.AreSame(classify, await Task.WhenAny(classify, Task.Delay(TimeSpan.FromSeconds(30))), "The request ends when it is cancelled.");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => classify);
+        Assert.IsTrue(worker.Killed);
+        Assert.AreEqual(1, worker.Writes, "Only the request was written: nothing after the worker stopped reading.");
+        client.Dispose();
+    }
+
+    // A worker that reads nothing and answers nothing: what is written to it waits until it is killed.
+    private sealed class StuckWorker : IWorkerProcess
+    {
+        private readonly ManualResetEventSlim _killed = new();
+        private int _writes;
+
+        public StuckWorker()
+        {
+            Input = new StuckStream(this);
+            Output = new StuckStream(this);
+        }
+
+        public Stream Input { get; }
+
+        public Stream Output { get; }
+
+        public bool Killed => _killed.IsSet;
+
+        public int Writes => Volatile.Read(ref _writes);
+
+        public void Kill() => _killed.Set();
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class StuckStream(StuckWorker owner) : Stream
+        {
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => true;
+
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+            public override void Flush()
+            {
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                owner._killed.Wait();
+                throw new IOException("The worker was killed.");
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                Interlocked.Increment(ref owner._writes);
+                owner._killed.Wait();
+                throw new IOException("The worker was killed.");
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+        }
+    }
+
     // The worker on pipes of this process, as the application runs it in a process of its own.
     private sealed class InProcessWorker : IWorkerProcess
     {
