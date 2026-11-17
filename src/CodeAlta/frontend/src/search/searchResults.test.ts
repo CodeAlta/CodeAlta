@@ -163,7 +163,7 @@ test("the archived sessions are found only by a query, and choosing one restores
   assert.deepEqual(searchArchivedSessions(catalog, [], ["parser"]), []);
 });
 
-test("the Claude Code sessions started elsewhere are found once something is typed, of the projects listed or of none, by title, project and folder", () => {
+test("the Claude Code sessions started elsewhere are found once something is typed, of the projects listed or of none, by title, project, folder and id", () => {
   const listed = snapshot([project("p1", "Stride"), project("p2", "Old", "C:\\code\\Old", true)]);
   const conversation = (id: string, title: string, projectId: string | null, lastChangedAt: string, tag: string | null = null, startDirectory: string | null = null)
     : WorkspaceClaudeCodeConversation => ({ cliSessionId: id, title, lastChangedAt, origin: "vscode", projectId, tag, startDirectory });
@@ -182,6 +182,7 @@ test("the Claude Code sessions started elsewhere are found once something is typ
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["stride"])), ["c5", "c1"], "by the name of the project");
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["gal"])), ["c5"], "by where it started");
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["users"])), ["c2"]);
+  assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["c5"])), ["c5"], "by its id, as a session of CodeAlta is");
   assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["shader"], "p1")), ["c1"], "the search of one project");
   assert.deepEqual(searchClaudeCodeConversations(all, null, listed, ["shader"], null), [], "the search of the chats");
 });

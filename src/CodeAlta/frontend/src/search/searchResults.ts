@@ -150,8 +150,8 @@ export function searchArchivedSessions(snapshot: WorkspaceSnapshot, archived: re
 
 /**
  * The Claude Code sessions started elsewhere that a query finds, among the sessions: by their title, then by the name of
- * the project that lists them, then by the folder they started in. Only once something is typed, and only those of the
- * projects of the list (the space shown) or of no project; `projectId` keeps those of one project (none for the chats),
+ * the project that lists them, then by the folder they started in, then by their id. Only once something is typed, and only
+ * those of the projects of the list (the space shown) or of no project; `projectId` keeps those of one project (none for the chats),
  * undefined keeps them all. As good a match, the one changed last comes first.
  */
 export function searchClaudeCodeConversations(conversations: readonly WorkspaceClaudeCodeConversation[], providerId: string | null, snapshot: WorkspaceSnapshot,
@@ -163,7 +163,8 @@ export function searchClaudeCodeConversations(conversations: readonly WorkspaceC
     if (projectId !== undefined && conversation.projectId !== projectId) continue;
     const project = conversation.projectId === null ? null : projects.get(conversation.projectId);
     if (project === undefined || project?.archived) continue;
-    const score = fieldsScore(words, [[plainTitle(conversation.title), 0], [project?.name ?? "", 60], [conversation.tag ?? conversation.startDirectory ?? "", 70]]);
+    const score = fieldsScore(words, [[plainTitle(conversation.title), 0], [project?.name ?? "", 60], [conversation.tag ?? conversation.startDirectory ?? "", 70],
+      [conversation.cliSessionId, 90]]);
     if (score === null) continue;
     results.push({ kind: "claude-code", key: `claude-code:${conversation.cliSessionId}`, score, conversation, project, providerId });
   }
