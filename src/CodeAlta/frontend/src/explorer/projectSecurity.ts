@@ -93,7 +93,9 @@ export async function secureProject(api: ProjectSecurityApi, epoch: string, proj
   if (plugin?.status !== "ok") return { status: "plugin_failed" };
   if (!await saveChoice(api, epoch, projectId, choice)) return { status: "settings_failed" };
   const secured = await api.setProjectSecure({ expectedHostEpoch: epoch, projectId, secure: true }, timeout).catch(() => null);
-  if (secured?.status !== "ok" || !secured.secure) return { status: secured?.status ?? "unavailable" };
+  // A host that answers ok and did not make the project secure did not do what was asked: that is no success.
+  if (secured?.status !== "ok") return { status: secured?.status ?? "unavailable" };
+  if (!secured.secure) return { status: "not_secured" };
   return installModel(api, epoch, choice.language);
 }
 
@@ -107,6 +109,19 @@ export async function saveProjectSecurity(api: ProjectSecurityApi, epoch: string
 export async function makeProjectNormal(api: ProjectSecurityApi, epoch: string, projectId: string): Promise<ProjectSecurityOutcome> {
   const answer = await api.setProjectSecure({ expectedHostEpoch: epoch, projectId, secure: false }, timeout).catch(() => null);
   return answer?.status === "ok" ? { status: "ok", downloading: false } : { status: answer?.status ?? "unavailable" };
+}
+
+/** Whether the choices shown differ from the saved ones. */
+export function projectSecurityChanged(saved: ProjectSecurityChoice, choice: ProjectSecurityChoice): boolean {
+  return saved.language !== choice.language || saved.alwaysHide.join("\n") !== choice.alwaysHide.join("\n") || saved.neverHide.join("\n") !== choice.neverHide.join("\n");
+}
+
+/**
+ * Whether the choices of a secure project can be saved: they differ from the saved ones, or their model is to download.
+ * Never while the saved ones are not read (`null`): saving would replace them with what the window shows before it reads them.
+ */
+export function canSaveProjectSecurity(saved: ProjectSecurityChoice | null, choice: ProjectSecurityChoice, download: boolean): boolean {
+  return !!saved && (download || projectSecurityChanged(saved, choice));
 }
 
 /** Whether the models answer says that a download runs. */

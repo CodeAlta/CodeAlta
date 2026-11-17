@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PseudonymizerModelsResponse } from "#neoastra";
-import { defaultSecurityLanguage, makeProjectNormal, pseudonymizerPluginId, readProjectSecurity, saveProjectSecurity, secureProject, securityLines, type ProjectSecurityApi } from "./projectSecurity";
+import {
+  canSaveProjectSecurity, defaultSecurityLanguage, makeProjectNormal, pseudonymizerPluginId, readProjectSecurity, saveProjectSecurity, secureProject, securityLines,
+  type ProjectSecurityApi,
+} from "./projectSecurity";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const models = (state = "idle", language: string | null = null): PseudonymizerModelsResponse => ({
@@ -9,7 +12,7 @@ const models = (state = "idle", language: string | null = null): PseudonymizerMo
   download: { state, language, percent: 0, error: null },
 });
 
-function host(fail: Partial<Record<"plugin" | "setting" | "secure", string>> = {}) {
+function host(fail: Partial<Record<"plugin" | "setting" | "secure" | "read", string>> & { ignored?: boolean } = {}) {
   const calls: string[] = [];
   const values = new Map<string, string>();
   const api: ProjectSecurityApi = {
@@ -19,8 +22,8 @@ function host(fail: Partial<Record<"plugin" | "setting" | "secure", string>> = {
       if (!fail.setting) values.set(`${request.projectId}/${request.id}`, request.value ?? "null");
       return { status: fail.setting ?? "ok", message: null, previous: null, value: request.value };
     },
-    getSetting: async request => ({ status: "ok", value: values.get(`${request.projectId}/${request.id}`) ?? null, message: null, source: null, choices: null }),
-    setProjectSecure: async request => { calls.push(`secure ${request.projectId} ${request.secure}`); return { status: fail.secure ?? "ok", secure: !fail.secure && request.secure }; },
+    getSetting: async request => ({ status: fail.read ?? "ok", value: values.get(`${request.projectId}/${request.id}`) ?? null, message: null, source: null, choices: null }),
+    setProjectSecure: async request => { calls.push(`secure ${request.projectId} ${request.secure}`); return { status: fail.secure ?? "ok", secure: !fail.secure && !fail.ignored && request.secure }; },
     models: async () => models(),
     install: async request => { calls.push(`install ${request.language}`); return request.language === "identifiers" ? models() : models("downloading", request.language); },
   };
@@ -45,6 +48,22 @@ test("a step that fails leaves the project normal", async () => {
     assert.deepEqual(await secureProject(api, epoch, "p1", choice), { status });
     assert.ok(!calls.some(call => call.startsWith("secure")), `${status}: the project is not made secure`);
   }
+});
+
+test("a host that answers ok without making the project secure is a failure", async () => {
+  const { api, calls } = host({ ignored: true });
+  assert.deepEqual(await secureProject(api, epoch, "p1", choice), { status: "not_secured" });
+  assert.ok(!calls.some(call => call.startsWith("install")), "no model is downloaded for a project that is not secure");
+});
+
+test("the choices of a secure project are not saved before they are read, nor when they cannot be", async () => {
+  const shown = { language: "english", alwaysHide: [], neverHide: [] };
+  assert.equal(await readProjectSecurity(host({ read: "unavailable" }).api, epoch, "p1"), null);
+  assert.equal(canSaveProjectSecurity(null, shown, false), false, "what shows before the read is not what the project saved");
+  assert.equal(canSaveProjectSecurity(null, shown, true), false, "not even to download a model");
+  assert.equal(canSaveProjectSecurity(choice, choice, false), false);
+  assert.equal(canSaveProjectSecurity(choice, choice, true), true);
+  assert.equal(canSaveProjectSecurity(choice, { ...choice, alwaysHide: [] }, false), true);
 });
 
 test("identifiers only downloads nothing, and a project no longer pseudonymized keeps the plugin", async () => {

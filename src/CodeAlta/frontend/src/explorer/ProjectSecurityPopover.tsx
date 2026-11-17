@@ -5,7 +5,8 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import {
-  defaultSecurityLanguage, downloading, makeProjectNormal, readProjectSecurity, saveProjectSecurity, secureProject, securityLanguageHelp, securityLanguageName, securityLines,
+  canSaveProjectSecurity, defaultSecurityLanguage, downloading, makeProjectNormal, projectSecurityChanged, readProjectSecurity, saveProjectSecurity, secureProject,
+  securityLanguageHelp, securityLanguageName, securityLines,
   type ProjectSecurityApi, type ProjectSecurityChoice,
 } from "./projectSecurity";
 import { usePseudonymizerModels } from "./usePseudonymizerModels";
@@ -30,6 +31,7 @@ export function ProjectSecurityPopover({ epoch, project, api, onClose, onChanged
   const [secure, setSecure] = useState(!!project.secure);
   const [models, setModels] = usePseudonymizerModels(api, epoch);
   const [saved, setSaved] = useState<ProjectSecurityChoice | null>(null);
+  const [unreadable, setUnreadable] = useState(false);
   const [language, setLanguage] = useState<string>(defaultSecurityLanguage(locale));
   const [alwaysHide, setAlwaysHide] = useState("");
   const [neverHide, setNeverHide] = useState("");
@@ -43,7 +45,8 @@ export function ProjectSecurityPopover({ epoch, project, api, onClose, onChanged
   useEffect(() => {
     if (!project.secure) return;
     void readProjectSecurity(api, epoch, project.id).then(choice => {
-      if (!alive.current || !choice) return;
+      if (!alive.current) return;
+      if (!choice) { setUnreadable(true); return; }
       setSaved(choice); setLanguage(choice.language);
       setAlwaysHide(choice.alwaysHide.join("\n")); setNeverHide(choice.neverHide.join("\n"));
     });
@@ -53,8 +56,9 @@ export function ProjectSecurityPopover({ epoch, project, api, onClose, onChanged
   const entry = models?.languages.find(item => item.id === language) ?? null;
   const missing = entry ? !entry.installed : false;
   const choice: ProjectSecurityChoice = { language, alwaysHide: securityLines(alwaysHide), neverHide: securityLines(neverHide) };
-  const changed = !saved || saved.language !== choice.language || saved.alwaysHide.join("\n") !== choice.alwaysHide.join("\n")
-    || saved.neverHide.join("\n") !== choice.neverHide.join("\n");
+  // The choices of a secure project are not changed before they are read: what shows until then is not what it saved.
+  const unread = secure && !saved;
+  const changed = !!saved && projectSecurityChanged(saved, choice);
   const failure = (status: string) => t(status === "plugin_failed" ? "The Pseudonymizer plugin could not be turned on: nothing was changed."
     : status === "settings_failed" ? "The choices of the project could not be saved: nothing was changed." : "The project was not changed ({status}).", { status });
 
@@ -82,19 +86,19 @@ export function ProjectSecurityPopover({ epoch, project, api, onClose, onChanged
     && !(running && download?.language === savedLanguage);
   const form = <div className="project-security-form" role="dialog" aria-label={t(secure ? "Pseudonymization of {name}" : "Pseudonymize {name}", { name: project.name })}
     onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
-    <header><AppIcon name="lock" size={16} /><strong>{t(secure ? "Pseudonymization of {name}" : "Pseudonymize {name}", { name: project.name })}</strong></header>
+    <header data-file-tone="teal"><AppIcon name="lock" size={16} /><strong>{t(secure ? "Pseudonymization of {name}" : "Pseudonymize {name}", { name: project.name })}</strong></header>
     <p className="project-security-lead">{t("What its sessions send to their provider is pseudonymized: names, identifiers, contact details. The real values stay on this computer, and the answers get them back.")}</p>
     {!models ? <ActivitySpinner size={16} /> : <>
-      <RadioGroup label={t("Language of the documents")} className="project-security-languages" selectedValue={language} disabled={busy}
+      <RadioGroup label={t("Language of the documents")} className="project-security-languages" selectedValue={language} disabled={busy || unread}
         onChange={event => setLanguage(event.currentTarget.value)}>
         {models.languages.map(item => <Radio key={item.id} value={item.id} labelElement={<LanguageLabel item={item} />} />)}
       </RadioGroup>
       <details className="project-security-lists" open={!!saved && (saved.alwaysHide.length > 0 || saved.neverHide.length > 0)}>
         <summary>{t("Names and words")}</summary>
         <label>{t("Names always hidden")}<small>{t("The parties of the file, even where nothing finds them. One per line.")}</small>
-          <TextArea fill rows={3} value={alwaysHide} disabled={busy} onChange={event => setAlwaysHide(event.currentTarget.value)} placeholder="Sylvie Durand" /></label>
+          <TextArea fill rows={3} value={alwaysHide} disabled={busy || unread} onChange={event => setAlwaysHide(event.currentTarget.value)} placeholder="Sylvie Durand" /></label>
         <label>{t("Words never hidden")}<small>{t("Sent as they are: what was taken for personal data by mistake. One per line.")}</small>
-          <TextArea fill rows={2} value={neverHide} disabled={busy} onChange={event => setNeverHide(event.currentTarget.value)} /></label>
+          <TextArea fill rows={2} value={neverHide} disabled={busy || unread} onChange={event => setNeverHide(event.currentTarget.value)} /></label>
       </details>
       {ours && download && <div className="project-security-download" role="status">
         <span>{t("Downloading {model}… {percent} %", { model: entry?.model ?? "", percent: download.percent })}</span>
@@ -105,6 +109,7 @@ export function ProjectSecurityPopover({ epoch, project, api, onClose, onChanged
         ? t("The download failed ({error}). The sessions of this project send nothing until the model is downloaded.", { error: download.error ?? "" })
         : t("This model is not downloaded: the sessions of this project send nothing until it is.")}</p>}
     </>}
+    {unread && unreadable && <p className="project-security-warning" role="alert">{t("The choices of this project could not be read: they cannot be changed until they are.")}</p>}
     {problem && <p className="project-security-warning" role="alert">{problem}</p>}
     {asking ? <div className="project-security-confirm" role="alert">
       <p>{t("Stop pseudonymizing {name}? Its next sessions send what they hold as it is. The sessions that were confidential stay so.", { name: project.name })}</p>
@@ -116,7 +121,7 @@ export function ProjectSecurityPopover({ epoch, project, api, onClose, onChanged
       <Button variant="minimal" text={t(secure && !changed ? "Close" : "Cancel")} disabled={busy} onClick={onClose} />
       {!secure ? <Button intent="primary" icon={<AppIcon name="lock" size={14} />} loading={busy} disabled={!models}
         text={missing && entry ? t("Pseudonymize and download {size} MB", { size: entry.sizeMegabytes }) : t("Pseudonymize")} onClick={secureIt} />
-        : (changed || (missing && !ours)) && <Button intent="primary" loading={busy} disabled={!models}
+        : canSaveProjectSecurity(saved, choice, missing && !ours) && <Button intent="primary" loading={busy} disabled={!models}
           text={missing && !ours && entry ? t("Save and download {size} MB", { size: entry.sizeMegabytes }) : t("Save")} onClick={save} />}
     </div>}
     {secure && !asking && <footer className="project-security-footer">

@@ -2774,7 +2774,7 @@ dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
 /* The security of a project beside its row: the language of its documents, its names and words, the download of its model. */
 .project-security-form { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 14px 16px 12px; }
-.project-security-form > header { display: flex; align-items: center; gap: 8px; min-width: 0; color: #58c2a8; }
+.project-security-form > header { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .project-security-form > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 14px; }
 .project-security-lead { margin: 0; color: var(--muted); line-height: 1.45; }
 .project-security-languages { margin: 0; }
