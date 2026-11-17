@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SettingsDescriptor } from "#neoastra";
-import { builtInSettings, choiceText, isMessageKey, mergeSettings, settingText } from "./settingsCatalog";
+import { builtInSettings, choiceText, isBuiltInPluginKey, isMessageKey, mergeSettings, pluginHtmlText, pluginShortText, settingText } from "./settingsCatalog";
 import { settingsGroups, settingsPages } from "./settingsPages";
 import { windowSettingIds } from "./windowSettings";
 
@@ -70,10 +70,43 @@ test("a bound that is a fraction stays a fraction, and a plugin of a project nam
   assert.deepEqual([entry.minimum, entry.maximum, entry.project], [0.1, 0.4, "p1"]);
 });
 
+test("the texts of a plugin that ships with CodeAlta are translated where they can be, those of another plugin are its own", () => {
+  const shipped: SettingsDescriptor = { id: "plugins.pseudonymizer.hide_places", label: "Places", help: "A help no dictionary has.", page: "plugin/builtin:pseudonymizer",
+    section: "What is hidden", kind: "choice", choices: [{ value: "french", label: "French" }], minimum: null, maximum: null, default: "true", owner: "plugin", agents: "read",
+    writable: true, managedBy: null, applies: "now", scopes: ["user"], keywords: [], plugin: "pseudonymizer", pluginName: "Pseudonymizer", available: true, project: null };
+  const other = { ...shipped, id: "plugins.mine.places", page: "plugin/source:mine", plugin: "mine", pluginName: "Mine" };
+  const [ours, theirs] = mergeSettings([shipped, other]).slice(-2);
+  assert.deepEqual([settingText("fr", ours.label, ours.builtIn), settingText("fr", ours.section!, ours.builtIn), settingText("fr", ours.help!, ours.builtIn)],
+    ["Lieux", "Ce qui est masqué", "A help no dictionary has."], "a text without a translation stays as it is written");
+  assert.equal(choiceText("fr", ours.choices[0], ours.builtIn), "Français");
+  assert.deepEqual([settingText("fr", theirs.label, theirs.builtIn), choiceText("fr", theirs.choices[0], theirs.builtIn)], ["Places", "French"]);
+});
+
 test("a built-in text is translated, a plugin's text and the name of a language are shown as they are", () => {
   assert.equal(settingText("fr", "Theme", true), "Thème");
   assert.equal(settingText("fr", "Theme", false), "Theme");
   const language = builtInSettings.find(entry => entry.id === "general.language")!;
   assert.equal(choiceText("fr", language.choices.find(choice => choice.value === "de")!, true), "Deutsch");
   assert.equal(choiceText("fr", language.choices.find(choice => choice.value === "auto")!, true), "Automatique");
+});
+
+test("the dialog of a built-in plugin is translated, its data is not", () => {
+  const html = "<p>The provider read these pseudonyms; the values stay on this machine, encrypted.</p><h3>Pseudonyms</h3>"
+    + "<table><thead><tr><th>Pseudonym</th><th>Value</th><th>Times sent</th></tr></thead>"
+    + "<tbody><tr><td><code>[LIEU_001]</code></td><td>Value</td><td>2</td></tr></tbody></table>";
+  assert.equal(pluginHtmlText("fr", html, true),
+    "<p>Le fournisseur a lu ces pseudonymes ; les valeurs restent sur cette machine, chiffrées.</p><h3>Pseudonymes</h3>"
+    + "<table><thead><tr><th>Pseudonyme</th><th>Valeur</th><th>Nombre d'envois</th></tr></thead>"
+    + "<tbody><tr><td><code>[LIEU_001]</code></td><td>Value</td><td>2</td></tr></tbody></table>", "a value a user wrote stays as it is, even a text of the window");
+  assert.equal(pluginHtmlText("fr", html, false), html, "the texts of a plugin of the user are shown as written");
+  assert.equal(pluginHtmlText("fr", "<p> Your text </p>", true), "<p> Ton texte </p>", "the spaces around a text stay");
+  assert.deepEqual([isBuiltInPluginKey("builtin:pseudonymizer"), isBuiltInPluginKey("my-plugin"), isBuiltInPluginKey(null)], [true, false, false]);
+});
+
+test("the status of a built-in plugin is translated part by part, its numbers kept", () => {
+  assert.equal(pluginShortText("fr", "3/3 · 1 unavailable · tools not loaded", true), "3/3 · 1 indisponibles · outils non chargés");
+  assert.equal(pluginShortText("fr", "31 values hidden", true), "31 valeurs masquées");
+  assert.equal(pluginShortText("fr", "downloading the model 42 %", true), "téléchargement du modèle 42 %");
+  assert.equal(pluginShortText("fr", "31 values hidden", false), "31 values hidden", "the status of a plugin of the user is shown as written");
+  assert.equal(pluginShortText("fr", "Pseudonymizer", true), "Pseudonymizer", "a name stays");
 });

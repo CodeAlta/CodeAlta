@@ -56,6 +56,14 @@ test("a project and the chats have a button for a new session, between the termi
   assert.doesNotMatch(others.join(""), /the-form|data-open="true"/);
 });
 
+test("a pseudonymized project has a padlock in place of its folder, and a normal one keeps its folder", () => {
+  const [, secure, normal] = rows(renderToStaticMarkup(createElement(ProjectRailRows, {
+    projects: [{ ...project("s", "Secure"), secure: true }, project("n", "Normal")],
+    selectedId: null, onSelect: never, canRename: false, renameBusy: false, onRename: never })));
+  assert.match(secure, /data-secure="true" title="Pseudonymized project: its sessions send pseudonyms in place of personal data"/);
+  assert.doesNotMatch(normal, /data-secure/);
+});
+
 test("favorite projects are listed first, in the chosen order, and the others follow", () => {
   const value = snapshot([project("c", "Gamma"), project("a", "Alpha"), project("b", "Beta"), project("d", "Delta")]);
   const listed = (favorites: string[]) => {

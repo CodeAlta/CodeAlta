@@ -11,6 +11,8 @@ internal static class Program
         if (args is [Desktop.Speech.SpeechWorker.Option]) return Desktop.Speech.SpeechWorker.RunProcess();
         // So is the embedding worker of search by meaning.
         if (args is [Desktop.Search.Embedding.EmbeddingWorker.Option]) return Desktop.Search.Embedding.EmbeddingWorker.RunProcess();
+        // So is the worker of the models that find names for the pseudonymization of confidential sessions.
+        if (args is [CodeAlta.Pseudonymization.Ner.NerWorker.Option]) return CodeAlta.Pseudonymization.Ner.NerWorker.RunProcess();
         // So is the worker of a sandboxed session, which runs its tools inside the sandbox.
         if (args is [CodeAlta.Sandbox.Worker.SandboxWorker.Option]) return CodeAlta.Sandbox.Worker.SandboxWorker.RunAsync().GetAwaiter().GetResult();
         // Started by the system as CodeAlta.app, this process starts again through the user's login shell for

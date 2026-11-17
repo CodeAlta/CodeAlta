@@ -2772,6 +2772,43 @@ dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body
 .sandbox-project-form .bp6-html-select { width: 100%; }
 .sandbox-project-form .bp6-form-helper-text { overflow-wrap: anywhere; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
+/* The security of a project beside its row: the language of its documents, its names and words, the download of its model. */
+.project-security-form { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 14px 16px 12px; }
+.project-security-form > header { display: flex; align-items: center; gap: 8px; min-width: 0; color: #58c2a8; }
+.project-security-form > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 14px; }
+.project-security-lead { margin: 0; color: var(--muted); line-height: 1.45; }
+.project-security-languages { margin: 0; }
+.project-security-languages > .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.project-security-languages .bp6-control.bp6-radio { display: flex; align-items: flex-start; margin: 0; padding: 7px 8px 7px 30px; border-radius: 6px; }
+.project-security-languages .bp6-control.bp6-radio:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.project-security-languages .bp6-control.bp6-radio:has(input:checked) { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.project-security-languages .bp6-control-indicator { margin-top: 2px; }
+.project-security-language { display: flex; flex: 1; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.project-security-language > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.project-security-language small { color: var(--muted); }
+.project-security-model { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.project-security-model[data-installed="true"] { color: var(--green); }
+.project-security-lists > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.project-security-lists[open] > summary { margin-bottom: 8px; }
+.project-security-lists label { display: grid; gap: 4px; margin-bottom: 8px; font-weight: 600; }
+.project-security-lists label small { color: var(--muted); font-weight: 400; }
+.project-security-download { display: grid; gap: 6px; }
+.project-security-download small, .project-security-confirm p { color: var(--muted); }
+.project-security-warning { margin: 0; color: var(--yellow); }
+.project-security-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.project-security-actions .bp6-button-text { white-space: nowrap; }
+.project-security-footer { margin: 0 -16px -12px; padding: 6px 10px; border-top: 1px solid var(--line); }
+.project-security-confirm p { margin: 0 0 8px; }
+.pseudonymizer-model-list { display: grid; gap: 2px; margin: 10px 0 0; padding: 0; list-style: none; }
+.pseudonymizer-model-list > li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.pseudonymizer-model-list > li:first-child { border-top: none; }
+.pseudonymizer-model-language { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.pseudonymizer-model-language small { color: var(--muted); }
+.pseudonymizer-model-meta { font-size: 11px; }
+.pseudonymizer-model-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+.pseudonymizer-model-state { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+.pseudonymizer-model-state[data-installed="true"] { color: var(--green); }
+.pseudonymizer-model-progress { display: flex; align-items: center; gap: 8px; width: 160px; }
 /* The form of a new session beside the row of its project, or of the chats: wider, for the chips of its choices. */
 .new-session-form { grid-template-columns: minmax(0, 1fr); width: min(420px, calc(100vw - 32px)); }
 .new-session-form > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

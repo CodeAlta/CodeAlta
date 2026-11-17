@@ -1575,6 +1575,45 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads whether a project's configuration makes its sessions confidential (<c>[privacy] pseudonymize = true</c>), its
+    /// repository's under its own for a sub-project.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project; null or empty for a session without a project.</param>
+    /// <returns>True when the project turns it on; false when it says nothing or its file cannot be read.</returns>
+    public bool IsProjectPseudonymized(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return false;
+        try
+        {
+            return ReadEffectiveProjectDocument(projectRoot).Privacy?.Pseudonymize == true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Persists whether a project is secure: its sessions are confidential. It is written in the project's own file;
+    /// false removes it.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="pseudonymize">The choice.</param>
+    /// <exception cref="ArgumentException"><paramref name="projectRoot"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveProjectPseudonymize(string projectRoot, bool pseudonymize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        ThrowIfReadOnly();
+        var path = GetProjectConfigPath(projectRoot);
+        using var writing = ConfigFileLock.Acquire(path);
+        var document = LoadDocument(path);
+        NormalizeDocument(document);
+        document.Privacy = pseudonymize ? new CodeAltaPrivacySettingsDocument { Pseudonymize = true } : null;
+        Save(path, document);
+    }
+
+    /// <summary>
     /// Reads whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta, from the
     /// user's configuration file (<c>[commits] co_author</c>).
     /// </summary>
@@ -2493,6 +2532,8 @@ public sealed partial class CodeAltaConfigStore
             if (speech.Send == Speech.SpeechSettings.ManualSend) speech.Send = null;
             if (speech is { Enabled: null, Model: null, Send: null }) document.Speech = null;
         }
+
+        if (document.Privacy is { Pseudonymize: not true }) document.Privacy = null;
 
         if (document.Search is { } search)
         {

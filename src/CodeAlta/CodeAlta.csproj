@@ -79,6 +79,7 @@
     <ProjectReference Include="../CodeAlta.Plugin.Git/CodeAlta.Plugin.Git.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Jira/CodeAlta.Plugin.Jira.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
+    <ProjectReference Include="../CodeAlta.Plugin.Pseudonymizer/CodeAlta.Plugin.Pseudonymizer.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mobile/CodeAlta.Plugin.Mobile.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Browser/CodeAlta.Plugin.Browser.csproj" />
     <ProjectReference Include="../CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />

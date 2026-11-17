@@ -18,7 +18,7 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> or <paramref name="question"/> is blank.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="onText"/> is null.</exception>
     /// <exception cref="KeyNotFoundException">No such session, or its provider is not configured.</exception>
-    /// <exception cref="NotSupportedException">The provider of the session runs an agent of its own.</exception>
+    /// <exception cref="NotSupportedException">The provider of the session runs an agent of its own, or the session is confidential.</exception>
     /// <exception cref="InvalidOperationException">Neither the session nor its provider names a model.</exception>
     /// <exception cref="IOException">The journal cannot be read.</exception>
     /// <exception cref="ObjectDisposedException">The runtime has closed.</exception>
@@ -38,6 +38,9 @@ public sealed partial class SessionRuntimeService
     {
         var session = await TryGetResumableSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"No session '{sessionId}'.");
+        // A side question sends the conversation of the session in one request of its own, outside the boundary of the session.
+        if (await IsConfidentialAsync(session, cancellationToken).ConfigureAwait(false))
+            throw new NotSupportedException("This session is confidential: a side question would send its conversation without pseudonymization, so it is not asked.");
         var providerKey = string.IsNullOrWhiteSpace(session.ProviderKey) ? session.ProviderId : session.ProviderKey;
         if (string.IsNullOrWhiteSpace(providerKey)) throw new KeyNotFoundException($"The session '{sessionId}' names no provider.");
         Exception? historyError = null;

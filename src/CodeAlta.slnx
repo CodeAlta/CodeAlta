@@ -38,6 +38,7 @@
     <Project Path="CodeAlta.NativeEngines/CodeAlta.NativeEngines.csproj" />
     <Project Path="CodeAlta.ModelServers/CodeAlta.ModelServers.csproj" />
     <Project Path="CodeAlta.Sandbox/CodeAlta.Sandbox.csproj" />
+    <Project Path="CodeAlta.Pseudonymization/CodeAlta.Pseudonymization.csproj" />
     <Project Path="CodeAlta.Search/CodeAlta.Search.csproj" />
     <Project Path="CodeAlta.Agent.Copilot/CodeAlta.Agent.Copilot.csproj" />
     <Project Path="CodeAlta.Agent.Xai/CodeAlta.Agent.Xai.csproj" />
@@ -63,6 +64,7 @@
     <Project Path="CodeAlta.Plugin.Jira/CodeAlta.Plugin.Jira.csproj" />
     <Project Path="CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <Project Path="CodeAlta.Plugin.Mobile/CodeAlta.Plugin.Mobile.csproj" />
+    <Project Path="CodeAlta.Plugin.Pseudonymizer/CodeAlta.Plugin.Pseudonymizer.csproj" />
     <Project Path="CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions/CodeAlta.Plugins.Abstractions.csproj" />
     <Project Path="CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj" />
@@ -80,6 +82,7 @@
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
     <Project Path="CodeAlta.Credentials.Tests/CodeAlta.Credentials.Tests.csproj" />
+    <Project Path="CodeAlta.Pseudonymization.Tests/CodeAlta.Pseudonymization.Tests.csproj" />
     <Project Path="CodeAlta.Tests.FakeVaultCli/CodeAlta.Tests.FakeVaultCli.csproj" />
     <Project Path="CodeAlta.Fleet.Tests/CodeAlta.Fleet.Tests.csproj" />
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />

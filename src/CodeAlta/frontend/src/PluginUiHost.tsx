@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, InputGroup, TextArea } from "@blueprintjs/core";
 import { pluginUi, type PluginUiAnswer, type PluginUiEvent } from "#neoastra";
 import { AppWindow } from "./AppWindow";
@@ -10,6 +10,7 @@ import { landingCardsChangedEvent } from "./landing/landingShell";
 import { pluginsChangedEvent } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
 import { createPluginPromptAdmissions, type PluginPromptOutcome } from "./pluginPromptAdmission";
+import { isBuiltInPluginKey, pluginHtmlText, settingText } from "./settings/settingsCatalog";
 
 type Api = Pick<typeof pluginUi, "watch" | "respond" | "dialogAction">;
 type Ask = PluginUiEvent & { requestId: string };
@@ -81,11 +82,14 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
   return <PluginDialog key={ask.requestId} ask={ask} api={api} onFinish={finish} onClosed={() => setAsks(current => current.filter(item => item.requestId !== ask.requestId))} />;
 }
 
-/** One dialog asked by a plugin. Dismissing it answers as cancelled. */
+/** One dialog asked by a plugin, in the shown language when the plugin is one of the application. Dismissing it answers as cancelled. */
 function PluginDialog({ ask, api, onFinish, onClosed }: {
   ask: Ask; api: Api; onFinish: (answer: Omit<PluginUiAnswer, "requestId">) => void; onClosed: () => void;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
+  const builtIn = isBuiltInPluginKey(ask.pluginKey);
+  const shown = (value: string) => settingText(locale, value, builtIn);
+  const title = ask.title ? shown(ask.title) : null;
   const kind = ask.dialog ?? "message";
   const [text, setText] = useState(ask.text ?? "");
   const [selected, setSelected] = useState(() => Math.max(0, ask.items?.findIndex(item => item.selected) ?? 0));
@@ -95,7 +99,7 @@ function PluginDialog({ ask, api, onFinish, onClosed }: {
   const first = useRef<HTMLElement | null>(null);
   const titleId = `plugin-dialog-${ask.requestId}`;
   const editing = kind === "input" || kind === "edit";
-  const buttons = ask.buttons?.length ? ask.buttons
+  const buttons = ask.buttons?.length ? ask.buttons.map(button => ({ ...button, label: shown(button.label) }))
     : kind === "message" || kind === "html" ? [{ name: "close", label: t("Close"), isDefault: true, isCancel: true }]
     : kind === "confirm" ? [{ name: "yes", label: t("Yes"), isDefault: true, isCancel: false }, { name: "no", label: t("No"), isDefault: false, isCancel: true }]
     : [{ name: "ok", label: t("OK"), isDefault: true, isCancel: false }, { name: "cancel", label: t("Cancel"), isDefault: false, isCancel: true }];
@@ -133,7 +137,8 @@ function PluginDialog({ ask, api, onFinish, onClosed }: {
 
   const sizes: Readonly<Record<string, [number, number]>> = { message: [520, 240], confirm: [520, 240], input: [520, 220], edit: [760, 520], select: [560, 460], html: [720, 520] };
   const [width, height] = sizes[kind] ?? sizes.message;
-  return <AppWindow storageKey={`codealta.desktop.window.plugin-${kind}.v1`} className="plugin-dialog" titleId={titleId} title={ask.title ?? t("Plugin")}
+  const shownHtml = useMemo(() => pluginHtmlText(locale, html, builtIn), [locale, html, builtIn]);
+  return <AppWindow storageKey={`codealta.desktop.window.plugin-${kind}.v1`} className="plugin-dialog" titleId={titleId} title={title ?? t("Plugin")}
     preferredSize={viewport => ({ width: Math.min(width, viewport.width - 40), height: Math.min(height, viewport.height - 40) })}
     minimumSize={{ width: 320, height: 180 }} onClose={cancel} closeLabel={t("Close")} onOpened={opened}
     // A plugin that asks waits for the answer; only a message has nothing to lose.
@@ -150,17 +155,17 @@ function PluginDialog({ ask, api, onFinish, onClosed }: {
         && !(event.target as HTMLElement).closest("button")) { event.preventDefault(); accept(); }
     }}>
     <div className="plugin-dialog-body" data-kind={kind} aria-busy={busy}>
-      {ask.message && <p className="plugin-dialog-message">{ask.message}</p>}
-      {kind === "input" && <InputGroup inputRef={element => { first.current = element; }} value={text} aria-label={ask.title ?? ""} onChange={event => setText(event.target.value)} />}
+      {ask.message && <p className="plugin-dialog-message">{shown(ask.message)}</p>}
+      {kind === "input" && <InputGroup inputRef={element => { first.current = element; }} value={text} aria-label={title ?? ""} onChange={event => setText(event.target.value)} />}
       {kind === "edit" && <TextArea inputRef={element => { first.current = element; }} className="plugin-dialog-editor" fill value={text} spellCheck={false}
-        aria-label={ask.title ?? ""} onChange={event => setText(event.target.value)} />}
-      {kind === "select" && <div className="plugin-dialog-list" role="listbox" tabIndex={0} ref={element => { first.current = element; }} aria-label={ask.title ?? ""}
+        aria-label={title ?? ""} onChange={event => setText(event.target.value)} />}
+      {kind === "select" && <div className="plugin-dialog-list" role="listbox" tabIndex={0} ref={element => { first.current = element; }} aria-label={title ?? ""}
         aria-activedescendant={`${titleId}-${selected}`}>
         {(ask.items ?? []).map((item, index) => <div key={index} id={`${titleId}-${index}`} role="option" aria-selected={index === selected} className="plugin-dialog-option"
           onClick={() => setSelected(index)} onDoubleClick={() => { setSelected(index); onFinish({ button: "ok", cancelled: false, text: null, selectedIndex: index, values: null }); }}>
-          <strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</div>)}
+          <strong>{shown(item.label)}</strong>{item.description && <small>{shown(item.description)}</small>}</div>)}
       </div>}
-      {kind === "html" && <PluginHtml ref={content} html={html} className="plugin-dialog-html" script={{ path: ask.script ?? null, problem: ask.scriptProblem ?? null }} onAction={(name, value, fields) => void action(name, value, fields)} onSubmit={accept} />}
+      {kind === "html" && <PluginHtml ref={content} html={shownHtml} className="plugin-dialog-html" script={{ path: ask.script ?? null, problem: ask.scriptProblem ?? null }} onAction={(name, value, fields) => void action(name, value, fields)} onSubmit={accept} />}
     </div>
     <footer className="plugin-dialog-buttons">
       {buttons.map(button => <Button key={button.name} intent={button.isDefault && !button.isCancel ? "primary" : "none"} disabled={busy}

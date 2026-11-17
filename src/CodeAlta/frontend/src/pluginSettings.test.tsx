@@ -28,11 +28,11 @@ test("the plugins that ship with CodeAlta come first and are on until configurat
     entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
   assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
     [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["landing", "Landing page", true, true], ["ui", "UI tools", true, true],
-      ["acp", "ACP agents", true, true], ["mobile", "Mobile", false, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
+      ["acp", "ACP agents", true, true], ["mobile", "Mobile", false, true], ["pseudonymizer", "Pseudonymizer", false, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
   assert.equal(rows[0].entry, null);
   assert.equal(rows[1].entry?.id, "git");
-  assert.equal(rows[8].description, "Keeps notes.");
-  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "landing", "ui", "acp", "mobile"]);
+  assert.equal(rows[9].description, "Keeps notes.");
+  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "landing", "ui", "acp", "mobile", "pseudonymizer"]);
 });
 
 test("the Mobile plugin is off until the global configuration turns it on", () => {
@@ -45,11 +45,18 @@ test("the Mobile plugin is off until the global configuration turns it on", () =
   assert.equal(mobile([]).icon, "smartphone");
 });
 
+test("the Pseudonymizer plugin is off until the user turns it on", () => {
+  const pseudonymizer = (listed: readonly PluginsEntry[]) => pluginRows(listed, english).find(row => row.id === "pseudonymizer") ?? assert.fail("no row for Pseudonymizer");
+  assert.equal(pseudonymizer([]).enabled, false, "Nothing configured: off, and a confidential session sends nothing.");
+  assert.equal(pseudonymizer([entry("pseudonymizer", { kind: "Config", enabled: true, enabledGlobal: true, folder: null, path: null, loadable: false })]).enabled, true);
+  assert.equal(pseudonymizer([]).icon, "lock");
+});
+
 test("a source plugin with the id of a plugin that ships with CodeAlta keeps its own row and its actions", () => {
   const rows = pluginRows([entry("git", { enabledGlobal: false, enabled: false, state: "Disabled", runtime: null })], english);
   assert.deepEqual(rows.map(row => [row.id, row.builtIn, row.entry?.kind ?? null, row.enabled]),
     [["mcp", true, null, true], ["git", true, null, false], ["jira", true, null, true], ["statistics", true, null, true], ["landing", true, null, true], ["ui", true, null, true],
-      ["acp", true, null, true], ["mobile", true, null, false], ["git", false, "Source", false]]);
+      ["acp", true, null, true], ["mobile", true, null, false], ["pseudonymizer", true, null, false], ["git", false, "Source", false]]);
   const html = render([entry("git")]);
   assert.equal(cards(html).filter(value => value.includes("<strong>git</strong>") && value.includes('aria-label="Edit git"')).length, 1, html);
   assert.ok(!card(html, "Git").includes("Edit Git"), html);

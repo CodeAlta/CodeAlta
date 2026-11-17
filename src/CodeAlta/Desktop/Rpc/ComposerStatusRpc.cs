@@ -105,7 +105,7 @@ internal sealed class ComposerStatusService
             var active = _plugins?.ActivePlugins ?? [];
             var plugin = active.Select(static plugin => plugin.Instance).OfType<McpPlugin>().FirstOrDefault();
             var status = plugin is null ? McpPlugin.CreateStatus(snapshot) : plugin.CreateStatus(snapshot, request.SessionId);
-            if (snapshot.Policy.Enabled && status is { } mcp) items.Add(Item(McpPluginId, "mcp-status", mcp, "mcp"));
+            if (snapshot.Policy.Enabled && status is { } mcp) items.Add(Item(McpPluginId, "mcp-status", mcp, "mcp") with { BuiltIn = true });
             if (_plugins is not null && active.Count > 0)
             {
                 // The window is the interactive surface of these contributions.
@@ -124,7 +124,11 @@ internal sealed class ComposerStatusService
                     var command = item.Command is null ? null : commands.FirstOrDefault(candidate =>
                         string.Equals(candidate.Handle.PluginRuntimeKey, registration.Handle.PluginRuntimeKey, StringComparison.Ordinal)
                         && string.Equals(((PluginCommandContribution)candidate.Contribution).Name, item.Command, StringComparison.OrdinalIgnoreCase));
-                    items.Add(Item("plugins", "status-" + index, item, null) with { CommandId = command?.Handle.RuntimeContributionKey });
+                    items.Add(Item("plugins", "status-" + index, item, null) with
+                    {
+                        CommandId = command?.Handle.RuntimeContributionKey,
+                        BuiltIn = registration.Handle.PluginRuntimeKey.StartsWith("builtin:", StringComparison.Ordinal),
+                    });
                 }
             }
 
@@ -267,7 +271,8 @@ internal sealed record ComposerStatusResponse(string Status, string? ProjectId, 
 /// <param name="Tone"><c>info</c>, <c>success</c>, <c>warning</c>, <c>error</c> or <c>muted</c>.</param>
 /// <param name="SettingsPage">The Settings page the item opens (<c>mcp</c>), or null when it opens nothing.</param>
 /// <param name="CommandId">The plugin command the item runs, as listed by <c>pluginUi.contributions</c>, or null.</param>
-internal sealed record ComposerStatusItem(string PluginId, string Name, string Label, string Text, string Tone, string? SettingsPage, string? CommandId = null);
+/// <param name="BuiltIn">The plugin is one of the application: the window translates its label and its text.</param>
+internal sealed record ComposerStatusItem(string PluginId, string Name, string Label, string Text, string Tone, string? SettingsPage, string? CommandId = null, bool BuiltIn = false);
 
 /// <summary><c>ok</c> with the MCP servers a session can use, or a refusal code with none.</summary>
 /// <param name="Status"><c>ok</c> or a refusal code.</param>

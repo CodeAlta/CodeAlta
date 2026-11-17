@@ -309,6 +309,14 @@ public sealed class SessionViewLocalState
     public bool? ReviewBeforeCommit { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the session is confidential: what it sends to its provider is pseudonymized, and nothing is sent
+    /// when it cannot be. Once true it stays so, whatever the settings say later: sending its history in clear then would
+    /// undo what it protected. <see langword="null"/> while the settings decide.
+    /// </summary>
+    [JsonPropertyName("confidential")]
+    public bool? Confidential { get; set; }
+
+    /// <summary>
     /// Gets or sets what the agent of the session was last told of the review before commit, or <see langword="null"/>
     /// when it was told nothing yet: the host tells it again only when this differs from what applies.
     /// </summary>

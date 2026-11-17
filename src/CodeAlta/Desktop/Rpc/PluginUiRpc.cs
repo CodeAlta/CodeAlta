@@ -604,6 +604,9 @@ internal sealed record PluginUiEvent(string Kind)
     /// <summary>For <c>ask</c>: <c>message</c>, <c>confirm</c>, <c>input</c>, <c>edit</c>, <c>select</c> or <c>html</c>.</summary>
     public string? Dialog { get; init; }
 
+    /// <summary>For <c>ask</c>: the key of the plugin that asks, when the host knows it. The window translates the texts of a plugin of the application (<c>builtin:</c>).</summary>
+    public string? PluginKey { get; init; }
+
     public string? Title { get; init; }
 
     public string? Message { get; init; }

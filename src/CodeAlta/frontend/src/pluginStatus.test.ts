@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { composerStatusItems, sameComposerStatus } from "./pluginStatus";
 
-const mcp = { pluginId: "mcp", name: "mcp-status", label: "MCP", text: "2/3 · 1 unavailable · tools not loaded", tone: "warning", settingsPage: "mcp" };
+const mcp = { pluginId: "mcp", name: "mcp-status", label: "MCP", text: "2/3 · 1 unavailable · tools not loaded", tone: "warning", settingsPage: "mcp", builtIn: true };
 
 test("composer status accepts the items of the asked project", () => {
   assert.deepEqual(composerStatusItems({ status: "ok", projectId: "p1", items: [mcp] }, "p1"), [
-    { key: "mcp/mcp-status", pluginId: "mcp", label: "MCP", text: "2/3 · 1 unavailable · tools not loaded", tone: "warning", settingsPage: "mcp", commandId: null }]);
+    { key: "mcp/mcp-status", pluginId: "mcp", label: "MCP", text: "2/3 · 1 unavailable · tools not loaded", tone: "warning", settingsPage: "mcp", commandId: null, builtIn: true }]);
   assert.deepEqual(composerStatusItems({ status: "ok", projectId: null, items: [] }, null), []);
   assert.deepEqual(composerStatusItems({ status: "ok", items: [] }, null), []);
   // An item can name a plugin command that it runs when clicked.
   assert.equal(composerStatusItems({ status: "ok", projectId: null, items: [{ ...mcp, commandId: "source:Sample/command:hello" }] }, null)?.[0].commandId, "source:Sample/command:hello");
   assert.equal(composerStatusItems({ status: "ok", projectId: null, items: [{ ...mcp, commandId: "x".repeat(513) }] }, null)?.[0].commandId, null);
+  // Only an item that says so is of a plugin of the application, whose texts the window translates.
+  assert.equal(composerStatusItems({ status: "ok", projectId: null, items: [{ ...mcp, builtIn: "yes" }] }, null)?.[0].builtIn, false);
 });
 
 test("composer status refuses another project's answer, refusals and malformed answers", () => {
@@ -32,5 +34,6 @@ test("composer status compares what is shown", () => {
   const [item] = composerStatusItems({ status: "ok", projectId: null, items: [mcp] }, null)!;
   assert.equal(sameComposerStatus([item], [{ ...item }]), true);
   assert.equal(sameComposerStatus([item], [{ ...item, text: "3/3 · tools not loaded" }]), false);
+  assert.equal(sameComposerStatus([item], [{ ...item, builtIn: false }]), false);
   assert.equal(sameComposerStatus([item], []), false);
 });

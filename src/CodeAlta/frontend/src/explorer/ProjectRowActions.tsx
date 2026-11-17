@@ -49,6 +49,11 @@ export type ProjectRowAuthority = {
   search?: Readonly<{ excluded: (project: WorkspaceProject) => boolean; set: (project: WorkspaceProject, excluded: boolean) => void }>;
   /** The host the sandbox of a project is chosen with, in a popover beside its row. Absent where the window owns no host. */
   sandbox?: Readonly<{ epoch: string; api: SandboxScopeApi }>;
+  /**
+   * The security of a project, in a popover beside its row: it is made secure there (the sessions of a secure project
+   * pseudonymize what they send to their provider), or normal again. Absent where the window owns no host.
+   */
+  security?: (project: WorkspaceProject, close: () => void) => ReactNode;
   /** The labels of a project, chosen in a popover beside its row. Absent where the host keeps no labels. */
   labels?: (project: WorkspaceProject, close: () => void) => ReactNode;
 };
@@ -77,6 +82,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
   const [sandboxing, setSandboxing] = useState<WorkspaceProject | null>(null);
   // The project whose labels are being chosen, beside the row.
   const [labeling, setLabeling] = useState<WorkspaceProject | null>(null);
+  // The project whose security is being chosen, beside the row.
+  const [securing, setSecuring] = useState<WorkspaceProject | null>(null);
   function current(value: Review) {
     const context = latest.current?.current();
     return review.current === value && !!context && value.row === row.current && value.row.isConnected
@@ -177,6 +184,17 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
     dismiss();
     setSandboxing(value.project);
   }
+  function securityAction(original: Review) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.security || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, owner.current()).open) return;
+    dismiss();
+    setSecuring(value.project);
+  }
+  function closeSecurity() {
+    setSecuring(null);
+    if (!modalDialogOpen()) row.current?.querySelector<HTMLElement>(":scope > button")?.focus();
+  }
   function labelsAction(original: Review) {
     const value = review.current;
     if (!value || value !== original || value.details || !latest.current?.labels || !current(value) || modalDialogOpen()) return;
@@ -261,6 +279,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
           key: window === "own" ? "subprojects" : "subprojects-repository", label: t(window === "own" ? "Sub-projects…" : "Sub-projects of the repository…"),
           icon: "files" as const, onSelect: () => subProjectsAction(visible, window === "own") })) : []),
         ...(authority?.sandbox && !project.archived ? [{ key: "sandbox", label: `${t("Sandbox")}…`, icon: "sandbox" as const, onSelect: () => sandboxAction(visible) }] : []),
+        ...(authority?.security && !project.archived ? [{ key: "security", label: t(project.secure ? "Pseudonymization…" : "Pseudonymize the project…"),
+          icon: "lock" as const, onSelect: () => securityAction(visible) }] : []),
         // The folder of the project outside CodeAlta: in the editor the user chose, and in the file manager of the system.
         ...(external.opener && !project.archived && external.editor ? [{ key: "external-editor", label: t("Open in {editor}", { editor: external.editor.name }),
           iconNode: <ExternalEditorIcon id={external.editor.id} size={15} />, onSelect: () => externalAction("editor", visible) }] : []),
@@ -280,6 +300,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
         ...pluginEntries,
       ]} />}
     {labeling && authority?.labels?.(labeling, closeLabels)}
+    {securing && authority?.security?.(securing, closeSecurity)}
     {sandboxing && authority?.sandbox && <ProjectSandboxPopover epoch={authority.sandbox.epoch} api={authority.sandbox.api} projectId={sandboxing.id}
       projectName={sandboxing.name} onClose={closeSandbox} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}

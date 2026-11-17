@@ -349,6 +349,25 @@ public abstract class PluginBase : IAsyncDisposable
         return new ValueTask<PluginAgentRunEndedResult?>((PluginAgentRunEndedResult?)null);
     }
 
+    /// <summary>
+    /// Gives the boundary the requests of a confidential session pass through before they reach its provider: what the
+    /// session sends is pseudonymized there, and what comes back is restored. Called before each request of a confidential
+    /// session; a plugin returns the same boundary for the same session, which holds what it hid.
+    /// </summary>
+    /// <remarks>
+    /// One plugin at most gives boundaries: a session that two plugins answer for sends nothing. A confidential session that
+    /// no plugin answers for sends nothing either, and so does one whose boundary throws: the host fails closed. A plugin
+    /// that does not override this method gives none.
+    /// </remarks>
+    /// <param name="context">The session.</param>
+    /// <returns>The boundary; <see langword="null"/> when the plugin does not pseudonymize this session.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is <see langword="null"/>.</exception>
+    public virtual CodeAlta.Agent.Runtime.IAgentProviderBoundary? GetProviderBoundary(PluginProviderBoundaryContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return null;
+    }
+
     /// <summary>Gets the time CodeAlta waits for a hook of a plugin by default: 10 seconds.</summary>
     public static TimeSpan DefaultHookTimeout { get; } = TimeSpan.FromSeconds(10);
 

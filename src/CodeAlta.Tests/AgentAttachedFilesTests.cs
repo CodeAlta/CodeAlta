@@ -110,6 +110,8 @@ public sealed class AgentAttachedFilesTests
         var markdown = (AgentMessagePart.Text)AgentPdfInputs.Resolve(conversation, text)[0].Parts[0];
         Assert.AreEqual($"<attached_file name=\"report.pdf\" path=\"{pdf}\" converted_to_markdown=\"{pdf}.md\">\nThe secret word is PELICAN.\n</attached_file>", markdown.Value);
         Assert.IsInstanceOfType<AgentMessagePart.Data>(AgentPdfInputs.Resolve(conversation, reader)[0].Parts[0], "A model that reads PDFs still gets the document.");
+        Assert.AreEqual(markdown, AgentPdfInputs.Resolve(conversation, reader, cache: null, asText: true)[0].Parts[0],
+            "A confidential session sends the text of a PDF, which is pseudonymized, even to a model that reads PDFs.");
 
         // A PDF of the project named with @ is not an attached copy: what is beside it is not its conversion.
         var project = Path.Combine(Path.GetDirectoryName(folder.Root)!, "docs");

@@ -15,6 +15,7 @@ import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
 import { adaptiveMessages } from "./adaptiveMessages";
 import { sandboxMessages } from "./sandbox/messages";
+import { projectSecurityMessages } from "./explorer/projectSecurityMessages";
 import { seatMessages } from "./machines/seatMessages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
@@ -1787,6 +1788,12 @@ export const messages = dictionary({
   "An agent asks for your review of its changes and commits only what you approve.": ["Un agente pide su revisión de sus cambios y solo confirma lo que usted aprueba.", "Un agent vous demande une revue de ses changements et ne commite que ce que vous approuvez.", "Ein Agent bittet Sie, seine Änderungen zu prüfen, und committet nur, was Sie freigeben.", "エージェントは変更のレビューを依頼し、承認されたものだけをコミットします。", "代理会请您审阅其更改，只提交您批准的内容。"],
   "The review before commit was not changed ({status}).": ["La revisión antes de confirmar no se cambió ({status}).", "La revue avant le commit n'a pas été changée ({status}).", "Die Review vor dem Commit wurde nicht geändert ({status}).", "コミット前のレビューは変更されませんでした ({status})。", "提交前审阅未更改（{status}）。"],
   "On": ["Activado", "Activé", "Ein", "オン", "开"],
+  "Pseudonymizes what confidential sessions send to their providers, and puts the real values back in the answers.": [
+    "Seudonimiza lo que las sesiones confidenciales envían a sus proveedores y devuelve los valores reales en las respuestas.",
+    "Pseudonymise ce que les sessions confidentielles envoient à leurs fournisseurs, et remet les vraies valeurs dans les réponses.",
+    "Pseudonymisiert, was vertrauliche Sitzungen an ihre Anbieter senden, und setzt die echten Werte in den Antworten wieder ein.",
+    "機密セッションがプロバイダーに送る内容を仮名化し、回答では実際の値に戻します。",
+    "将机密会话发送给提供方的内容假名化，并在回答中还原真实值。"],
   "Review changes before commit": ["Revisar los cambios antes de confirmarlos", "Passer les changements en revue avant le commit", "Änderungen vor dem Commit prüfen", "コミット前に変更をレビューする", "提交前审阅更改"],
   "An agent asks for your review of its changes and commits only what you approve. A session can turn this on or off for itself, in its composer.": ["Un agente pide su revisión de sus cambios y solo confirma lo que usted aprueba. Una sesión puede activarlo o desactivarlo para sí misma, en su compositor.", "Un agent vous demande une revue de ses changements et ne commite que ce que vous approuvez. Une session peut l'activer ou le désactiver pour elle-même, dans son compositeur.", "Ein Agent bittet Sie, seine Änderungen zu prüfen, und committet nur, was Sie freigeben. Eine Sitzung kann dies in ihrem Eingabebereich für sich selbst ein- oder ausschalten.", "エージェントは変更のレビューを依頼し、承認されたものだけをコミットします。各セッションはコンポーザーで個別にオン・オフできます。", "代理会请您审阅其更改，只提交您批准的内容。每个会话都可以在其编辑区中为自己开启或关闭此项。"],
   "Commits": ["Commits", "Commits", "Commits", "コミット", "提交"],
@@ -3101,6 +3108,7 @@ export const messages = dictionary({
   ...modelTierMessages,
   ...adaptiveMessages,
   ...sandboxMessages,
+  ...projectSecurityMessages,
   ...seatMessages,
   ...promptProvenanceMessages,
   ...codeModeSettingsMessages,

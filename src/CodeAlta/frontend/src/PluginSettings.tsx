@@ -33,6 +33,8 @@ const builtIn: readonly { id: string; name: string; description: MessageKey; ico
   { id: "acp", name: "ACP agents", description: "Coding agents of the Agent Client Protocol registry, as model providers.", icon: "subAgents", color: "#e879f9" },
   // It publishes this computer on the tailnet: off until the user turns it on.
   { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", icon: "smartphone", color: "#34d399", off: true },
+  // Off until the user turns it on: a session of a pseudonymized project sends nothing meanwhile.
+  { id: "pseudonymizer", name: "Pseudonymizer", description: "Pseudonymizes what confidential sessions send to their providers, and puts the real values back in the answers.", icon: "lock", color: "#38bdf8", off: true },
 ];
 /** The picture of the card of a plugin that ships with CodeAlta, among the files of the application; `plugin` is the one of a plugin that has none. */
 export const builtInCover = (id: string) => `plugin-covers/${id}.webp`;

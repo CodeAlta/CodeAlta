@@ -1129,8 +1129,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (prompt.Images is { Count: > 0 } images)
             {
                 var items = new List<AgentInputItem>(input.Items);
+                // The PDFs of a confidential session go as their text, which is pseudonymized: they are converted whatever the model reads.
+                var confidential = await _runtime.IsConfidentialAsync(session, operation.Execution.Token).ConfigureAwait(false);
                 items.AddRange(await PromptAttachmentInput.SaveAsync(session, _catalog, images, operation.Receipt.OperationId.ToString("N"),
-                    imageModel, Documents, operation.Execution.Token).ConfigureAwait(false));
+                    imageModel, Documents, confidential, operation.Execution.Token).ConfigureAwait(false));
                 input = new AgentInput(items);
             }
             if (Plugins is not null)

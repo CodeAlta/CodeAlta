@@ -6197,7 +6197,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         try
         {
-            var items = await PromptAttachmentInput.MaterializeAsync(info.Session, catalog, path, model, context.CancellationToken).ConfigureAwait(false);
+            // The PDFs of a confidential session go as their text, which is pseudonymized.
+            var confidential = context.Services.Get<SessionRuntimeService>() is { } runtime
+                && await runtime.IsConfidentialAsync(info.Session, context.CancellationToken).ConfigureAwait(false);
+            var items = await PromptAttachmentInput.MaterializeAsync(info.Session, catalog, path, model, confidential, context.CancellationToken).ConfigureAwait(false);
             return (AltaExitCodes.Success, items);
         }
         catch (NotSupportedException exception)

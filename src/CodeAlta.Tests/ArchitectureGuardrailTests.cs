@@ -33,6 +33,43 @@ public sealed class ArchitectureGuardrailTests
         }, arguments);
     }
 
+    // What may call a turn executor: the request executor of a session, which a confidential session passes through its
+    // boundary, the decorators of that executor, and providers that call the executor of another protocol for one request.
+    // A new caller would send a conversation outside the boundary: it goes through the session, or refuses confidential
+    // sessions (as side questions do) and is added here with that check.
+    private static readonly string[] AllowedTurnExecutorCallers =
+    [
+        "CodeAlta.Agent/Runtime/AgentSession.cs",
+        "CodeAlta.Agent/Runtime/ProviderBoundaryTurnExecutor.cs",
+        "CodeAlta.Agent/Runtime/ProviderRequestGatedTurnExecutor.cs",
+        "CodeAlta.Agent/Runtime/Compaction/AgentTurnExecutorCompactionSummaryExecutor.cs",
+        "CodeAlta.Agent.Claude/ClaudeCodeTurnExecutor.cs",
+        "CodeAlta.Agent.Copilot/CopilotDirectTurnExecutor.cs",
+        "CodeAlta.Agent.Mistral/MistralResponsesTurnExecutor.cs",
+        "CodeAlta.Agent.Xai/XaiDirectTurnExecutor.cs",
+        "CodeAlta.Orchestration/Runtime/AgentHub.SideQuestion.cs",
+        "CodeAlta.Plugin.Acp/AcpTurnExecutor.cs",
+        "CodeAlta.Plugin.CodexCli/CodexCliTurnExecutor.cs",
+    ];
+
+    [TestMethod]
+    public void TurnExecutors_AreCalledOnlyWhereTheBoundaryOfAConfidentialSessionApplies()
+    {
+        var sourceRoot = GetSourceRoot();
+        var call = new Regex(@"\.Execute(Standalone)?TurnAsync\(", RegexOptions.CultureInvariant);
+        var offenders = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(sourceRoot, path).Replace('\\', '/'))
+            .Where(static path => !path.Contains("/bin/", StringComparison.Ordinal) && !path.Contains("/obj/", StringComparison.Ordinal))
+            .Where(static path => !path.Split('/')[0].EndsWith(".Tests", StringComparison.Ordinal) && !path.StartsWith("CodeAlta.Benchmarks/", StringComparison.Ordinal)
+                && !path.StartsWith("CodeAlta.Evals/", StringComparison.Ordinal) && !path.StartsWith("TestSupport/", StringComparison.Ordinal)
+                && !path.StartsWith("prototypes/", StringComparison.Ordinal) && !path.StartsWith("CodeAlta.Tests.", StringComparison.Ordinal))
+            .Where(path => call.IsMatch(File.ReadAllText(Path.Combine(sourceRoot, path))))
+            .Except(AllowedTurnExecutorCallers, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.IsEmpty(offenders, "These files call a turn executor directly, outside the boundary of confidential sessions: " + string.Join(", ", offenders));
+    }
+
     [TestMethod]
     public void CodeAltaSource_DoesNotUseStaticMutableData()
     {

@@ -43,4 +43,11 @@ export const mcpSessionMessages = {
   "Called as": ["Se llama como", "Appelé sous le nom", "Aufgerufen als", "呼び出し名", "调用名称"],
   "Copy the tool name": ["Copiar el nombre de la herramienta", "Copier le nom de l’outil", "Tool-Namen kopieren", "ツール名をコピー", "复制工具名称"],
   "No arguments.": ["Sin argumentos.", "Aucun argument.", "Keine Argumente.", "引数はありません。", "无参数。"],
+
+  // The parts of the text of the MCP item, after "MCP 3/3 · ": numbers are parameters.
+  "{0} unavailable": ["{0} no disponibles", "{0} indisponibles", "{0} nicht verfügbar", "{0} 件利用不可", "{0} 个不可用"],
+  "tools not loaded": ["herramientas no cargadas", "outils non chargés", "Tools nicht geladen", "ツール未読み込み", "工具未加载"],
+  "tools pending": ["herramientas pendientes", "outils en attente", "Tools ausstehend", "ツール待機中", "工具待加载"],
+  "tools {0}/{1}": ["herramientas {0}/{1}", "outils {0}/{1}", "Tools {0}/{1}", "ツール {0}/{1}", "工具 {0}/{1}"],
+  "active tools {0}": ["herramientas activas {0}", "outils actifs {0}", "aktive Tools {0}", "有効なツール {0}", "活动工具 {0}"],
 } as const;

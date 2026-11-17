@@ -25,7 +25,10 @@ export type SettingEntry = Readonly<{
   plugin: string | null; pluginName: string | null; available: boolean;
   /** The project of a plugin of a project, whose settings are all that project's; null otherwise. */
   project: string | null;
-  /** Built in: its texts are keys of the dictionaries of the window. */
+  /**
+   * Built in, or of a plugin that ships with CodeAlta: its texts are keys of the dictionaries of the window where they
+   * have a translation, and shown as they are written otherwise.
+   */
   builtIn: boolean;
 }>;
 
@@ -57,13 +60,15 @@ function parseDefault(text: string | null): unknown {
 
 /** A setting a plugin declares, as the host describes it. */
 function pluginEntry(descriptor: SettingsDescriptor): SettingEntry {
+  // A plugin that ships with CodeAlta has its page under its built-in key: its texts are translated where they can be.
+  const shipped = descriptor.page.startsWith("plugin/builtin:");
   return Object.freeze({
     id: descriptor.id, label: descriptor.label, help: descriptor.help ?? null, page: descriptor.page, section: descriptor.section ?? null, kind: descriptor.kind as SettingKind,
-    choices: Object.freeze(descriptor.choices.map(choice => Object.freeze({ value: choice.value, label: choice.label ?? null, literal: true }))),
+    choices: Object.freeze(descriptor.choices.map(choice => Object.freeze({ value: choice.value, label: choice.label ?? null, literal: !shipped }))),
     minimum: bound(descriptor.minimum), maximum: bound(descriptor.maximum), defaultValue: parseDefault(descriptor.default ?? null), owner: descriptor.owner,
     agents: descriptor.agents, writable: descriptor.writable, managedBy: descriptor.managedBy ?? null, applies: descriptor.applies, scopes: Object.freeze([...descriptor.scopes]),
     keywords: Object.freeze([...descriptor.keywords]), plugin: descriptor.plugin ?? null, pluginName: descriptor.pluginName ?? null, available: descriptor.available,
-    project: descriptor.project ?? null, builtIn: false,
+    project: descriptor.project ?? null, builtIn: shipped,
   });
 }
 
@@ -82,9 +87,46 @@ export function mergeSettings(host: readonly SettingsDescriptor[] | null): reado
 /** Whether a text is a key of the dictionaries of the window. */
 export const isMessageKey = (text: string): text is MessageKey => Object.hasOwn(messages, text);
 
-/** A text of a setting in the shown language: a built-in one translated, a plugin's as it is written. */
+/** A text of a setting in the shown language: a built-in one translated where it can be, a plugin's as it is written. */
 export function settingText(locale: string, text: string, builtIn: boolean): string {
   return builtIn && isMessageKey(text) ? translate(locale, text) : text;
+}
+
+/** Whether the key of a plugin is the one of a plugin of the application, whose texts the window translates. */
+export const isBuiltInPluginKey = (pluginKey: string | null | undefined) => !!pluginKey?.startsWith("builtin:");
+
+const htmlEntities: Readonly<Record<string, string>> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'" };
+// The elements whose text is data, never a text of the plugin: a value a user wrote is shown as it is.
+const dataElements = new Set(["td", "code", "pre", "textarea", "kbd", "samp"]);
+
+/**
+ * The HTML of a plugin in the shown language: of a built-in plugin, each text between two tags that is a key of the
+ * dictionaries is translated, except in the cells of a table and in code; a plugin's as it is written.
+ */
+export function pluginHtmlText(locale: string, html: string, builtIn: boolean): string {
+  if (!builtIn) return html;
+  return html.replace(/<(\/?)([a-zA-Z][\w-]*)[^>]*>([^<]+)/g, (match, closing: string, tag: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || (!closing && dataElements.has(tag.toLowerCase()))) return match;
+    const key = trimmed.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => htmlEntities[entity]);
+    if (!isMessageKey(key)) return match;
+    const translated = translate(locale, key).replace(/[&<>]/g, character => character === "&" ? "&amp;" : character === "<" ? "&lt;" : "&gt;");
+    return match.slice(0, match.length - text.length) + text.replace(trimmed, () => translated);
+  });
+}
+
+/**
+ * A short text of a built-in plugin in the shown language, such as a status ("31 values hidden", "3/3 · tools not
+ * loaded"): each part between two " · " is translated when, its numbers made parameters ("{0} values hidden"), it is a
+ * key of the dictionaries; a plugin's as it is written.
+ */
+export function pluginShortText(locale: string, text: string, builtIn: boolean): string {
+  if (!builtIn) return text;
+  return text.split(" · ").map(part => {
+    const numbers: string[] = [];
+    const key = part.replace(/\d+(?:[.,]\d+)?/g, number => `{${numbers.push(number) - 1}}`);
+    return isMessageKey(key) ? translate(locale, key, Object.fromEntries(numbers.map((number, index) => [String(index), number]))) : part;
+  }).join(" · ");
 }
 
 /** The text of a choice in the shown language: its label translated, else its own text, else its value. */
