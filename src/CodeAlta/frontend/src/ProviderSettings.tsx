@@ -479,7 +479,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                     {original?.hasApiKey && <Checkbox checked={form.clearApiKey} disabled={busy} label={t("Remove the stored key")}
                       onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}</FormGroup>
                   {!original && <p className="provider-settings-wide provider-form-note"><AppIcon name="secret" size={13} /> {t("Once the provider is saved, its key can be kept as a secret or taken from a vault here.")}</p>}
-                  {original && original.type === form.type && <div className="provider-settings-wide provider-key-sources">
+                  {original && original.type === form.type && <div className="provider-key-sources">
                     <ProviderKeySecret key={original.key} provider={original} disabled={busy || dirty}
                       onKeep={name => void settle(() => secretKeys.keepKeyAsSecret({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
                         { timeoutMilliseconds: 60000 }), original.key)} />

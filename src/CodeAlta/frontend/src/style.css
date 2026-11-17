@@ -1353,8 +1353,9 @@ dialog.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dv
 .provider-settings-heading p { margin: 0; color: var(--muted); }
 .provider-settings-actions { display: flex; align-items: center; gap: 8px; }
 .provider-settings-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
-/* The providers take a share of the page, as the skills do: their names, tags and spaces are read without wrapping. */
-@media (min-width: 901px) { .provider-settings .provider-settings-layout { grid-template-columns: minmax(280px, 2fr) minmax(0, 3fr); } }
+/* The providers take a third of the page: their names, tags and spaces are read without wrapping, and the form beside
+   them has the room for three columns of fields at the size Settings opens with. */
+@media (min-width: 901px) { .provider-settings .provider-settings-layout { grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr); } }
 /* A provider is its logo, its name and its tags on a first row, and its spaces on a row of their own under the name:
    the name is always read whole, whatever the number of tags and of spaces. */
 .provider-settings-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -1410,22 +1411,27 @@ dialog.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dv
 .provider-form-tab { display: inline-flex; align-items: center; gap: 6px; }
 /* A tab that holds the field that keeps the form from being saved. */
 .provider-form-tab[data-problem]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
-.provider-form-panel.bp6-tab-panel { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px; margin: 0; padding: 14px 16px 16px; container-type: inline-size; }
+.provider-form-panel.bp6-tab-panel { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; margin: 0; padding: 12px 16px 10px; container-type: inline-size; }
 .provider-form-panel.bp6-tab-panel[aria-hidden="true"] { display: none; }
 .provider-form-panel.bp6-tab-panel > * { margin: 0; }
-.provider-form-section { display: grid; gap: 8px; min-width: 0; }
+.provider-form-section { display: grid; gap: 6px; min-width: 0; }
 .provider-form-section-title { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; user-select: none; }
 .provider-form-section-title > svg { flex: none; }
 .provider-form-section-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
 .provider-form-section-title > .bp6-tag { order: 1; letter-spacing: 0; text-transform: none; }
-.provider-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-items: start; gap: 0 16px; }
+.provider-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); align-items: start; gap: 0 16px; }
 .provider-form-grid .bp6-form-group { min-width: 0; margin: 0 0 8px; }
 .provider-form-grid .bp6-form-helper-text { font-size: 12px; }
+.provider-form-grid > .bp6-checkbox { margin-bottom: 4px; }
+/* The default model keeps the room of its field for its name: the placeholder alone says it is the default. */
+.provider-model-field .provider-default-tag { display: none; }
 /* A field that takes the columns left on its row, where the form has more than two; a row of its own otherwise. */
 .provider-settings-rest { grid-column: 1 / -1; }
-@container (min-width: 700px) { .provider-settings-rest { grid-column: span 2; } }
+@container (min-width: 600px) { .provider-settings-rest { grid-column: span 2; } }
 /* Where the key of a provider is kept, under its fields: the secret, its vault, and the buttons that move it there. */
-.provider-key-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; font-size: 12.5px; }
+.provider-key-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; margin-bottom: 8px; font-size: 12.5px; }
+/* Beside the fields of the key, on the line of their inputs, where the form has a column for it. */
+@container (min-width: 600px) { .provider-key-sources { margin-top: 23px; } }
 .provider-key-sources:empty { display: none; }
 .provider-key-sources > .provider-key-secret { margin-top: 0; }
 /* The icon at the start of a field that says what it holds: an address, a variable, a key. */
