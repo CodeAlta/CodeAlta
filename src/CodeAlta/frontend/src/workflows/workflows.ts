@@ -17,7 +17,7 @@ export function stepColumns(steps: readonly WorkflowStepItem[]): readonly (reado
 }
 
 /** The scope of a script as the tab names it. */
-export const scopeLabel = (scope: string) => scope === "project" ? "Project" : scope === "global" ? "Mine" : "Sample";
+export const scopeLabel = (scope: string) => scope === "project" ? "Project" : scope === "global" ? "Mine" : scope === "plugin" ? "Plugin" : "Sample";
 
 /**
  * The path of a script of a project in that project, as its code editor names its files (`.alta/scripts/triage.js`); null for

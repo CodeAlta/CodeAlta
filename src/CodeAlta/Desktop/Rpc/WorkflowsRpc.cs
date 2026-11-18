@@ -73,7 +73,7 @@ internal sealed class WorkflowsService
         if (request.ProjectId is not null && (project is null || project.Archived)) return new("not_found", []);
         var spaces = _spaceOf is null ? null : await _spaceOf(project, cancellationToken).ConfigureAwait(false);
         var scripts = await Task.Run(() => _scripts!.List(project?.ProjectPath, spaces), cancellationToken).ConfigureAwait(false);
-        return new("ok", [.. scripts.Select(static script => new WorkflowScriptItem(script.Name, Scope(script.Scope), script.Title, script.Description,
+        return new("ok", [.. scripts.Select(static script => new WorkflowScriptItem(script.Name, CodeModeScriptScopeNames.NameOf(script.Scope), script.Title, script.Description,
             script.Problem, script.Path, Parameters(script.ParametersSchemaJson),
             [.. script.Steps.Select(static step => new WorkflowStepItem(step.Id, step.Title, step.After, step.Each))]))]);
     }
@@ -116,7 +116,7 @@ internal sealed class WorkflowsService
         if (request.ProjectId is not null && (project is null || project.Archived)) return new("not_found", null);
         var spaces = _spaceOf is null ? null : await _spaceOf(project, cancellationToken).ConfigureAwait(false);
         var script = await Task.Run(() => _scripts!.List(project?.ProjectPath, spaces)
-            .FirstOrDefault(candidate => candidate.Name == request.Name && Scope(candidate.Scope) == request.Scope), cancellationToken).ConfigureAwait(false);
+            .FirstOrDefault(candidate => candidate.Name == request.Name && CodeModeScriptScopeNames.NameOf(candidate.Scope) == request.Scope), cancellationToken).ConfigureAwait(false);
         if (script is null) return new("not_found", null);
         try
         {
@@ -252,14 +252,6 @@ internal sealed class WorkflowsService
     private static bool Name(string value) => value is { Length: > 0 and <= 256 } && value == value.Trim() && !value.Any(char.IsControl);
 
     private static bool RunId(string? value) => value is { Length: > 0 and <= 64 } && value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
-
-    private static string Scope(CodeModeScriptScope scope) => scope switch
-    {
-        CodeModeScriptScope.Project => "project",
-
-
-        _ => "builtin",
-    };
 
     // A field per parameter: its JSON type, whether it is required, its description, and its default as JSON.
     private static IReadOnlyList<WorkflowScriptParameter> Parameters(string? schema)

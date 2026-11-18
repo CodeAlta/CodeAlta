@@ -91,11 +91,13 @@ function ScriptFacts({ script }: { script: WorkflowScriptItem }) {
   </>;
 }
 
-// The parts of the library, in the order a project finds a name: its own scripts, yours, then the samples.
+// The parts of the library, in the order a project finds a name: its own scripts, yours, then the samples; the scripts of
+// plugins, which have names of their own, come last and only when there are some.
 const libraryScopes = [
   { scope: "project", title: "This project", caption: "In the .alta/scripts folder of {project}, shared with it. They replace one of yours or a sample of the same name." },
   { scope: "global", title: "My scripts", caption: "In your ~/.alta/scripts folder: every project can run them, in the spaces that have them." },
-  { scope: "builtin", title: "Samples", caption: "They come with CodeAlta, to run or to start from." },
+  { scope: "builtin", title: "Built-in samples", caption: "They come with CodeAlta, to run or to start from." },
+  { scope: "plugin", title: "Plugins", caption: "Given by the plugins that run: they change with their plugin." },
 ] as const;
 
 function RunMark({ state }: { state: string }) {
@@ -219,7 +221,7 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
   const ordered = useMemo(() => sortRuns(runs?.items ?? []), [runs]);
   const now = Math.max(useNow(visible, ordered.some(run => run.state === "running")), Date.now());
   const byId = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
-  // The samples show until the user hides them, a choice the window keeps.
+  // The built-in samples show until the user hides them, a choice the window keeps.
   const [samples, setSamples] = useState(() => restoreSamplesShown(() => localStorage.getItem(samplesShownKey)));
   const toggleSamples = () => setSamples(current => {
     try { localStorage.setItem(samplesShownKey, String(!current)); } catch { /* Kept for this window only. */ }
@@ -252,7 +254,7 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
         <div className="automation-list-head workflow-library-head">
           <h3>{t("Library")}<span className="count">{scripts.items.length}</span></h3>
           {sampleCount > 0 && <Button size="small" variant="minimal" className="workflow-samples-toggle" aria-pressed={samples}
-            icon={<AppIcon name={samples ? "hide" : "eye"} size={13} />} onClick={toggleSamples}>{t(samples ? "Hide samples" : "Show samples")}</Button>}
+            icon={<AppIcon name={samples ? "hide" : "eye"} size={13} />} onClick={toggleSamples}>{t(samples ? "Hide built-in samples" : "Show built-in samples")}</Button>}
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search scripts")}
             aria-label={t("Search scripts")} onChange={event => setQuery(event.target.value)} />
         </div>
@@ -261,7 +263,7 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
         {query && shown.length === 0 ? <p className="automation-empty">{t("No script matches.")}</p>
           : libraryScopes.filter(part => (part.scope !== "project" || chosen) && (part.scope !== "builtin" || samples)).map(part => {
             const items = shown.filter(script => script.scope === part.scope);
-            if (query && items.length === 0) return null;
+            if ((query || part.scope === "plugin") && items.length === 0) return null;
             const caption = t(part.caption, { project: chosen?.name ?? "" });
             // One line for a part: its name, its count, where its scripts are, and that it has none yet.
             return <section key={part.scope} className="workflow-scope-section" data-scope={part.scope} aria-label={t(part.title)}>

@@ -48,6 +48,17 @@ public sealed class CodeModeScriptLibraryTests
     }
 
     [TestMethod]
+    public void EveryScope_HasANameOfItsOwn_ThatIsReadBack()
+    {
+        var scopes = Enum.GetValues<CodeModeScriptScope>();
+        CollectionAssert.AreEqual(new[] { "builtin", "global", "project", "plugin" }, scopes.Select(CodeModeScriptScopeNames.NameOf).ToArray());
+        CollectionAssert.AreEqual(scopes, scopes.Select(static scope => CodeModeScriptScopeNames.Parse(CodeModeScriptScopeNames.NameOf(scope).ToUpperInvariant())!.Value).ToArray());
+        Assert.IsNull(CodeModeScriptScopeNames.Parse("sample"));
+        Assert.IsNull(CodeModeScriptScopeNames.Parse(null));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(static () => CodeModeScriptScopeNames.NameOf((CodeModeScriptScope)99));
+    }
+
+    [TestMethod]
     public async Task AltaScript_EditsAScriptThroughACopy_ChecksIt_SavesIt_AndDeletesIt()
     {
         using var root = TestTempDirectory.Create();
@@ -58,7 +69,9 @@ public sealed class CodeModeScriptLibraryTests
             .Add(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") }).Add(registry).Add(library));
         Task<AltaCommandResult> Invoke(string? stdin, params string[] args) => dispatcher.InvokeAsync(args, stdin, cwd: project).AsTask();
 
+        library.Save("mine", CodeModeScriptScope.Global, "return 1;", null, null);
         var listed = await Invoke(null, "script", "list");
+        library.Delete("mine", CodeModeScriptScope.Global, null);
         var declared = await Invoke(null, "script", "show", "review", "--declarations");
         var edited = await Invoke(null, "script", "edit", "review");
         using var edit = JsonDocument.Parse(edited.Stdout.Split('\n').Single(static line => line.Contains("\"alta.script.edit\"", StringComparison.Ordinal)));
@@ -74,6 +87,7 @@ public sealed class CodeModeScriptLibraryTests
 
         StringAssert.Contains(listed.Stdout, "\"name\":\"review\"");
         StringAssert.Contains(listed.Stdout, "\"scope\":\"project\"");
+        StringAssert.Contains(listed.Stdout.Split('\n').Single(static line => line.Contains("\"name\":\"mine\"", StringComparison.Ordinal)), "\"scope\":\"global\"", "a script of yours is not a sample");
         StringAssert.Contains(declared.Stdout, "declare function workflow(name: \\\"review\\\", args: { pr: number; depth?: string }): Promise<unknown>;");
         StringAssert.StartsWith(copy, Path.Combine(root.Path, "home", "scratchpad", "scripts"));
         Assert.AreEqual(AltaExitCodes.Success, checkedCopy.ExitCode, checkedCopy.Transcript);

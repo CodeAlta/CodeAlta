@@ -255,7 +255,7 @@ internal sealed class DesktopSearchSources
             {
                 var ofProject = script.Scope == CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Project;
                 if (ofProject != (project is not null) || script.Problem is not null) continue;
-                var scope = ofProject ? "project" : script.Scope == CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Global ? "global" : "builtin";
+                var scope = CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScopeNames.NameOf(script.Scope);
                 var reference = $"script:{(ofProject ? project!.ProjectId : scope)}/{script.Name}";
                 documents[reference] = new SearchDocument(reference, SearchKind.Script, script.Name,
                     string.Join('\n', new[] { script.Title, script.Description, script.WhenToUse }.Where(static text => !string.IsNullOrWhiteSpace(text))), DateTimeOffset.UnixEpoch)

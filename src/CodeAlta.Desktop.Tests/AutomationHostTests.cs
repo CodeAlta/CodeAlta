@@ -1389,6 +1389,7 @@ public sealed class AutomationHostTests
             Assert.AreEqual("invalid_request", (await rpc.DeleteAsync(new(Epoch, "triage", "project", null), default)).Status, "a script of a project names its project");
             Assert.AreEqual("stale_epoch", (await rpc.DeleteAsync(new("other", "triage", "project", project.Id), default)).Status);
             Assert.IsNull(host.CodeModeScripts.Save("mine", CodeModeScriptScope.Global, "return 1;", null, null).Refusal);
+            Assert.AreEqual("global", (await rpc.ScriptsAsync(new(Epoch, null), default)).Scripts.Single(static script => script.Name == "mine").Scope, "a script of yours is not a sample");
             Assert.AreEqual("ok", (await rpc.DeleteAsync(new(Epoch, "triage", "project", project.Id), default)).Status);
             Assert.AreEqual("ok", (await rpc.DeleteAsync(new(Epoch, "mine", "global", null), default)).Status);
             var left = (await rpc.ScriptsAsync(new(Epoch, project.Id), default)).Scripts;

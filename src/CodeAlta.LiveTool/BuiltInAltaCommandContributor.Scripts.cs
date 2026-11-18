@@ -47,7 +47,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         string? scope = null;
         var command = Leaf("list", "List the scripts the project sees: the project's, yours and the samples, one per name.");
-        command.Add("scope=", "Only `project`, `global` or `builtin`.", value => scope = value);
+        command.Add("scope=", "Only `project`, `global`, `plugin` or `builtin`.", value => scope = value);
         command.Add(async (_, _) => await HandleScriptListAsync(context, scope).ConfigureAwait(false));
         return command;
     }
@@ -114,7 +114,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         CodeModeScriptScope? only = null;
         if (NormalizeOptionalText(scope) is { } named)
         {
-            if (ParseScope(named) is not { } parsed) return UsageError(context, "usage.invalidScope", "--scope is `project`, `global` or `builtin`.", "alta script list");
+            if (CodeModeScriptScopeNames.Parse(named) is not { } parsed) return UsageError(context, "usage.invalidScope", "--scope is `project`, `global`, `plugin` or `builtin`.", "alta script list");
             only = parsed;
         }
 
@@ -214,7 +214,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["name"] = scriptName,
             ["path"] = copy,
             ["hash"] = script?.Hash,
-            ["scope"] = script is null ? null : ScopeName(script.Scope),
+            ["scope"] = script is null ? null : CodeModeScriptScopeNames.NameOf(script.Scope),
             ["nextStep"] = $"Change {copy} with your file tools, check it with `alta script check {copy}`, try it with `workflow({{ scriptPath: \"{copy.Replace("\\", "/", StringComparison.Ordinal)}\" }})`, then publish it with `alta script save {scriptName} --from {copy}{(script is null ? string.Empty : " --hash " + script.Hash)}`.",
         };
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
@@ -255,7 +255,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         CodeModeScriptScope scope;
         if (NormalizeOptionalText(options.Scope) is { } named)
         {
-            if (ParseScope(named) is not { } parsed || parsed == CodeModeScriptScope.BuiltIn) return UsageError(context, "usage.invalidScope", "--scope is `project` or `global`.", path);
+            if (CodeModeScriptScopeNames.Parse(named) is not { } parsed || parsed is not (CodeModeScriptScope.Project or CodeModeScriptScope.Global)) return UsageError(context, "usage.invalidScope", "--scope is `project` or `global`.", path);
             scope = parsed;
         }
         else
@@ -279,8 +279,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (context.Services.Get<CodeModeScriptLibrary>() is not { } library) return ScriptsUnavailable(context);
         if (NormalizeOptionalText(name) is not { } scriptName) return UsageError(context, "usage.missingName", "A script name is required.", "alta script delete");
         var projectRoot = ProjectRoot(context);
-        var where = NormalizeOptionalText(scope) is { } named ? ParseScope(named) : projectRoot is null ? CodeModeScriptScope.Global : CodeModeScriptScope.Project;
-        if (where is null or CodeModeScriptScope.BuiltIn) return UsageError(context, "usage.invalidScope", "--scope is `project` or `global`.", "alta script delete");
+        var where = NormalizeOptionalText(scope) is { } named ? CodeModeScriptScopeNames.Parse(named) : projectRoot is null ? CodeModeScriptScope.Global : CodeModeScriptScope.Project;
+        if (where is not (CodeModeScriptScope.Project or CodeModeScriptScope.Global)) return UsageError(context, "usage.invalidScope", "--scope is `project` or `global`.", "alta script delete");
         if (!library.Delete(scriptName, where.Value, projectRoot)) return ScriptNotFound(context, scriptName);
         AltaJsonlWriter.WriteRecord(context.Stdout, new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -288,7 +288,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["version"] = 1,
             ["correlationId"] = context.CorrelationId,
             ["name"] = scriptName,
-            ["scope"] = ScopeName(where.Value),
+            ["scope"] = CodeModeScriptScopeNames.NameOf(where.Value),
         });
         return AltaExitCodes.Success;
     }
@@ -447,7 +447,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["version"] = 1,
             ["correlationId"] = context.CorrelationId,
             ["name"] = script.Name,
-            ["scope"] = ScopeName(script.Scope),
+            ["scope"] = CodeModeScriptScopeNames.NameOf(script.Scope),
             ["path"] = script.Path,
             ["hash"] = script.Hash,
         };
@@ -463,22 +463,6 @@ internal sealed partial class BuiltInAltaCommandContributor
     // The script a caller sees under a name: one of yours or a sample only when the space of the calling session has it.
     private static async Task<CodeModeLibraryScript?> FindInCallerSpaceAsync(AltaCommandContext context, CodeModeScriptLibrary library, string name)
         => library.Find(name, ProjectRoot(context), await CallerSpaceFilterAsync(context).ConfigureAwait(false));
-
-    private static CodeModeScriptScope? ParseScope(string scope) => scope.ToLowerInvariant() switch
-    {
-        "project" => CodeModeScriptScope.Project,
-        "global" => CodeModeScriptScope.Global,
-        "builtin" => CodeModeScriptScope.BuiltIn,
-        _ => null,
-    };
-
-    private static string ScopeName(CodeModeScriptScope scope) => scope switch
-    {
-        CodeModeScriptScope.Project => "project",
-
-
-        _ => "builtin",
-    };
 
     private static int ScriptNotFound(AltaCommandContext context, string name)
         => NotFound(context, "script.notFound", $"No script '{name}' in the library: `alta script list` lists them.");

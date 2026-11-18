@@ -22,6 +22,34 @@ public enum CodeModeScriptScope
     Plugin,
 }
 
+/// <summary>The name of a <see cref="CodeModeScriptScope"/> wherever it is written: the records of <c>alta script</c>, the Workflows tab, the journal of a run, a search hit.</summary>
+public static class CodeModeScriptScopeNames
+{
+    /// <summary>Gets the name of a scope: <c>builtin</c>, <c>global</c>, <c>project</c> or <c>plugin</c>.</summary>
+    /// <param name="scope">The scope.</param>
+    /// <returns>Its name.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The scope is not one of the enumeration.</exception>
+    public static string NameOf(CodeModeScriptScope scope) => scope switch
+    {
+        CodeModeScriptScope.BuiltIn => "builtin",
+        CodeModeScriptScope.Global => "global",
+        CodeModeScriptScope.Project => "project",
+        CodeModeScriptScope.Plugin => "plugin",
+        // No default name: a scope added without one must fail here, not pass for a sample.
+        _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "The scope has no name."),
+    };
+
+    /// <summary>Reads the name of a scope, whatever its case.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>The scope, or null when the name is not one of <see cref="NameOf"/>.</returns>
+    public static CodeModeScriptScope? Parse(string? name)
+    {
+        foreach (var scope in Enum.GetValues<CodeModeScriptScope>())
+            if (string.Equals(NameOf(scope), name, StringComparison.OrdinalIgnoreCase)) return scope;
+        return null;
+    }
+}
+
 /// <summary>A script a running plugin gives to the library.</summary>
 /// <param name="Name">Its name, <c>&lt;prefix&gt;/&lt;name&gt;</c> (<see cref="CodeModeScriptLibrary.IsPluginName"/>).</param>
 /// <param name="Content">The script.</param>

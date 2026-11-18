@@ -383,7 +383,7 @@ public static class CodeModeToolFactory
                 {
                     Limits = limits,
                     ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd, spaces, script => options.Runs.Record(((CodeModeRunHandle)observer).Id,
-                        AgentWorkflowEventKind.ScriptLoaded, record => record with { ScriptName = script.Name, ScriptScope = ScopeName(script.Scope) })),
+                        AgentWorkflowEventKind.ScriptLoaded, record => record with { ScriptName = script.Name, ScriptScope = CodeModeScriptScopeNames.NameOf(script.Scope) })),
                     ArgumentsJson = plan?.Run.ArgumentsJson,
                     Replay = plan?.Replay,
                     WorkingDirectory = cwd,
@@ -553,15 +553,6 @@ public static class CodeModeToolFactory
     }
 
     private static string SourceLine(string? sourcePath) => sourcePath is null ? string.Empty : $"Source: {sourcePath}\n";
-
-    // The scope of a library script as its record names it.
-    private static string ScopeName(CodeModeScriptScope scope) => scope switch
-    {
-        CodeModeScriptScope.Project => "project",
-
-
-        _ => "sample",
-    };
 
     // The source of each run is kept as a file, so that the model fixes a long script with its file tools.
     private static string? KeepSource(CodeModeToolOptions options, string sessionId, string runId, CodeModeSource source)

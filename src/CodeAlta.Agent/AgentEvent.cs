@@ -738,7 +738,7 @@ public sealed record AgentWorkflowEvent(
     public string? ScriptName { get; init; }
 
     /// <summary>
-    /// Gets where the library script comes from (<c>project</c>, <c>user</c> or <c>sample</c>), for
+    /// Gets where the library script comes from (<c>project</c>, <c>global</c>, <c>plugin</c> or <c>builtin</c>), for
     /// <see cref="AgentWorkflowEventKind.ScriptLoaded"/>.
     /// </summary>
     public string? ScriptScope { get; init; }
