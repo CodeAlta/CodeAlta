@@ -450,6 +450,28 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Describe_OfAnAltaCommand_PointsToItsHelp_AndDescribesThatHelpToo()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var exec = Create(root.Path, runs);
+
+        var result = await InvokeAsync(exec, """
+            return {
+              command: await codemode.describe({ path: "alta.prompt.show" }),
+              help: await codemode.describe({ path: "alta.prompt.show.help" }),
+              text: await alta.prompt.show.help(),
+            };
+            """, new FakeTools { Alta = AltaTool(root.Path) });
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        StringAssert.Contains(value.RootElement.GetProperty("command").GetString(), "`await alta.prompt.show.help()` gives its help");
+        StringAssert.Contains(value.RootElement.GetProperty("help").GetString(), "Promise<string>");
+        StringAssert.StartsWith(value.RootElement.GetProperty("text").GetString(), "Usage: alta prompt show");
+    }
+
+    [TestMethod]
     public async Task ASessionWhoseAltaToolIsOff_HasNoAltaInItsScripts()
     {
         using var root = TestTempDirectory.Create();

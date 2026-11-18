@@ -95,7 +95,9 @@ public sealed class AltaScriptCallHandler : ICodeModeCallHandler
             };
         }
 
-        return commandLine!.Raw ? AltaScriptBinding.ReadRun(result) : AltaScriptBinding.ReadResult(result, commandLine.CommandPath);
+        return commandLine!.Help ? AltaScriptBinding.ReadHelp(result, commandLine.CommandPath)
+            : commandLine.Raw ? AltaScriptBinding.ReadRun(result)
+            : AltaScriptBinding.ReadResult(result, commandLine.CommandPath);
     }
 
     private static JsonElement ToolArguments(AltaScriptCommandLine commandLine)

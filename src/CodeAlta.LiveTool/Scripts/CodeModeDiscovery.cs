@@ -326,6 +326,13 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
     {
         var trimmed = path.Trim().TrimEnd('.');
         var functions = api.Under(trimmed).ToArray();
+        // A function every member of a namespace carries (`alta.session.create.help`) is declared once, at its root.
+        if (functions.Length == 0 && trimmed.LastIndexOf('.') is > 0 and var dot && api.Under(trimmed[..dot]).Any()
+            && api.Find(trimmed[..trimmed.IndexOf('.')] + trimmed[dot..]) is { OnEveryMember: true } carried)
+        {
+            functions = [carried with { Path = trimmed }];
+        }
+
         if (functions.Length == 0)
         {
             var near = api.Functions.Select(static function => function.Path)
@@ -341,6 +348,13 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
         if (functions.Length > MaxDescribed)
         {
             declarations += $"\n// … {(functions.Length - MaxDescribed).ToString(CultureInfo.InvariantCulture)} more functions under `{trimmed}` are not shown: describe a narrower path (codemode.help({{ path: \"{trimmed}\" }}) lists its namespaces).\n";
+        }
+
+        // The declaration says the arguments and the result; the help of the command says the rest (examples, notes).
+        if (api.Find(AltaScriptBinding.HelpPath) is not null && !trimmed.EndsWith(".help", StringComparison.Ordinal)
+            && (trimmed.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) || trimmed == AltaScriptBinding.Namespace))
+        {
+            declarations += $"\n// `await {trimmed}.help()` gives its help, as `--help` writes it: examples and notes.\n";
         }
 
         if (trimmed.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) || trimmed == AltaScriptBinding.Namespace)

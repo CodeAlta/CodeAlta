@@ -281,6 +281,13 @@ public sealed class CodeModeApi
               apply: () => Promise.reject(new TypeError(`${path} is not a function of this script. ${known}`)),
               get: (t, p) => typeof p === "string" && p !== "then" ? missing(`${path}.${p}`, known) : undefined,
             });
+            // A function every member of a namespace carries (alta.session.create.help): its call says what it was called on.
+            const member = (path, of) => function (args) {
+              if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
+                return Promise.reject(new TypeError(`${of}.${path.slice(path.lastIndexOf(".") + 1)}(args): args must be an object.`));
+              }
+              return host(path, stringify(Object.assign({}, args, { of }))).then(unwrap);
+            };
             const guard = (path, target) => new Proxy(target, {
               get: (t, p, r) => typeof p !== "string" || p in t || p === "then" || p === "toJSON" ? Reflect.get(t, p, r)
                 : missing(`${path}.${p}`, `${path} has: ${Object.keys(t).join(", ") || "nothing"}. codemode.search({ query }) finds a function; an MCP server activated during this script is in mcp from the next exec.`),
@@ -304,7 +311,7 @@ public sealed class CodeModeApi
         foreach (var (name, node) in root.Children)
         {
             builder.Append("global(").Append(Quote(name)).Append(", ");
-            AppendNode(builder, node, name);
+            AppendNode(builder, node, name, [.. functions.Where(function => function.OnEveryMember && function.Path.StartsWith(name + ".", StringComparison.Ordinal))]);
             builder.Append(");\n");
         }
 
@@ -323,29 +330,49 @@ public sealed class CodeModeApi
 
     // A path that is both a function and a namespace (`alta.search` and `alta.search.show`) is a function that carries
     // its members. A namespace answers a name it does not have with a function that says what it has.
-    private static void AppendNode(StringBuilder builder, PathNode node, string path)
+    private static void AppendNode(StringBuilder builder, PathNode node, string path, IReadOnlyList<CodeModeFunction> everyMember)
     {
-        if (node.Children.Count == 0)
+        // The function every member carries, where it is declared: called there, it is called on its namespace.
+        if (node.Function is { OnEveryMember: true } declared && node.Children.Count == 0)
+        {
+            builder.Append("member(").Append(Quote(declared.Path)).Append(", ").Append(Quote(path[..path.LastIndexOf('.')])).Append(')');
+            return;
+        }
+
+        var carried = everyMember.Where(function => !node.Children.Exists(child => child.Name == NameOf(function))).ToArray();
+        if (node.Children.Count == 0 && carried.Length == 0)
         {
             builder.Append(FunctionValue(node.Function!));
             return;
         }
 
-        builder.Append("guard(").Append(Quote(path)).Append(", freeze(Object.assign(").Append(node.Function is null ? "{}" : FunctionValue(node.Function)).Append(", {");
+        if (node.Children.Count > 0)
+        {
+            builder.Append("guard(").Append(Quote(path)).Append(", ");
+        }
+
+        builder.Append("freeze(Object.assign(").Append(node.Function is null ? "{}" : FunctionValue(node.Function)).Append(", {");
         var first = true;
         foreach (var (name, child) in node.Children)
         {
-            if (!first)
-            {
-                builder.Append(", ");
-            }
-
+            builder.Append(first ? string.Empty : ", ").Append(Quote(name)).Append(": ");
             first = false;
-            builder.Append(Quote(name)).Append(": ");
-            AppendNode(builder, child, path + "." + name);
+            AppendNode(builder, child, path + "." + name, everyMember);
         }
 
-        builder.Append("})))");
+        foreach (var function in carried)
+        {
+            builder.Append(first ? string.Empty : ", ").Append(Quote(NameOf(function))).Append(": member(").Append(Quote(function.Path)).Append(", ").Append(Quote(path)).Append(')');
+            first = false;
+        }
+
+        builder.Append("}))");
+        if (node.Children.Count > 0)
+        {
+            builder.Append(')');
+        }
+
+        static string NameOf(CodeModeFunction function) => function.Path[(function.Path.LastIndexOf('.') + 1)..];
     }
 
     private sealed class PathNode

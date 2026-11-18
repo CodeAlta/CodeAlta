@@ -41,6 +41,14 @@ public sealed record CodeModeFunction(string Path)
     /// </summary>
     public string? TextArgument { get; init; }
 
+    /// <summary>
+    /// Gets whether the function is also a member, under its own name, of every namespace and function below its
+    /// namespace: <c>alta.help</c> is then <c>alta.session.help</c> and <c>alta.session.create.help</c> too. A call
+    /// carries the path it was called on (<c>alta.session.create</c>) in the property <c>of</c> of its argument. A
+    /// namespace that has a function of that name keeps its own.
+    /// </summary>
+    public bool OnEveryMember { get; init; }
+
     /// <summary>Gets annotations shown in the declaration, such as <c>mutating</c>.</summary>
     public IReadOnlyList<string> Annotations { get; init; } = [];
 }

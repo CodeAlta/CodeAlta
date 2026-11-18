@@ -202,6 +202,36 @@ public sealed class AltaScriptBindingTests
     }
 
     [TestMethod]
+    public async Task EveryCommandAndEveryGroup_HasHelp_WhichIsWhatItsHelpOptionWrites()
+    {
+        using var root = TestTempDirectory.Create();
+        var (dispatcher, binding) = Create(root.Path);
+
+        var result = await RunAsync(dispatcher, binding, """
+            return {
+              command: await alta.prompt.show.help(),
+              group: await alta.prompt.help(),
+              all: await alta.help(),
+              kind: typeof alta.prompt.show,
+              missing: await alta.nope.help().catch((e) => e.name),
+            };
+            """);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var value = JsonDocument.Parse(result.ValueJson!);
+        StringAssert.StartsWith(value.RootElement.GetProperty("command").GetString(), "Usage: alta prompt show");
+        StringAssert.StartsWith(value.RootElement.GetProperty("group").GetString(), "Usage: alta prompt");
+        StringAssert.Contains(value.RootElement.GetProperty("group").GetString(), "show");
+        StringAssert.StartsWith(value.RootElement.GetProperty("all").GetString(), "Usage: alta ");
+        Assert.AreEqual("function", value.RootElement.GetProperty("kind").GetString(), "a command that has help is still called as before");
+        Assert.AreEqual("TypeError", value.RootElement.GetProperty("missing").GetString());
+        Assert.IsTrue(binding.IsReadOnly(AltaScriptBinding.HelpPath), "a help changes nothing: a resumed script reads it again");
+        // The words of a command are its own, whatever its function is named in camelCase.
+        Assert.IsTrue(binding.TryCreateCommandLine(AltaScriptBinding.HelpPath, """{"of":"alta.prompt.show"}""", out var line, out var error), error?.Message);
+        CollectionAssert.AreEqual(new[] { "prompt", "show", "--help" }, line!.Arguments.ToArray());
+    }
+
+    [TestMethod]
     public void WhatACommandWroteThatIsNoRecord_IsItsText_NeverAnEmptyResult()
     {
         var text = AltaScriptBinding.ReadResult(new AltaCommandResult { ExitCode = 0, Stdout = "Three items\n- a\n", Stderr = string.Empty, CorrelationId = "c", Duration = TimeSpan.Zero }, "plugin report");

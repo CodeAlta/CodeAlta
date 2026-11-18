@@ -16,6 +16,9 @@ public sealed record AltaScriptCommandLine(string CommandPath, IReadOnlyList<str
 {
     /// <summary>Gets whether the script gave the arguments itself (<c>alta.run</c>): it receives all the command wrote, whatever its exit code.</summary>
     public bool Raw { get; init; }
+
+    /// <summary>Gets whether the call asks for the help of a command (<c>.help()</c>): it receives the text of the help.</summary>
+    public bool Help { get; init; }
 }
 
 /// <summary>
@@ -24,8 +27,10 @@ public sealed record AltaScriptCommandLine(string CommandPath, IReadOnlyList<str
 /// quotes a command line: <c>alta.session.create({ project: "CodeAlta", tier: "quick" })</c> becomes
 /// <c>session create --project=CodeAlta --tier=quick</c>. The script receives the records the command writes: the
 /// record when it writes one, else the list; a failure throws an <c>AltaError</c> with the code of the command.
-/// <c>alta.run({ args, stdin })</c> runs any command line of the tree as the <c>alta</c> tool does, for what the
-/// functions do not say: the help of a command, or a syntax of its own.
+/// Every command and every group has <c>help()</c>, which gives the help <c>--help</c> writes
+/// (<c>alta.session.create.help()</c>, <c>alta.session.help()</c>, <c>alta.help()</c>).
+/// <c>alta.run({ args, stdin })</c> runs any command line of the tree as the <c>alta</c> tool does, for a syntax the
+/// functions do not have.
 /// </summary>
 public sealed class AltaScriptBinding
 {
@@ -41,9 +46,21 @@ public sealed class AltaScriptBinding
         "note", "skills", "skills_activate", "issues",
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    /// <summary>The path of the function that gives the help of a command or of a group, which each of them carries.</summary>
+    public const string HelpPath = Namespace + ".help";
+
+    private static readonly CodeModeFunction HelpFunction = new(HelpPath)
+    {
+        Description = "Gives the help of `alta`, as `alta --help` writes it. Every command and every group has it for itself: `alta.session.create.help()` is `alta session create --help`, and `alta.session.help()` is `alta session --help`.",
+        InputSchemaJson = """{"type":"object","properties":{}}""",
+        ResultType = "string",
+        Parallel = true,
+        OnEveryMember = true,
+    };
+
     private static readonly CodeModeFunction RunFunction = new(RunPath)
     {
-        Description = "Runs a command line of `alta` as the `alta` tool does, and resolves with all it wrote, also when it fails: for the help of a command (`{ args: [\"session\", \"create\", \"--help\"] }`) and for a syntax the functions do not have. Prefer the function of a command, which checks its arguments and gives its records.",
+        Description = "Runs a command line of `alta` as the `alta` tool does, and resolves with all it wrote, also when it fails: for a syntax the functions do not have (`{ args: [\"session\", \"list\", \"--limit=5\"] }`). Prefer the function of a command, which checks its arguments and gives its records, and its `help()` for its help.",
         InputSchemaJson = """{"type":"object","properties":{"args":{"type":"array","items":{"type":"string"},"description":"The arguments, without `alta`: one string each, never quoted."},"stdin":{"type":"string","description":"What a command reads with --stdin."}},"required":["args"],"additionalProperties":false}""",
         ResultType = "{ exitCode: number; output: string; records: AltaRecord[] }",
         Parallel = true,
@@ -99,7 +116,13 @@ public sealed class AltaScriptBinding
             });
         }
 
-        // A command named `run` at the root keeps its function: its name is the tree's.
+        // A command named `help` at the root keeps its function, as one named `run` does: its name is the tree's.
+        _helps = commands.Count > 0 && !entries.ContainsKey(HelpPath);
+        if (_helps)
+        {
+            functions.Add(HelpFunction);
+        }
+
         _runsCommandLines = runsCommandLines && commands.Count > 0 && !entries.ContainsKey(RunPath);
         if (_runsCommandLines)
         {
@@ -111,6 +134,7 @@ public sealed class AltaScriptBinding
     }
 
     private readonly bool _runsCommandLines;
+    private readonly bool _helps;
 
     /// <summary>Gets the functions, one per command.</summary>
     public IReadOnlyList<CodeModeFunction> Functions { get; }
@@ -124,7 +148,8 @@ public sealed class AltaScriptBinding
     /// <summary>Gets whether a path of a script function is a command of this binding.</summary>
     /// <param name="functionPath">The path, such as <c>alta.session.create</c>.</param>
     /// <returns>True when it is one.</returns>
-    public bool Contains(string functionPath) => _byFunction.ContainsKey(functionPath) || (_runsCommandLines && functionPath == RunPath);
+    public bool Contains(string functionPath)
+        => _byFunction.ContainsKey(functionPath) || (_runsCommandLines && functionPath == RunPath) || (_helps && functionPath == HelpPath);
 
     /// <summary>
     /// Gets whether a function is a command that only reads (a policy that does not mutate): it may run again with the same
@@ -133,7 +158,7 @@ public sealed class AltaScriptBinding
     /// <param name="functionPath">The path, such as <c>alta.session.list</c>.</param>
     /// <returns>True when it only reads.</returns>
     public bool IsReadOnly(string functionPath)
-        => _byFunction.TryGetValue(functionPath, out var entry) && entry.Command.Policy is { IsMutating: false };
+        => (_helps && functionPath == HelpPath) || (_byFunction.TryGetValue(functionPath, out var entry) && entry.Command.Policy is { IsMutating: false });
 
     /// <summary>Builds the command line of a call of a script.</summary>
     /// <param name="functionPath">The path of the function.</param>
@@ -145,7 +170,8 @@ public sealed class AltaScriptBinding
     {
         commandLine = null;
         var runs = _runsCommandLines && functionPath == RunPath;
-        if (!_byFunction.TryGetValue(functionPath, out var entry) && !runs)
+        var helps = _helps && functionPath == HelpPath;
+        if (!_byFunction.TryGetValue(functionPath, out var entry) && !runs && !helps)
         {
             error = new CodeModeCallError("TypeError", $"`{functionPath}` is not a command of this session.");
             return false;
@@ -169,7 +195,45 @@ public sealed class AltaScriptBinding
             return false;
         }
 
-        return runs ? TryBuildRun(arguments, out commandLine, out error) : entry!.TryBuild(functionPath, arguments, out commandLine, out error);
+        return helps ? TryBuildHelp(arguments, out commandLine, out error)
+            : runs ? TryBuildRun(arguments, out commandLine, out error)
+            : entry!.TryBuild(functionPath, arguments, out commandLine, out error);
+    }
+
+    // The help of what the call was made on: the script gives the path of a function or of a namespace
+    // (`alta.session.setAgent`), and the words of the command are those of a command there (`session set_agent`).
+    private bool TryBuildHelp(JsonElement arguments, out AltaScriptCommandLine? commandLine, out CodeModeCallError? error)
+    {
+        commandLine = null;
+        var of = arguments.TryGetProperty("of", out var given) && given.ValueKind == JsonValueKind.String ? given.GetString()! : Namespace;
+        string[] words = [];
+        if (of != Namespace)
+        {
+            var depth = of.Count(static c => c == '.');
+            var under = _byFunction.FirstOrDefault(pair => pair.Key == of || pair.Key.StartsWith(of + ".", StringComparison.Ordinal));
+            if (under.Value is null)
+            {
+                error = new CodeModeCallError("TypeError", $"`{of}` is not a command nor a group of this session: {HelpPath}() gives the commands.");
+                return false;
+            }
+
+            words = [.. under.Value.Command.Path.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(depth)];
+        }
+
+        commandLine = new AltaScriptCommandLine(string.Join(' ', words), [.. words, "--help"], null) { Help = true };
+        error = null;
+        return true;
+    }
+
+    /// <summary>Reads the help a command wrote: its text.</summary>
+    /// <param name="result">The result of the command.</param>
+    /// <param name="commandPath">The path of the command.</param>
+    /// <returns>The text of the help, or the error of a command that could not give it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
+    public static CodeModeCallResult ReadHelp(AltaCommandResult result, string commandPath)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.ExitCode == AltaExitCodes.Success ? CodeModeCallResult.Text(result.Stdout.TrimEnd()) : ReadResult(result, commandPath);
     }
 
     private static bool TryBuildRun(JsonElement arguments, out AltaScriptCommandLine? commandLine, out CodeModeCallError? error)
