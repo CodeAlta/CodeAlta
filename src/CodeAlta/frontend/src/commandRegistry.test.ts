@@ -19,8 +19,8 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
   for (const focus of ["prompt", "text", "none"] as const) {
     assert.equal(resolveCommandKey(ctrl("ArrowLeft", { altKey: true }), false, focus).command, "previousTab");
     assert.equal(resolveCommandKey(ctrl("ArrowRight", { altKey: true }), false, focus).command, "nextTab");
-    assert.equal(resolveCommandKey(ctrl("Tab"), false, focus).command, "nextTab");
-    assert.equal(resolveCommandKey(ctrl("Tab", { shiftKey: true }), false, focus).command, "previousTab");
+    assert.equal(resolveCommandKey(ctrl("Tab"), false, focus).command, "switchTabs");
+    assert.equal(resolveCommandKey(ctrl("Tab", { shiftKey: true }), false, focus).command, "switchTabs");
     assert.equal(resolveCommandKey(ctrl("PageDown"), false, focus).command, "nextTab");
     assert.equal(resolveCommandKey(ctrl("PageUp"), false, focus).command, "previousTab");
     assert.equal(resolveCommandKey(ctrl("w"), false, focus).command, "closeTab");

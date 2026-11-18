@@ -93,11 +93,11 @@ test("a built-in text is translated, a plugin's text and the name of a language 
 test("the dialog of a built-in plugin is translated, its data is not", () => {
   const html = "<p>The provider read these pseudonyms; the values stay on this machine, encrypted.</p><h3>Pseudonyms</h3>"
     + "<table><thead><tr><th>Pseudonym</th><th>Value</th><th>Times sent</th></tr></thead>"
-    + "<tbody><tr><td><code>[LIEU_001]</code></td><td>Value</td><td>2</td></tr></tbody></table>";
+    + "<tbody><tr><td><code>[LOCATION_001]</code></td><td>Value</td><td>2</td></tr></tbody></table>";
   assert.equal(pluginHtmlText("fr", html, true),
     "<p>Le fournisseur a lu ces pseudonymes ; les valeurs restent sur cette machine, chiffrées.</p><h3>Pseudonymes</h3>"
     + "<table><thead><tr><th>Pseudonyme</th><th>Valeur</th><th>Nombre d'envois</th></tr></thead>"
-    + "<tbody><tr><td><code>[LIEU_001]</code></td><td>Value</td><td>2</td></tr></tbody></table>", "a value a user wrote stays as it is, even a text of the window");
+    + "<tbody><tr><td><code>[LOCATION_001]</code></td><td>Value</td><td>2</td></tr></tbody></table>", "a value a user wrote stays as it is, even a text of the window");
   assert.equal(pluginHtmlText("fr", html, false), html, "the texts of a plugin of the user are shown as written");
   assert.equal(pluginHtmlText("fr", "<p> Your text </p>", true), "<p> Ton texte </p>", "the spaces around a text stay");
   assert.deepEqual([isBuiltInPluginKey("builtin:pseudonymizer"), isBuiltInPluginKey("my-plugin"), isBuiltInPluginKey(null)], [true, false, false]);

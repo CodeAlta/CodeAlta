@@ -2,14 +2,14 @@ import type { MessageKey } from "./localization";
 
 /**
  * The application's commands: one list drives the commands of the search window, the shortcut help and the
- * keyboard dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
+ * keyboard dispatcher. Shared commands follow the names, labels and key gestures of the terminal UI.
  */
 export type CommandId =
   | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workflows" | "workItems" | "reviews" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "insertEquation" | "dictate" | "sideQuestion" | "shellCommand" | "releaseNotes" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
+  | "expandPrompt" | "insertEquation" | "dictate" | "sideQuestion" | "shellCommand" | "releaseNotes" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "switchTabs" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
   | "newSession" | "browseSessions" | "searchSessions" | "findInSession" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
@@ -128,8 +128,9 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "reopenTab", name: "reopen_tab", label: "Reopen Tab", description: "Reopen the last closed tab.", category: "Session", keys: ["Ctrl+Shift+T"] },
   { id: "moveTabToNewWindow", name: "move_tab_to_window", label: "Move tab to new window", description: "Move the tab in front to a window of its own.", category: "Session",
     search: "window detach tear out new window move tab monitor screen" },
-  { id: "previousTab", name: "tab_left", label: "Tab Left", description: "Switch to the previous tab.", category: "Session", keys: ["Ctrl+Shift+Tab", "Ctrl+PageUp", "Ctrl+Alt+Left"] },
-  { id: "nextTab", name: "tab_right", label: "Tab Right", description: "Switch to the next tab.", category: "Session", keys: ["Ctrl+Tab", "Ctrl+PageDown", "Ctrl+Alt+Right"] },
+  { id: "previousTab", name: "tab_left", label: "Tab Left", description: "Switch to the previous tab.", category: "Session", keys: ["Ctrl+PageUp", "Ctrl+Alt+Left"] },
+  { id: "nextTab", name: "tab_right", label: "Tab Right", description: "Switch to the next tab.", category: "Session", keys: ["Ctrl+PageDown", "Ctrl+Alt+Right"] },
+  { id: "switchTabs", name: "switch_tabs", label: "Switch tabs", description: "Switch between recently shown tabs in the current pane.", category: "Session", keys: ["Ctrl+Tab", "Ctrl+Shift+Tab"] },
   { id: "reminders", name: "reminder", label: "Reminders", description: "Schedule prompts for this session.", category: "Session", keys: ["Ctrl+G Ctrl+D"], search: "reminders delayed_prompt" },
   { id: "browseSessions", name: "sessions", label: "Browse Sessions", description: "Find and open a saved session.", category: "Session", keys: ["Ctrl+Alt+B"], search: "saved sessions history" },
   // Ctrl+F outside a session and a rendered page, which find in themselves; Ctrl+Shift+F from them too, the prompt

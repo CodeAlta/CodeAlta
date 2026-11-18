@@ -7,7 +7,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+import { canvasTab, editorTab, fileTabsKey, issuesTab, type FileTabs } from "./fileTabs";
+import { landingStartupKey } from "./landing/landingPreferences";
+import { sessionTabsKey, type SessionTabs } from "./sessionTabs";
+import { defaultSpaceId, shownSpaceKey } from "./spaces/spaces";
 import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
@@ -25,7 +29,7 @@ const frame = `(() => {
 // width the Explorer starts with.
 const bar = 38, mark = 270, wideMark = 298, explorer = 272;
 
-test("the title bar keeps Explorer in place and Home opens or focuses one Welcome tab", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+test("the title bar keeps Explorer in place and Home opens or focuses one Welcome tab", { skip: !edge, timeout: testLimit(90_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-window-frame-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -98,8 +102,8 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     await command("Page.enable");
     await command("Runtime.enable");
     await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'languages',{get:()=>['en-US']});
-      localStorage.setItem('settingsFixtureOwned','true');
-      localStorage.setItem('codealta.desktop.landing.startup.v1','off');` });
+      localStorage.setItem('settingsFixtureOwned','true');` });
+    const initial = await command("Page.addScriptToEvaluateOnNewDocument", { source: `localStorage.setItem(${JSON.stringify(landingStartupKey)},'off');` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await size(800, 900);
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -172,10 +176,84 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     assert.equal(await evaluate(`!!document.querySelector('[role="alertdialog"]')`), false, "No exit or close-window question");
     await evaluate("windowFrameFixture.enabled=false; projectFocusFixture.notify({kind:'plugins-changed',runningSessions:0,busyTerminals:0})");
     assert.equal(await wait(`${home}.disabled`), true, "Home is unavailable when the built-in Landing page is disabled, not routed to another plugin");
+
+    await command("Page.removeScriptToEvaluateOnNewDocument", { identifier: initial.identifier });
+    await size(1280, 900);
+    const reload = async (sessions: Omit<SessionTabs, "closed"> | null, files: Omit<FileTabs, "closed">,
+      options: { deferWelcome?: boolean; spaceId?: string } = {}) => {
+      const stored = {
+        [landingStartupKey]: "on",
+        [sessionTabsKey]: sessions ? JSON.stringify({ version: 1, ...sessions }) : null,
+        [fileTabsKey]: JSON.stringify({ version: 1, ...files, beforeRestore: true }),
+        [shownSpaceKey]: options.spaceId ?? null,
+        windowFrameFixtureDeferWelcome: String(options.deferWelcome ?? false),
+      };
+      await evaluate(`window.fixtureReloading = true;
+        for (const [key, value] of Object.entries(${JSON.stringify(stored)}))
+          if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value);`);
+      await command("Page.reload");
+      assert.equal(await wait(`!window.fixtureReloading && window.windowFrameFixture?.catalogReads > 0
+        && !JSON.parse(localStorage.getItem(${JSON.stringify(fileTabsKey)}))?.beforeRestore`), true, "the new window restored its tabs and read the canvases");
+      await frames();
+    };
+    const homeActive = `${home}.classList.contains('bp6-active')`;
+    const noSessions = { open: [], active: null };
+    const noFiles = { open: [], active: null };
+    const issuesActive = "document.querySelector('.activity-issues').classList.contains('bp6-active')";
+    const session = { projectId: "project", path: "/fixture/project", sessionId: "one" };
+    const savedSession = { open: [session], active: session };
+    const selectedSessionLabel = "document.querySelector('.flexlayout__tab_button--selected [data-session-node]')?.textContent.trim()";
+    await t.test("Welcome opens when the saved tabs no longer exist", async () => {
+      const removed = { projectId: "removed", path: "/fixture/removed" };
+      const gone = { ...removed, sessionId: "gone" };
+      const editor = editorTab({ id: removed.projectId, path: removed.path });
+      await reload({ open: [gone], active: gone, drafts: [removed] }, { open: [editor], active: editor });
+      assert.equal(await evaluate(homeActive), true);
+    });
+    await t.test("the implicit first session does not count as a restored tab", async () => {
+      await reload(null, noFiles);
+      assert.deepEqual(await evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(sessionTabsKey)})).open.map(tab => tab.sessionId)`), ["one"]);
+      assert.equal(await evaluate(homeActive), true);
+    });
+    await t.test("a Welcome tab left in the background is not activated by startup", async () => {
+      const welcome = canvasTab({ pluginKey: "builtin:landing", canvasId: "landing" }, { title: "Welcome" });
+      await reload(noSessions, { open: [welcome], active: null });
+      assert.equal(await evaluate(`${welcomeTabs}.length`), 1);
+      assert.equal(await evaluate(homeActive), false);
+    });
+    await t.test("a kept draft prevents Welcome from opening", async () => {
+      await reload({ ...noSessions, drafts: [{ projectId: "project", path: "/fixture/project" }] }, noFiles);
+      assert.equal(await evaluate(`${welcomeTabs}.length`), 0);
+    });
+    await t.test("a restored session stays in front", async () => {
+      await reload(savedSession, noFiles);
+      assert.equal(await evaluate(`${welcomeTabs}.length`), 0);
+      assert.equal(await evaluate(selectedSessionLabel), "one - Project");
+    });
+    await t.test("tabs of the Default space stay in front if the saved space was removed", async () => {
+      await reload(noSessions, { open: [issuesTab], active: issuesTab }, { spaceId: "deleted-space" });
+      assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(shownSpaceKey)})`), defaultSpaceId);
+      assert.equal(await evaluate(issuesActive), true);
+      assert.equal(await evaluate(`${welcomeTabs}.length`), 0);
+
+      // The Default space can restore the same session the deleted space used as its fallback.
+      await reload(savedSession, noFiles, { spaceId: "deleted-space" });
+      assert.equal(await evaluate(selectedSessionLabel), "one - Project");
+      assert.equal(await evaluate(`${welcomeTabs}.length`), 0);
+    });
+    await t.test("a late Welcome declaration does not take over a tab opened during startup", async () => {
+      await reload(noSessions, noFiles, { deferWelcome: true });
+      await evaluate("document.querySelector('.activity-issues').click()");
+      assert.equal(await wait(issuesActive), true);
+      await evaluate("windowFrameFixture.declareWelcome()");
+      await frames();
+      assert.equal(await evaluate(`${welcomeTabs}.length`), 0);
+      assert.equal(await evaluate(issuesActive), true);
+    });
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
-    socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+    socket?.close(); await endBrowser(browser); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }
 });

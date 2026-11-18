@@ -56,6 +56,13 @@ export function mcpServerFormDirty(form: McpServerForm, baseline: McpServerForm)
 export const mcpServerReadOnly = (server: Pick<McpServerEntry, "origin">) => server.origin !== "CodeAlta";
 
 /**
+ * Whether the definition in use of this name is in the same scope as this overridden one. Enablement is kept by name
+ * and scope, so the switch of this row would turn the other definition off: it is that row's switch to use.
+ */
+export const mcpServerSwitchOfAnother = (server: Pick<McpServerEntry, "key" | "scope" | "shadowed">, servers: readonly Pick<McpServerEntry, "key" | "scope" | "shadowed">[]) =>
+  server.shadowed && servers.some(other => !other.shadowed && other.key === server.key && other.scope === server.scope);
+
+/**
  * The first problem that prevents saving, or null. Keys follow the host's `[A-Za-z0-9._-]{1,128}` rule. A save
  * writes to the file of CodeAlta, so only its servers can already use the name: one of another tool is overridden.
  */

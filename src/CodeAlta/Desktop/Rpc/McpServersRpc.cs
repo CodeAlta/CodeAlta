@@ -504,10 +504,15 @@ internal sealed class McpServersService
         if (_projects is null) return [];
         // Its own service: this only reads where the files are, beside the listing and the edits of the other one.
         var snapshot = new McpManagementService().RefreshSnapshot(Paths(projectRoot));
-        return [.. snapshot.Sources.Concat(snapshot.ExternalSources)
-            .Where(source => projectRoot is not null || source.Scope == McpManagementScope.Global)
-            .Select(static source => new McpConfigFile(source.Scope.ToString(), source.Origin.ToString(), source.Path, source.Exists))];
+        return ConfigFiles(snapshot.Sources.Concat(snapshot.ExternalSources), projectRoot is not null);
     }
+
+    // Synthetic sources, such as the built-in MCP servers, have no file to show.
+    internal static IReadOnlyList<McpConfigFile> ConfigFiles(IEnumerable<McpManagementConfigSourceSnapshot> sources, bool includeProject)
+        => [.. sources.Where(source => HasConfigFile(source.Path) && (includeProject || source.Scope == McpManagementScope.Global))
+            .Select(static source => new McpConfigFile(source.Scope.ToString(), source.Origin.ToString(), source.Path, source.Exists))];
+
+    private static bool HasConfigFile(string? path) => path is not null && Path.IsPathFullyQualified(path);
 
     private McpManagementRequest Paths(string? projectRoot)
         => new() { ProjectDirectory = projectRoot, Home = _home, ProbeWritability = false };
@@ -530,7 +535,7 @@ internal sealed class McpServersService
             _ => "ok",
         };
 
-    private static McpServerEntry? Entry(McpManagementServerSnapshot row)
+    internal static McpServerEntry? Entry(McpManagementServerSnapshot row)
     {
         var environment = row.EditableEnv ?? row.Env;
         var headers = row.EditableHeaders ?? row.Headers;
@@ -547,7 +552,7 @@ internal sealed class McpServersService
             Names(environment), Names(headers),
             row.DisabledTools.Where(static tool => tool.Length <= MaximumNameLength).Take(MaximumDisabledTools).ToArray(),
             row.OAuthTokenCached, row.OAuthTokenCached ? row.OAuthTokenExpiresAt : null,
-            row.SourceOrigin.ToString(), row.SourceName ?? string.Empty);
+            row.SourceOrigin.ToString(), HasConfigFile(row.SourcePath) ? row.SourceName : null);
     }
 
     private static McpServerValueName[] Names(IReadOnlyDictionary<string, string> values)
@@ -723,12 +728,13 @@ internal sealed record McpServersListResponse(string Status, string? ProjectId, 
 /// One definition in one scope; redacted arguments or URL may be sent back unchanged to keep the stored value.
 /// <c>Authorized</c> says that tokens of a browser authorization are stored for an HTTP server.
 /// <c>Origin</c> says whose file it is in (<c>CodeAlta</c>, <c>Common</c>, <c>Copilot</c> or <c>Vscode</c>) and
-/// <c>Source</c> is the short name of that file: a definition of another tool is never changed or removed.
+/// <c>Source</c> is the short name of that file, or null for a built-in definition. Only a definition from
+/// CodeAlta's file can be changed or removed here.
 /// </summary>
 internal sealed record McpServerEntry(string Key, string Scope, string Transport, string? Command, IReadOnlyList<string> Arguments,
     bool ArgumentsRedacted, string? WorkingDirectory, string? Url, bool UrlRedacted, bool Enabled, bool OverridesGlobal, bool Shadowed,
     IReadOnlyList<McpServerValueName> Environment, IReadOnlyList<McpServerValueName> Headers, IReadOnlyList<string> DisabledTools,
-    bool Authorized, DateTimeOffset? AuthorizationExpiresAt, string Origin, string Source);
+    bool Authorized, DateTimeOffset? AuthorizationExpiresAt, string Origin, string? Source);
 
 /// <summary>
 /// A server of a file of another tool that is left out. <c>Reason</c> is <c>input_variable</c>,

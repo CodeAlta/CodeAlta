@@ -12,10 +12,9 @@ import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import type { ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
   type SessionTabView as Tabs } from "./sessionTabLayout";
-import { ProviderIcon } from "./ProviderIcon";
+import { FileTabIcon, fileTabLook } from "./fileTabLook";
 import { emptyFileTabs, fileNodeId, isAutomationsTab, isWorkflowsTab, isWorkflowRunTab, isClaudeCodeTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
-import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { keepMiddleButtonFromTab } from "./tabMiddleButton";
@@ -504,23 +503,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) {
           const shown = shownTerminal(file);
-          const look = isTerminalTab(file) ? { icon: "terminal" as const, tone: shown && !shown.running ? "muted" : "green" }
-            : isChangesTab(file) ? { icon: "changes" as const, tone: "orange" }
-            : isAutomationsTab(file) ? { icon: "automation" as const, tone: "gold" }
-            : isWorkflowsTab(file) || isWorkflowRunTab(file) ? { icon: "workflow" as const, tone: "blue" }
-            : isWorkItemsTab(file) ? { icon: "task" as const, tone: "teal" }
-            : isIssuesTab(file) ? { icon: "issueOpen" as const, tone: "green" }
-            : isCanvasesTab(file) ? { icon: "canvases" as const, tone: "purple" }
-            : isDocumentationTab(file) ? { icon: "documentation" as const, tone: "azure" }
-            : isBookmarksTab(file) ? { icon: "bookmark" as const, tone: "gold" }
-            : isPluginTab(file) ? { icon: "plugin" as const, tone: "purple" }
-            : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
+          const running = !(shown && !shown.running);
           // A terminal whose shell runs a command shows it where its icon is.
-          values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={look.tone}><ActivitySpinner size={13} /></span>
-            : isCanvasTab(file) ? <span className="file-tab-icon" data-file-tone="purple"><CanvasIcon name={file.icon} pluginKey={file.pluginKey} size={14} /></span>
-            // Not a session of CodeAlta yet: the logo of its provider, dimmed, as in the list.
-            : isClaudeCodeTab(file) ? <span className="file-tab-icon claude-code-tab-icon"><ProviderIcon providerKey={file.icon ?? null} size={14} fallback="assistant" /></span>
-            : <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
+          values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={fileTabLook(file).tone}><ActivitySpinner size={13} /></span>
+            : <FileTabIcon file={file} running={running} />;
           values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} terminal={shown} status={fileStatus?.(file)} /></span>;
           return;
         }

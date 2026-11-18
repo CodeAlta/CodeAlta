@@ -4,7 +4,7 @@ import { Actions, DockLocation, RowNode, TabNode, TabSetNode } from "flexlayout-
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeDraftTab, closePreviewTab, closeSessionTab, emptySessionTabs, openDraftTab, openSessionTab, pinSessionTab, sessionTabLimit, type DraftTab, type SessionTab, type SessionTabs } from "./sessionTabs";
-import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, paneNodeIds, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
 import { activateFileTab, canvasTab, changesTab, claudeCodeTab, closeFileTab, dropClaudeCodeTab, openClaudeCodeTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
@@ -738,6 +738,20 @@ test("the next and previous tab of the dock follow the strip, pane after pane, a
   const single = createSessionTabModel();
   reconcileSessionTabModel(single, openSessionTab(emptySessionTabs(), tab("one")), label);
   assert.equal(cycleDockTab(single, sessionNodeId(tab("one")), 1), null, "a tab alone has no other to go to");
+});
+
+test("the tabs of the switcher are those of the pane that holds the tab in front", () => {
+  const model = createSessionTabModel();
+  const files = openFileTab(openFileTab(emptyFileTabs(), documentationTab), editorTab({ id: "p", path: "/p" }));
+  reconcileSessionTabModel(model, both(), label, files);
+  const [one, two, docs, editor] = [sessionNodeId(tab("one")), sessionNodeId(tab("two")), fileNodeId(documentationTab), fileNodeId(editorTab({ id: "p", path: "/p" }))];
+  assert.deepEqual(paneNodeIds(model, one), [one, two, docs, editor], "one pane holds them all");
+  // A tab moved to a pane on the right is in a group of its own: the tabs of a pane are not those of the other.
+  model.doAction(Actions.moveNode(two, (model.getNodeById(one) as TabNode).getParent()!.getId(), DockLocation.RIGHT, -1, true));
+  assert.deepEqual(paneNodeIds(model, one), [one, docs, editor]);
+  assert.deepEqual(paneNodeIds(model, two), [two]);
+  assert.deepEqual(dockNodeIds(model), [one, docs, editor, two]);
+  assert.deepEqual(paneNodeIds(model, sessionDraftNodeId), [], "an absent source must not cycle through other panes");
 });
 
 test("the preview of a Claude Code conversation takes the place of the one before, and its session takes its place once imported", () => {

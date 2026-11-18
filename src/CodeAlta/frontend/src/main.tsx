@@ -65,15 +65,18 @@ import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
 import { dockLayoutKey, restoreDockLayout, serializeDockLayout } from "./dockLayout";
+import { isTabSwitcherKey, TabSwitcher, type TabSwitcherHandle, type TabSwitcherItem } from "./tabSwitcher/TabSwitcher";
+import { FileTabIcon } from "./fileTabLook";
+import { recentOrder, rememberRecent } from "./tabSwitcher/recentTabs";
 import { ActivityRail } from "./ActivityRail";
-import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, hasTransientDraft, sessionDraftNodeId, sessionNodeId, sessionTabPresentation, type SessionTabView } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, dockNodeName, draftNodeId, hasTransientDraft, paneNodeIds, sessionDraftNodeId, sessionNodeId, sessionTabPresentation, type SessionTabView } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
 import { browserActivation } from "./sessionBrowser";
-import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
+import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, claudeCodeTabProvider, automationsTab, isWorkflowsTab, workflowsTab, isWorkflowRunTab, workflowRunTab,bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
@@ -385,7 +388,7 @@ import { CommandHelp } from "./CommandHelp";
 import { commandDefinitions, commandKeys, resolveCommandKey, type CommandId } from "./commandRegistry";
 import { composerCommandBlock, composerControlState, isComposerControlCommand, type ComposerControlCommand } from "./composerCommands";
 import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
-import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
+import { hasStartupTabs, useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
@@ -733,7 +736,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return false;
   }
   function setTabs(next: SessionTabsState) { protectNavigation(next.open.map(tab => tab.sessionId), () => writeTabs(next)); }
-  const [tabsReady, setTabsReady] = useState(false);
+  // The most recent session is opened when no session tabs were saved; it must not count as a restored tab.
+  const [tabStartup, setTabStartup] = useState<{ spaceId: string; fallbackSessionId: string | null } | null>(null);
+  const tabsReady = tabStartup !== null;
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
   // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
   const [restoredFileTabs] = useState(() => {
@@ -1429,10 +1434,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }, [spacesState.loaded, spacesState.available, spacesState.spaces, workspaceState.kind]);
   // A space that is gone (removed here, by a command or by another instance) gives its place to the default one,
   // and the tabs the window kept for it are forgotten.
+  const shownSpaceMissing = spacesState.available && !spacesState.spaces.some(space => space.id === spaceId);
   useEffect(() => {
     // The storage of the pages is the main window's: a secondary window keeps its space and its tabs in its window.
     if (!spacesState.loaded || !spacesState.available || secondary) return;
-    if (tabsReady && !spacesState.spaces.some(space => space.id === spaceId)) showSpace(defaultSpaceId, undefined, true);
+    if (tabsReady && shownSpaceMissing) showSpace(defaultSpaceId, undefined, true);
     try {
       for (const base of [sessionTabsKey, fileTabsKey, dockLayoutKey]) {
         for (const key of Object.keys(localStorage)) {
@@ -1442,7 +1448,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     } catch { /* Storage that cannot be read keeps what it has. */ }
     for (const id of spaceLayouts.current.keys()) if (!spacesState.spaces.some(space => space.id === id)) spaceLayouts.current.delete(id);
     for (const id of spaceTabs.current.keys()) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); void canvasHub.closeSpace(id); }
-  }, [spacesState.loaded, spacesState.available, spacesState.spaces, spaceId, tabsReady]);
+  }, [spacesState.loaded, spacesState.available, spacesState.spaces, shownSpaceMissing, tabsReady]);
   useEffect(() => {
     if (!snapshot || !status || hostLost || status.hostAvailable && (!spacesEpoch || retentionLifetime !== spacesEpoch)) return;
     let current = true;
@@ -1459,10 +1465,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const expose = () => {
       if (!initial) return;
       initialSelectionMade.current = true;
-      setTabsReady(true);
       // Restoration is allowed to finish protection after the user navigates, but never to undo that
       // newer selection/settings action merely because its original acknowledgement arrived late.
-      if (navigation !== retentionNavigation.current || revision !== browserRevision.current) return;
+      const superseded = navigation !== retentionNavigation.current || revision !== browserRevision.current;
+      setTabStartup({ spaceId, fallbackSessionId: !superseded && !restoredTabs ? next.active?.sessionId ?? null : null });
+      if (superseded) return;
       applyTabState(next);
       if (restoredFileTabs) setFileTabs(reconcileFileTabs(unheldFileTabs(restoredFileTabs), snapshot));
     };
@@ -1654,6 +1661,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
     return layout;
   }
+  // The dock that is shown, for what reads its panes: the one arranged for the space, or the one held while the tabs are read.
+  const shownDockLayout = () => spaceLayouts.current.get(spaceId) ?? (loadingLayout.current ??= createSessionTabModel());
   // The main page debounces writes to its own storage. A secondary page reports to the host after the current
   // batch of model actions, without waiting for an unload event (a disappearing WebView cannot reliably send RPCs).
   const layoutPending = useRef<{ model: ReturnType<typeof createSessionTabModel>; spaceId: string } | null>(null);
@@ -2696,6 +2705,28 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const revision = browserRevision.current;
     return { revision, current: () => revision === browserRevision.current && currentView.current === "workspace" && !settingsVisible.current };
   }
+  // Each space keeps its own history with its dock. A pane uses only its tabs from that history.
+  const [recentTabs] = useState(() => new WeakMap<ReturnType<typeof createSessionTabModel>, readonly string[]>());
+  const tabSwitcher = useRef<TabSwitcherHandle>(null);
+  function recentDockOrder() {
+    const layout = shownDockLayout();
+    return recentOrder(recentTabs.get(layout) ?? [], paneNodeIds(layout, frontTab), frontTab);
+  }
+  function switcherItems(): TabSwitcherItem[] {
+    const layout = shownDockLayout();
+    return recentDockOrder().map(id => {
+      const file = fileTabs.open.find(tab => fileNodeId(tab) === id);
+      const terminal = file && isTerminalTab(file) ? terminalList.find(item => item.id === file.terminalId) : undefined;
+      const icon = file ? <FileTabIcon file={file} running={terminal?.running} /> : <span className="file-tab-icon"><AppIcon name={id.startsWith("session:") ? "chat" : "newSession"} size={14} /></span>;
+      // As the strip shows them, a tab that is only looked at has its title in italics.
+      const preview = id === sessionDraftNodeId ? !tabView.single : file ? isClaudeCodeTab(file) : isPreviewTab(tabView, tabView.open.find(tab => sessionNodeId(tab) === id));
+      return { id, label: dockNodeName(layout, id), icon, preview };
+    });
+  }
+  function showRecentDockTab(id: string) {
+    if (currentView.current !== "workspace" || settingsVisible.current || searchOpen || dialog || modalDialogOpen()) return;
+    if (paneNodeIds(shownDockLayout(), frontTab).includes(id)) showDockNode(id);
+  }
   function tabCommand(action: "nextTab" | "previousTab" | "closeTab" | "reopenTab") {
     if (!snapshot || view !== "workspace" || settingsVisible.current) return;
     const valid = reconcileSessionTabs(tabs, snapshot);
@@ -2721,20 +2752,23 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // The tabs are gone through as the strip shows them, the tools, the sessions and the editors alike: the transient
       // tab of a new session is one of them only while it is there.
       const shown = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
-      const layout = spaceLayouts.current.get(spaceId) ?? loadingLayout.current;
-      if (!layout) return;
-      const next = cycleDockTab(layout, activeDockNodeId(shown, fileTabs), action === "nextTab" ? 1 : -1);
-      if (next === null) return;
-      const file = fileTabs.open.find(tab => fileNodeId(tab) === next);
-      const session = valid.open.find(tab => sessionNodeId(tab) === next);
-      const prompt = valid.drafts?.find(draft => draftNodeId(draft) === next);
-      tabFocusPending.current = true;
-      if (file) activateFile(file);
-      // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
-      else if (session) selectSessionTab(session, "preview");
-      else if (prompt) selectProject(prompt.projectId);
-      else if (next === sessionDraftNodeId) { if (fileTabs.active) activateFile(null); else applyTabState({ ...valid, active: null }); }
+      const next = cycleDockTab(shownDockLayout(), activeDockNodeId(shown, fileTabs), action === "nextTab" ? 1 : -1);
+      if (next !== null) showDockNode(next);
     }
+  }
+  /** Shows a tab of the dock: the file tab, the session or the new-session prompt a node stands for. */
+  function showDockNode(next: string) {
+    if (!snapshot) return;
+    const valid = reconcileSessionTabs(tabs, snapshot);
+    const file = fileTabs.open.find(tab => fileNodeId(tab) === next);
+    const session = valid.open.find(tab => sessionNodeId(tab) === next);
+    const prompt = valid.drafts?.find(draft => draftNodeId(draft) === next);
+    tabFocusPending.current = true;
+    if (file) activateFile(file);
+    // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
+    else if (session) selectSessionTab(session, "preview");
+    else if (prompt) selectProject(prompt.projectId);
+    else if (next === sessionDraftNodeId) { if (fileTabs.active) activateFile(null); else applyTabState({ ...valid, active: null }); }
   }
   // The macOS menu consumes Cmd+W before the webview. Use the current tab state and the same close path
   // as the keyboard, including dirty-editor handling and the unclosable prompt tab. Never close behind a dialog.
@@ -3819,6 +3853,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "dictate": return view === "workspace" && !fileTabs.active && speechEnabled(speech.getState());
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
+      case "switchTabs": return view === "workspace" && !!snapshot && paneNodeIds(shownDockLayout(), frontTab).length > 1;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "moveTabToNewWindow": return !!windowsState.current && (!!fileTabs.active || !!tabs.active);
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
@@ -3905,6 +3940,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "help": openHelp(); break;
       case "releaseNotes": setReleaseNotesShown({ version: null }); break;
       case "palette": openSearch(); break;
+      case "switchTabs": { const previous = recentDockOrder()[1]; if (previous !== undefined) showDockNode(previous); break; }
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
       case "projectEditor": openProjectEditor(); break;
@@ -4010,9 +4046,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // A message found by search, as a bookmark of a message is shown: the pane of the session reads its history up to it.
     openMessage: (id, offset) => { bookmarkHost.reveals.open(id, offset); void openAutomationSession(id); } });
   // The Welcome page is the main window's: a secondary window opens with the tabs it had.
-  // A Welcome page that another window holds stays there: a start does not bring that window to the front.
-  useLandingAtStartup(owned && tabsReady && !secondary, canvasCatalog, item => {
+  // Look at the tabs after reconciliation, including the Default space's tabs if the saved space is gone.
+  const fallbackSessionId = tabStartup?.spaceId === spaceId ? tabStartup.fallbackSessionId : null;
+  useLandingAtStartup(owned && tabsReady && !secondary && !shownSpaceMissing, hasStartupTabs(tabs, fileTabs, fallbackSessionId), canvasCatalog, item => {
     const target = defaultCanvasTarget(item, canvasSelection);
+    // A Welcome page that another window holds stays there: a start does not bring that window to the front.
     if (target && windowsHub.heldElsewhere(fileTabRef(canvasTabOf(item, target)))) return;
     openCanvasHere(item);
   });
@@ -4045,7 +4083,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!commandChord.current && changeKeyKept(event, target)) return;
       // The code editor goes through its own files with Ctrl+Tab and Ctrl+Shift+Tab; Ctrl+PageDown and Ctrl+PageUp
       // still go through the tabs of the window from there.
-      if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
+      if (!commandChord.current && isTabSwitcherKey(event) && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
       // The code editor searches the files of its project with Ctrl+Shift+F, which searches the sessions elsewhere.
@@ -4078,7 +4116,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // A key whose command has nothing to act on now is the editor's: F3 goes to the next match of its search.
       if (editing && resolved.command && !chorded && !commandAvailable(resolved.command)) return;
       event.preventDefault(); event.stopPropagation();
-      if (resolved.command) runCommand(resolved.command);
+      if (resolved.command === "switchTabs") tabSwitcher.current?.step(event.shiftKey ? -1 : 1);
+      else if (resolved.command) runCommand(resolved.command);
     }
     // Bubble phase: Escape reaches here only when nothing inside (a popover, the editor) used it.
     function escapeKey(event: globalThis.KeyboardEvent) {
@@ -6115,12 +6154,22 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     && backgroundTabs?.some(value => value.sessionId === tab.sessionId) ? wholeCatalog : shown;
   // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
   const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
+  const frontTab = activeDockNodeId(tabView, fileTabs);
+  const dockReady = tabsReady && !!snapshot && view === "workspace";
+  // The strip has reconciled its model by then, and the next key must see the tab just shown.
+  useLayoutEffect(() => {
+    if (!dockReady) return;
+    const layout = shownDockLayout();
+    const open = dockNodeIds(layout);
+    if (open.includes(frontTab)) recentTabs.set(layout, rememberRecent(recentTabs.get(layout) ?? [], frontTab, open));
+  }, [dockReady, spaceId, frontTab, tabView.open, tabView.drafts, fileTabs.open]);
   // The owners of the panes that are no longer mounted go once the dock has let them go.
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
   return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
+    <TabSwitcher key={spaceId} ref={tabSwitcher} current={dockReady && !settingsOpen && !searchOpen && !dialog ? frontTab : null} items={switcherItems} show={showRecentDockTab} />
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}

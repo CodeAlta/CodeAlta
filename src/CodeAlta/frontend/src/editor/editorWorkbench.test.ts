@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activateEditorFile, adoptLegacyFiles, closeEditorFile, closeEditorFiles, cycleEditorFile, defaultEditorPreferences, editorFileLimit, editorSideWidth, editorStorageKey, editorTabNames,
+import { activateEditorFile, adoptLegacyFiles, closeEditorFile, closeEditorFiles, defaultEditorPreferences, editorFileLimit, editorSideWidth, editorStorageKey, editorTabNames,
   emptyEditorFiles, emptyStoredEditor, moveEditorFile, movedPath, openEditorFile, pinEditorFile, removeEditorPath, renameEditorPath, restoreEditorStorage, storedEditor,
   underPath, updateEditorStorage, type EditorFiles } from "./editorWorkbench";
 
@@ -51,15 +51,12 @@ test("closing the file shown shows the one shown before it, or else its neighbor
   assert.equal(closeEditorFile({ ...plain, active: "d.ts" }, "d.ts").active, "c.ts");
 });
 
-test("tabs move within the strip and cycle around it", () => {
+test("tabs move within the strip", () => {
   const state = open("a.ts", "b.ts", "c.ts");
   assert.deepEqual(paths(moveEditorFile(state, "c.ts", 0)), ["c.ts", "a.ts", "b.ts"]);
   assert.deepEqual(paths(moveEditorFile(state, "a.ts", 99)), ["b.ts", "c.ts", "a.ts"]);
   assert.equal(moveEditorFile(state, "b.ts", 1), state);
   assert.equal(moveEditorFile(state, "missing.ts", 0), state);
-  assert.deepEqual([cycleEditorFile(state, 1), cycleEditorFile(state, -1)], ["a.ts", "b.ts"]);
-  assert.equal(cycleEditorFile(open("a.ts"), 1), null);
-  assert.equal(cycleEditorFile(emptyEditorFiles, -1), null);
 });
 
 test("open files follow a rename or a move, and close with what was deleted", () => {

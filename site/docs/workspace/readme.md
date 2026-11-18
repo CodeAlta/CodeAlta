@@ -28,7 +28,8 @@ In CodeAlta Desktop, right-click a text field, the prompt or a code editor, or p
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` (also `Ctrl+PageDown` / `Ctrl+PageUp`) | Next / previous open tab, in the order of the tab strip (desktop). In a code editor, they go through its files instead |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Desktop: a quick `Ctrl+Tab` returns to the last tab you used in this pane. Keep holding `Ctrl` and press `Tab` to go further back, or add `Shift` to go in reverse. Release `Ctrl` to switch to the highlighted tab, or press `Esc` to cancel. When the code editor has focus, these keys switch between its files |
+| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous open tab, in the order of the tab strip (desktop) |
 | `Ctrl+Alt+Right` / `Ctrl+Alt+Left` | Next / previous tab |
 | `Ctrl+T` or `/next_prompt` | Switch the session or draft to the next agent prompt |
 | `Ctrl+G Ctrl+G` | Collapse or expand the Explorer |
@@ -196,7 +197,7 @@ A tab is in one window at a time: opening something another window shows brings 
   <figcaption class="small text-secondary mt-2">Start a session, return to recent work or explore CodeAlta from the Welcome tab.</figcaption>
 </figure>
 
-CodeAlta Desktop starts on a **Welcome** tab with:
+CodeAlta Desktop opens the **Welcome** tab at startup when it has no tabs to restore and **Show the welcome page at startup** is on. If you leave Welcome open, it comes back with your other tabs, even with the switch off, without changing which tab was in front. The tab has:
 
 - **New session**, **Open a project** and **Documentation**;
 - **Get started**, while a model provider or a first project is missing;
@@ -205,7 +206,7 @@ CodeAlta Desktop starts on a **Welcome** tab with:
 - **Fleet**: how many of your machines are online and your server, or how to start a fleet, with **Open Fleet** ([Fleet](../fleet/readme.md#open-fleet));
 - **Explore**: the documentation, Canvases, Plugins, Model Providers, Settings and the keyboard shortcuts.
 
-Open it with the **Home** icon of the title bar, **Welcome** in the search or `/landing`; an agent uses `alta landing open`. The switches at its bottom, also in **Settings > General > Welcome page**, choose whether it opens at startup and whether it is animated (it never moves when your system asks for reduced motion). To remove it, turn off the **Landing page** plugin in **Settings > Plugins**. A plugin can add [its own card](../plugins/ui.md#welcome-page-cards).
+Open it with the **Home** icon of the title bar, **Welcome** in the search or `/landing`; an agent uses `alta landing open`. Its startup and animation switches are also in **Settings > General > Welcome page** (it never moves when your system asks for reduced motion). To remove it, turn off the **Landing page** plugin in **Settings > Plugins**. A plugin can add [its own card](../plugins/ui.md#welcome-page-cards).
 
 ## Open a project
 
