@@ -10,6 +10,10 @@ namespace CodeAlta.Desktop.Tests;
 /// The issue lookup behind the WebApp <c>#</c> picker. The providers are a literal handler and the git
 /// remotes are a literal list: no test reaches the network or runs git.
 /// </summary>
+/// <remarks>
+/// The GraphQL API of GitHub is refused by the handler unless a test answers it (<c>RespondGraphQl</c>): the tests of
+/// the REST listings are the ones of a GitHub that refuses GraphQL, and of the other providers.
+/// </remarks>
 [TestClass]
 public sealed class GitIssuesRpcTests
 {
@@ -549,6 +553,137 @@ public sealed class GitIssuesRpcTests
         CollectionAssert.AreEqual(new[] { 7 }, (await refused.SearchAsync("")).Issues.Select(static issue => issue.Number).ToArray());
     }
 
+    [TestMethod]
+    public async Task SignedInGitHub_ListsIssuesAndPullRequestsWithOneGraphQlRequest_OpenOnlyUnlessAsked_PageAfterPage()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Http.RespondGraphQl = variables => Json(variables.Contains("after=CURSOR-1", StringComparison.Ordinal)
+            ? Found(null, Node(3, "Oldest issue", day: 1))
+            : Found("CURSOR-1", Node(9, "A pull request", day: 9, pull: true), Node(8, "A draft", day: 8, pull: true, draft: true), "null", Node(7, "An issue", day: 7),
+                Node(6, "Elsewhere", day: 6, url: "https://evil.example/org/repo/issues/6")));
+
+        var first = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null), default);
+
+        Assert.AreEqual("ok", first.Status);
+        Assert.AreEqual("github", first.Provider);
+        CollectionAssert.AreEqual(new[] { (9, "pull_request", "open"), (8, "pull_request", "draft"), (7, "issue", "open") },
+            first.Issues.Select(static issue => (issue.Number, issue.Kind, issue.State)).ToArray(), "Both kinds in the order of GitHub; what it may not show and a link to another host are left out.");
+        Assert.IsTrue(first.Issues.All(static issue => issue.Open));
+        Assert.AreEqual("https://github.com/org/repo/pull/9", first.Issues[0].Url);
+        Assert.AreEqual(new DateTimeOffset(2026, 5, 9, 10, 0, 0, TimeSpan.Zero), first.Issues[0].UpdatedAt);
+        Assert.AreEqual("CURSOR-1", first.NextCursor);
+        CollectionAssert.AreEqual(new[] { "q=repo:org/repo is:open sort:updated-desc&first=50" }, fixture.Http.GraphQl, "Closed items are not asked for unless the request says so.");
+        Assert.IsEmpty(fixture.Http.Requests, "No REST listing is read.");
+        Assert.IsEmpty(fixture.Http.PullRequests);
+        StringAssert.Contains(JsonSerializer.Serialize(first, DesktopJsonContext.Default.GitIssuesSearchResponse), "\"nextCursor\":\"CURSOR-1\"");
+
+        var second = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null, false, first.NextCursor), default);
+        Assert.AreEqual("ok", second.Status);
+        CollectionAssert.AreEqual(new[] { 3 }, second.Issues.Select(static issue => issue.Number).ToArray());
+        Assert.IsNull(second.NextCursor, "GitHub has no page after the last.");
+        Assert.AreEqual("q=repo:org/repo is:open sort:updated-desc&first=50&after=CURSOR-1", fixture.Http.GraphQl[^1]);
+
+        // The first page is kept for the cache window, each choice of closed items on its own.
+        fixture.Http.GraphQl.Clear();
+        await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null), default);
+        Assert.IsEmpty(fixture.Http.GraphQl);
+        fixture.Http.RespondGraphQl = _ => Json(Found(null, Node(5, "Done", day: 5, state: "CLOSED"), Node(4, "Merged", day: 4, state: "MERGED", pull: true)));
+        var all = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", 20, true), default);
+        CollectionAssert.AreEqual(new[] { (5, "closed", false), (4, "merged", false) }, all.Issues.Select(static issue => (issue.Number, issue.State, issue.Open)).ToArray());
+        CollectionAssert.AreEqual(new[] { "q=repo:org/repo sort:updated-desc&first=20" }, fixture.Http.GraphQl);
+
+        // A cursor is one line of bounded length.
+        foreach (var cursor in new[] { "", " x", "two\nlines", new string('c', GitIssuesService.MaximumCursorLength + 1) })
+        {
+            Assert.AreEqual("invalid_request", (await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null, false, cursor), default)).Status);
+        }
+    }
+
+    [TestMethod]
+    public async Task SignedInGitHub_FindsANumberAndWords_BesideTheRecentItemsThatMatchWhatIsTyped()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Http.RespondGraphQl = variables => Json(
+            variables.StartsWith("owner=org&name=repo&number=12", StringComparison.Ordinal) ? "{\"data\":{\"repository\":{\"issueOrPullRequest\":" + Node(12, "Exact, closed long ago", day: 1, state: "CLOSED") + "}}}"
+            : variables.StartsWith("owner=", StringComparison.Ordinal) ? "{\"data\":{\"repository\":{\"issueOrPullRequest\":null}},\"errors\":[{\"type\":\"NOT_FOUND\"}]}"
+            : variables.Contains(" crash sort:", StringComparison.Ordinal) ? Found("CURSOR-S", Node(30, "Old crash report", day: 2), Node(20, "Crashes in the picker", day: 4))
+            : Found(null, Node(120, "Number prefix", day: 8, pull: true), Node(20, "Crashes in the picker", day: 4), Node(5, "Unrelated", day: 3)));
+
+        var numeric = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "12", null), default);
+        Assert.AreEqual("ok", numeric.Status);
+        CollectionAssert.AreEqual(new[] { 12, 120 }, numeric.Issues.Select(static issue => issue.Number).ToArray(), "The item of that number, whatever its state, then the recent ones it starts.");
+        Assert.IsNull(numeric.NextCursor);
+        CollectionAssert.AreEquivalent(new[] { "owner=org&name=repo&number=12", "q=repo:org/repo is:open sort:updated-desc&first=50" }, fixture.Http.GraphQl);
+
+        fixture.Http.GraphQl.Clear();
+        CollectionAssert.AreEqual(new[] { 5 }, (await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "5", null), default)).Issues.Select(static issue => issue.Number).ToArray(),
+            "A number that names nothing leaves the recent matches.");
+        CollectionAssert.AreEqual(new[] { "owner=org&name=repo&number=5" }, fixture.Http.GraphQl, "The recent items are still cached.");
+
+        fixture.Http.GraphQl.Clear();
+        var partial = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "cr", null), default);
+        CollectionAssert.AreEqual(new[] { 20 }, partial.Issues.Select(static issue => issue.Number).ToArray(), "Two letters filter the recent titles.");
+        Assert.IsEmpty(fixture.Http.GraphQl, "Two letters search nothing.");
+
+        // The search of GitHub matches whole words: the recent items whose title has the letters typed so far come too.
+        var words = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "crash", null), default);
+        CollectionAssert.AreEqual(new[] { 20, 30 }, words.Issues.Select(static issue => issue.Number).ToArray(), "Local and searched matches, without duplicates, newest first.");
+        Assert.AreEqual("CURSOR-S", words.NextCursor);
+        CollectionAssert.AreEqual(new[] { "q=repo:org/repo is:open crash sort:updated-desc&first=50" }, fixture.Http.GraphQl);
+
+        // What is typed about the state is not contradicted, and travels as one value.
+        fixture.Http.GraphQl.Clear();
+        await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "is:closed label:\"a b\"", null), default);
+        CollectionAssert.AreEqual(new[] { "q=repo:org/repo is:closed label:\"a b\" sort:updated-desc&first=50" }, fixture.Http.GraphQl);
+
+        // A search GitHub limits does not hide the recent matches; without any, the REST search is asked, and its refusal is told.
+        fixture.Http.Respond = request => request.StartsWith("/search/", StringComparison.Ordinal) ? new HttpResponseMessage(HttpStatusCode.TooManyRequests) : Json("[]");
+        fixture.Http.RespondGraphQl = variables => Json(variables.Contains(" sort:", StringComparison.Ordinal) && !variables.Contains("is:open sort:", StringComparison.Ordinal)
+            ? "{\"errors\":[{\"type\":\"RATE_LIMITED\",\"message\":\"" + Fixture.Token + "\"}]}"
+            : Found(null));
+        var limited = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "crashes", null), default);
+        Assert.AreEqual("ok", limited.Status);
+        CollectionAssert.AreEqual(new[] { 20 }, limited.Issues.Select(static issue => issue.Number).ToArray());
+        var nothing = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "absent", null), default);
+        AssertSafeFailure(nothing, fixture);
+        StringAssert.Contains(nothing.Message, "429");
+    }
+
+    [TestMethod]
+    public async Task GitHubWithoutSignIn_OrThatRefusesGraphQl_IsReadThroughTheRestListings_WithoutClosedItemsUnlessAsked()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Http.Respond = _ => Json(Array(Issue(7, "Open issue", day: 9), Issue(5, "Closed issue", day: 3, state: "closed")));
+        fixture.Http.RespondPulls = _ => Json("""
+            [{"number":8,"title":"A pull request","html_url":"https://github.com/org/repo/pull/8","state":"open","head":{"ref":"work"},"updated_at":"2026-05-06T00:00:00Z"}]
+            """);
+
+        // GraphQL is refused (the default of the handler): the listings answer, and name no following page.
+        var refused = await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null), default);
+        Assert.AreEqual("ok", refused.Status);
+        CollectionAssert.AreEqual(new[] { 7, 8 }, refused.Issues.Select(static issue => issue.Number).ToArray(), "Closed items are left out unless asked for.");
+        Assert.IsNull(refused.NextCursor);
+        Assert.HasCount(1, fixture.Http.GraphQl);
+        CollectionAssert.AreEqual(new[] { 7, 8, 5 }, (await fixture.SearchAsync("")).Issues.Select(static issue => issue.Number).ToArray());
+        Assert.IsEmpty((await fixture.Service.SearchAsync(new(Epoch, fixture.Project.Id, "", null, false, "CURSOR"), default)).Issues, "The listings have one page.");
+
+        // A visitor is never sent to GraphQL, which answers only who is signed in.
+        using var visitor = await Fixture.CreateAsync();
+        visitor.Anonymous = true;
+        visitor.Http.Respond = _ => Json(Array(Issue(7, "Open issue", day: 9)));
+        CollectionAssert.AreEqual(new[] { 7 }, (await visitor.SearchAsync("")).Issues.Select(static issue => issue.Number).ToArray());
+        Assert.IsEmpty(visitor.Http.GraphQl);
+        Assert.IsNull(visitor.Http.Headers[0].Authorization);
+    }
+
+    private static string Found(string? endCursor, params string[] nodes)
+        => "{\"data\":{\"search\":{\"pageInfo\":{\"hasNextPage\":" + (endCursor is null ? "false" : "true") + ",\"endCursor\":" + JsonSerializer.Serialize(endCursor) + "},\"nodes\":" + Array(nodes) + "}}}";
+
+    private static string Node(int number, string title, int day, string state = "OPEN", bool pull = false, bool draft = false, string? url = null)
+        => "{\"__typename\":\"" + (pull ? "PullRequest" : "Issue") + "\",\"number\":" + number + ",\"title\":" + JsonSerializer.Serialize(title) + ",\"url\":"
+           + JsonSerializer.Serialize(url ?? $"https://github.com/org/repo/{(pull ? "pull" : "issues")}/{number}")
+           + ",\"state\":\"" + state + "\",\"updatedAt\":\"2026-05-" + day.ToString("00") + "T10:00:00Z\"" + (pull ? ",\"isDraft\":" + (draft ? "true" : "false") : "") + "}";
+
     private sealed class ProviderStub : HttpMessageHandler
     {
         /// <summary>The only scheme and host a request may be sent to.</summary>
@@ -575,10 +710,30 @@ public sealed class GitIssuesRpcTests
         /// <summary>Path and query of each request for pull requests, unescaped.</summary>
         public List<string> PullRequests { get; } = [];
 
+        /// <summary>
+        /// Answers the requests to the GraphQL API of GitHub, from their variables (<c>name=value&amp;name=value</c>). By
+        /// default GitHub refuses them, and the REST listings are read instead.
+        /// </summary>
+        public Func<string, HttpResponseMessage> RespondGraphQl { get; set; } = _ => new HttpResponseMessage(HttpStatusCode.NotFound);
+
+        /// <summary>The variables of each GraphQL request.</summary>
+        public List<string> GraphQl { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.AreEqual(ExpectedAuthority, request.RequestUri!.GetLeftPart(UriPartial.Authority));
             var path = Uri.UnescapeDataString(request.RequestUri.PathAndQuery);
+            if (path == "/graphql")
+            {
+                Assert.AreEqual(HttpMethod.Post, request.Method);
+                Assert.AreEqual("Bearer " + Fixture.Token, request.Headers.Authorization?.ToString());
+                using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
+                var variables = string.Join("&", body.RootElement.GetProperty("variables").EnumerateObject()
+                    .Select(static variable => variable.Name + "=" + (variable.Value.ValueKind == JsonValueKind.String ? variable.Value.GetString() : variable.Value.GetRawText())));
+                GraphQl.Add(variables);
+                return Task.FromResult(RespondGraphQl(variables));
+            }
+
             if (path.Contains("/pulls", StringComparison.Ordinal) || path.Contains("/merge_requests", StringComparison.Ordinal) || path.Contains("/pullrequests", StringComparison.Ordinal)
                 || path.Contains(" is:pr", StringComparison.Ordinal))
             {
@@ -623,7 +778,7 @@ public sealed class GitIssuesRpcTests
                 {
                     TokenReads++;
                     CredentialRequests.Add(repository.Provider + ":" + repository.Host);
-                    return ValueTask.FromResult<GitRemoteCredential?>(GitRemoteCredential.Bearer(Token));
+                    return ValueTask.FromResult(Anonymous ? null : GitRemoteCredential.Bearer(Token));
                 },
             });
         }
@@ -649,6 +804,9 @@ public sealed class GitIssuesRpcTests
         public int RemoteReads { get; private set; }
         public int TokenReads { get; private set; }
 
+        /// <summary>Whether the user is signed in nowhere: the requests carry no credentials.</summary>
+        public bool Anonymous { get; set; }
+
         /// <summary>The provider and host each credential was asked for.</summary>
         public List<string> CredentialRequests { get; } = [];
 
@@ -660,12 +818,13 @@ public sealed class GitIssuesRpcTests
             return await Projects.UpsertFromPathAsync(path);
         }
 
+        // These searches ask for the closed items too, as the listings of the providers give them.
         public Task<GitIssuesSearchResponse> SearchAsync(string query) => SearchAsync(query, Project.Id);
 
         public Task<GitIssuesSearchResponse> SearchAsync(string query, int? limit) => SearchAsync(query, Project.Id, limit);
 
         public Task<GitIssuesSearchResponse> SearchAsync(string query, string? projectId, int? limit = null)
-            => Service.SearchAsync(new(Epoch, projectId, query, limit), default);
+            => Service.SearchAsync(new(Epoch, projectId, query, limit, IncludeClosed: true), default);
 
         private async IAsyncEnumerable<string> ReadRemotesAsync(string directory, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
