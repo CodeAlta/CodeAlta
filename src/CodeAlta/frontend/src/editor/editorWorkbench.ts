@@ -78,13 +78,6 @@ export function moveEditorFile(state: EditorFiles, path: string, index: number):
   return { ...state, open };
 }
 
-/** The file after or before the one shown, around the strip; null when nothing else is open. */
-export function cycleEditorFile(state: EditorFiles, delta: 1 | -1): string | null {
-  if (state.open.length < 2) return null;
-  const at = state.open.findIndex(file => file.path === state.active);
-  return state.open[(at + delta + state.open.length) % state.open.length].path;
-}
-
 /** Follows a file or a folder that was renamed or moved: the open files keep their tabs under their new paths. */
 export function renameEditorPath(state: EditorFiles, from: string, to: string): EditorFiles {
   if (!state.open.some(file => underPath(file.path, from))) return state;

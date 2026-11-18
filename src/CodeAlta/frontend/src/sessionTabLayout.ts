@@ -200,14 +200,33 @@ export function activeDockNodeId(state: SessionTabView, files: FileTabs): string
   return files.active ? fileNodeId(files.active) : state.active ? sessionNodeId(state.active) : shownDraftNodeId(state);
 }
 
-/**
- * The tab `delta` places after `current` among the tabs of the dock, around them: in the order they are shown, pane
- * after pane as the layout places them, and in a pane from left to right. Only tabs that are there are gone through,
- * so going through them opens none. Null when there is no other tab.
- */
-export function cycleDockTab(model: Model, current: string, delta: 1 | -1): string | null {
+/** The tabs of the dock in the order they are shown, pane after pane as the layout places them, and in a pane from left to right. */
+export function dockNodeIds(model: Model): string[] {
   const order: string[] = [];
   model.visitNodes(node => { if (node instanceof TabNode && node.getParent() instanceof TabSetNode) order.push(node.getId()); });
+  return order;
+}
+
+/**
+ * The tabs of the pane that holds `current`, in strip order. Empty if the current tab is no longer in the dock.
+ */
+export function paneNodeIds(model: Model, current: string): string[] {
+  const pane = model.getNodeById(current)?.getParent();
+  return pane instanceof TabSetNode ? pane.getChildren().map(node => node.getId()) : [];
+}
+
+/** The title a tab of the dock shows: its node's name. */
+export function dockNodeName(model: Model, id: string): string {
+  const node = model.getNodeById(id);
+  return node instanceof TabNode ? node.getName() : id;
+}
+
+/**
+ * The tab `delta` places after `current` among the tabs of the dock, around them. Only tabs that are there are gone
+ * through, so going through them opens none. Null when there is no other tab.
+ */
+export function cycleDockTab(model: Model, current: string, delta: 1 | -1): string | null {
+  const order = dockNodeIds(model);
   const at = order.indexOf(current);
   if (order.length === 0 || at >= 0 && order.length === 1) return null;
   return order[at < 0 ? (delta > 0 ? 0 : order.length - 1) : (at + delta + order.length) % order.length];
