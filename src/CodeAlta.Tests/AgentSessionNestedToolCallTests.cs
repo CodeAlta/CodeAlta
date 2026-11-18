@@ -88,18 +88,23 @@ public sealed partial class AgentSessionTests
         var permissions = new ConcurrentQueue<string>();
         AgentToolResult? write = null, shell = null, self = null, hidden = null;
         string[] listed = [];
+        (string? Run, string? Step) scriptOfTheCall = default;
         var script = ScriptTool(async (tools, cancellationToken) =>
         {
             listed = [.. tools.ListTools().Select(static spec => spec.Name)];
             write = await tools.InvokeAsync(new AgentNestedToolCall("write_file", Json("""{"path":"created.txt","content":"hello"}""")) { StepId = "make" }, cancellationToken);
             shell = await tools.InvokeAsync(new AgentNestedToolCall("shell_command", Json("""{"command":"exit 3"}""")), cancellationToken);
             self = await tools.InvokeAsync(new AgentNestedToolCall("script", Json("{}")), cancellationToken);
-            hidden = await tools.InvokeAsync(new AgentNestedToolCall("scripts_only", Json("{}")), cancellationToken);
+            hidden = await tools.InvokeAsync(new AgentNestedToolCall("scripts_only", Json("{}")) { StepId = "probe", ScriptRunId = "run-1" }, cancellationToken);
             return new AgentToolResult(true, [new AgentToolResultItem.Text("script done")]);
         });
         var scriptsOnly = new AgentToolDefinition(
             new AgentToolSpec("scripts_only", "Only for scripts.", Json("""{"type":"object","properties":{}}""")) { Exposure = AgentToolExposure.Scripts },
-            static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("hidden ran")])));
+            (invocation, _) =>
+            {
+                scriptOfTheCall = (invocation.ScriptRunId, invocation.ScriptStepId);
+                return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("hidden ran")]));
+            });
 
         IReadOnlyList<string> offered = [];
         IReadOnlyList<AgentConversationMessage> secondConversation = [];
@@ -132,6 +137,7 @@ public sealed partial class AgentSessionTests
         // The model is never offered the tool of scripts only; a script is never offered the tool of the model only.
         CollectionAssert.DoesNotContain(offered.ToArray(), "scripts_only");
         CollectionAssert.Contains(listed, "scripts_only");
+        Assert.AreEqual(("run-1", "probe"), scriptOfTheCall, "a tool is told the run and the step of the script that calls it");
         CollectionAssert.DoesNotContain(listed, "script");
 
         // The nested calls ask as the calls of the model do, and run the run's handlers.

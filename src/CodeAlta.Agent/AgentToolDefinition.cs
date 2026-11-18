@@ -207,6 +207,14 @@ public sealed record AgentToolInvocation(
     /// </summary>
     [JsonIgnore]
     public string? ParentToolCallId { get; init; }
+
+    /// <summary>Gets the run of the script that makes this call, or <see langword="null"/> when the caller did not say.</summary>
+    [JsonIgnore]
+    public string? ScriptRunId { get; init; }
+
+    /// <summary>Gets the step of the script that makes this call, or <see langword="null"/>.</summary>
+    [JsonIgnore]
+    public string? ScriptStepId { get; init; }
 }
 
 /// <summary>

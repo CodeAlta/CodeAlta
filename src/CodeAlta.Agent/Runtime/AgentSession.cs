@@ -1453,7 +1453,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                             var delta = new AgentContentDeltaEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentContentKind.ToolOutput,
                                 outputContentId, callId, update.Delta, update.Details);
                             await AppendEventsAsync([delta], AgentEventPersistenceMode.TransientOnly, progressToken).ConfigureAwait(false);
-                        }) { RunTools = run.RunTools, ParentToolCallId = parent.CallId },
+                        }) { RunTools = run.RunTools, ParentToolCallId = parent.CallId, ScriptRunId = call.ScriptRunId, ScriptStepId = call.StepId },
                     cancellationToken)
                 .ConfigureAwait(false);
         }

@@ -44,4 +44,7 @@ public sealed record AgentNestedToolCall(string ToolName, JsonElement Arguments)
 
     /// <summary>Gets the name shown for the call, such as <c>alta session create</c>; null shows the tool name.</summary>
     public string? DisplayName { get; init; }
+
+    /// <summary>Gets the run of the script that makes the call, or null: a tool that answers scripts another way than the model is told so.</summary>
+    public string? ScriptRunId { get; init; }
 }

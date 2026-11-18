@@ -377,7 +377,7 @@ public static class CodeModeToolFactory
                     .. agents is null ? [] : CodeModeAgentBinding.Paths.Select(path => (path, (ICodeModeCallHandler)agents)),
                     (CodeModeAskBinding.Path, new CodeModeAskBinding(options.Questions, sessionId, () => ((CodeModeRunHandle)observer).Id)),
                     .. CodeModeValueBinding.Paths.Select(path => (path, (ICodeModeCallHandler)values)),
-                    (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity with { ScriptRunId = ((CodeModeRunHandle)observer).Id }, cwd)),
+                    (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity with { ScriptRunId = ((CodeModeRunHandle)observer).Id }, cwd, invocation.Tools)),
                     (ToolScriptBinding.ToolsNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (CodeModeDiscovery.Namespace, discovery),

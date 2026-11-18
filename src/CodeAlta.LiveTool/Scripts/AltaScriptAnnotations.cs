@@ -19,12 +19,12 @@ internal static class AltaScriptAnnotations
     // `--scope` of `session result` and `session report`; `turn` and `all` are accepted as aliases.
     private static readonly AltaValue ResultScope = AltaValue.Enum("last-turn", "session");
 
-    private static readonly Dictionary<string, AltaValue> SessionEventLists = new(StringComparer.Ordinal)
+    private static readonly FrozenDictionary<string, AltaValue> SessionEventLists = new Dictionary<string, AltaValue>(StringComparer.Ordinal)
     {
         ["include"] = new AltaValue(AltaValueKind.CommaList) { Values = ["user", "assistant", "reasoning", "tool", "host", "workflow", "event"] },
         ["kind"] = AltaValue.CommaList,
         ["fields"] = AltaValue.CommaList,
-    };
+    }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>Gets the annotations by command path (<c>session create</c>).</summary>
     public static FrozenDictionary<string, AltaCommandAnnotation> Commands { get; } = new Dictionary<string, AltaCommandAnnotation>(StringComparer.Ordinal)

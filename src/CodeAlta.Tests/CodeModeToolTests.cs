@@ -16,7 +16,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var invoker = new FakeTools();
+        var invoker = new FakeTools { Alta = AltaTool(root.Path) };
         var (exec, _) = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
 
         var result = await InvokeAsync(exec, """
@@ -33,7 +33,8 @@ public sealed class CodeModeToolTests
             Assert.AreEqual("""{"content":"hello","issues":"2 open issues","prompt":"alta.prompt"}""", value.RootElement.GetRawText());
         }
 
-        CollectionAssert.AreEqual(new[] { "read_file", "github_list_issues" }, invoker.Calls.ToArray());
+        // Every call of the script is a call of a tool of the session, `alta` included.
+        CollectionAssert.AreEqual(new[] { "read_file", "github_list_issues", "alta", "alta" }, invoker.Calls.ToArray());
         // The source of the run is kept, for the model to fix it with its file tools.
         var source = Text(result).Split('\n').Single(static line => line.StartsWith("Source: ", StringComparison.Ordinal))["Source: ".Length..];
         StringAssert.Contains(File.ReadAllText(source), "tools.read_file");
@@ -346,6 +347,32 @@ public sealed class CodeModeToolTests
 
         StringAssert.Contains(declarations[0], "reasoning?: \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\" | \"none\"");
         StringAssert.Contains(declarations[1], "run(prompt: string, options?: {");
+    }
+
+    [TestMethod]
+    public async Task AnAltaCallOfAScript_IsACallOfTheAltaToolOfItsSession_WhichItsHooksCheck()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, _) = Create(root.Path, runs);
+        const string script = """
+            return await step("write", () => alta.prompt.create({ promptId: "reviewer", scope: "global", stdin: "Review." }))
+              .then((created) => created.type, (e) => `${e.name}: ${e.message}`);
+            """;
+
+        var allowed = new FakeTools { Alta = AltaTool(root.Path) };
+        var ran = await InvokeAsync(exec, script, allowed);
+        var blocked = new FakeTools { Alta = AltaTool(root.Path), AltaBlocked = "The policy of this project refuses `alta prompt create`." };
+        var refused = await InvokeAsync(exec, script, blocked);
+
+        using var value = ValueOf(ran);
+        StringAssert.StartsWith(value.RootElement.GetString(), "alta.prompt", Text(ran));
+        var call = allowed.AltaCalls.Single();
+        Assert.AreEqual("""{"args":["prompt","create","--scope=global","--stdin","--","reviewer"],"stdin":"Review."}""", call.Arguments.GetRawText(), "a hook sees the command line the tool runs");
+        Assert.AreEqual("write", call.StepId);
+        StringAssert.StartsWith(call.ScriptRunId, "run-");
+        using var error = ValueOf(refused);
+        Assert.AreEqual("ToolError: The policy of this project refuses `alta prompt create`.", error.RootElement.GetString(), Text(refused));
     }
 
     [TestMethod]
@@ -1463,6 +1490,9 @@ public sealed class CodeModeToolTests
         return (new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root }).Add(registry)), registry);
     }
 
+    private static AgentToolDefinition AltaTool(string root)
+        => AltaSessionToolFactory.Create(Dispatcher(root).Dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root });
+
     private static (AgentToolDefinition Exec, AgentToolDefinition Wait) Create(string root, CodeModeRunRegistry runs, string? sourceFolder = null,
         CodeModeScriptLibrary? library = null)
     {
@@ -1567,9 +1597,29 @@ public sealed class CodeModeToolTests
             new("alta", "alta", Schema("""{"type":"object"}""")),
         ];
 
+        // The `alta` tool of the session, which the calls of `alta.*` go through; null answers them as any other tool.
+        public AgentToolDefinition? Alta { get; init; }
+
+        public List<AgentNestedToolCall> AltaCalls { get; } = [];
+
+        // What a hook of the session answers a call of `alta` with instead of running it; null runs it.
+        public string? AltaBlocked { get; init; }
+
         public async Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
         {
             lock (Calls) Calls.Add(call.ToolName);
+            if (call.ToolName == "alta" && Alta is not null)
+            {
+                lock (AltaCalls) AltaCalls.Add(call);
+                if (AltaBlocked is { } blocked) return new AgentToolResult(false, [new AgentToolResultItem.Text(blocked)], blocked);
+                return await Alta.Handler(new AgentToolInvocation(new ModelProviderId("provider"), "session-1", "call-1/1", "alta", call.Arguments)
+                {
+                    ParentToolCallId = "call-1",
+                    ScriptRunId = call.ScriptRunId,
+                    ScriptStepId = call.StepId,
+                }, cancellationToken);
+            }
+
             if (Gate is not null && (GatedTool is null || GatedTool == call.ToolName)) await Gate.Task.WaitAsync(cancellationToken);
             if (call.ToolName == "read_file")
             {

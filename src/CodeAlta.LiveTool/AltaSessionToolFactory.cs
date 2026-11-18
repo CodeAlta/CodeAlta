@@ -150,7 +150,15 @@ public static class AltaSessionToolFactory
             PluginRuntimeKey = options.PluginRuntimeKey,
             RunTools = invocation.RunTools,
             SubSessions = options.SessionOptions.SubSessions,
+            ScriptRunId = invocation.ScriptRunId,
+            ScriptStepId = invocation.ScriptStepId,
         };
+        if (invocation.ScriptRunId is not null)
+        {
+            return await InvokeForScriptAsync(dispatcher, args, stdin, caller,
+                cwd ?? options.WorkingDirectoryProvider?.Invoke() ?? options.WorkingDirectory, effectiveCancellationToken).ConfigureAwait(false);
+        }
+
         var result = await dispatcher.InvokeAsync(
                 args,
                 stdin ?? string.Empty,
@@ -169,6 +177,39 @@ public static class AltaSessionToolFactory
         {
             // The view of an MCP tool the command called is shown with this call, as with the tool of the server.
             App = result.App,
+        };
+    }
+
+    /// <summary>The property of the structured result of a call of a script that holds the exit code of the command.</summary>
+    internal const string ScriptExitCode = "exitCode";
+
+    /// <summary>The property of the structured result of a call of a script that holds what the command wrote.</summary>
+    internal const string ScriptStdout = "stdout";
+
+    /// <summary>The property of the structured result of a call of a script that holds the errors the command wrote.</summary>
+    internal const string ScriptStderr = "stderr";
+
+    // A script reads the records of a command, not a transcript made for a model: its call goes through this tool, so that
+    // what turns the tool off or checks its calls applies, and is answered with all the command wrote, uncapped.
+    private static async Task<AgentToolResult> InvokeForScriptAsync(AltaCommandDispatcher dispatcher, IReadOnlyList<string> args, string? stdin, AltaCallerIdentity caller,
+        string? cwd, CancellationToken cancellationToken)
+    {
+        var result = await dispatcher.InvokeRawAsync(args, stdin, caller, cwd, cancellationToken).ConfigureAwait(false);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber(ScriptExitCode, result.ExitCode);
+            writer.WriteString(ScriptStdout, result.Stdout);
+            writer.WriteString(ScriptStderr, result.Stderr);
+            writer.WriteEndObject();
+        }
+
+        using var structured = JsonDocument.Parse(stream.ToArray());
+        return new AgentToolResult(result.ExitCode == AltaExitCodes.Success, [new AgentToolResultItem.Text(result.Stdout)],
+            result.ExitCode == AltaExitCodes.Success ? null : ExtractErrorMessage(result.Error) ?? result.Error)
+        {
+            Structured = structured.RootElement.Clone(),
         };
     }
 

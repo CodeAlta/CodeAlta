@@ -66,6 +66,9 @@ over (`AgentToolSpec.ScriptsTakeOver`): the model is offered only the tools of e
 direct (`view_image`), and calls the others from scripts. Each `exec` binds the functions of
 its run: the session's tools through `AgentToolInvocation.Tools` (`ToolScriptBinding`: `tools.*`, `mcp.<server>.*`), the
 typed `alta` commands for its caller (`AltaScriptBinding`), and discovery over that same API (`CodeModeDiscovery`).
+A call of `alta.*` is a call of the session's own `alta` tool (`AltaScriptCallHandler`), as a call of `tools.*` is a call
+of its tool: a session whose `alta` is turned off has no `alta.*`, the tool hooks of the session check each command, and
+the tool answers a script with all the command wrote instead of the transcript it makes for a model.
 A tool's structured value (`AgentToolResult.Structured`) is what a script receives; the model reads its text.
 
 Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to a turn:
