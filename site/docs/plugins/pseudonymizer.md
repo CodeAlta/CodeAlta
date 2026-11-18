@@ -69,7 +69,7 @@ People, contact details (emails, phone numbers, postal codes) and identifiers (b
 | **Company numbers** | Hidden: SIREN and SIRET, Companies House numbers, EIN. |
 | **Every date** | Off: only dates of birth are hidden, the dates of acts and meetings are sent. |
 | **Web addresses** | Off: links to documentation, a repository or a site are sent. |
-| **Words never hidden** | `CodeAlta`, `CodeAlta Desktop`, `noreply@codealta.io`, and distinctive technology names in CodeAlta's instructions (`CUDA`, `ROCm`, `Vulkan`, `EPUB`, `MarkItDotNet`, `Unicode`, `PowerPoint`). Add only words that are safe to send in every project. |
+| **Words never hidden** | `CodeAlta`, `CodeAlta Desktop`, `noreply@codealta.io`, and the technologies CodeAlta's own instructions name (`CUDA`, `ROCm`, `Vulkan`, `Metal`, `EPUB`, `MarkItDotNet`, `Unicode`, `CI`, `PowerPoint`, `io`): add the names of products or of your firm that name no one. A project whose party has one of these names lists it in **Names always hidden**. |
 | **Tools that get pseudonyms** | The web tools and the pages of a browser. `*` stands for any characters. |
 
 ## See what was hidden

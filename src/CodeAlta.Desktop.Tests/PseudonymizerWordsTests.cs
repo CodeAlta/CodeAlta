@@ -24,18 +24,20 @@ public sealed class PseudonymizerWordsTests
     }
 
     [TestMethod]
-    public async Task TheTechnologyDefaults_KeepDistinctiveNames_ButDoNotExemptAmbiguousWords()
+    public async Task TheTechnologyDefaults_AreSent_UnlessTheProjectAlwaysHidesOne()
     {
         var organizations = new PatternRecognizer(PiiEntities.Organization,
-            new Regex("CodeAlta Desktop|CUDA|ROCm|Vulkan|EPUB|MarkItDotNet|Unicode|PowerPoint|Metal|CI|Io", RegexOptions.CultureInvariant), 0.8);
-        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([organizations]), new PseudonymTable(), new PseudonymCache(),
-            new PseudonymizerOptions { NeverHide = new HashSet<string>(PseudonymizerPlugin.DefaultSafeWords, StringComparer.OrdinalIgnoreCase) });
+            new Regex("CodeAlta Desktop|CUDA|ROCm|Vulkan|EPUB|MarkItDotNet|Unicode|PowerPoint|Metal|CI|io", RegexOptions.CultureInvariant), 0.8);
+        var never = new HashSet<string>(PseudonymizerPlugin.DefaultSafeWords, StringComparer.OrdinalIgnoreCase);
+        const string text = "CodeAlta Desktop: CUDA, ROCm, Vulkan, Metal, EPUB, MarkItDotNet, Unicode, CI, PowerPoint, io.";
 
-        var sent = await boundary.PseudonymizeAsync(
-            "CodeAlta Desktop: CUDA, ROCm, Vulkan, EPUB, MarkItDotNet, Unicode, PowerPoint. The parties are Metal, CI and Io.", CancellationToken.None);
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([organizations]), new PseudonymTable(), new PseudonymCache(), new PseudonymizerOptions { NeverHide = never });
+        Assert.AreEqual(text, await boundary.PseudonymizeAsync(text, CancellationToken.None));
 
-        Assert.AreEqual(
-            "CodeAlta Desktop: CUDA, ROCm, Vulkan, EPUB, MarkItDotNet, Unicode, PowerPoint. The parties are [ORGANIZATION_001], [ORGANIZATION_002] and [ORGANIZATION_003].", sent);
+        // A party of the file named as one of them is listed by the project, and hidden.
+        var withParty = new PseudonymizingBoundary(new PiiAnalyzer([organizations]), new PseudonymTable(), new PseudonymCache(),
+            new PseudonymizerOptions { NeverHide = never, AlwaysHide = [(PiiEntities.Organization, "Metal")] });
+        Assert.AreEqual(text.Replace("Metal", "[ORGANIZATION_001]", StringComparison.Ordinal), await withParty.PseudonymizeAsync(text, CancellationToken.None));
     }
 
     [TestMethod]
