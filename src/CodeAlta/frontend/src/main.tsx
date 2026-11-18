@@ -384,7 +384,7 @@ import { CommandHelp } from "./CommandHelp";
 import { commandDefinitions, commandKeys, resolveCommandKey, type CommandId } from "./commandRegistry";
 import { composerCommandBlock, composerControlState, isComposerControlCommand, type ComposerControlCommand } from "./composerCommands";
 import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
-import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
+import { hasStartupTabs, useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
@@ -732,7 +732,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return false;
   }
   function setTabs(next: SessionTabsState) { protectNavigation(next.open.map(tab => tab.sessionId), () => writeTabs(next)); }
-  const [tabsReady, setTabsReady] = useState(false);
+  // The most recent session is opened when no session tabs were saved; it must not count as a restored tab.
+  const [tabStartup, setTabStartup] = useState<{ spaceId: string; fallbackSessionId: string | null } | null>(null);
+  const tabsReady = tabStartup !== null;
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
   // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
   const [restoredFileTabs] = useState(() => {
@@ -1428,10 +1430,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }, [spacesState.loaded, spacesState.available, spacesState.spaces, workspaceState.kind]);
   // A space that is gone (removed here, by a command or by another instance) gives its place to the default one,
   // and the tabs the window kept for it are forgotten.
+  const shownSpaceMissing = spacesState.available && !spacesState.spaces.some(space => space.id === spaceId);
   useEffect(() => {
     // The storage of the pages is the main window's: a secondary window keeps its space and its tabs in its window.
     if (!spacesState.loaded || !spacesState.available || secondary) return;
-    if (tabsReady && !spacesState.spaces.some(space => space.id === spaceId)) showSpace(defaultSpaceId, undefined, true);
+    if (tabsReady && shownSpaceMissing) showSpace(defaultSpaceId, undefined, true);
     try {
       for (const base of [sessionTabsKey, fileTabsKey]) {
         for (const key of Object.keys(localStorage)) {
@@ -1440,7 +1443,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }
     } catch { /* Storage that cannot be read keeps what it has. */ }
     for (const id of [...spaceTabs.current.keys()]) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); spaceLayouts.current.delete(id); void canvasHub.closeSpace(id); }
-  }, [spacesState.loaded, spacesState.available, spacesState.spaces, spaceId, tabsReady]);
+  }, [spacesState.loaded, spacesState.available, spacesState.spaces, shownSpaceMissing, tabsReady]);
   useEffect(() => {
     if (!snapshot || !status || hostLost || status.hostAvailable && (!spacesEpoch || retentionLifetime !== spacesEpoch)) return;
     let current = true;
@@ -1457,10 +1460,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const expose = () => {
       if (!initial) return;
       initialSelectionMade.current = true;
-      setTabsReady(true);
       // Restoration is allowed to finish protection after the user navigates, but never to undo that
       // newer selection/settings action merely because its original acknowledgement arrived late.
-      if (navigation !== retentionNavigation.current || revision !== browserRevision.current) return;
+      const superseded = navigation !== retentionNavigation.current || revision !== browserRevision.current;
+      setTabStartup({ spaceId, fallbackSessionId: !superseded && !restoredTabs ? next.active?.sessionId ?? null : null });
+      if (superseded) return;
       applyTabState(next);
       if (restoredFileTabs) setFileTabs(reconcileFileTabs(unheldFileTabs(restoredFileTabs), snapshot));
     };
@@ -3948,9 +3952,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // A message found by search, as a bookmark of a message is shown: the pane of the session reads its history up to it.
     openMessage: (id, offset) => { bookmarkHost.reveals.open(id, offset); void openAutomationSession(id); } });
   // The Welcome page is the main window's: a secondary window opens with the tabs it had.
-  // A Welcome page that another window holds stays there: a start does not bring that window to the front.
-  useLandingAtStartup(owned && tabsReady && !secondary, canvasCatalog, item => {
+  // Look at the tabs after reconciliation, including the Default space's tabs if the saved space is gone.
+  const fallbackSessionId = tabStartup?.spaceId === spaceId ? tabStartup.fallbackSessionId : null;
+  useLandingAtStartup(owned && tabsReady && !secondary && !shownSpaceMissing, hasStartupTabs(tabs, fileTabs, fallbackSessionId), canvasCatalog, item => {
     const target = defaultCanvasTarget(item, canvasSelection);
+    // A Welcome page that another window holds stays there: a start does not bring that window to the front.
     if (target && windowsHub.heldElsewhere(fileTabRef(canvasTabOf(item, target)))) return;
     openCanvasHere(item);
   });
