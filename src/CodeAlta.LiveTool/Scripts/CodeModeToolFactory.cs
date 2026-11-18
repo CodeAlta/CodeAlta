@@ -25,6 +25,13 @@ public sealed record CodeModeToolOptions
     /// <summary>Gets the folder where the runs of a session keep their source, by session id, or null to keep none.</summary>
     public Func<string, string?>? SourceFolder { get; init; }
 
+    /// <summary>
+    /// Gets whether the tools are those of sessions: a call of <c>exec</c> then comes with the tools of its session
+    /// (<see cref="AgentToolInvocation.Tools"/>), which its script calls and whose hooks check its calls, and a call that
+    /// comes without them (one a provider makes outside a turn of the session) is refused instead of running unchecked.
+    /// </summary>
+    public bool OfSessions { get; init; }
+
     /// <summary>Gets whether <c>exec</c> takes over the other tools (the <c>only</c> mode): the model calls them through scripts.</summary>
     public bool TakesOver { get; init; }
 
@@ -260,6 +267,11 @@ public static class CodeModeToolFactory
             return Failure("exec needs `code`: the JavaScript to run.");
         }
 
+        if (options.OfSessions && invocation.Tools is null)
+        {
+            return Failure("This call of `exec` reached CodeAlta outside a turn of its session: its script would run without the tools of the session and without the checks of its calls. Call `exec` again.");
+        }
+
         var code = codeElement.GetString() ?? string.Empty;
         var source = CodeModeSource.Prepare(code);
         if (source.Error is not null)
@@ -345,6 +357,12 @@ public static class CodeModeToolFactory
 
         var run = options.Runs.TryStart(sessionId, execOptions.Title, maxOutputTokens, invocation.ToolCallId, start, (observer, runCancellation) =>
             {
+                // The pictures of the result are read as the session reads a picture: through its own tool, in its sandbox.
+                if (invocation.Tools is { } sessionTools)
+                {
+                    ((CodeModeRunHandle)observer).OpenImage = image => OpenImageAsync(sessionTools, image);
+                }
+
                 // The observer of a run is its handle: the sessions it starts know its id.
                 var agents = agentHost is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, execOptions.BudgetTokens) : null;
                 var values = new CodeModeValueBinding(options.Values, sessionId);
@@ -422,6 +440,62 @@ public static class CodeModeToolFactory
 
         return new AgentToolResult(true, [new AgentToolResultItem.Text(
             CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput(), WaitsLongFor(run)) + SourceLine(sourcePath))]);
+    }
+
+    private const string ViewImageToolName = "view_image";
+
+    // The content of a picture a script attached, as the tool of the session that looks at pictures gives it: a session
+    // that has no such tool, or whose sandbox or permissions refuse the file, attaches no picture.
+    private static async Task<(byte[]? Bytes, string? Why)> OpenImageAsync(IAgentRunToolInvoker tools, CodeModeImage image)
+    {
+        if (!tools.ListTools().Any(static spec => spec.Name == ViewImageToolName))
+        {
+            return (null, $"this session has no `{ViewImageToolName}` tool, so its scripts attach no picture.");
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("path", image.Path);
+            writer.WriteEndObject();
+        }
+
+        using var arguments = JsonDocument.Parse(stream.ToArray());
+        AgentToolResult result;
+        try
+        {
+            result = await tools.InvokeAsync(new AgentNestedToolCall(ViewImageToolName, arguments.RootElement.Clone()), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return (null, "the read was cancelled.");
+        }
+
+        if (!result.Success)
+        {
+            return (null, result.Error ?? string.Join(' ', result.Items.OfType<AgentToolResultItem.Text>().Select(static text => text.Value)));
+        }
+
+        foreach (var item in result.Items)
+        {
+            switch (item)
+            {
+                case AgentToolResultItem.Image picture:
+                    return (Convert.FromBase64String(picture.Base64Data), null);
+                case AgentToolResultItem.LocalImage local:
+                    try
+                    {
+                        return (await File.ReadAllBytesAsync(local.Path).ConfigureAwait(false), null);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        return (null, $"cannot be read: {exception.Message}");
+                    }
+            }
+        }
+
+        return (null, $"`{ViewImageToolName}` gave no picture.");
     }
 
     private static readonly string[] SessionCalls = [CodeModeAgentBinding.Path, CodeModeAgentBinding.AskPath];

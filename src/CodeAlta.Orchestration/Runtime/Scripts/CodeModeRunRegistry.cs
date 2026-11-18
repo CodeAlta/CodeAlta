@@ -114,7 +114,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(result);
-        return result.Images.Count == 0 ? Task.FromResult(CodeModeResultImages.None) : run.ReadImagesAsync(() => CodeModeResultImages.Read(result.Images));
+        return result.Images.Count == 0 ? Task.FromResult(CodeModeResultImages.None) : run.ReadImagesAsync(() => CodeModeResultImages.ReadAsync(result.Images, run.OpenImage));
     }
 
     // Writes the whole result in a file: what reads the text reads the rest there. A result that cannot be written keeps
@@ -939,22 +939,30 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     private Task<CodeModeResultImages>? _images;
 
     // The pictures of the result, read by the first that gives the result: exec, wait, the prompt, the store.
-    internal Task<CodeModeResultImages> ReadImagesAsync(Func<CodeModeResultImages> read)
+    internal Task<CodeModeResultImages> ReadImagesAsync(Func<Task<CodeModeResultImages>> read)
     {
         if (Volatile.Read(ref _images) is { } images)
         {
             return images;
         }
 
-        var reading = new Task<CodeModeResultImages>(read);
-        if (Interlocked.CompareExchange(ref _images, reading, null) is { } first)
+        var reading = new Task<Task<CodeModeResultImages>>(read);
+        var unwrapped = reading.Unwrap();
+        if (Interlocked.CompareExchange(ref _images, unwrapped, null) is { } first)
         {
             return first;
         }
 
         reading.Start(TaskScheduler.Default);
-        return reading;
+        return unwrapped;
     }
+
+    /// <summary>
+    /// Gets or sets what gives the content of a picture the script attached, as the session of the run reads it (its
+    /// sandbox, the tools it has), or why it does not; null for a run without a session, whose pictures are read from
+    /// their files.
+    /// </summary>
+    public Func<CodeModeImage, Task<(byte[]? Bytes, string? Why)>>? OpenImage { get; set; }
 
     // The file of the whole result, written by the first that formats the result: exec, wait, the prompt, the store.
     internal Task<string?> KeepResultAsync(Func<Task<string?>> keep)

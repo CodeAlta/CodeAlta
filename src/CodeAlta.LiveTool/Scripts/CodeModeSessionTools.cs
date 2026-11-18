@@ -108,6 +108,7 @@ public sealed class CodeModeSessionTools
             Values = new CodeModeValueStore(CodeModeValueStore.RootOf(catalog)),
             Runs = runs,
             Cache = new CodeModeScriptCache(),
+            OfSessions = true,
             SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,
         };
         return new CodeModeSessionTools(options, (providerKey, modelId) => ResolveMode(store, providerKey, modelId));

@@ -184,6 +184,7 @@ public sealed class HeadlessAltaTools : IAsyncDisposable
         var codeModeOptions = new CodeModeToolOptions
         {
             Runs = host.CodeModeRuns,
+            OfSessions = true,
             Agents = new DeferredCodeModeAgents(() => host.CodeModeAgents),
             Library = host.CodeModeScripts,
             Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),

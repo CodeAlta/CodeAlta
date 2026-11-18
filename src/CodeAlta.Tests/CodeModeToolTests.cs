@@ -417,6 +417,26 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task AnExecOfASession_ThatComesWithoutTheToolsOfItsSession_IsRefused_NotRunUnchecked()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "agent", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), OfSessions = true }).Single();
+
+        // What a provider does with a call it cannot match to a turn: it runs the tool with no tools of the session.
+        var detached = await InvokeAsync(exec, """{"code":"return await alta.prompt.list({});"}""");
+        var started = runs.List("session-1").Count;
+        var inTurn = await InvokeAsync(exec, "return (await alta.prompt.list({})).length > 0;", new FakeTools { Alta = AltaTool(root.Path) });
+
+        Assert.IsFalse(detached.Success);
+        StringAssert.Contains(Text(detached), "outside a turn of its session");
+        Assert.AreEqual(0, started, "no run started");
+        Assert.IsTrue(inTurn.Success, Text(inTurn));
+    }
+
+    [TestMethod]
     public async Task ASessionWhoseAltaToolIsOff_HasNoAltaInItsScripts()
     {
         using var root = TestTempDirectory.Create();
@@ -860,6 +880,25 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(text, $"image skipped: {Path.Combine(root.Path, "notes.txt")}: not a PNG, JPEG, GIF or WebP picture.\n");
         // The result stays the end of the text.
         StringAssert.EndsWith(text, "Result:\ndone\n");
+    }
+
+    // A picture is read as the session reads one: a file its sandbox or its tools keep from it is not attached.
+    [TestMethod]
+    public async Task APictureOfAScript_IsReadThroughTheImageToolOfItsSession_NeverBesideIt()
+    {
+        using var root = TestTempDirectory.Create();
+        File.WriteAllBytes(Path.Combine(root.Path, "chart.png"), Png);
+        await using var runs = new CodeModeRunRegistry(null);
+        var exec = Create(root.Path, runs);
+        const string script = """image("chart.png"); return "done";""";
+
+        var refused = await InvokeAsync(exec, script, new FakeTools { ImageRefusal = "This file is outside the sandbox of the session." });
+        var without = await InvokeAsync(exec, script, new FakeTools { ImageRefusal = "none" });
+
+        Assert.HasCount(1, refused.Items, "no picture is attached");
+        StringAssert.Contains(Text(refused), $"image skipped: {Path.Combine(root.Path, "chart.png")}: This file is outside the sandbox of the session.");
+        Assert.HasCount(1, without.Items);
+        StringAssert.Contains(Text(without), "this session has no `view_image` tool");
     }
 
     [TestMethod]
@@ -1577,7 +1616,12 @@ public sealed class CodeModeToolTests
             new("read_file", "Reads a file.", Schema("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""")) { RunsInParallel = true, Idempotent = true },
             new("github_list_issues", "Lists the issues of a repository.", Schema("""{"type":"object","properties":{"state":{"type":"string"}}}""")) { Group = "github", ScriptName = "list_issues" },
             new("alta", "alta", Schema("""{"type":"object"}""")),
+            .. ImageRefusal == "none" ? Array.Empty<AgentToolSpec>() : [new AgentToolSpec("view_image", "Looks at a picture.", Schema("""{"type":"object","properties":{"path":{"type":"string"}}}"""))],
         ];
+
+        // What the tool of the session that looks at pictures answers instead of the picture; null gives the picture, and
+        // "none" is a session without that tool.
+        public string? ImageRefusal { get; init; }
 
         // The `alta` tool of the session, which the calls of `alta.*` go through; null answers them as any other tool.
         public AgentToolDefinition? Alta { get; init; }
@@ -1590,6 +1634,15 @@ public sealed class CodeModeToolTests
         public async Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
         {
             lock (Calls) Calls.Add(call.ToolName);
+            if (call.ToolName == "view_image")
+            {
+                var file = call.Arguments.GetProperty("path").GetString()!;
+                if (ImageRefusal is { } refused) return new AgentToolResult(false, [new AgentToolResultItem.Text(refused)], refused);
+                return File.Exists(file)
+                    ? new AgentToolResult(true, [new AgentToolResultItem.Image(Convert.ToBase64String(File.ReadAllBytes(file)), "image/png")])
+                    : new AgentToolResult(false, [new AgentToolResultItem.Text("no such file.")], "no such file.");
+            }
+
             if (call.ToolName == "alta" && Alta is not null)
             {
                 lock (AltaCalls) AltaCalls.Add(call);
