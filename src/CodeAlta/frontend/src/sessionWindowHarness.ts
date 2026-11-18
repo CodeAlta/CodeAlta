@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { pressElement } from "./browserPointer";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 import { devToolsAnswerLimit, pageWaitLimit, testLimitRanOut } from "./testTime";
 
 /** The window in headless Edge, with what a test of its tabs needs to drive it and to read it. */
@@ -28,17 +28,17 @@ export type SessionWindow = Readonly<{
 }>;
 
 /**
- * Runs a test in the window itself (main.tsx) over the isolated host of `selectedSessionMenu.neoastra.mount.ts`,
- * with `storage` in its local storage before it loads.
+ * Runs a test in the window itself (main.tsx) over an isolated host, with `storage` in its local storage before it loads.
  */
-export async function withSessionWindow(storage: Readonly<Record<string, string>>, run: (window: SessionWindow) => Promise<void>) {
+export async function withSessionWindow(storage: Readonly<Record<string, string>>, run: (window: SessionWindow) => Promise<void>,
+  bridge = new URL("./selectedSessionMenu.neoastra.mount.ts", import.meta.url)) {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-window-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"),
       bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-session-window", setup(bundle) {
-        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./selectedSessionMenu.neoastra.mount.ts", import.meta.url)) }));
+        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(bridge) }));
         bundle.onResolve({ filter: /^monaco-editor\/.*\?worker$/ }, args => ({ path: args.path, namespace: "fixture-worker" }));
         bundle.onLoad({ filter: /.*/, namespace: "fixture-worker" }, async () => {
           const worker = await build({ entryPoints: [fileURLToPath(new URL("../node_modules/monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url))],
@@ -106,8 +106,9 @@ export async function withSessionWindow(storage: Readonly<Record<string, string>
     await command("Page.navigate", { url: pathToFileURL(page).href });
     await run({ command, evaluate, until, tabs, shown, press, session, scope, title, exceptions });
   } finally {
-    socket?.close(); browser?.kill();
-    await new Promise(resolve => setTimeout(resolve, 300));
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
+    socket?.close();
+    await endBrowser(browser);
     await rm(root, { recursive: true, force: true, maxRetries: 5 }).catch(() => { });
   }
 }

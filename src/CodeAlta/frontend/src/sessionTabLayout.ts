@@ -22,6 +22,9 @@ export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null; s
 /** The node that shows the new-session prompt when no session is shown: the tab of the scope, or the transient one. */
 export const shownDraftNodeId = (state: SessionTabView) => state.scope && hasDraftTab(state, state.scope) ? draftNodeId(state.scope) : sessionDraftNodeId;
 
+/** Whether the dock shows the transient new-session prompt as a tab. */
+export const hasTransientDraft = (state: SessionTabView) => !state.active && !state.noPrompt && shownDraftNodeId(state) === sessionDraftNodeId;
+
 // Project App's selection synchronously: its persistence effect can lag a render.
 // Never rebind an invalid formerly active identity to a reused session ID.
 // A selected session that has no tab yet is looked at: it takes the transient tab, unless it is opened to be kept.
@@ -83,7 +86,7 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
   const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId), ...drafts.map(draftNodeId)]);
   const shownDraft = shownDraftNodeId(state);
   // The transient prompt: no session is shown, and the prompt of the scope has no tab of its own.
-  const transientDraft = !state.active && shownDraft === sessionDraftNodeId && !state.noPrompt;
+  const transientDraft = hasTransientDraft(state);
   if (transientDraft) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });

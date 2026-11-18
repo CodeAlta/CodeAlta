@@ -73,6 +73,7 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
   let request: (value: WindowsRequest) => void = () => { };
   let reported = "";
   let reportTimer: ReturnType<typeof setTimeout> | null = null;
+  let reporting = false;
   let pending: Readonly<{ tabs: readonly string[]; active: string | null; pageState: string | null }> | null = null;
   let listing = 0;
   const notify = () => { for (const listener of [...listeners]) listener(); };
@@ -106,6 +107,22 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       state = { ...state, current: self, windows: reply.windows, restoreAtStartup: reply.restoreAtStartup };
       notify();
     } catch { /* The windows are read again when the host says they changed. */ }
+  }
+
+  function flushReport() {
+    if (reportTimer !== null) clearTimeout(reportTimer);
+    reportTimer = null;
+    if (!pending || reporting) return;
+    const value = pending, key = reported;
+    pending = null;
+    reporting = true;
+    const failed = () => { if (reported === key) reported = ""; };
+    void api.report({ tabs: [...value.tabs], active: value.active, pageState: value.pageState }, { timeoutMilliseconds: 15_000 })
+      .then(reply => { if (reply.status !== "ok") failed(); }, failed).finally(() => {
+        reporting = false;
+        // Keep the host's snapshots in order even when a newer report was flushed before this one answered.
+        if (reportTimer === null) flushReport();
+      });
   }
 
   return {
@@ -170,13 +187,10 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       for (const [tab, owner] of held) if (owner === current.id && !tabs.includes(tab)) held.delete(tab);
       for (const tab of tabs) held.set(tab, current.id);
       owners = held;
-      if (reportTimer === null) reportTimer = setTimeout(() => {
-        reportTimer = null;
-        const value = pending;
-        pending = null;
-        if (value) void api.report({ tabs: [...value.tabs], active: value.active, pageState: value.pageState }, { timeoutMilliseconds: 15_000 }).catch(() => { reported = ""; });
-      }, 200);
+      if (reportTimer === null) reportTimer = setTimeout(flushReport, 200);
     },
+    /** Sends a queued report without waiting for its timer. An in-flight report still finishes first. */
+    flushReport,
     /** Moves a tab of this window to another window, or to a new one (no target); the page closes the tab on `ok`. */
     async moveTab(tab: string, payload: string, spaceBound: boolean, target: string | null, requestId: string | null = null): Promise<string> {
       try { return (await api.moveTab({ tab, payload, spaceBound, target, requestId }, { timeoutMilliseconds: 60_000 })).status; }

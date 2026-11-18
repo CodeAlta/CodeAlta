@@ -254,6 +254,17 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
   };
   const promptLabel = (draft: DraftTab) => draftLabel?.(draft) ?? label(null);
+  // Listen before the first reconciliation: FlexLayout attaches its listener after layout effects.
+  const layoutChangedLatest = useRef(layoutChanged);
+  layoutChangedLatest.current = layoutChanged;
+  useLayoutEffect(() => {
+    const save = (action: Action) => {
+      if (!action.isAdjusting() && action.type !== Actions.RENAME_TAB && action.type !== Actions.UPDATE_NODE_ATTRIBUTES)
+        layoutChangedLatest.current?.(model);
+    };
+    model.addChangeListener(save);
+    return () => model.removeChangeListener(save);
+  }, [model]);
   useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel, promptLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
@@ -468,7 +479,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     <div className="session-dock"><Layout model={model} supportsPopout={false} invalidateTabContentOnParentRender={true}
       keyMap={{ closeTab: undefined, renameTab: undefined, focusTabToggle: undefined,
         focusNextTabset: undefined, focusPreviousTabset: undefined, closeOverlayBorder: undefined }}
-      onAction={action => dispatch(action)} onModelChange={(_model, action) => { changed(action); layoutChanged?.(model); }}
+      onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
       onContextMenu={(node, event) => {
         event.preventDefault();
         if (node instanceof TabNode) tabMenu(node, event.currentTarget as HTMLElement, { x: event.clientX, y: event.clientY });

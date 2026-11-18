@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WindowsCurrentResponse, WindowsEvent, WindowsWindow } from "#neoastra";
 import { automationsTab, canvasTab, changesTab, documentationTab, editorTab, terminalTab } from "../fileTabs";
+import { testLimit } from "../testTime";
 import { fileTabRef, readTransfer, sessionTabRef, spaceBound, tabRefKind, transferOf } from "./tabRefs";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsApi } from "./windowsHub";
 
@@ -145,6 +146,32 @@ test("what the host asks of the window reaches the shell, and the tabs are repor
   hub.claim("editor:p1");
   assert.equal(hub.ownerOf("editor:p1"), "main");
   stop();
+});
+
+test("flushing a window report sends it without a timer and never passes an older in-flight report", { timeout: testLimit(5000) }, async () => {
+  const secondary = window("w2");
+  const { api } = fakeApi(() => [secondary]);
+  const layouts: (string | null)[] = [];
+  let acknowledgeFirst!: () => void;
+  const first = new Promise<void>(resolve => { acknowledgeFirst = resolve; });
+  let sentLatest!: () => void;
+  const latest = new Promise<void>(resolve => { sentLatest = resolve; });
+  const hub = createWindowsHub({ ...api, report: async request => {
+    layouts.push(request.pageState);
+    if (layouts.length === 1) await first; else sentLatest();
+    return { status: "ok" };
+  } }, current(secondary));
+
+  hub.report([], null, "old");
+  hub.flushReport();
+  assert.deepEqual(layouts, ["old"]);
+  hub.report([], null, "intermediate");
+  hub.report([], null, "latest");
+  hub.flushReport();
+  assert.deepEqual(layouts, ["old"]);
+  acknowledgeFirst();
+  await latest;
+  assert.deepEqual(layouts, ["old", "latest"]);
 });
 
 test("the tabs the windows hold do not change what the page shows of them", async () => {
