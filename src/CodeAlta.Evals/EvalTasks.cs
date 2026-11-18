@@ -75,6 +75,41 @@ internal static class EvalTasks
             },
             outcome => string.Equals(LastLine(outcome), ReleaseCode(ReleaseVersion, "beta"), StringComparison.Ordinal)),
 
+        // A sub-agent with a reasoning effort the user names: the session must run at that effort, not at the parent's.
+        new("agent-effort", "sub-agent options",
+            "Start one sub-agent session that runs at the reasoning effort `medium`, whatever your own effort is, and ask it to answer with the single word `ready`. "
+            + "Then read from CodeAlta which reasoning effort that session recorded, and answer with `effort=<the recorded effort>` alone on the last line.",
+            _ => new Dictionary<string, string> { ["readme.md"] = "# Fixture\nA project.\n" },
+            outcome => string.Equals(LastLine(outcome)?.Replace(" ", string.Empty, StringComparison.Ordinal), "effort=medium", StringComparison.OrdinalIgnoreCase)),
+
+        // Several alta commands with options, a kind to choose and a text on stdin, then a listing.
+        new("alta-tasks", "alta commands",
+            "Propose three follow-up tasks for this project with the `alta` task commands: `Fix the --verbose flag` of kind problem, `Add a changelog` of kind gap, and "
+            + "`-Wall cleanup of the build` of kind improvement. Give each a one-sentence summary and a description with a `## Why` section. Then list the tasks of the project "
+            + "and answer with `tasks=<the number of tasks listed>` alone on the last line.",
+            _ => new Dictionary<string, string> { ["readme.md"] = "# Fixture\nA project.\n" },
+            outcome =>
+            {
+                var folder = Path.Combine(outcome.ProjectFolder, ".alta", "tasks");
+                if (!Directory.Exists(folder) || LastLine(outcome)?.Replace(" ", string.Empty, StringComparison.Ordinal) != "tasks=3") return false;
+                var tasks = Directory.GetFiles(folder, "*.md").Select(File.ReadAllText).ToArray();
+                return tasks.Length == 3
+                    && tasks.Any(static task => task.Contains("Fix the --verbose flag", StringComparison.Ordinal) && task.Contains("kind: problem", StringComparison.Ordinal))
+                    && tasks.Any(static task => task.Contains("Add a changelog", StringComparison.Ordinal) && task.Contains("kind: gap", StringComparison.Ordinal))
+                    && tasks.Any(static task => task.Contains("-Wall cleanup of the build", StringComparison.Ordinal) && task.Contains("kind: improvement", StringComparison.Ordinal))
+                    && tasks.All(static task => task.Contains("## Why", StringComparison.Ordinal));
+            }),
+
+        // A command the session was not shown, with a scope to choose and a text on stdin.
+        new("alta-prompt", "alta commands",
+            "Create an agent prompt named `reviewer` for this project (not a global one) with `alta`, whose text is `Review the diff and name each risk.`, then show it with `alta` "
+            + "and answer with `scope=<the scope alta reports for it>` alone on the last line.",
+            _ => new Dictionary<string, string> { ["readme.md"] = "# Fixture\nA project.\n" },
+            outcome => string.Equals(LastLine(outcome)?.Replace(" ", string.Empty, StringComparison.Ordinal), "scope=project", StringComparison.OrdinalIgnoreCase)
+                && Directory.Exists(Path.Combine(outcome.ProjectFolder, ".alta", "prompts"))
+                && Directory.GetFiles(Path.Combine(outcome.ProjectFolder, ".alta", "prompts"), "reviewer*", SearchOption.AllDirectories)
+                    .Any(static file => File.ReadAllText(file).Contains("Review the diff and name each risk.", StringComparison.Ordinal))),
+
         // A sequential control: one small edit, where a script should not help.
         new("edit-rename", "sequential control",
             "In src/app.js, rename the function `computeTotal` to `sumPrices`, everywhere it is used in that file. Answer `done` when it is done.",

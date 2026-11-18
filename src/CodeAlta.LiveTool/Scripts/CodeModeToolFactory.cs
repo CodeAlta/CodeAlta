@@ -86,7 +86,7 @@ public static class CodeModeToolFactory
         """ + ExecDescriptionLibrary + $$"""
 
 
-        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts; `max_output_tokens` is {{CodeModeResultFormatter.DefaultMaxOutputTokens}} by default). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts; `max_output_tokens` is {{CodeModeResultFormatter.DefaultMaxOutputTokens}} by default). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background, and its result comes back to this session as a prompt when it ends: go on with other work, or end your turn. Do not wait for it: while a tool call waits, the user cannot reach you.
         """ + ExecDescriptionEnd;
 
     // The description of exec for a session without sub-sessions: no agent() nor session(), which it does not have.
@@ -97,7 +97,7 @@ public static class CodeModeToolFactory
         """ + ExecDescriptionLibrary + $$"""
 
 
-        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "timeout_ms": 600000}` (`max_output_tokens` is {{CodeModeResultFormatter.DefaultMaxOutputTokens}} by default). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "timeout_ms": 600000}` (`max_output_tokens` is {{CodeModeResultFormatter.DefaultMaxOutputTokens}} by default). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background, and its result comes back to this session as a prompt when it ends: go on with other work, or end your turn. Do not wait for it: while a tool call waits, the user cannot reach you.
         """ + ExecDescriptionEnd;
 
     private const string ExecDescriptionStart = """
@@ -162,7 +162,7 @@ public static class CodeModeToolFactory
         }
         """;
 
-    private const string WaitDescription = "Wait for a script that `exec` left running in the background: returns its result, or what it wrote so far when `yield_ms` passes (30000 by default, at most 600000). Prefer one long wait, or other work, to repeated short ones. `terminate: true` stops the script.";
+    private const string WaitDescription = "Stop a script that `exec` left running in the background (`terminate: true`), or wait for the last seconds of one whose result your very next step needs: returns its result, or what it wrote so far when `yield_ms` passes (30000 by default, at most 600000). You rarely need it: the result of a script comes back to this session as a prompt when it ends, and while this tool waits the user cannot reach you. It does not wait for a script that waits for sub-agent sessions or sleeps: end your turn, or do other work.";
 
     private const string WaitSchema = """
         {
@@ -400,7 +400,7 @@ public static class CodeModeToolFactory
         var sourcePath = KeepSource(options, sessionId, run.Id, source);
 
         // While the turn waits for the run, stopping the turn stops it; once it goes on in the background, it no longer does.
-        var yieldTime = execOptions.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(yieldMs) : options.DefaultYield;
+        var yieldTime = execOptions.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(Math.Min(yieldMs, MaxWaitMilliseconds)) : options.DefaultYield;
         using (cancellationToken.Register(static state => ((CodeModeRunHandle)state!).Stop(), run))
         {
             try
@@ -411,6 +411,13 @@ public static class CodeModeToolFactory
                 {
                     var left = yieldTime - run.TimeNotWaitingForUser;
                     if (left <= TimeSpan.Zero && !run.WaitingForUser)
+                    {
+                        break;
+                    }
+
+                    // A longer yield is for a computation the turn needs: a script that waits for sessions of its own or
+                    // sleeps has the usual one, then leaves the turn free.
+                    if (yieldTime > options.DefaultYield && run.TimeNotWaitingForUser >= options.DefaultYield && WaitsLongFor(run) is not null)
                     {
                         break;
                     }
@@ -438,8 +445,17 @@ public static class CodeModeToolFactory
         }
 
         return new AgentToolResult(true, [new AgentToolResultItem.Text(
-            CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput()) + SourceLine(sourcePath))]);
+            CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput(), WaitsLongFor(run)) + SourceLine(sourcePath))]);
     }
+
+    private static readonly string[] SessionCalls = [CodeModeAgentBinding.Path, CodeModeAgentBinding.AskPath];
+
+    // What a run waits for that takes minutes, as its session is told; null when it computes or calls tools. A turn
+    // never waits on these: the sub-sessions of a session answer it by themselves, and so does a script that waits for them.
+    private static string? WaitsLongFor(CodeModeRunHandle run)
+        => !run.Running ? null
+            : run.PendingCalls(SessionCalls) is > 0 and var sessions ? (sessions == 1 ? "a sub-agent session" : $"{sessions.ToString(CultureInfo.InvariantCulture)} sub-agent sessions")
+            : run.Sleeping ? "a sleep" : null;
 
     private static async Task<AgentToolResult> WaitAsync(CodeModeToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
     {
@@ -465,7 +481,7 @@ public static class CodeModeToolFactory
         var yieldTime = arguments.TryGetProperty("yield_ms", out var yieldElement) && yieldElement.TryGetInt32(out var yieldMs) && yieldMs > 0
             ? TimeSpan.FromMilliseconds(Math.Clamp(yieldMs, terminates ? 1 : MinWaitMilliseconds, MaxWaitMilliseconds))
             : options.DefaultYield;
-        var (ended, result) = await options.Runs.WaitAsync(run, yieldTime, cancellationToken).ConfigureAwait(false);
+        var (ended, result) = await options.Runs.WaitAsync(run, yieldTime, terminates ? null : () => WaitsLongFor(run) is not null, cancellationToken).ConfigureAwait(false);
         if (ended)
         {
             return result is null
@@ -473,7 +489,7 @@ public static class CodeModeToolFactory
                 : new AgentToolResult(result.Status == CodeModeRunStatus.Completed, await WithImagesAsync(options.Runs, run, result, await options.Runs.FormatResultAsync(run, result).ConfigureAwait(false)).ConfigureAwait(false));
         }
 
-        return new AgentToolResult(true, [new AgentToolResultItem.Text(CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput()))]);
+        return new AgentToolResult(true, [new AgentToolResultItem.Text(CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput(), WaitsLongFor(run)))]);
     }
 
     // workflow({ scriptPath }) reads the file with the session's own read_file, so its sandbox and its tools apply.

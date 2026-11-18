@@ -375,6 +375,52 @@ public sealed class CodeModeToolTests
         Assert.AreEqual("ToolError: The policy of this project refuses `alta prompt create`.", error.RootElement.GetString(), Text(refused));
     }
 
+    // The sub-sessions of a session answer it by themselves: a turn is never held for them, whatever the script or the
+    // model asks, so that the user can always reach the session.
+    [TestMethod]
+    public async Task AScriptThatWaitsForSubAgents_IsNotWaitedFor_ByItsExecPastTheUsualYield_NorByWait()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new GatedAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var tools = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents, DefaultYield = TimeSpan.FromMilliseconds(100) });
+        var exec = tools.Single(static tool => tool.Spec.Name == "exec");
+        var wait = tools.Single(static tool => tool.Spec.Name == "wait");
+
+        var started = await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 600000}
+            return await Promise.all([agent("Review A."), agent("Review B.")]);
+            """, new FakeTools()).WaitAsync(TimeSpan.FromSeconds(30));
+        var runId = runs.List("session-1").Single().Id;
+        var waited = await InvokeAsync(wait, $$"""{"run":"{{runId}}","yield_ms":600000}""").WaitAsync(TimeSpan.FromSeconds(30));
+        agents.Release.SetResult();
+        var result = await runs.FindAny(runId)!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+
+        StringAssert.Contains(Text(started), "It waits for 2 sub-agent sessions, which `wait` does not wait for.");
+        StringAssert.Contains(Text(started), "its result comes back to this session as a prompt when it ends");
+        StringAssert.Contains(Text(waited), "It waits for 2 sub-agent sessions");
+        StringAssert.Contains(result.ValueJson, "answer to Review A.", "the script itself goes on to its end");
+    }
+
+    private sealed class GatedAgents : ICodeModeAgents
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<CodeModeAgentResult> RunAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
+        {
+            await Release.Task.WaitAsync(cancellationToken);
+            return new CodeModeAgentResult("child", true, "completed", "answer to " + request.Prompt, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero);
+        }
+
+        public Task<CodeModeAgentResult> OpenAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<CodeModeAgentResult> AskAsync(string runId, string sessionId, string prompt, JsonElement? schema, TimeSpan? timeout, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task CloseAsync(string runId, string sessionId) => Task.CompletedTask;
+    }
+
     [TestMethod]
     public async Task ASessionWhoseAltaToolIsOff_HasNoAltaInItsScripts()
     {
@@ -746,7 +792,7 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
-    public async Task TheDescriptionsOfExecAndWait_AskForBatches_AndOneLongWait_TheSameForEverySession()
+    public async Task TheDescriptionsOfExecAndWait_AskForBatches_AndNotToWait_TheSameForEverySession()
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
@@ -758,7 +804,8 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(exec.Spec.Description, $"`max_output_tokens` is {CodeModeResultFormatter.DefaultMaxOutputTokens} by default");
         Assert.DoesNotContain("\"max_output_tokens\": ", exec.Spec.Description);
         StringAssert.Contains(wait.Spec.Description, "30000 by default");
-        StringAssert.Contains(wait.Spec.Description, "Prefer one long wait, or other work, to repeated short ones");
+        StringAssert.Contains(wait.Spec.Description, "while this tool waits the user cannot reach you");
+        StringAssert.Contains(exec.Spec.Description, "Do not wait for it: while a tool call waits, the user cannot reach you.");
         Assert.AreEqual(exec.Spec.Description, again.Spec.Description, "the prompt cache holds");
     }
 

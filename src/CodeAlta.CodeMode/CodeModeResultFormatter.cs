@@ -456,6 +456,16 @@ public static class CodeModeResultFormatter
     /// <param name="recentOutput">The output it wrote so far, or null.</param>
     /// <returns>The text for the model.</returns>
     public static string FormatRunning(string runId, TimeSpan elapsed, int calls, string? recentOutput)
+        => FormatRunning(runId, elapsed, calls, recentOutput, null);
+
+    /// <summary>Formats what the model is told of a script that goes on, and of what it waits for.</summary>
+    /// <param name="runId">The id of the run.</param>
+    /// <param name="elapsed">How long it has run.</param>
+    /// <param name="calls">How many calls it made so far.</param>
+    /// <param name="recentOutput">The output it wrote so far, or null.</param>
+    /// <param name="waitsFor">What the script waits for that takes long, such as <c>2 sub-agent sessions</c>; null when nothing does.</param>
+    /// <returns>The text for the model.</returns>
+    public static string FormatRunning(string runId, TimeSpan elapsed, int calls, string? recentOutput, string? waitsFor)
     {
         var builder = new StringBuilder();
         builder.Append("Script running as ").Append(runId).Append(" · ").Append(Duration(elapsed)).Append(" · ")
@@ -465,7 +475,13 @@ public static class CodeModeResultFormatter
             builder.Append("Output:\n").Append(recentOutput.TrimEnd()).Append('\n');
         }
 
-        builder.Append("It goes on in the background: call `wait` with this run to wait for it, or end your turn; its result comes back to this session as a prompt.\n");
+        if (waitsFor is not null)
+        {
+            builder.Append("It waits for ").Append(waitsFor).Append(", which `wait` does not wait for. ");
+        }
+
+        // While a tool call waits, the user cannot reach the session: the result finds it by itself.
+        builder.Append("It goes on in the background, and its result comes back to this session as a prompt when it ends: go on with other work, or end your turn. Do not wait for it.\n");
         return builder.ToString();
     }
 

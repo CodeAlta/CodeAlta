@@ -891,7 +891,7 @@ public sealed class SystemPromptBuilder
         - **Keep sequential what depends on a result:** an edit that depends on what you are reading, the test run after a change, the next step of a diagnosis. For a single call, call the tool directly.
         - **`alta` in a script:** a command your instructions give as `alta <group> <command> ...` is the function `alta.<group>.<command>({ ... })`, its arguments and options by name in camelCase and `stdin` for what `--stdin` reads. `codemode.describe({ path: "alta.<group>.<command>" })` gives its arguments and its result, and `alta.run({ args: [..., "--help"] })` its help.
         - **Return only what you will use:** the lines or matches you need, the exit code and the failing part of a test run; not whole tool objects or long logs. A result past `max_output_tokens` is kept in a file and you see only its start and end.
-        - **A script still running:** do other work, or call `wait` with a `yield_ms` of 30000 or more; do not poll in short steps.
+        - **A script still running** goes on in the background, and its result comes back to you as a prompt when it ends, as the answer of a sub-agent does: go on with other work, or end your turn. Do not call `wait` for it, and do not raise `yield_ms` to keep it in your turn: while a tool call waits, the user cannot reach you.
         - **A long script the user waits on:** `present(markdown)` shows them its progress, its findings and its report on the card of the run as it goes; what the script returns stays yours. A quick script presents nothing: your answer does.
         - **Sub-agents:** `agent()` starts a sub-agent and follows the rules of "Sub-agents". When they call for several, start them in one `exec` with `parallel()`, and give that script a `meta` with its steps, each wrapped in `step()`: the user follows its progress.
 
@@ -927,7 +927,7 @@ public sealed class SystemPromptBuilder
         - **Keep sequential what depends on a result:** an edit that depends on what you are reading, the test run after a change, the next step of a diagnosis. For a single call, call the tool directly.
         - **`alta` in a script:** a command your instructions give as `alta <group> <command> ...` is the function `alta.<group>.<command>({ ... })`, its arguments and options by name in camelCase and `stdin` for what `--stdin` reads. `codemode.describe({ path: "alta.<group>.<command>" })` gives its arguments and its result, and `alta.run({ args: [..., "--help"] })` its help.
         - **Return only what you will use:** the lines or matches you need, the exit code and the failing part of a test run; not whole tool objects or long logs. A result past `max_output_tokens` is kept in a file and you see only its start and end.
-        - **A script still running:** do other work, or call `wait` with a `yield_ms` of 30000 or more; do not poll in short steps.
+        - **A script still running** goes on in the background, and its result comes back to you as a prompt when it ends, as the answer of a sub-agent does: go on with other work, or end your turn. Do not call `wait` for it, and do not raise `yield_ms` to keep it in your turn: while a tool call waits, the user cannot reach you.
         - **A long script the user waits on:** `present(markdown)` shows them its progress, its findings and its report on the card of the run as it goes; what the script returns stays yours. A quick script presents nothing: your answer does.
 
         ```js

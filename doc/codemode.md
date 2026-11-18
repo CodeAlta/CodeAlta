@@ -73,7 +73,10 @@ A tool's structured value (`AgentToolResult.Structured`) is what a script receiv
 
 Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to a turn:
 
-- `exec` waits for its run until the yield time; the run then goes on in the background, and the turn may end.
+- `exec` waits for its run until the yield time; the run then goes on in the background, and the turn may end. A turn
+  is never held for sessions: a run that waits for its sub-agents or sleeps is left by `exec` after the default yield
+  and is not waited for by `wait`, since its result finds the session by itself and a waiting tool call keeps the user
+  out.
 - Its result is taken once: by the `exec` that waited, by a `wait` that waits when it ends, or else delivered to its
   session as a prompt of provenance `workflow`.
 - That result is one text for the model (`CodeModeResultFormatter`), the value last. The value is data for the model,

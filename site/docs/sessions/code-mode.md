@@ -6,7 +6,7 @@ title: Code Mode
 
 With Code Mode, an agent can write a short JavaScript program that calls its tools, instead of calling them one by one. Loops, filters and calls in parallel then run without a round trip to the model, and only what the script returns comes back to it: fewer turns, fewer tokens, and work that keeps going while the model waits.
 
-Code Mode is on by default, for every provider and model. Agents keep all their tools and get two more: `exec`, which runs a script, and `wait`, which waits for a script that goes on in the background.
+Code Mode is on by default, for every provider and model. Agents keep all their tools and get two more: `exec`, which runs a script, and `wait`, which stops a script that goes on in the background or waits for the last seconds of one.
 
 Their instructions lead them to it for work that splits. A request about several topics, files, modules or options becomes one script that gives each part to a sub-agent and runs them all at once, and you follow its steps and sessions [in the timeline](#in-the-timeline). A sub-agent does its own part itself instead of starting sub-agents of its own.
 
@@ -107,7 +107,7 @@ Click the card of a script without steps or sessions, or **Show the call** on a 
 
 ## Long scripts
 
-`exec` waits 30 seconds for a script, or what its first line says (`yield_ms`). A script still running then goes on in the background: the agent can call `wait` for it, which waits 30 seconds by default and at least 10 seconds unless it stops the script, or end its turn. When it ends, its result comes back to the session as a **Workflow** message.
+`exec` waits 30 seconds for a script, or what its first line says (`yield_ms`). A script still running then goes on in the background, and the agent goes on with other work or ends its turn: when the script ends, its result comes back to the session as a **Workflow** message, so you can write to the session meanwhile. A script that waits for its sub-agents or sleeps never keeps the turn longer than those 30 seconds, whatever `yield_ms` says, and `wait` does not wait for it. `wait` is for a result the agent needs within seconds: it waits 30 seconds by default, at least 10 unless it stops the script.
 
 While it runs, it is listed above the prompt with what the session runs in the background: click it there to go to its card in the timeline.
 

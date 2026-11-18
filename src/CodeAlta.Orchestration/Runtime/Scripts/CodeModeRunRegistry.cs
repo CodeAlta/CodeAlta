@@ -660,6 +660,9 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <param name="sessionId">The session.</param>
     /// <param name="runId">The id of the run.</param>
     /// <returns>The run, or null.</returns>
+    // How often a wait asks whether it should give up.
+    private static readonly TimeSpan WaitCheck = TimeSpan.FromMilliseconds(200);
+
     public CodeModeRunHandle? Find(string sessionId, string runId)
         => _runs.TryGetValue(runId, out var run) && run.SessionId == sessionId ? run : null;
 
@@ -673,16 +676,33 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <returns>Whether the run ended, and its result when this wait took it; null when the session was already given it.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
     /// <exception cref="OperationCanceledException">The wait was cancelled.</exception>
-    public async Task<(bool Ended, CodeModeRunResult? Result)> WaitAsync(CodeModeRunHandle run, TimeSpan timeout, CancellationToken cancellationToken)
+    public Task<(bool Ended, CodeModeRunResult? Result)> WaitAsync(CodeModeRunHandle run, TimeSpan timeout, CancellationToken cancellationToken)
+        => WaitAsync(run, timeout, null, cancellationToken);
+
+    /// <summary>
+    /// Waits for a run as <see cref="WaitAsync(CodeModeRunHandle, TimeSpan, CancellationToken)"/> does, and stops waiting
+    /// as soon as the caller says so: a run that started what takes long (sessions of its own) is not waited for.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <param name="timeout">How long to wait.</param>
+    /// <param name="giveUp">Asked while the run goes on: true stops the wait; null never does.</param>
+    /// <param name="cancellationToken">Cancels the wait, not the run.</param>
+    /// <returns>Whether the run ended, and its result when this wait took it; null when the session was already given it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The wait was cancelled.</exception>
+    public async Task<(bool Ended, CodeModeRunResult? Result)> WaitAsync(CodeModeRunHandle run, TimeSpan timeout, Func<bool>? giveUp, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(run);
         run.AddWaiter(1);
         try
         {
-            await run.Completion.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
+            var waited = Stopwatch.StartNew();
+            while (!run.Completion.IsCompleted && waited.Elapsed < timeout && giveUp?.Invoke() != true)
+            {
+                var slice = timeout - waited.Elapsed;
+                await Task.WhenAny(run.Completion, Task.Delay(giveUp is not null && slice > WaitCheck ? WaitCheck : slice, cancellationToken)).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
         }
         finally
         {
@@ -922,6 +942,8 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     private readonly ConcurrentQueue<string> _recent = new();
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private int _calls;
+    private int _sleeping;
+    private readonly ConcurrentDictionary<(int Scope, int Index), string> _pendingCalls = new();
     private int _collected;
     private int _backgrounded;
     private int _waiters;
@@ -957,6 +979,19 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     /// <summary>Gets how many calls it made so far.</summary>
     public int Calls => Volatile.Read(ref _calls);
+
+    /// <summary>Gets whether the script sleeps.</summary>
+    public bool Sleeping => Volatile.Read(ref _sleeping) > 0;
+
+    /// <summary>Counts the calls of some functions that the script made and that have not ended.</summary>
+    /// <param name="paths">The paths of the functions, such as <c>codemode.agent</c>.</param>
+    /// <returns>How many of them are pending.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="paths"/> is null.</exception>
+    public int PendingCalls(IReadOnlyCollection<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return _pendingCalls.Values.Count(paths.Contains);
+    }
 
     /// <summary>Gets how long it has run.</summary>
     public TimeSpan Elapsed => _clock.Elapsed;
@@ -1207,10 +1242,15 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     void ICodeModeRunObserver.CallStarted(CodeModeCall call)
     {
         Interlocked.Increment(ref _calls);
+        _pendingCalls[(call.Scope, call.Index)] = call.Path;
         Writer?.CallStarted(call);
     }
 
-    void ICodeModeRunObserver.CallEnded(CodeModeCallRecord record) => Writer?.CallEnded(record);
+    void ICodeModeRunObserver.CallEnded(CodeModeCallRecord record)
+    {
+        _pendingCalls.TryRemove((record.Scope, record.Index), out _);
+        Writer?.CallEnded(record);
+    }
 
     void ICodeModeRunObserver.StepStarted(string stepId) => Record(AgentWorkflowEventKind.StepStarted, record => record with { StepId = stepId });
 
@@ -1242,12 +1282,14 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     void ICodeModeRunObserver.SleepStarted(CodeModeSleep sleep)
     {
+        Interlocked.Increment(ref _sleeping);
         Writer?.SleepStarted(sleep);
         Record(AgentWorkflowEventKind.WaitStarted, record => record with { Status = "sleep", StepId = sleep.StepId, WakeAt = sleep.WakeAt });
     }
 
     void ICodeModeRunObserver.SleepEnded(CodeModeSleep sleep)
     {
+        Interlocked.Decrement(ref _sleeping);
         Writer?.SleepEnded(sleep);
         Record(AgentWorkflowEventKind.WaitEnded, record => record with { Status = "sleep", StepId = sleep.StepId });
     }
