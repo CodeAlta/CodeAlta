@@ -22,6 +22,9 @@ internal sealed record FleetHeldSend(string RunId, string SessionId, string Text
     /// <summary>Gets the run the budgets admit when it is not the retry key: the session, for the first prompt of a new session.</summary>
     public string? BudgetRunId { get; init; }
 
+    /// <summary>Gets the script operation that waits for this first prompt to settle, including while it waits for a seat.</summary>
+    public Guid? ScriptOperationId { get; init; }
+
     /// <summary>Gets the permission mode chosen for this prompt; null keeps the session's mode.</summary>
     public string? PermissionMode { get; init; }
 
@@ -42,7 +45,7 @@ internal sealed record FleetHeldSend(string RunId, string SessionId, string Text
 
     /// <summary>Gets the run the hold is bound to, asked again with the same nonce after a restart.</summary>
     [JsonIgnore]
-    public string HoldId => BudgetRunId ?? RunId;
+    public string HoldId => ScriptOperationId?.ToString("N") ?? BudgetRunId ?? RunId;
 }
 
 /// <summary>

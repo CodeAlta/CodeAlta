@@ -14,7 +14,7 @@ public sealed partial class FleetNodeService
     private Task<FleetCreateSessionResult> CreateSessionAsync(FleetNodeCall call, FleetCreateSessionParams parameters, CancellationToken cancellationToken)
     {
         ValidateCreation(parameters, call.Device!.Permissions);
-        if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
+        if (parameters.Agent is not null || parameters.ForScript) return CreateAgentSessionAsync(call, parameters);
         var retryKey = RetryKey(call);
         return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(call.Device, retryKey, parameters)));
     }
@@ -364,7 +364,15 @@ public sealed partial class FleetNodeService
     }
 
     private async Task<FleetCommandResult> AbortAsync(FleetNodeCall call, FleetAbortParams parameters, CancellationToken cancellationToken)
-        => await AbortPersonAsync(RetryKey(call), parameters, cancellationToken).ConfigureAwait(false);
+    {
+        if (parameters.ScriptOperationId is not { } operation)
+            return await AbortPersonAsync(RetryKey(call), parameters, cancellationToken).ConfigureAwait(false);
+
+        var id = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        if (_agents.Find(id)?.ParentDeviceId != call.Caller.DeviceId)
+            throw new FleetException(FleetErrorCodes.Forbidden, null, "Only the device that started the script child may stop its operation.");
+        return await Once(call, FleetNodeJsonContext.Default.FleetCommandResult, () => StopScriptChildAsync(id, operation, cancellationToken)).ConfigureAwait(false);
+    }
 
     private async Task<FleetCommandResult> AbortPersonAsync(string retryKey, FleetAbortParams parameters, CancellationToken cancellationToken)
     {

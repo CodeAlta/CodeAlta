@@ -178,6 +178,33 @@ public sealed partial class SessionRuntimeService
         return await TryReadStoredHistoryOwnedBodyAsync(session, onUnavailable, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Waits for the session's tree to settle and reads its outcome, including turns started by its background work.</summary>
+    /// <param name="session">The session at the root of the tree.</param>
+    /// <param name="fromRun">The first run to include; null for the run of the last answer.</param>
+    /// <param name="cancellationToken">Stops waiting; the session goes on.</param>
+    /// <returns>The outcome read from the journal after settlement.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The wait or read was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public Task<SessionOutcome> ReadSettledOutcomeAsync(SessionViewDescriptor session, AgentRunId? fromRun, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return ReadSettledOutcomeAsync(session.SessionId, () => ReadOutcomeAsync(session, fromRun, cancellationToken), cancellationToken);
+    }
+
+    internal async Task<SessionOutcome> ReadSettledOutcomeAsync(string sessionId, Func<Task<SessionOutcome>> read, CancellationToken cancellationToken)
+    {
+        // A follow-up turn may start as settlement is confirmed; a journal read can also race its first record.
+        const int maxRereads = 5;
+        for (var attempt = 0; ; attempt++)
+        {
+            await WhenSettledAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var outcome = await read().ConfigureAwait(false);
+            if (attempt >= maxRereads || outcome is not ({ Status: SessionOutcomeStatus.Running } or { Status: SessionOutcomeStatus.Unknown, EventCount: 0 }))
+                return outcome;
+        }
+    }
+
     /// <summary>
     /// Reads how the runs of a session ended from its journal (<see cref="SessionOutcome"/>): from the first record of a
     /// run to the end, which a run, the queued prompts and the answers of children it started make; or the run of its last

@@ -210,8 +210,9 @@ editor says why another one is refused:
 
 - A workflow script places its sub-agents: `agent(prompt, { machine: "any", tags: ["macos"] })` starts the child on a
   machine that matches, through the server, with the parent's restrictions; `parallel()` fans out across machines.
-- The workflow's run stays owned by the session that runs the script, on its machine; children elsewhere report back
-  through deliveries, which wait while the parent's machine is offline.
+- The workflow's run stays owned by the session that runs the script. Its signed start asks for a script child, not
+  per-turn notifications. The node delivers one outcome after the child and its work settle; the delivery waits while
+  the parent is offline. The start receipt identifies the operation the parent can stop, even between turns or in the seat queue.
 - The run's graph (the Code Mode graph already drawn by the desktop) spans machines; one trace follows it
   ([observability](observability.md#traces)).
 - Scripts used by unattended runs are **approved versions**: an automation pins the hash it was allowed with (as

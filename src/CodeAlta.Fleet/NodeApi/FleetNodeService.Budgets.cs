@@ -61,9 +61,23 @@ public sealed partial class FleetNodeService
             ? new OwnedSessionSelection(provider, prompt, held.ModelId,
                 Enum.TryParse<CodeAlta.Agent.AgentReasoningEffort>(held.ReasoningEffort, ignoreCase: true, out var effort) ? effort : null) { PermissionMode = held.PermissionMode }
             : null;
-        var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(held.RunId, held.SessionId, held.Text) { Selection = selection }, CancellationToken.None);
+        var request = new OwnedTextSendRequest(held.RunId, held.SessionId, held.Text) { Selection = selection };
+        OwnedSessionCommandAdmission admission;
+        if (held.ScriptOperationId is { } operation)
+        {
+            lock (_scriptAdmission)
+            {
+                if (_agents.Find(held.SessionId)?.ScriptOperationId != operation) return new FleetCommandResult("cancelled");
+                admission = _host.Commands.AdmitSend(request, CancellationToken.None);
+            }
+        }
+        else admission = _host.Commands.AdmitSend(request, CancellationToken.None);
+
         if (admission is { Kind: OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay, Receipt: { } receipt })
+        {
             _ = ForgetOnceStartedAsync(held.HoldId, receipt.Completion);
+            if (held.ScriptOperationId is { } script) _ = ReportScriptChildAsync(held.SessionId, script, receipt.Completion);
+        }
         else HeldSends.Remove(held.HoldId);
         return Admit(admission);
     }
@@ -203,7 +217,7 @@ public sealed partial class FleetNodeService
                 var result = held.IsQueued ? await WithinSeatAsync(session, held.Title, held, "send").ConfigureAwait(false)
                     : await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
                 // Nobody waits for this answer: a session at work takes the prompt into its queue rather than lose it.
-                if (result.Status == "busy") result = await QueueInSessionAsync(held).ConfigureAwait(false);
+                if (result.Status == "busy" && held.ScriptOperationId is null) result = await QueueInSessionAsync(held).ConfigureAwait(false);
                 LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
             }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException

@@ -117,6 +117,9 @@ public static class FleetAgentRequestKinds
     /// <summary>Starts a session, the child of the agent's session, with its first prompt.</summary>
     public const string Start = "start";
 
+    /// <summary>Starts a child for a script. It answers after its tree settles. Nodes without this contract refuse the kind.</summary>
+    public const string StartScript = "startScript";
+
     /// <summary>Sends a prompt that starts a turn of a session.</summary>
     public const string Send = "send";
 
@@ -204,7 +207,7 @@ public static class FleetAgentRequestDocuments
             return false;
         }
 
-        if (read.Kind is not (FleetAgentRequestKinds.Start or FleetAgentRequestKinds.Send or FleetAgentRequestKinds.Queue or FleetAgentRequestKinds.Steer))
+        if (read.Kind is not (FleetAgentRequestKinds.Start or FleetAgentRequestKinds.StartScript or FleetAgentRequestKinds.Send or FleetAgentRequestKinds.Queue or FleetAgentRequestKinds.Steer))
         {
             reason = $"'{read.Kind}' is not a kind of agent request";
             return false;
@@ -217,8 +220,14 @@ public static class FleetAgentRequestDocuments
             return false;
         }
 
-        if (read.Kind == FleetAgentRequestKinds.Start)
+        if (read.Kind is FleetAgentRequestKinds.Start or FleetAgentRequestKinds.StartScript)
         {
+            if (read.Kind == FleetAgentRequestKinds.StartScript && read.TextHash is null)
+            {
+                reason = "a script starts its child with a prompt";
+                return false;
+            }
+
             if (read.Limits is not { } limits || read.SessionId is not null)
             {
                 reason = "a start names its limits, and no session";

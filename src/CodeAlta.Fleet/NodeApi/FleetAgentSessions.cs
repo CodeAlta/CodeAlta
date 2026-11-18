@@ -15,7 +15,11 @@ namespace CodeAlta.Fleet.NodeApi;
 /// <param name="Nonce">The nonce of the request that started it, never accepted again.</param>
 /// <param name="CreatedAt">When it was started.</param>
 public sealed record FleetAgentChild(string ChildSessionId, string ParentSessionId, string ParentDeviceId, string ParentMachineName, string SpaceId,
-    IReadOnlyList<string> DisabledTools, string Nonce, DateTimeOffset CreatedAt);
+    IReadOnlyList<string> DisabledTools, string Nonce, DateTimeOffset CreatedAt)
+{
+    /// <summary>Gets the script operation until its result is enqueued or the script cancels it. An ordinary child has none.</summary>
+    public Guid? ScriptOperationId { get; init; }
+}
 
 /// <summary>
 /// What a node keeps of the sessions agents of other machines start on it (<c>doc/fleet/sessions-across-machines.md</c>,
@@ -155,15 +159,36 @@ public sealed class FleetAgentSessions : IRemoteParentNotifications
             // Only to the device that started the session, for the parent it named.
             var child = _state.Children.FirstOrDefault(value => string.Equals(value.ChildSessionId, notification.ChildSessionId, StringComparison.OrdinalIgnoreCase));
             if (child is null || !string.Equals(child.ParentSessionId, notification.ParentSessionId, StringComparison.OrdinalIgnoreCase)) return Task.CompletedTask;
-            var body = notification.Body.Length > MaxDeliveryText ? notification.Body[..MaxDeliveryText] : notification.Body;
-            var delivery = new FleetAgentStoredDelivery(child.ParentDeviceId, new FleetAgentDelivery(Guid.NewGuid().ToString("N"), child.ChildSessionId,
-                notification.ChildProjectId, child.ParentSessionId, notification.Kind, body, notification.RunId, notification.ContentId, _time.GetUtcNow()));
-            var deliveries = _state.Deliveries.Append(delivery).ToList();
-            if (deliveries.Count > MaxDeliveries) deliveries.RemoveRange(0, deliveries.Count - MaxDeliveries);
-            Save(_state with { Deliveries = deliveries });
+            Save(WithDelivery(_state, child, notification.ChildProjectId, notification.Kind, notification.Body, notification.RunId, notification.ContentId));
         }
 
         return Task.CompletedTask;
+    }
+
+    // Recording the outcome and retiring the operation that cancels it are one change. A late cancellation cannot
+    // stop a later turn of the same session; an outcome that lost to a cancellation has no waiting script.
+    internal bool EndScript(string sessionId, Guid operation, string? project = null, string? answer = null, string? failure = null, string? runId = null)
+    {
+        lock (_gate)
+        {
+            var child = Find(sessionId);
+            if (child?.ScriptOperationId != operation) return false;
+            var state = _state with { Children = [.. _state.Children.Select(item => item == child ? item with { ScriptOperationId = null } : item)] };
+            if ((failure ?? answer) is { } body)
+                state = WithDelivery(state, child, project, failure is null ? "answer" : "error", body, runId, operation.ToString("N"));
+            Save(state);
+            return true;
+        }
+    }
+
+    private FleetAgentState WithDelivery(FleetAgentState state, FleetAgentChild child, string? project, string kind, string body, string? runId, string contentId)
+    {
+        if (body.Length > MaxDeliveryText) body = body[..MaxDeliveryText];
+        var delivery = new FleetAgentStoredDelivery(child.ParentDeviceId, new FleetAgentDelivery(Guid.NewGuid().ToString("N"), child.ChildSessionId,
+            project, child.ParentSessionId, kind, body, runId, contentId, _time.GetUtcNow()));
+        var deliveries = state.Deliveries.Append(delivery).ToList();
+        if (deliveries.Count > MaxDeliveries) deliveries.RemoveRange(0, deliveries.Count - MaxDeliveries);
+        return state with { Deliveries = deliveries };
     }
 
     /// <summary>Takes the deliveries of a device, oldest first, without forgetting them.</summary>

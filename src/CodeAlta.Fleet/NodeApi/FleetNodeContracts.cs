@@ -742,7 +742,7 @@ public sealed record FleetCreateSessionParams(string? ProjectId = null, string? 
 
     /// <summary>
     /// Gets the signed request of the agent that starts the session as the child of its own, on behalf of the person of
-    /// the calling device (<see cref="Protocol.FleetAgentRequestKinds.Start"/>); null for a session a person starts.
+    /// the calling device (<see cref="Protocol.FleetAgentRequestKinds.Start"/> or <see cref="Protocol.FleetAgentRequestKinds.StartScript"/>); null for a session a person starts.
     /// </summary>
     public Protocol.FleetSignedAgentRequest? Agent { get; init; }
 
@@ -758,6 +758,9 @@ public sealed record FleetCreateSessionParams(string? ProjectId = null, string? 
     /// </summary>
     public string? Sandbox { get; init; }
 
+    /// <summary>Gets whether this is a signed <see cref="Protocol.FleetAgentRequestKinds.StartScript"/> rather than an ordinary creation.</summary>
+    public bool ForScript { get; init; }
+
     /// <summary>Gets whether the session can start sessions of its own; null for yes. A session an agent starts takes it from its request.</summary>
     public bool? SubSessions { get; init; }
 }
@@ -768,6 +771,9 @@ public sealed record FleetCreateSessionParams(string? ProjectId = null, string? 
 /// <param name="Send">The admission of its first prompt; null without one.</param>
 public sealed record FleetCreateSessionResult(string SessionId, string ProviderKey, FleetCommandResult? Send)
 {
+    /// <summary>Gets the operation that stops this script child's work, even while queued or between its turns; null for an ordinary child.</summary>
+    public Guid? ScriptOperationId { get; init; }
+
     /// <summary>Gets the permission mode a session an agent started runs in, as the node decided it; null for another session.</summary>
     public string? PermissionMode { get; init; }
 
@@ -809,15 +815,19 @@ public sealed record FleetSteerParams(string SessionId, string Text, Guid Runtim
 }
 
 /// <summary>
-/// The parameters of <c>sessions.abort</c>: either the send to stop (<see cref="OperationId"/>), or the exact run of the
-/// session (<see cref="RuntimeInstanceId"/>, <see cref="AttachmentGeneration"/> and <see cref="RunId"/>).
+/// The parameters of <c>sessions.abort</c>: a script child (<see cref="ScriptOperationId"/>), a send (<see cref="OperationId"/>),
+/// or an exact run (<see cref="RuntimeInstanceId"/>, <see cref="AttachmentGeneration"/> and <see cref="RunId"/>).
 /// </summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="OperationId">The operation of a send this caller was given.</param>
 /// <param name="RuntimeInstanceId">The runtime the caller saw.</param>
 /// <param name="AttachmentGeneration">The attachment the caller saw.</param>
 /// <param name="RunId">The run the caller saw.</param>
-public sealed record FleetAbortParams(string SessionId, Guid? OperationId = null, Guid? RuntimeInstanceId = null, long? AttachmentGeneration = null, string? RunId = null);
+public sealed record FleetAbortParams(string SessionId, Guid? OperationId = null, Guid? RuntimeInstanceId = null, long? AttachmentGeneration = null, string? RunId = null)
+{
+    /// <summary>Gets the operation from the receipt of a script child's creation. Only the device that started it can stop it this way.</summary>
+    public Guid? ScriptOperationId { get; init; }
+}
 
 /// <summary>
 /// The admission of an owned command: <c>accepted</c>, <c>replay</c> (a retry of the same key: the first receipt),

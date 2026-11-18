@@ -13,6 +13,9 @@ namespace CodeAlta.Fleet.NodeApi;
 // is signed by that device, the node's policy is the final authority, and nothing is given more than its parent has.
 public sealed partial class FleetNodeService
 {
+    // Orders the handoff of a seated script prompt to the runtime against cancellation of that operation.
+    private readonly Lock _scriptAdmission = new();
+
     /// <summary>Gets what the node keeps of the sessions agents of other machines started on it: its owner's policy, their lineage and their outbox.</summary>
     public FleetAgentSessions AgentSessions => _agents;
 
@@ -112,7 +115,7 @@ public sealed partial class FleetNodeService
     // policy of the node; the node refuses what it cannot hold.
     private Task<FleetCreateSessionResult> CreateAgentSessionAsync(FleetNodeCall call, FleetCreateSessionParams parameters)
     {
-        var request = VerifyAgent(call, parameters.Agent, FleetAgentRequestKinds.Start);
+        var request = VerifyAgent(call, parameters.Agent, parameters.ForScript ? FleetAgentRequestKinds.StartScript : FleetAgentRequestKinds.Start);
         if (!SameId(parameters.SpaceId, request.SpaceId) || !SameId(parameters.ProjectId, request.ProjectId)
             || (parameters.Prompt is { } prompt ? request.TextHash != FleetAgentRequestDocuments.HashText(prompt) : request.TextHash is not null))
             throw new FleetException(FleetNodeErrorCodes.AgentRequestInvalid, null, "The space, the project or the prompt is not the one the agent request signs.");
@@ -157,9 +160,10 @@ public sealed partial class FleetNodeService
         if (toolsOff.Select(AgentToolPatterns.Validate).FirstOrDefault(static error => error is not null) is { } invalidTools)
             throw Refused($"The tools the policy of the organization turns off do not read: {invalidTools}");
         var sessionId = Guid.NewGuid().ToString();
+        Guid? scriptOperation = request.Kind == FleetAgentRequestKinds.StartScript ? Guid.NewGuid() : null;
         var createdBy = new AltaActorProvenance
         {
-            Kind = "agent",
+            Kind = scriptOperation is null ? "agent" : AltaActorProvenance.WorkflowKind,
             SourceSessionId = request.ParentSessionId,
             SourceMachineId = call.Caller.DeviceId,
             SourceMachineName = request.ParentMachineName,
@@ -187,7 +191,7 @@ public sealed partial class FleetNodeService
         }
 
         _agents.Add(new FleetAgentChild(session.SessionId, request.ParentSessionId, call.Caller.DeviceId, request.ParentMachineName, request.SpaceId,
-            toolsOff, request.Nonce, _options.TimeProvider.GetUtcNow()));
+            toolsOff, request.Nonce, _options.TimeProvider.GetUtcNow()) { ScriptOperationId = scriptOperation });
         Work.Record(session.SessionId, request.SpaceId, "agent", _options.TimeProvider.GetUtcNow());
         if (sandbox is not null)
         {
@@ -208,10 +212,63 @@ public sealed partial class FleetNodeService
         {
             var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
             // The first run asks a seat of the machine: it may wait for its turn there, the creation does not.
-            send = await WithinSeatAsync(session, parameters.Title, HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection), "agent").ConfigureAwait(false);
+            var held = HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection) with { ScriptOperationId = scriptOperation };
+            send = await WithinSeatAsync(session, parameters.Title, held, "agent").ConfigureAwait(false);
         }
 
-        return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send) { PermissionMode = permissionMode, Sandbox = sandbox };
+        return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send) { PermissionMode = permissionMode, Sandbox = sandbox, ScriptOperationId = scriptOperation };
+    }
+
+    private void FailScriptSend(FleetHeldSend held, string failure)
+    {
+        if (held.ScriptOperationId is { } operation) _agents.EndScript(held.SessionId, operation, failure: failure);
+    }
+
+    private async Task<FleetCommandResult> StopScriptChildAsync(string sessionId, Guid operation, CancellationToken cancellationToken)
+    {
+        lock (_scriptAdmission)
+        {
+            if (!_agents.EndScript(sessionId, operation)) return new FleetCommandResult("unknown_target");
+            var holdId = operation.ToString("N");
+            Seats.Cancel(holdId);
+            HeldSends.Remove(holdId);
+        }
+
+        await _host.RuntimeService.AbortTreeAsync(sessionId, "cancelled", cancellationToken).ConfigureAwait(false);
+        return new FleetCommandResult("accepted");
+    }
+
+    // Called once the first prompt was actually admitted, not when its creation merely queued it for a seat.
+    // The workflow provenance keeps ordinary per-turn parent notifications off. Only the settled outcome is delivered.
+    private async Task ReportScriptChildAsync(string sessionId, Guid operation, Task<OwnedSessionCommandResult> first)
+    {
+        try
+        {
+            var sent = await first.ConfigureAwait(false);
+            var runtime = _host.RuntimeService;
+            if (_agents.Find(sessionId)?.ScriptOperationId != operation) return;
+            if (await runtime.TryGetRecoverableSessionAsync(sessionId).ConfigureAwait(false) is not { } session)
+            {
+                _agents.EndScript(sessionId, operation, failure: "The session is no longer available.");
+                return;
+            }
+
+            var outcome = await runtime.ReadSettledOutcomeAsync(session, sent.RunId).ConfigureAwait(false);
+            if (await IsPrivateAsync(sessionId, CancellationToken.None).ConfigureAwait(false))
+            {
+                _agents.EndScript(sessionId, operation, failure: "The session is no longer available.");
+                return;
+            }
+            var answer = sent is { RunId: null, Code: OwnedSessionCommandService.PluginHandledCode } ? sent.Message
+                : outcome.Status == SessionOutcomeStatus.Completed ? outcome.FinalMessage : null;
+            _agents.EndScript(sessionId, operation, session.ProjectRef, answer, answer is null
+                ? outcome.FailureMessage ?? sent.Message ?? $"The session ended without an answer ({outcome.Status})." : null, sent.RunId?.Value);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or IOException or UnauthorizedAccessException or FleetException)
+        {
+            LogWarn($"The script child {sessionId} could not report its result: {exception.Message}");
+            _agents.EndScript(sessionId, operation, failure: "The machine could not read the outcome of the script child.");
+        }
     }
 
     // The mode the session runs in: at most the parent's, never bypassing permissions unless the owner allows it, and one

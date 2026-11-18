@@ -225,11 +225,12 @@ public interface IRemoteChildSessions
     /// <returns>The session, or the refusal; a refusal is a result, not an exception.</returns>
     Task<RemoteChildResult> CreateAsync(RemoteChildRequest request, CancellationToken cancellationToken);
 
-    /// <summary>Waits for the answer of a session started for a script (<see cref="RemoteChildRequest.ForScript"/>).</summary>
+    /// <summary>Waits for the settled outcome of a session started for a script (<see cref="RemoteChildRequest.ForScript"/>).</summary>
     /// <param name="childSessionId">The session.</param>
-    /// <param name="timeout">How long to wait, or null for no limit.</param>
-    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="timeout">How long to wait before asking the machine to stop the child, or null for no limit.</param>
+    /// <param name="cancellationToken">Cancels the wait and asks the machine to stop the child.</param>
     /// <returns>Its answer, or how it ended.</returns>
+    /// <exception cref="OperationCanceledException">The caller cancelled the wait.</exception>
     Task<RemoteChildAnswer> WaitForAnswerAsync(string childSessionId, TimeSpan? timeout, CancellationToken cancellationToken);
 
     /// <summary>Sends, queues or steers a prompt of a session of another machine, for an agent of this host.</summary>

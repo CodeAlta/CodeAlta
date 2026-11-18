@@ -256,11 +256,13 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         var disabled = (await runtime.GetDisabledToolsAsync(parentSessionId, cancellationToken).ConfigureAwait(false))
             .Union(runtime.GetDisabledToolPatterns(parentSessionId), StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
         string? provider = null, model = null;
-        if (request.ModelRef is { } modelRef)
+        var reasoning = request.Effort;
+        if (request.ModelRef is { } reference)
         {
-            var reference = modelRef.Split('@')[0];
-            var colon = reference.IndexOf(':', StringComparison.Ordinal);
-            (provider, model) = colon < 0 ? (reference, null) : (reference[..colon], reference[(colon + 1)..]);
+            if (!ModelTierTarget.TryParse(reference, out var target, out var error) || target.Reasoning.Count > 1)
+                return Refused(error ?? $"'{reference}' names more than one reasoning effort.");
+            (provider, model) = (target.ProviderKey, target.ModelId);
+            reasoning ??= target.PreferredReasoning;
         }
 
         var created = await remote.CreateAsync(new RemoteChildRequest(parentSessionId, request.Machine!)
@@ -271,7 +273,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
             SpaceId = parent.SpaceId ?? "default",
             ProviderKey = provider,
             ModelId = model,
-            ReasoningEffort = request.Effort?.ToString(),
+            ReasoningEffort = reasoning?.ToString(),
             AgentPromptId = request.AgentPromptId,
             DisabledTools = disabled,
             PermissionMode = floor.PermissionMode,

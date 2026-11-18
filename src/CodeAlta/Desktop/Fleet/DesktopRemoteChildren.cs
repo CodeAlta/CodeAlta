@@ -45,7 +45,7 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     private readonly TimeProvider _time;
     private readonly TimeSpan _interval;
     private readonly Lock _gate = new();
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<RemoteChildAnswer>> _answers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ScriptWaiter> _answers = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _stop = new();
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Desktop.Fleet");
     private readonly string _receivedPath;
@@ -145,7 +145,8 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
                 return Refused("space_missing", $"{name} has no space '{request.SpaceId}': a session of another machine is in the space of its parent.", name);
             var (projectId, refusal) = await ResolveProjectAsync(request, info, name, cancellationToken).ConfigureAwait(false);
             if (refusal is not null) return refusal;
-            var signed = _fleet.SignAgentRequest(new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Start, host.MachineId!, "", "",
+            var kind = request.ForScript ? FleetAgentRequestKinds.StartScript : FleetAgentRequestKinds.Start;
+            var signed = _fleet.SignAgentRequest(new FleetAgentRequest(FleetAgentRequest.CurrentVersion, kind, host.MachineId!, "", "",
                 _time.GetUtcNow(), "", request.ParentSessionId, _machineName, request.SpaceId, null, projectId,
                 request.Prompt is { } prompt ? FleetAgentRequestDocuments.HashText(prompt) : null,
                 new FleetAgentLimits(request.DisabledTools, request.PermissionMode, request.Sandbox, request.SubSessions, 1,
@@ -158,10 +159,18 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
             Creating(host.MachineId!, 1);
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Once the start is sent, get its receipt even if the script stops meanwhile: the operation in it is
+                // what stops that exact child, including before it gets a seat and between its turns.
+                var receiptToken = request.ForScript ? CancellationToken.None : cancellationToken;
                 created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(projectId, request.SpaceId, request.Title, request.Prompt, selection)
-                    { Agent = signed }, Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
-                if (Created is { } hold) await hold(created.SessionId, cancellationToken).ConfigureAwait(false);
-                if (request.ForScript) _answers.TryAdd(created.SessionId, NewAnswer());
+                    { Agent = signed, ForScript = request.ForScript }, Guid.NewGuid().ToString("N"), receiptToken).ConfigureAwait(false);
+                if (Created is { } hold) await hold(created.SessionId, receiptToken).ConfigureAwait(false);
+                if (request.ForScript)
+                {
+                    if (created.ScriptOperationId is not { } operation) return Refused("unavailable", $"{name} did not accept a script child.", name);
+                    _answers.TryAdd(created.SessionId, new ScriptWaiter(host, operation));
+                }
                 Remember(new DesktopRemoteChild(created.SessionId, host.MachineId!, name, request.ParentSessionId, request.ForScript, _time.GetUtcNow()));
             }
             finally
@@ -197,18 +206,47 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     public async Task<RemoteChildAnswer> WaitForAnswerAsync(string childSessionId, TimeSpan? timeout, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childSessionId);
-        if (!_answers.TryGetValue(childSessionId, out var answer)) return new RemoteChildAnswer("refused", null, $"No script of this computer waits for '{childSessionId}'.");
+        if (!_answers.TryGetValue(childSessionId, out var waiter)) return new RemoteChildAnswer("refused", null, $"No script of this computer waits for '{childSessionId}'.");
         try
         {
-            return timeout is { } limit ? await answer.Task.WaitAsync(limit, _time, cancellationToken).ConfigureAwait(false) : await answer.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return timeout is { } limit ? await waiter.Answer.Task.WaitAsync(limit, _time, cancellationToken).ConfigureAwait(false) : await waiter.Answer.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            return new RemoteChildAnswer("timeout", null, $"The session did not answer within {timeout}.");
+            var problem = await StopScriptChildAsync(childSessionId, waiter).ConfigureAwait(false);
+            return new RemoteChildAnswer("timeout", null, $"The session did not answer within {timeout}." + (problem is null ? "" : " " + problem));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await StopScriptChildAsync(childSessionId, waiter).ConfigureAwait(false);
+            throw;
         }
         finally
         {
-            if (answer.Task.IsCompleted) _answers.TryRemove(childSessionId, out _);
+            _answers.TryRemove(childSessionId, out _);
+        }
+    }
+
+    private async Task<string?> StopScriptChildAsync(string childSessionId, ScriptWaiter waiter)
+    {
+        using var grace = new CancellationTokenSource(OnlineWait);
+        try
+        {
+            var client = await waiter.Host.WaitOnlineAsync(grace.Token).ConfigureAwait(false);
+            var stopped = await client.AbortAsync(new FleetAbortParams(childSessionId) { ScriptOperationId = waiter.Operation }, cancellationToken: grace.Token).ConfigureAwait(false);
+            if (stopped.Status is "accepted" or "replay" or "unknown_target") return null;
+            return Problem(stopped.Status);
+        }
+        catch (Exception exception) when (exception is FleetException or IOException or OperationCanceledException or InvalidOperationException or TimeoutException)
+        {
+            return Problem(exception.Message);
+        }
+
+        string Problem(string why)
+        {
+            var problem = $"Could not confirm the stop of script child {childSessionId} on {NameOf(waiter.Host)}: {why}.";
+            Log(problem);
+            return problem;
         }
     }
 
@@ -292,7 +330,12 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         if (!_stop.IsCancellationRequested) await _stop.CancelAsync().ConfigureAwait(false);
         try { await _loop.ConfigureAwait(false); }
         catch (OperationCanceledException) { }
-        foreach (var (_, answer) in _answers) answer.TrySetResult(new RemoteChildAnswer("failed", null, "CodeAlta closed before the session answered."));
+        await Task.WhenAll(_answers.ToArray().Select(async pair =>
+        {
+            if (!_answers.TryRemove(pair.Key, out var waiter)) return;
+            waiter.Answer.TrySetResult(new RemoteChildAnswer("failed", null, "CodeAlta closed before the session answered."));
+            await StopScriptChildAsync(pair.Key, waiter).ConfigureAwait(false);
+        })).ConfigureAwait(false);
         _stop.Dispose();
     }
 
@@ -387,8 +430,9 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
 
         if (child.ForScript)
         {
-            if (delivery.Kind is "answer" or "error" && _answers.TryGetValue(child.ChildSessionId, out var answer))
-                answer.TrySetResult(delivery.Kind == "answer" ? new RemoteChildAnswer("completed", delivery.Body, null) : new RemoteChildAnswer("failed", null, delivery.Body));
+            if (delivery.Kind is "answer" or "error" && _answers.TryGetValue(child.ChildSessionId, out var waiter)
+                && delivery.ContentId == waiter.Operation.ToString("N"))
+                waiter.Answer.TrySetResult(delivery.Kind == "answer" ? new RemoteChildAnswer("completed", delivery.Body, null) : new RemoteChildAnswer("failed", null, delivery.Body));
             return true;
         }
 
@@ -545,8 +589,6 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
             ? "This session runs for an automation that decides what it does without a person: another machine would do what it is handed without that check, so it starts and prompts no session there. Do the work in this session or in a session of its own here, or ask the user."
             : null;
 
-    private static TaskCompletionSource<RemoteChildAnswer> NewAnswer() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
     private void Remember(DesktopRemoteChild child)
     {
         lock (_gate)
@@ -584,6 +626,11 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         {
             return [];
         }
+    }
+
+    private sealed record ScriptWaiter(RemoteSessionHost Host, Guid Operation)
+    {
+        public TaskCompletionSource<RemoteChildAnswer> Answer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private void Log(string message)

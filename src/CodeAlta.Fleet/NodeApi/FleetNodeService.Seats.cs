@@ -147,6 +147,7 @@ public sealed partial class FleetNodeService
         {
             _seatHolds.TryRemove(id, out _);
             Seats.Cancel(id);
+            FailScriptSend(held, "The machine could not keep the prompt while it waited for a seat.");
             LogInfo($"The prompt of the session {session.SessionId} that waits for a seat could not be kept: {exception.Message}");
             return new FleetCommandResult("capacity", Code: "capacity");
         }
@@ -187,7 +188,11 @@ public sealed partial class FleetNodeService
     private FleetCommandResult SendSeated(FleetHeldSend held)
     {
         var result = SendHeld(held);
-        if (result.Status is not ("accepted" or "replay")) Seats.Release(held.HoldId);
+        if (result.Status is not ("accepted" or "replay"))
+        {
+            Seats.Release(held.HoldId);
+            FailScriptSend(held, $"The machine did not admit the prompt ({result.Status}).");
+        }
         return result;
     }
 
@@ -204,6 +209,7 @@ public sealed partial class FleetNodeService
                 // A node that stops leaves it kept, for its next start; a run taken out of the queue is never sent.
                 if (Volatile.Read(ref _disposed) != 0) return;
                 HeldSends.Remove(id);
+                FailScriptSend(held, "The prompt was taken out of the machine's queue.");
                 LogInfo($"The prompt of the session {sessionId} that waited for a seat was taken out of the queue: it was not sent.");
                 return;
             }
@@ -219,6 +225,7 @@ public sealed partial class FleetNodeService
             {
                 HeldSends.Remove(id);
                 Seats.Release(id);
+                FailScriptSend(held, halt.Describe(_options.Name));
                 LogInfo($"The prompt of the session {sessionId} that waited for a seat was not sent: {halt.Describe(_options.Name)}");
                 return;
             }
@@ -227,12 +234,13 @@ public sealed partial class FleetNodeService
             var result = SeatedSend(held);
             // Its session works meanwhile (another prompt of its tree took the seat first): nobody waits for this answer, so the
             // prompt goes into the queue of the session, as the caller does with a busy answer.
-            if (result.Status == "busy") result = await QueueInSessionAsync(held).ConfigureAwait(false);
+            if (result.Status == "busy" && held.ScriptOperationId is null) result = await QueueInSessionAsync(held).ConfigureAwait(false);
             LogInfo($"The prompt of the session {sessionId} was sent once it had a seat ({result.Status}).");
         }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException)
         {
             Seats.Release(id);
+            FailScriptSend(held, "The machine could not send the queued prompt.");
             LogInfo($"The prompt of the session {sessionId} that waited for a seat was not sent: {exception.Message}");
         }
         finally

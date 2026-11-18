@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.CodeMode;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Fleet.Client;
@@ -137,12 +138,26 @@ public sealed class RemoteChildSessionsTests
     }
 
     [TestMethod]
-    public async Task AScriptStartsAnAgentOnAnotherMachine_AndGetsItsAnswer()
+    public async Task AScriptStartsAnAgentOnAnotherMachine_AndGetsItsSettledAnswer()
     {
         var token = TestContext.CancellationToken;
         await using var two = await TwoHosts.StartAsync(token);
         var parent = await two.CreateParentAsync(token);
         two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        two.Node.Provider.Turns.Enqueue(async (request, _) =>
+        {
+            var run = two.Node.Host.CodeModeRuns.TryStart(request.SessionId, "Tests", 100, async (_, stop) =>
+            {
+                await release.Task.WaitAsync(stop);
+                return new CodeModeRunResult(CodeModeRunStatus.Completed, TimeSpan.Zero) { ValueJson = "42" };
+            }, out var refused);
+            Assert.IsNotNull(run, refused);
+            await two.Node.Host.CodeModeRuns.BackgroundAsync(run);
+            started.SetResult(request.SessionId);
+            return ScriptedFleetProvider.Answer("Started the tests.");
+        });
         two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("42 tests, all green.")));
 
         var parentPrompted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -154,7 +169,21 @@ public sealed class RemoteChildSessionsTests
 
         var agents = new CodeModeAgents(two.Desktop);
         await using var _ = agents;
-        var result = await agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Count the tests.") { RunId = "run-1", Machine = "test-node", Timeout = Patience }, token);
+        var pending = agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Count the tests.") { RunId = "run-1", Machine = "test-node", Timeout = Patience }, token);
+        var id = await started.Task.WithinAsync(Patience, token);
+        try
+        {
+            async Task WaitForIdleAsync()
+            {
+                while (await two.Node.Host.RuntimeService.ReadActiveTurnAsync(id, token) is not null) await Task.Delay(10, token);
+            }
+            await WaitForIdleAsync().WithinAsync(Patience, token);
+        }
+        finally
+        {
+            release.SetResult();
+        }
+        var result = await pending.WithinAsync(Patience, token);
         Assert.IsTrue(result.Succeeded, result.Failure);
         Assert.AreEqual("42 tests, all green.", result.Answer);
         Assert.IsTrue(two.Children.Children.Single().ForScript);
@@ -163,6 +192,107 @@ public sealed class RemoteChildSessionsTests
 
         var kept = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest("") { RunId = "run-1", Machine = "test-node" }, token);
         Assert.AreEqual("refused", kept.Status, "session() keeps sessions of this machine only.");
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task EndingTheScriptWait_StopsItsRemoteChildAndForgetsTheWaiter(bool timeout)
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token, startDeliveries: false);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        two.Node.Provider.Turns.Enqueue(async (_, stop) =>
+        {
+            entered.SetResult();
+            try { await release.Task.WaitAsync(stop); }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                stopped.SetResult();
+                throw;
+            }
+            return ScriptedFleetProvider.Answer("Done.");
+        });
+        try
+        {
+            var created = await two.Children.CreateAsync(Request(parent.SessionId, "Wait.") with { ForScript = true }, token);
+            Assert.AreEqual("created", created.Status, created.Message);
+            await entered.Task.WithinAsync(Patience, token);
+            var id = created.SessionId!;
+            if (timeout) Assert.AreEqual("timeout", (await two.Children.WaitForAnswerAsync(id, TimeSpan.Zero, token)).Status);
+            else await Assert.ThrowsAsync<OperationCanceledException>(() => two.Children.WaitForAnswerAsync(id, null, new CancellationToken(true)));
+
+            Assert.AreEqual("refused", (await two.Children.WaitForAnswerAsync(id, TimeSpan.Zero, token)).Status, "no abandoned answer entry");
+            Assert.AreEqual("cancelled", two.Node.Host.RuntimeService.GetAbortReason(id), "the node aborted the child tree");
+            await stopped.Task.WithinAsync(Patience, token);
+        }
+        finally
+        {
+            release.SetResult();
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AQueuedScriptChild_CanBeStoppedByItsScriptOrByTheNode(bool byNode)
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var client = await two.Machine.WaitOnlineAsync(token);
+        await client.SetLimitsAsync(1, token);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        two.Node.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(release.Task, "Done.", entered));
+        try
+        {
+            await client.CreateSessionAsync(new FleetCreateSessionParams(Prompt: "Take the only seat."), cancellationToken: token);
+            await entered.Task.WithinAsync(Patience, token);
+            var created = await two.Children.CreateAsync(Request(parent.SessionId, "This must not run.") with { ForScript = true }, token);
+            Assert.AreEqual(1, created.QueuedPosition, created.Message);
+            if (byNode)
+            {
+                var queued = (await client.ListSeatsAsync(token)).Queue.Single();
+                await client.CancelSeatAsync(queued.Id, token);
+                var result = await two.Children.WaitForAnswerAsync(created.SessionId!, Patience, token);
+                Assert.AreEqual("failed", result.Status, result.Failure);
+            }
+            else
+            {
+                var result = await two.Children.WaitForAnswerAsync(created.SessionId!, TimeSpan.Zero, token);
+                Assert.AreEqual("timeout", result.Status, result.Failure);
+            }
+            Assert.IsEmpty((await client.ListSeatsAsync(token)).Queue);
+        }
+        finally
+        {
+            release.SetResult();
+        }
+        Assert.AreEqual(1, two.Node.Provider.Prompts.Count, "The cancelled child never took a seat.");
+    }
+
+    [TestMethod]
+    [DataRow(null, AgentReasoningEffort.Low)]
+    [DataRow(AgentReasoningEffort.High, AgentReasoningEffort.High)]
+    public async Task RemoteAgent_UsesTheModelReferencesEffort_UnlessExplicitlyOverridden(AgentReasoningEffort? effort, AgentReasoningEffort expected)
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        two.Node.Provider.Turns.Enqueue((request, _) => Task.FromResult(ScriptedFleetProvider.Answer($"{request.ModelId}@{request.ReasoningEffort}")));
+        await using var agents = new CodeModeAgents(two.Desktop);
+        var result = await agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("What model?")
+        {
+            RunId = "run-1", Machine = "test-node", ModelRef = "scripted:scripted-model@low", Effort = effort, Timeout = Patience,
+        }, token);
+        Assert.AreEqual("scripted-model@" + expected, result.Answer, result.Failure);
     }
 
     // The fleet is never a way out of a sandbox: a script runs nothing elsewhere for a session whose profile forbids the
@@ -218,6 +348,8 @@ public sealed class RemoteChildSessionsTests
         // A prompt, a space or a project other than the ones signed.
         var signed = Sign(two.Fleet.DeviceKey, limits);
         Assert.AreEqual(FleetNodeErrorCodes.AgentRequestInvalid, await RefusedAsync(new FleetCreateSessionParams(SpaceId: "default", Prompt: "rm -rf /") { Agent = signed }));
+        Assert.AreEqual(FleetNodeErrorCodes.AgentRequestInvalid, await RefusedAsync(new FleetCreateSessionParams(SpaceId: "default", Prompt: "Hello") { Agent = signed, ForScript = true }),
+            "The intent to start a script child is signed too.");
         // A space the owner did not allow.
         Assert.AreEqual(FleetNodeErrorCodes.AgentSessionsOff,
             await RefusedAsync(new FleetCreateSessionParams(SpaceId: "work", Prompt: "Hello") { Agent = Sign(two.Fleet.DeviceKey, limits, space: "work") }));

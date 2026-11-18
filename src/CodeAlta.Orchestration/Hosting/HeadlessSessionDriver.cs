@@ -25,9 +25,6 @@ namespace CodeAlta.Orchestration.Hosting;
 /// </remarks>
 public sealed class HeadlessSessionDriver : IAsyncDisposable
 {
-    // The times a run waits for its tree to settle again when the outcome it read says a run is still in flight.
-    private const int SettledRereads = 5;
-
     private static readonly Logger Log = LogManager.GetLogger("CodeAlta.HeadlessSessionDriver");
 
     private readonly CodeAltaHost _host;
@@ -322,11 +319,21 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             return Result(HeadlessRunStatus.Failed, null, null, null, null, $"The prompt was not admitted ({admission.Kind.ToString().ToLowerInvariant()}): the session is busy or the host is closing.");
 
         OwnedSessionCommandResult? sent = null;
+        SessionOutcome? outcome = null;
         string? abortReason = null;
         try
         {
             sent = await receipt.Completion.WaitAsync(stop.Token).ConfigureAwait(false);
-            await runtime.WhenSettledAsync(session.SessionId, stop.Token).ConfigureAwait(false);
+            if (sent is { RunId: null, Code: OwnedSessionCommandService.PluginHandledCode or OwnedSessionCommandService.PluginCancelledCode })
+            {
+                await runtime.WhenSettledAsync(session.SessionId, stop.Token).ConfigureAwait(false);
+                // A prompt-submit hook answered or cancelled the prompt itself: nothing ran.
+                return sent.Code == OwnedSessionCommandService.PluginHandledCode
+                    ? new(HeadlessRunStatus.Completed, session.SessionId, null, sent.Message, null, null, null, SessionUsageTotals.None, stopwatch.Elapsed)
+                    : new(HeadlessRunStatus.Aborted, session.SessionId, null, null, "plugin", null, sent.Message ?? "A plugin cancelled the prompt.", SessionUsageTotals.None, stopwatch.Elapsed);
+            }
+
+            outcome = await runtime.ReadSettledOutcomeAsync(session.SessionId, ReadOutcomeAsync, stop.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
@@ -337,35 +344,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             sent ??= receipt.Completion.IsCompleted ? await receipt.Completion.ConfigureAwait(false) : null;
         }
 
-        // A plugin answered the prompt itself (a prompt-submit hook): nothing ran, and what it said is the answer.
-        if (abortReason is null && sent is { RunId: null, Code: OwnedSessionCommandService.PluginHandledCode })
-            return new(HeadlessRunStatus.Completed, session.SessionId, null, sent.Message, null, null, null, SessionUsageTotals.None, stopwatch.Elapsed);
-        if (abortReason is null && sent is { RunId: null, Code: OwnedSessionCommandService.PluginCancelledCode })
-            return new(HeadlessRunStatus.Aborted, session.SessionId, null, null, "plugin", null, sent.Message ?? "A plugin cancelled the prompt.",
-                SessionUsageTotals.None, stopwatch.Elapsed);
-
         var runId = sent?.RunId;
         // A run aborted before its send returned has no known run: the events since the prompt are read instead.
-        var outcome = await ReadOutcomeAsync().ConfigureAwait(false);
-        // A turn that starts as the tree is found settled (the answer to the result of a script that ended in the background)
-        // is still running when its outcome is read, and a read that races the journal finds nothing: the run waits for the
-        // tree to settle again and reads again, rather than ending without its answer.
-        for (var again = 0; abortReason is null && again < SettledRereads
-            && (outcome.Status == SessionOutcomeStatus.Running || outcome is { Status: SessionOutcomeStatus.Unknown, EventCount: 0 }); again++)
-        {
-            try
-            {
-                await runtime.WhenSettledAsync(session.SessionId, stop.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stop.IsCancellationRequested)
-            {
-                abortReason = timer.IsCancellationRequested ? "timeout" : aborts.Reason ?? "cancelled";
-                await AbortAndWaitAsync(session.SessionId, abortReason, CancellationToken.None).ConfigureAwait(false);
-                aborts.End();
-            }
-
-            outcome = await ReadOutcomeAsync().ConfigureAwait(false);
-        }
+        outcome ??= await ReadOutcomeAsync().ConfigureAwait(false);
 
         // A journal read that finds neither an answer nor an error of the run is not how it ended when the reader saw the
         // session answer: what it saw is reported, with the usage it saw.
@@ -408,8 +389,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             _ => Result(HeadlessRunStatus.Failed, runId, outcome, usage, null, "The run ended without an answer."),
         };
 
-        Task<SessionOutcome> ReadOutcomeAsync() => _options.ReadOutcome is { } read ? read(session.Descriptor, runId, startedAt)
-            : runId is { } run
+        Task<SessionOutcome> ReadOutcomeAsync() => _options.ReadOutcome is { } read ? read(session.Descriptor, sent?.RunId, startedAt)
+            : sent?.RunId is { } run
                 ? runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None)
                 : runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None);
 
