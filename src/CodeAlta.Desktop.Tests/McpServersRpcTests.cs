@@ -209,6 +209,32 @@ public sealed class McpServersRpcTests
     }
 
     [TestMethod]
+    public void BuiltInServer_DoesNotHaveASettingsFile()
+    {
+        var entry = McpServersService.Entry(new McpManagementServerSnapshot
+        {
+            Key = McpBuiltInServers.Safari,
+            DisplayName = McpBuiltInServers.Safari,
+            State = McpManagementServerState.Configured,
+            SourceScope = McpManagementScope.Global,
+            SourceOrigin = McpManagementConfigOrigin.Common,
+            SourceName = ".mcp.json",
+            SourcePath = McpBuiltInServers.SourcePath,
+            Transport = McpManagementTransport.Stdio,
+            Command = "safaridriver",
+        });
+        Assert.IsNotNull(entry);
+        Assert.IsNull(entry.Source, "The page must not direct the user to an external file for a built-in server.");
+
+        var config = Path.Combine(Path.GetTempPath(), "mcp.json");
+        var files = McpServersService.ConfigFiles([
+            new() { Scope = McpManagementScope.Global, Origin = McpManagementConfigOrigin.CodeAlta, Path = config },
+            new() { Scope = McpManagementScope.Global, Origin = McpManagementConfigOrigin.Common, Path = McpBuiltInServers.SourcePath, Exists = true },
+        ], includeProject: false);
+        Assert.AreEqual(new McpConfigFile("Global", "CodeAlta", config, false), files.Single(), "A synthetic source is not a file, but the path to the missing user config is still shown.");
+    }
+
+    [TestMethod]
     public async Task ServersOfOtherTools_AreListedWithTheirFile_EnabledAndAuthorizedButNeverChanged()
     {
         using var fixture = await Fixture.CreateAsync();

@@ -1831,7 +1831,7 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-footer.bp6-section-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .settings-editor-spacer { flex: 1 1 auto; }
 .settings-editor-problem { flex: 1 0 100%; color: var(--red); font-size: 12px; }
-.settings-editor-note.bp6-callout { flex: 1 0 100%; font-size: 12px; }
+.settings-editor-note.bp6-callout { margin-bottom: 6px; font-size: 12px; }
 .settings-editor-note-body { display: flex; flex-direction: column; gap: 6px; }
 /* In a narrow detail column the file's actions go under its path instead of past the edge. */
 .settings-editor-note .settings-file-location { flex-wrap: wrap; row-gap: 2px; }
