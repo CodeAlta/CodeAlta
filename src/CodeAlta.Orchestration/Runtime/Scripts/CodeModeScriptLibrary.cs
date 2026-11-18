@@ -277,6 +277,7 @@ public sealed partial class CodeModeScriptLibrary
         if (IsPluginName(name)) return (null, $"'{name}' is a script of a plugin: it changes with its plugin. Save a copy under another name.");
         if (!IsName(name)) return (null, $"'{name}' is not a script name: lowercase letters, digits and hyphens, starting with a letter.");
         if (scope == CodeModeScriptScope.BuiltIn) return (null, "The samples of CodeAlta are not saved: save a copy under your scripts or the project's.");
+        if (!IsSaved(scope)) return (null, "A script is saved under your scripts or the project's.");
         if (scope == CodeModeScriptScope.Project && string.IsNullOrWhiteSpace(projectRoot)) return (null, "A project script needs a project.");
         var source = CodeModeSource.Prepare(content, name + ".js");
         if (source.Error is { } error) return (null, $"The script does not parse: {error.Message}");
@@ -291,18 +292,21 @@ public sealed partial class CodeModeScriptLibrary
 
     /// <summary>Deletes a script of your library or of the project.</summary>
     /// <param name="name">The name.</param>
-    /// <param name="scope">Where it is.</param>
+    /// <param name="scope">Where it is: <see cref="CodeModeScriptScope.Global"/> or <see cref="CodeModeScriptScope.Project"/>.</param>
     /// <param name="projectRoot">The folder of the project, for a project script.</param>
-    /// <returns>True when it was deleted.</returns>
+    /// <returns>True when it was deleted; false for a script that is not there, or of another scope.</returns>
     /// <exception cref="IOException">The file cannot be deleted.</exception>
     public bool Delete(string name, CodeModeScriptScope scope, string? projectRoot)
     {
-        if (!IsName(name) || scope == CodeModeScriptScope.BuiltIn || scope == CodeModeScriptScope.Project && string.IsNullOrWhiteSpace(projectRoot)) return false;
+        if (!IsName(name) || !IsSaved(scope) || scope == CodeModeScriptScope.Project && string.IsNullOrWhiteSpace(projectRoot)) return false;
         var file = System.IO.Path.Combine(scope == CodeModeScriptScope.Project ? ProjectFolder(projectRoot!) : GlobalFolder, name + ".js");
         if (!File.Exists(file)) return false;
         File.Delete(file);
         return true;
     }
+
+    // The scopes whose scripts are files the library writes: every other scope would fall in the folder of yours.
+    private static bool IsSaved(CodeModeScriptScope scope) => scope is CodeModeScriptScope.Global or CodeModeScriptScope.Project;
 
     /// <summary>Gets the hash a save compares: the SHA-256 of the text, in lowercase hexadecimal.</summary>
     /// <param name="content">The text.</param>

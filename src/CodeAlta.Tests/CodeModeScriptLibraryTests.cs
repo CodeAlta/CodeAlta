@@ -59,6 +59,27 @@ public sealed class CodeModeScriptLibraryTests
     }
 
     [TestMethod]
+    public void OnlyYourScriptsAndThoseOfAProject_AreSavedAndDeleted()
+    {
+        using var root = TestTempDirectory.Create();
+        var (library, project) = Create(root.Path);
+        Assert.IsNull(library.Save("review", CodeModeScriptScope.Global, Review, null, null).Refusal);
+        var file = library.Find("review", null)!.Path;
+
+        foreach (var scope in new[] { CodeModeScriptScope.BuiltIn, CodeModeScriptScope.Plugin, (CodeModeScriptScope)99 })
+        {
+            var (saved, refusal) = library.Save("review", scope, Review + "\n// replaced", project, null);
+            Assert.IsNull(saved, scope.ToString());
+            Assert.IsNotNull(refusal, scope.ToString());
+            Assert.IsNull(library.Save("other", scope, Review, project, null).Script, scope.ToString());
+            Assert.IsFalse(library.Delete("review", scope, project), scope.ToString());
+        }
+
+        Assert.AreEqual(Review, File.ReadAllText(file), "your script of that name is neither replaced nor deleted");
+        Assert.IsNull(library.Find("other", project), "nothing is written under a scope that is not saved");
+    }
+
+    [TestMethod]
     public async Task AltaScript_EditsAScriptThroughACopy_ChecksIt_SavesIt_AndDeletesIt()
     {
         using var root = TestTempDirectory.Create();
