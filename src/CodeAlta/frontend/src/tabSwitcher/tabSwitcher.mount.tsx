@@ -1,5 +1,5 @@
 // Disposable page: the tab switcher with the keys of the window, over three tabs, as its test presses them.
-import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { StrictMode, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { recentOrder, rememberRecent } from "./recentTabs";
 import { isTabSwitcherKey, TabSwitcher, type TabSwitcherHandle } from "./TabSwitcher";
@@ -14,7 +14,9 @@ function Window() {
   const recent = useRef<readonly string[]>([]);
   const switcher = useRef<TabSwitcherHandle>(null);
   useLayoutEffect(() => { recent.current = rememberRecent(recent.current, front, tabs); }, [front]);
-  useEffect(() => {
+  // Before the first paint: a test sends its keys as soon as it sees the window, and a listener added after the paint
+  // (a passive effect) would miss the first of them.
+  useLayoutEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
       if (!isTabSwitcherKey(event)) return;
       event.preventDefault();

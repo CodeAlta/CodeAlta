@@ -9,6 +9,14 @@ import { testLimit } from "../testTime";
 const options = { entry: "../tabSwitcher/tabSwitcher.mount.tsx", fixture: "tabSwitcherFixture", rpcFixture: "../demo-api.ts", width: 900, height: 500 } as const;
 const control = 2, shift = 8;
 const handled = (page: Page) => page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+// Before the first key: the window is there, and the page has the focus. A headless page takes the focus when it wants
+// (a `focusin` or a `blur` of the window, some time after its first key), and a focus that moves cancels the switcher,
+// as it must: the list of a test then never opened.
+async function ready(page: Page) {
+  await page.command("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await page.until(`document.querySelector('#front')`, "the window");
+}
+
 function keys(page: Page) {
   const key = (type: "keyDown" | "keyUp", name: string, virtualKey: number, modifiers: number, code = name) =>
     page.command("Input.dispatchKeyEvent", { type, key: name, code, windowsVirtualKeyCode: virtualKey, modifiers });
@@ -23,7 +31,7 @@ test("Ctrl+Tab goes back and forth between the last two tabs, and a list shows t
     const list = `[...document.querySelectorAll('.tab-switcher-row')].map(row => row.textContent + (row.getAttribute('aria-selected') === 'true' ? '*' : '')).join()`;
     // The list is drawn by React after the key: wait for it to say what is expected.
     const rows = async (expected: string[]) => { await page.until(`(${list}) === ${JSON.stringify(expected.join())}`, `the list ${expected.join()}`); };
-    await page.until(`document.querySelector('#front')`, "the window");
+    await ready(page);
 
     // Tab, then Control released: the tab shown before; again: back.
     await key("keyDown", "Control", 17, control);
@@ -58,6 +66,7 @@ test("Ctrl+Tab goes back and forth between the last two tabs, and a list shows t
 test("stepping through the list does not render the window, and wrapping to the current tab does not select it again", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const { key, tab } = keys(page);
+    await ready(page);
     const renders = `document.querySelector('#front').dataset.renders`;
     const before = await page.evaluate(renders);
     await key("keyDown", "Control", 17, control);
@@ -73,10 +82,14 @@ test("stepping through the list does not render the window, and wrapping to the 
 test("only releasing the last Control key applies the highlighted tab", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const { key, tab } = keys(page);
+    await ready(page);
     await key("keyDown", "Control", 17, control, "ControlLeft");
     await tab();
     await key("keyDown", "Control", 17, control, "ControlRight");
     await key("keyUp", "Control", 17, control, "ControlLeft");
+    // The list is drawn by React after the key, not within a frame or two on a loaded machine: wait for it, then for the
+    // release of one Control to have been handled, before saying that it applied nothing.
+    await page.until(`document.querySelector('[role="option"][aria-selected="true"]')?.textContent === 'two'`, "the list open on the highlighted tab");
     await handled(page);
     assert.equal(await page.evaluate(`document.querySelector('[role="option"][aria-selected="true"]')?.textContent`), "two");
     assert.equal(await page.evaluate(`document.querySelector('#front').textContent`), "one");
@@ -88,6 +101,7 @@ test("only releasing the last Control key applies the highlighted tab", { skip: 
 test("leaving the switcher by pointer, another shortcut or a focus change cancels its pending selection", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const { key, tab } = keys(page);
+    await ready(page);
     for (const leave of [
       async () => { await key("keyDown", "PageDown", 34, control); await key("keyUp", "PageDown", 34, control); },
       () => page.evaluate("document.querySelector('#other').focus()"),
