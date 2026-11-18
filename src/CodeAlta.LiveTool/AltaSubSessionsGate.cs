@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using CodeAlta.Orchestration.Runtime;
 using XenoAtom.CommandLine;
 
@@ -11,12 +10,10 @@ namespace CodeAlta.LiveTool;
 /// </summary>
 internal static class AltaSubSessionsGate
 {
-    // Paths of commands under `alta` that start a session now or later: a child, a fork, the session of a script or of an
-    // automation, and an automation, which starts sessions by itself.
-    private static readonly FrozenSet<string> Gated = new[]
-    {
-        "session create", "session fork", "script run", "automation run", "automation create",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    // A command that starts a session now or later: a child, a fork, the session of a script or of an automation, and an
+    // automation, which starts sessions by itself. It is made by `Leaf`, which hides it from a caller without sub-sessions,
+    // and refused for that caller by what it is, wherever it is in the tree: one rule for what is shown and what runs.
+    private sealed class SessionStartingCommand(string name, string description) : Command(name, description);
 
     /// <summary>Gets the context with the options of the calling session: a caller whose session has no sub-sessions says so.</summary>
     /// <param name="context">The context of the call.</param>
@@ -32,12 +29,7 @@ internal static class AltaSubSessionsGate
 
     /// <summary>Gets whether a command starts a session.</summary>
     /// <param name="commandPath">The path of the command, as the parser resolves it (<c>alta session create</c>).</param>
-    public static bool Gates(string commandPath)
-    {
-        var words = commandPath.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        // The path starts with the name of the application.
-        return words.Length > 2 && Gated.Contains(string.Join(' ', words, 1, 2));
-    }
+    public static bool Gates(Command? command) => command is SessionStartingCommand;
 
     /// <summary>Creates a command that starts a session: hidden from a caller without sub-sessions.</summary>
     /// <param name="context">The context of the call.</param>
@@ -46,7 +38,7 @@ internal static class AltaSubSessionsGate
     /// <returns>The command.</returns>
     public static Command Leaf(AltaCommandContext context, string name, string description)
     {
-        var command = new Command(name, description) { Hidden = !context.Caller.SubSessions };
+        var command = new SessionStartingCommand(name, description) { Hidden = !context.Caller.SubSessions };
         command.Add(new CommandUsage());
         command.Add(new HelpOption());
         return command;

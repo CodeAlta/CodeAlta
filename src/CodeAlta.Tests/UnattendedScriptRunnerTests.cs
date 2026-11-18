@@ -97,6 +97,8 @@ public sealed class UnattendedScriptRunnerTests
         Assert.IsFalse(UnattendedScriptRunner.Allows(Command("job start", null), plugins), "a command that says nothing of itself is not given");
         Assert.IsTrue(UnattendedScriptRunner.Allows(Command("mail send", null), plugins), "a command of a plugin is how the script calls it");
         Assert.IsTrue(UnattendedScriptRunner.Allows(Command("todo add", null), plugins));
+        Assert.IsFalse(UnattendedScriptRunner.Allows(Command("mcp tool call", null), [.. plugins, "mcp"]), "the tools of MCP servers run under no sandbox nor guard here");
+        Assert.IsFalse(UnattendedScriptRunner.Allows(Command("mcp", null), [.. plugins, "mcp"]));
         Assert.IsFalse(UnattendedScriptRunner.Allows(Command("mailbox", null), plugins), "a prefix of a name is not the name");
     }
 

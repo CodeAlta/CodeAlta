@@ -102,7 +102,14 @@ public sealed class UnattendedScriptRunner
         (_dispatcher, _library, _runtime, _pluginCommands) = (dispatcher, library, runtime, pluginCommands);
     }
 
-    /// <summary>Whether a command of <c>alta</c> is one such a run may call: one that changes nothing, or one of a plugin.</summary>
+    // The commands of the MCP plugin start the programs of servers and call their tools: a run without a session has no
+    // sandbox nor guard to run them under, so it gets those that only read.
+    private const string McpRoot = "mcp";
+
+    /// <summary>
+    /// Whether a command of <c>alta</c> is one such a run may call: one that changes nothing, or one of a plugin other than
+    /// those that reach MCP servers.
+    /// </summary>
     /// <param name="command">The command.</param>
     /// <param name="pluginCommands">The paths of the commands of plugins.</param>
     /// <returns>True when it may.</returns>
@@ -112,7 +119,8 @@ public sealed class UnattendedScriptRunner
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(pluginCommands);
         return command.Policy is { IsMutating: false }
-            || pluginCommands.Any(path => string.Equals(command.Path, path, StringComparison.Ordinal) || command.Path.StartsWith(path + " ", StringComparison.Ordinal));
+            || (command.Path != McpRoot && !command.Path.StartsWith(McpRoot + " ", StringComparison.Ordinal)
+                && pluginCommands.Any(path => string.Equals(command.Path, path, StringComparison.Ordinal) || command.Path.StartsWith(path + " ", StringComparison.Ordinal)));
     }
 
     /// <summary>Runs a script to its end.</summary>

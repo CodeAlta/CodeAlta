@@ -204,6 +204,33 @@ public sealed class AltaCommandRegistryOptionsTests
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) => throw new NotSupportedException(targetMethod?.Name);
     }
 
+    // The guard of an automation checks a command of a plugin that changes something: the parser names the command with
+    // the application first, and a plugin declares the policy of its root for its whole tree.
+    [TestMethod]
+    public void TheCommandAGuardChecks_IsFoundUnderThePolicyOfItsPlugin_WhereverItIsInItsTree()
+    {
+        AltaCommandPolicy[] policies =
+        [
+            new() { Path = "jira", IsMutating = true },
+            new() { Path = "jira issue", IsMutating = false },
+            new() { Path = "mcp", IsMutating = true },
+        ];
+
+        Assert.AreEqual(("jira comment", "jira"), Found("alta jira comment"));
+        Assert.AreEqual(("jira issue show", "jira issue"), Found("alta jira issue show"), "the nearest policy above the command");
+        Assert.AreEqual(("jira", "jira"), Found("alta jira"));
+        Assert.AreEqual(("jiraffe", null), Found("alta jiraffe"), "a root that only starts like another is another");
+        Assert.AreEqual(("mcp tool call", null), Found("alta mcp tool call"), "it checks the tool it calls");
+        Assert.AreEqual(("mcp server add", "mcp"), Found("alta mcp server add"));
+        Assert.AreEqual((string.Empty, null), Found("alta"));
+
+        (string, string?) Found(string path)
+        {
+            var (command, policy) = AltaCommandRegistry.GuardedCommand(path, policies);
+            return (command, policy?.Path);
+        }
+    }
+
     [TestMethod]
     public void APlugin_TakesNoNameOfACommandASandboxedSessionMayRun()
     {

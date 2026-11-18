@@ -61,13 +61,12 @@ public sealed class AltaCommandRegistry
     // command is never a way around the guard. `alta mcp tool call` checks the tool it calls, as the tool of the session.
     private async ValueTask<string?> CheckGuardedPluginCommandAsync(AltaCommandContext context, string? path, IReadOnlyList<string> args)
     {
-        if (context.Caller.Kind != "agent" || context.Caller.SourceSessionId is not { Length: > 0 } sessionId || string.IsNullOrWhiteSpace(path)
-            || string.Equals(path, McpToolCallPath, StringComparison.OrdinalIgnoreCase)
+        if (context.Caller.Kind != "agent" || context.Caller.SourceSessionId is not { Length: > 0 } sessionId
             || context.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>()?.ToolGuards is not { } guards)
             return null;
         var contributionContext = new AltaCommandContributionContext { Invocation = context };
-        var policy = _contributors.OfType<PluginAltaCommandContributor>().SelectMany(contributor => contributor.GetCommandPolicies(contributionContext))
-            .FirstOrDefault(candidate => string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase));
+        var (command, policy) = GuardedCommand(path,
+            _contributors.OfType<PluginAltaCommandContributor>().SelectMany(contributor => contributor.GetCommandPolicies(contributionContext)));
         // The guard of the session is looked up for a command of a plugin that changes something only.
         if (policy is not { IsMutating: true } || await guards.FindAsync(sessionId, context.CancellationToken).ConfigureAwait(false) is null) return null;
         using var buffer = new MemoryStream();
@@ -82,8 +81,28 @@ public sealed class AltaCommandRegistry
 
         using var arguments = System.Text.Json.JsonDocument.Parse(buffer.ToArray());
         using var schema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"args":{"type":"array","items":{"type":"string"}}}}""");
-        var spec = new AgentToolSpec("alta " + policy.Path, $"The command `alta {policy.Path}` of a plugin.", schema.RootElement.Clone());
+        var spec = new AgentToolSpec("alta " + command, $"The command `alta {command}` of a plugin.", schema.RootElement.Clone());
         return await guards.CheckAsync(sessionId, spec, arguments.RootElement.Clone(), context.Cwd, context.CancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Finds what the guard of a session checks for a command: the command without the name of the application the parser
+    /// puts first (<c>alta jira comment</c> is <c>jira comment</c>), and its policy, the one of the command itself or the
+    /// nearest one above it (a plugin that declares <c>jira</c> declares its whole tree). <c>mcp tool call</c> has none:
+    /// it checks the tool it calls.
+    /// </summary>
+    /// <param name="resolvedPath">The path of the command, as the parser resolves it.</param>
+    /// <param name="policies">The policies of the commands of plugins.</param>
+    /// <returns>The command and its policy, or no policy when no plugin declares the command.</returns>
+    internal static (string Command, AltaCommandPolicy? Policy) GuardedCommand(string? resolvedPath, IEnumerable<AltaCommandPolicy> policies)
+    {
+        var space = resolvedPath?.IndexOf(' ', StringComparison.Ordinal) ?? -1;
+        var command = space < 0 ? string.Empty : resolvedPath![(space + 1)..].Trim();
+        if (command.Length == 0 || string.Equals(command, McpToolCallPath, StringComparison.OrdinalIgnoreCase)) return (command, null);
+        return (command, policies
+            .Where(candidate => string.Equals(candidate.Path, command, StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith(candidate.Path + " ", StringComparison.OrdinalIgnoreCase))
+            .MaxBy(static candidate => candidate.Path.Length));
     }
 
     private static string RootOf(string path)
@@ -329,7 +348,7 @@ public sealed class AltaCommandRegistry
                 return CaptureResult(exitCode, context, stopwatch.Elapsed, isHelp: true, error: null);
             }
 
-            if (!context.Caller.SubSessions && AltaSubSessionsGate.Gates(parseResult.ResolvedCommandPath))
+            if (!context.Caller.SubSessions && AltaSubSessionsGate.Gates(parseResult.ResolvedCommand))
             {
                 var what = $"run `{parseResult.ResolvedCommandPath}`";
                 AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "subSessions.refused", AltaExitCodes.PolicyDenied, AltaSubSessionsGate.Refusal(parseResult.ResolvedCommandPath));

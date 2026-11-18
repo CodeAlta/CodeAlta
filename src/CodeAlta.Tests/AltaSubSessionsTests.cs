@@ -13,12 +13,21 @@ public sealed class AltaSubSessionsTests
     private static readonly AltaCallerIdentity WithoutSubSessions = new() { Kind = "agent", SourceSessionId = "session-leaf", SubSessions = false };
 
     [TestMethod]
-    public void Gates_TheCommandsThatStartASession()
+    public void Gates_TheCommandsThatStartASession_AndNoOther()
     {
-        foreach (var path in new[] { "alta session create", "alta session fork", "alta script run", "alta automation run", "alta automation create" })
-            Assert.IsTrue(AltaSubSessionsGate.Gates(path), path);
-        foreach (var path in new[] { "alta session send", "alta session list", "alta script list", "alta automation list", "alta", "alta session" })
-            Assert.IsFalse(AltaSubSessionsGate.Gates(path), path);
+        var context = new AltaCommandContext
+        {
+            Caller = WithoutSubSessions,
+            Services = new AltaServiceCollection(),
+            Stdin = TextReader.Null,
+            Stdout = TextWriter.Null,
+            Stderr = TextWriter.Null,
+            CorrelationId = "test",
+        };
+
+        Assert.IsTrue(AltaSubSessionsGate.Gates(AltaSubSessionsGate.Leaf(context, "run", "Runs.")));
+        Assert.IsFalse(AltaSubSessionsGate.Gates(new XenoAtom.CommandLine.Command("list", "Lists.")));
+        Assert.IsFalse(AltaSubSessionsGate.Gates(null));
     }
 
     [TestMethod]
