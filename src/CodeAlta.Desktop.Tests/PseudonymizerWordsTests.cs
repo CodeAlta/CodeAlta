@@ -22,4 +22,17 @@ public sealed class PseudonymizerWordsTests
         Assert.IsFalse(sent.Contains("sophie.martin@exemple.fr", StringComparison.Ordinal), "The address of a person is still hidden.");
         Assert.IsFalse(sent.Contains("Montauban", StringComparison.Ordinal), "A place is still hidden.");
     }
+
+    [TestMethod]
+    [DataRow("lieu: Montauban", "Montauban", "[LOCATION_001]")]
+    [DataRow("ADRESSE: 7 rue des Lilas", "7 rue des Lilas", "[ADDRESS_001]")]
+    public async Task AProject_CanStillExplicitlyHideValuesWithAnOldKindPrefix(string setting, string value, string token)
+    {
+        var configured = PseudonymizerPlugin.ParseValue(setting);
+        Assert.IsNotNull(configured);
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([]), new PseudonymTable(), new PseudonymCache(),
+            new PseudonymizerOptions { AlwaysHide = [configured.Value] });
+
+        Assert.AreEqual($"The value is {token}.", await boundary.PseudonymizeAsync($"The value is {value}.", CancellationToken.None));
+    }
 }

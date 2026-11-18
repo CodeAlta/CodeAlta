@@ -244,15 +244,19 @@ public sealed partial class PseudonymizerPlugin : PluginBase
         };
     }
 
-    private static (string Entity, string Value)? ParseValue(string line)
+    internal static (string Entity, string Value)? ParseValue(string line)
     {
         var text = line.Trim();
         if (text.Length == 0) return null;
         var separator = text.IndexOf(':', StringComparison.Ordinal);
-        if (separator > 0 && PiiEntities.All.Contains(text[..separator].Trim().ToUpperInvariant()))
+        if (separator > 0)
         {
-            var value = text[(separator + 1)..].Trim();
-            return value.Length == 0 ? null : (text[..separator].Trim().ToUpperInvariant(), value);
+            var entity = PiiEntities.CanonicalName(text[..separator].Trim().ToUpperInvariant());
+            if (PiiEntities.All.Contains(entity))
+            {
+                var value = text[(separator + 1)..].Trim();
+                return value.Length == 0 ? null : (entity, value);
+            }
         }
 
         return (PiiEntities.Person, text);

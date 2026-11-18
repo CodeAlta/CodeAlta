@@ -118,20 +118,6 @@ internal sealed class NerModels : IDisposable
         lock (_gate)
         {
             if (_loaded.TryGetValue(directory, out var loaded)) return loaded.Recognizer;
-            // The description of a model of the catalog is the one of this version: the file a previous version wrote
-            // beside it (with other kinds, other labels) is written again before this process and its worker read it.
-            if (NerModelCatalog.Find(id) is { } catalogModel)
-            {
-                try
-                {
-                    catalogModel.Description.Save(directory);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                    throw new InvalidOperationException($"The description of the model {catalogModel.Name} could not be written: {exception.Message}", exception);
-                }
-            }
-
             var runtime = _host.OnnxRuntimeLibrary() ?? throw new InvalidOperationException("The ONNX Runtime is not installed.");
             NerModelDescription description;
             NerTokenizer tokenizer;
@@ -162,7 +148,7 @@ internal sealed class NerModels : IDisposable
     }
 
     // The description of a model of the catalog is written beside its files: the worker reads it as it reads the one of
-    // a model of the user. Each load writes it again (Recognizer).
+    // a model of the user.
     private static Task WriteDescriptionAsync(string directory, NerModelPreset preset)
     {
         preset.Description.Save(directory);

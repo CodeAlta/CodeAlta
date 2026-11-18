@@ -34,7 +34,7 @@ sequenceDiagram
 1. In the Explorer, open the menu of the project and choose **Pseudonymize the project…**.
 2. Choose the **Language of the documents** (see below).
 3. Optionally, open **Names and words**:
-   - **Names always hidden**: the parties of the file, hidden wherever they appear, even where nothing finds them. One per line.
+   - **Names always hidden**: the parties of the file, hidden wherever they appear, even where nothing finds them. One per line. Use a prefix such as `LOCATION: Montauban` to choose the kind of pseudonym; older prefixes such as `LIEU:` still work.
    - **Words never hidden**: what was taken for personal data by mistake. One per line.
 4. Choose **Pseudonymize**. The project shows a padlock, and its next requests are pseudonymized.
 
@@ -55,7 +55,7 @@ Each project chooses the language of its documents, which chooses the model that
 | Several languages | Ten languages, French and English among them, and the identifiers of France, the UK and the US. |
 | Identifiers only | Emails, phone numbers, IBAN, social security and company numbers of France, the UK and the US. Names are not looked for, and nothing is downloaded. |
 
-**Settings > Plugins > Pseudonymizer** lists the languages with their model and its size, and deletes a model or downloads it again. A **Custom model** setting takes the folder of a token classification model of yours (ONNX, with its tokenizer and a `ner-model.json` that describes it).
+**Settings > Plugins > Pseudonymizer** lists the languages with their model and its size, and deletes a model or downloads it again. A **Custom model** setting takes the folder of a token classification model of yours (ONNX, with its tokenizer and a `ner-model.json` that describes it). Descriptions that use older French kinds, such as `PERSONNE`, still work without edits or a new download.
 
 ## What is hidden
 

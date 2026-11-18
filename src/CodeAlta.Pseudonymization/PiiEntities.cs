@@ -158,6 +158,30 @@ public static class PiiEntities
     private static readonly FrozenDictionary<string, int> Ranks = Priority.Select(static (entity, index) => (entity, index))
         .ToFrozenDictionary(static pair => pair.entity, static pair => pair.index, StringComparer.Ordinal);
 
+    /// <summary>Gets the current name of a kind. The former French names are accepted; other names are unchanged.</summary>
+    /// <param name="entity">The case-sensitive name of the kind.</param>
+    /// <returns>The current name, or <paramref name="entity"/> if it is not a former name.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entity"/> is <see langword="null"/>.</exception>
+    public static string CanonicalName(string entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        return entity switch
+        {
+            "PERSONNE" => Person,
+            "ORGANISATION" => Organization,
+            "LIEU" => Location,
+            "ADRESSE" => Address,
+            "TELEPHONE" => Phone,
+            "CARTE" => CreditCard,
+            "DATE_NAISSANCE" => BirthDate,
+            "CODE_POSTAL" => PostalCode,
+            "PLAQUE" => Plate,
+            "NUMERO_FISCAL" => TaxNumber,
+            "REFERENCE_AVIS" => TaxNoticeReference,
+            _ => entity,
+        };
+    }
+
     /// <summary>Gets the rank of a kind in <see cref="Priority"/>; an unknown kind comes just before <see cref="Date"/>.</summary>
     /// <param name="entity">The kind.</param>
     /// <returns>The rank, the lowest first.</returns>

@@ -66,6 +66,7 @@ public sealed partial class PseudonymTable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        entity = PiiEntities.CanonicalName(entity);
         lock (_gate)
         {
             if (_byValue.TryGetValue((entity, value), out var known))
@@ -144,10 +145,10 @@ public sealed partial class PseudonymTable
             var exact = Format(label, number);
             if (_byToken.ContainsKey(exact)) return exact;
             string? found = null;
-            foreach (var entity in _counters.Keys)
+            foreach (var knownLabel in _counters.Keys)
             {
-                if (!IsOneEditAway(label, entity)) continue;
-                var token = Format(entity, number);
+                if (!IsOneEditAway(label, knownLabel)) continue;
+                var token = Format(knownLabel, number);
                 if (!_byToken.ContainsKey(token)) continue;
                 if (found is not null) return null;
                 found = token;
@@ -184,22 +185,32 @@ public sealed partial class PseudonymTable
         {
             if (string.IsNullOrEmpty(entry.Token) || string.IsNullOrEmpty(entry.Entity) || string.IsNullOrEmpty(entry.Value)) throw new JsonException("An entry of the table is incomplete.");
             table._byToken[entry.Token] = entry;
-            table._byValue[(entry.Entity, entry.Value)] = entry.Token;
+            // Match a known value by its current kind, but keep the exact token already sent to the provider.
+            table._byValue.TryAdd((PiiEntities.CanonicalName(entry.Entity), entry.Value), entry.Token);
         }
 
-        foreach (var (entity, number) in document.Counters ?? [])
+        foreach (var (label, number) in document.Counters ?? [])
         {
-            table._counters[entity] = number;
+            table.KeepCounterAtLeast(label, number);
         }
 
         // A counter is never behind a pseudonym the table has: a new value never takes the number of another.
         foreach (var entry in table._byToken.Values)
         {
-            var number = int.Parse(StrictToken().Match(entry.Token).Groups["number"].Value, CultureInfo.InvariantCulture);
-            if (!table._counters.TryGetValue(entry.Entity, out var counter) || counter < number) table._counters[entry.Entity] = number;
+            var match = StrictToken().Match(entry.Token);
+            var number = int.Parse(match.Groups["number"].Value, CultureInfo.InvariantCulture);
+            table.KeepCounterAtLeast(match.Groups["label"].Value, number);
         }
 
         return table;
+    }
+
+    // Keep the old label for tolerant restoration, and continue numbering under the new label instead of reusing a number.
+    private void KeepCounterAtLeast(string label, int number)
+    {
+        if (_counters.GetValueOrDefault(label) < number) _counters[label] = number;
+        var entity = PiiEntities.CanonicalName(label);
+        if (entity != label && _counters.GetValueOrDefault(entity) < number) _counters[entity] = number;
     }
 
     /// <summary>Matches a pseudonym in its exact form.</summary>

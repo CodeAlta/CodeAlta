@@ -124,6 +124,32 @@ public sealed class NerTests
     }
 
     [TestMethod]
+    [DataRow("PERSONNE", "PERSON")]
+    [DataRow("ORGANISATION", "ORGANIZATION")]
+    [DataRow("LIEU", "LOCATION")]
+    [DataRow("ADRESSE", "ADDRESS")]
+    [DataRow("TELEPHONE", "PHONE_NUMBER")]
+    [DataRow("CARTE", "CREDIT_CARD")]
+    [DataRow("DATE_NAISSANCE", "DATE_OF_BIRTH")]
+    [DataRow("CODE_POSTAL", "POSTAL_CODE")]
+    [DataRow("PLAQUE", "LICENSE_PLATE")]
+    [DataRow("NUMERO_FISCAL", "FR_TAX_NUMBER")]
+    [DataRow("REFERENCE_AVIS", "FR_TAX_NOTICE")]
+    public void ADescription_WithALegacyKind_LoadsWithoutChangingTheFile(string legacy, string current)
+    {
+        using var folder = new TempVocabulary("[PAD]");
+        var path = System.IO.Path.Combine(folder.Path, NerModelDescription.FileName);
+        var json = $$$"""{"id":"x","labels":["O","B-ENTITY"],"entities":{"ENTITY":"{{{legacy}}}","MISC":null}}""";
+        File.WriteAllText(path, json);
+
+        var description = NerModelDescription.Load(folder.Path);
+
+        Assert.AreEqual((current, true), description.Read("B-ENTITY"));
+        Assert.IsNull(description.Read("B-MISC").Entity);
+        Assert.AreEqual(json, File.ReadAllText(path));
+    }
+
+    [TestMethod]
     public void ADescription_WithAnUnknownKind_IsRefused()
     {
         using var folder = new TempVocabulary("[PAD]");
