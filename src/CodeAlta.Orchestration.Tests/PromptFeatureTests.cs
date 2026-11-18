@@ -193,16 +193,16 @@ public sealed class PromptFeatureTests
                 DisabledTools = disabledTools.ToHashSet(StringComparer.Ordinal),
                 DisabledFeatures = off.ToHashSet(StringComparer.Ordinal),
             }).DeveloperInstructions!;
-            return instructions.Split('\n').Single(static line => line.StartsWith("- Do not end your turn saying", StringComparison.Ordinal)).TrimEnd('\r');
+            return instructions.Split('\n').Single(static line => line.StartsWith("- Never keep your turn busy waiting", StringComparison.Ordinal)).TrimEnd('\r');
         }
 
         string[] shell = [];
         string[] noShell = [PromptToolConditions.ShellCommand];
         StringAssert.EndsWith(Bullet(shell), "a few seconds. Otherwise set one reminder first, `alta reminder create --duration <delay> --stdin`, with a delay that fits how long the thing takes and a content that says what to check, and set another when it fires too early. Say in your answer what brings you back: the job or the reminder.");
-        StringAssert.Contains(Bullet(shell, PromptFeatures.Reminders), "within the turn when that is short. When a command can do the waiting");
+        StringAssert.Contains(Bullet(shell, PromptFeatures.Reminders), "Wait within the turn only for what takes a few seconds. A command that sleeps, polls in a loop or may take more than half a minute");
         StringAssert.EndsWith(Bullet(shell, PromptFeatures.Reminders), "Do not start a job for a command that ends in a few seconds.");
-        StringAssert.EndsWith(Bullet(noShell), "within the turn when that is short. Set one reminder first, `alta reminder create --duration <delay> --stdin`, with a delay that fits how long the thing takes and a content that says what to check, and set another when it fires too early. Say in your answer what brings you back: the job or the reminder.");
-        StringAssert.EndsWith(Bullet(noShell, PromptFeatures.Reminders), "Wait for it within the turn when that is short.");
+        StringAssert.EndsWith(Bullet(noShell), "within the turn only for what takes a few seconds. Set one reminder first, `alta reminder create --duration <delay> --stdin`, with a delay that fits how long the thing takes and a content that says what to check, and set another when it fires too early. Say in your answer what brings you back: the job or the reminder.");
+        StringAssert.EndsWith(Bullet(noShell, PromptFeatures.Reminders), "Wait within the turn only for what takes a few seconds.");
     }
 
     [TestMethod]

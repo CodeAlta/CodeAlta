@@ -36,6 +36,7 @@ internal static class StatisticsToolBuckets
         ["skill"] = ToolKind.Skill,
         ["codealta_skills_activate"] = ToolKind.Skill,
         ["exec"] = ToolKind.Script,
+        // The tool that waited for a script, which sessions had until it was removed: their recorded calls keep their kind.
         ["wait"] = ToolKind.Script,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 

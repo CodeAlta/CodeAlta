@@ -163,25 +163,13 @@ public sealed class CodeModeAgentsLimitsTests
         }
 
         var aborted = await RunHeldAsync(_ => host.RuntimeService.AbortTreeAsync(parent.SessionId, "test"));
-        var terminated = await RunHeldAsync(async run =>
-        {
-            // `wait` with `terminate: true`: the wait takes the result.
-            run.Stop();
-            var (ended, result) = await host.CodeModeRuns.WaitAsync(run, Hang, CancellationToken.None);
-            Assert.IsTrue(ended);
-            Assert.AreEqual(CodeModeRunStatus.Cancelled, result?.Status);
-        });
         await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
         await Task.Delay(1000);
 
         Assert.IsTrue(aborted.Run.TryCollect(), "no prompt took the result of the aborted run: it was never delivered");
-        Assert.IsFalse(terminated.Run.TryCollect(), "the wait took the result of the terminated run");
-        foreach (var (result, child, _) in new[] { aborted, terminated })
-        {
-            Assert.AreEqual(CodeModeRunStatus.Cancelled, result.Status);
-            Assert.IsNotNull(child, "the child's run ended");
-            Assert.AreEqual("aborted", child.Status, "the child's turn was stopped with the run");
-        }
+        Assert.AreEqual(CodeModeRunStatus.Cancelled, aborted.Result.Status);
+        Assert.IsNotNull(aborted.Child, "the child's run ended");
+        Assert.AreEqual("aborted", aborted.Child.Status, "the child's turn was stopped with the run");
 
         Assert.AreEqual(parentRequests, provider.RequestsOf(parent.SessionId).Length, "the parent is told nothing");
     }

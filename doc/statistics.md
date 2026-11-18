@@ -66,7 +66,7 @@ Definitions the reducer guarantees:
   because a script may sleep for days. Its name is the first library script it loads; a run that loads none is
   `(inline)`, and one recorded before the loads were recorded `(unknown)`. A session a script started records the run
   (`workflow:<run>`), which gives the tokens and the cost of the sessions of each script at query time. The calls a
-  script makes are tool calls of the session marked as the script's, and `exec` and `wait` are tools of their own kind.
+  script makes are tool calls of the session marked as the script's, and `exec` is a tool of its own kind (as `wait`, which sessions had before, is in their records).
 
 `SessionFactsState.CurrentVersion` (9) versions the definitions. A new version rereads every session that still has
 its journal, one at a time, keeping the old numbers until each session's new rows are saved.

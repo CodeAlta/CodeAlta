@@ -477,7 +477,7 @@ public static class CodeModeResultFormatter
 
         if (waitsFor is not null)
         {
-            builder.Append("It waits for ").Append(waitsFor).Append(", which `wait` does not wait for. ");
+            builder.Append("It waits for ").Append(waitsFor).Append(". ");
         }
 
         // While a tool call waits, the user cannot reach the session: the result finds it by itself.

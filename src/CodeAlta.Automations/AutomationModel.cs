@@ -393,7 +393,7 @@ internal sealed record AutomationAutonomy
     internal static readonly string[] HostTools =
     [
         "read_file", "view_image", "list_dir", "grep", "webget", "shell_command", "write_file", "replace_in_file", "delete_file_or_dir", "rename_file_or_dir",
-        "apply_patch", "request_user_input", "alta", "exec", "wait", "web_search", "web_fetch", "tool_search",
+        "apply_patch", "request_user_input", "alta", "exec", "web_search", "web_fetch", "tool_search",
     ];
 
     /// <summary>Gets the tools of other sources the runs call without a person, by their exact names.</summary>

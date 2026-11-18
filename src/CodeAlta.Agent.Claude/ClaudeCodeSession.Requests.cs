@@ -10,10 +10,10 @@ internal sealed partial class ClaudeCodeSession
     /// <summary>The tool Claude Code always loads, whatever the number of tools: the gateway to the host.</summary>
     internal const string AlwaysLoadedTool = "alta";
 
-    // The tools Claude Code always loads: `alta`, and `exec` with `wait` while the session has Code Mode, which its
+    // The tools Claude Code always loads: `alta`, and `exec` while the session has Code Mode, which its
     // instructions tell it to reach for first. A deferred one would wait for a tool search the model rarely makes.
     private static readonly System.Collections.Frozen.FrozenSet<string> AlwaysLoadedTools =
-        System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal, AlwaysLoadedTool, "exec", "wait");
+        System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal, AlwaysLoadedTool, "exec");
 
     private const int PermissionReasonLimit = 1000;
 

@@ -133,7 +133,7 @@ public sealed class CodeModeSessionTools
     }
 
     /// <summary>
-    /// Returns the tools of a session on a provider and a model, with <c>exec</c> and <c>wait</c> after them while Code
+    /// Returns the tools of a session on a provider and a model, with <c>exec</c> after them while Code
     /// Mode is on for them; in <c>only</c>, <c>exec</c> takes over the others, which the model then calls through scripts.
     /// </summary>
     /// <param name="dispatcher">The dispatcher of <c>alta</c>.</param>
@@ -170,6 +170,6 @@ public sealed class CodeModeSessionTools
 
     // The scripts of the library offered as tools, under a name no other tool of the session has.
     private IEnumerable<AgentToolDefinition> ScriptTools(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, IReadOnlyList<AgentToolDefinition> tools)
-        => CodeModeToolFactory.CreateScriptTools(dispatcher, caller, _options).Where(tool => tool.Spec.Name is not (CodeModeToolFactory.ExecToolName or CodeModeToolFactory.WaitToolName)
+        => CodeModeToolFactory.CreateScriptTools(dispatcher, caller, _options).Where(tool => tool.Spec.Name != CodeModeToolFactory.ExecToolName
             && !tools.Any(other => string.Equals(other.Spec.Name, tool.Spec.Name, StringComparison.Ordinal)));
 }

@@ -143,7 +143,7 @@ The **Scripts** page counts the runs of [Code Mode](../sessions/code-mode.md) sc
 - **Scripts by model** and **A turn, with a script and without** compare the turns that sent a script with the others.
 - **Recent runs** opens the session of a run.
 
-The Tools page counts `exec` and `wait` as **Scripts** and shows how many calls of each tool scripts made. The Agents page shows who started the sessions, scripts included.
+The Tools page counts `exec` as **Scripts** and shows how many calls of each tool scripts made. The Agents page shows who started the sessions, scripts included.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-statistics-projects.webp" alt="The Projects page of the Statistics tab: a table of the projects with their sessions, runs, active time, tokens, tool calls and cost, and a line of their activity" loading="lazy">

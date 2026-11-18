@@ -169,7 +169,7 @@ public sealed class UnattendedScriptRunner
             var identity = new AltaCallerIdentity { Kind = CallerKind, SourceProjectId = request.ProjectId, SubSessions = false, ScriptRunId = request.RunId };
             var plugins = _pluginCommands();
             var alta = new AltaScriptBinding([.. _dispatcher.Describe(identity, cwd).Where(command => Allows(command, plugins))]);
-            var bound = new ToolScriptBinding(invoker, ["alta", "exec", "wait"]);
+            var bound = new ToolScriptBinding(invoker, ["alta", "exec"]);
             CodeModeApi? api = null;
             api = new CodeModeApi([.. alta.Functions, .. bound.Functions, .. CodeModeDiscovery.Functions]);
             var discovery = new CodeModeDiscovery(() => api, () => _library.List(CodeModeScriptLibrary.ProjectRootOf(cwd), request.Spaces));

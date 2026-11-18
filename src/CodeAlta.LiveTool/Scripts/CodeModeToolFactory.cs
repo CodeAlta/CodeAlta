@@ -61,19 +61,13 @@ public static class CodeModeToolFactory
     /// <summary>The name of the tool that runs a script.</summary>
     public const string ExecToolName = "exec";
 
-    /// <summary>The name of the tool that waits for a script.</summary>
-    public const string WaitToolName = "wait";
-
     /// <summary>Gets the name of the tool a library script with <c>meta.tool: true</c> is offered as: its name with underscores, such as <c>review_pr</c>.</summary>
     /// <param name="scriptName">The name of the script.</param>
     /// <returns>The name of the tool.</returns>
     public static string ScriptToolName(string scriptName) => scriptName.Replace('-', '_');
 
-    private const int MaxWaitMilliseconds = 600_000;
-
-    // A wait shorter than this is a poll that costs a whole request of the model: wait lasts at least this long, unless it
-    // stops the script.
-    private const int MinWaitMilliseconds = 10_000;
+    // The longest a turn is held for a script: past it the script goes on in the background.
+    private const int MaxYieldMilliseconds = 600_000;
 
     // How often exec looks again at a run whose yield has not passed: its clock stops while the run waits for the user.
     private static readonly TimeSpan YieldCheck = TimeSpan.FromMilliseconds(200);
@@ -162,26 +156,11 @@ public static class CodeModeToolFactory
         }
         """;
 
-    private const string WaitDescription = "Stop a script that `exec` left running in the background (`terminate: true`), or wait for the last seconds of one whose result your very next step needs: returns its result, or what it wrote so far when `yield_ms` passes (30000 by default, at most 600000). You rarely need it: the result of a script comes back to this session as a prompt when it ends, and while this tool waits the user cannot reach you. It does not wait for a script that waits for sub-agent sessions or sleeps: end your turn, or do other work.";
-
-    private const string WaitSchema = """
-        {
-          "type": "object",
-          "properties": {
-            "run": { "type": "string", "description": "The id of the run, such as run-7f3c2a." },
-            "yield_ms": { "type": "integer", "minimum": 1, "description": "How long to wait, in milliseconds; 30000 by default, at least 10000 unless it terminates, at most 600000." },
-            "terminate": { "type": "boolean", "description": "Stop the script instead of waiting for it." }
-          },
-          "required": ["run"],
-          "additionalProperties": false
-        }
-        """;
-
-    /// <summary>Creates the <c>exec</c> and <c>wait</c> tools of a session.</summary>
+    /// <summary>Creates the <c>exec</c> tool of a session.</summary>
     /// <param name="dispatcher">The dispatcher of <c>alta</c>.</param>
     /// <param name="caller">Who the session is, as for its <c>alta</c> tool.</param>
     /// <param name="options">The options of the host.</param>
-    /// <returns>The two tools.</returns>
+    /// <returns>The tool.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public static IReadOnlyList<AgentToolDefinition> Create(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, CodeModeToolOptions options)
     {
@@ -201,9 +180,6 @@ public static class CodeModeToolFactory
                     },
                 },
                 (invocation, cancellationToken) => ExecAsync(dispatcher, caller, options, invocation, cancellationToken)),
-            new AgentToolDefinition(
-                new AgentToolSpec(WaitToolName, WaitDescription, Parse(WaitSchema)) { Exposure = AgentToolExposure.Model },
-                (invocation, cancellationToken) => WaitAsync(options, invocation, cancellationToken)),
         ];
     }
 
@@ -343,7 +319,7 @@ public static class CodeModeToolFactory
         // for the session), every command line of its tree otherwise.
         var hasAlta = invocation.Tools is not { } offered || offered.ListTools().Any(static spec => spec.Name == AltaSessionToolFactory.ToolName);
         var alta = new AltaScriptBinding(hasAlta ? dispatcher.Describe(identity, cwd) : [], runsCommandLines: true);
-        var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
+        var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
             .. agentHost is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function, .. CodeModeValueBinding.Functions]);
@@ -400,7 +376,7 @@ public static class CodeModeToolFactory
         var sourcePath = KeepSource(options, sessionId, run.Id, source);
 
         // While the turn waits for the run, stopping the turn stops it; once it goes on in the background, it no longer does.
-        var yieldTime = execOptions.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(Math.Min(yieldMs, MaxWaitMilliseconds)) : options.DefaultYield;
+        var yieldTime = execOptions.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(Math.Min(yieldMs, MaxYieldMilliseconds)) : options.DefaultYield;
         using (cancellationToken.Register(static state => ((CodeModeRunHandle)state!).Stop(), run))
         {
             try
@@ -451,46 +427,11 @@ public static class CodeModeToolFactory
     private static readonly string[] SessionCalls = [CodeModeAgentBinding.Path, CodeModeAgentBinding.AskPath];
 
     // What a run waits for that takes minutes, as its session is told; null when it computes or calls tools. A turn
-    // never waits on these: the sub-sessions of a session answer it by themselves, and so does a script that waits for them.
+    // is never held for these: the sub-sessions of a session answer it by themselves, and so does a script that waits for them.
     private static string? WaitsLongFor(CodeModeRunHandle run)
         => !run.Running ? null
             : run.PendingCalls(SessionCalls) is > 0 and var sessions ? (sessions == 1 ? "a sub-agent session" : $"{sessions.ToString(CultureInfo.InvariantCulture)} sub-agent sessions")
             : run.Sleeping ? "a sleep" : null;
-
-    private static async Task<AgentToolResult> WaitAsync(CodeModeToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
-    {
-        var arguments = invocation.Arguments;
-        if (arguments.ValueKind != JsonValueKind.Object || !arguments.TryGetProperty("run", out var runElement) || runElement.ValueKind != JsonValueKind.String)
-        {
-            return Failure("wait needs `run`: the id `exec` gave, such as run-7f3c2a.");
-        }
-
-        var run = options.Runs.Find(invocation.SessionId, runElement.GetString()!);
-        if (run is null)
-        {
-            var known = options.Runs.List(invocation.SessionId).Select(static info => info.Id).ToArray();
-            return Failure($"No run `{runElement.GetString()}` of this session.{(known.Length == 0 ? string.Empty : " Its runs: " + string.Join(", ", known) + ".")}");
-        }
-
-        var terminates = arguments.TryGetProperty("terminate", out var terminate) && terminate.ValueKind == JsonValueKind.True;
-        if (terminates)
-        {
-            run.Stop();
-        }
-
-        var yieldTime = arguments.TryGetProperty("yield_ms", out var yieldElement) && yieldElement.TryGetInt32(out var yieldMs) && yieldMs > 0
-            ? TimeSpan.FromMilliseconds(Math.Clamp(yieldMs, terminates ? 1 : MinWaitMilliseconds, MaxWaitMilliseconds))
-            : options.DefaultYield;
-        var (ended, result) = await options.Runs.WaitAsync(run, yieldTime, terminates ? null : () => WaitsLongFor(run) is not null, cancellationToken).ConfigureAwait(false);
-        if (ended)
-        {
-            return result is null
-                ? new AgentToolResult(true, [new AgentToolResultItem.Text($"Script {run.Id} ended; its result was already given to this session.")])
-                : new AgentToolResult(result.Status == CodeModeRunStatus.Completed, await WithImagesAsync(options.Runs, run, result, await options.Runs.FormatResultAsync(run, result).ConfigureAwait(false)).ConfigureAwait(false));
-        }
-
-        return new AgentToolResult(true, [new AgentToolResultItem.Text(CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput(), WaitsLongFor(run)))]);
-    }
 
     // workflow({ scriptPath }) reads the file with the session's own read_file, so its sandbox and its tools apply.
     // workflow("name") runs a script of the library, the project's before the user's; the run records which (Statistics counts

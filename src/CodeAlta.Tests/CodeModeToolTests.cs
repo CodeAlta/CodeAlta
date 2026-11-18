@@ -17,7 +17,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
         var invoker = new FakeTools { Alta = AltaTool(root.Path) };
-        var (exec, _) = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
+        var exec = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
 
         var result = await InvokeAsync(exec, """
             const file = await tools.read_file({ path: "a.txt" });
@@ -46,7 +46,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         var folder = Path.Combine(root.Path, "tool-output");
         await using var runs = new CodeModeRunRegistry(null) { ResultFolder = (_, _) => ValueTask.FromResult<string?>(folder) };
-        var (exec, _) = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
+        var exec = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
 
         var result = await InvokeAsync(exec, """
             // @exec: {"max_output_tokens": 300}
@@ -84,7 +84,7 @@ public sealed class CodeModeToolTests
             ResultFolder = (_, _) => ValueTask.FromResult<string?>(folder),
             SecretMasker = new CodeAlta.Agent.Runtime.AgentSecretMasker(() => [secret]),
         };
-        var (exec, _) = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
+        var exec = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
 
         // The script builds the secret: its source holds none.
         var result = await InvokeAsync(exec, """
@@ -128,8 +128,6 @@ public sealed class CodeModeToolTests
             // The raw-text form says to send the source itself; the rest of its description is the JSON form's.
             StringAssert.Contains(freeform.Description, "This is a FREEFORM tool: send the raw JavaScript source itself as the input, not JSON");
             Assert.AreEqual(exec.Spec.Description, freeform.Description!.Replace(" This is a FREEFORM tool: send the raw JavaScript source itself as the input, not JSON, a quoted string or a Markdown code fence.", string.Empty, StringComparison.Ordinal));
-            // The wait tool stays a JSON function.
-            Assert.IsNull(tools.Single(static tool => tool.Spec.Name == "wait").Spec.FreeformInput);
         }
     }
 
@@ -139,7 +137,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
         var invoker = new PatchTools();
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             const a = await tools.apply_patch("*** Begin Patch\n*** Add File: a.txt\n+a\n*** End Patch");
@@ -163,7 +161,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             const found = await codemode.help({ path: "tools" });
@@ -181,7 +179,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             const hits = await codemode.search({ query: "issues" });
@@ -200,7 +198,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             return { none: await codemode.search({ query: "zzqx" }), declaration: await codemode.describe({ path: "alta.prompt.show" }) };
@@ -354,7 +352,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         const string script = """
             return await step("write", () => alta.prompt.create({ promptId: "reviewer", scope: "global", stdin: "Review." }))
               .then((created) => created.type, (e) => `${e.name}: ${e.message}`);
@@ -378,7 +376,7 @@ public sealed class CodeModeToolTests
     // The sub-sessions of a session answer it by themselves: a turn is never held for them, whatever the script or the
     // model asks, so that the user can always reach the session.
     [TestMethod]
-    public async Task AScriptThatWaitsForSubAgents_IsNotWaitedFor_ByItsExecPastTheUsualYield_NorByWait()
+    public async Task AScriptThatWaitsForSubAgents_IsNotWaitedFor_ByItsExecPastTheUsualYield()
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
@@ -387,20 +385,17 @@ public sealed class CodeModeToolTests
         var tools = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
             new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents, DefaultYield = TimeSpan.FromMilliseconds(100) });
         var exec = tools.Single(static tool => tool.Spec.Name == "exec");
-        var wait = tools.Single(static tool => tool.Spec.Name == "wait");
 
         var started = await InvokeAsync(exec, """
             // @exec: {"yield_ms": 600000}
             return await Promise.all([agent("Review A."), agent("Review B.")]);
-            """, new FakeTools()).WaitAsync(TimeSpan.FromSeconds(30));
+            """, new FakeTools()).WithinAsync(TestTime.Seconds(30));
         var runId = runs.List("session-1").Single().Id;
-        var waited = await InvokeAsync(wait, $$"""{"run":"{{runId}}","yield_ms":600000}""").WaitAsync(TimeSpan.FromSeconds(30));
         agents.Release.SetResult();
-        var result = await runs.FindAny(runId)!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+        var result = await runs.FindAny(runId)!.Completion.WithinAsync(TestTime.Seconds(30));
 
-        StringAssert.Contains(Text(started), "It waits for 2 sub-agent sessions, which `wait` does not wait for.");
+        StringAssert.Contains(Text(started), "It waits for 2 sub-agent sessions.");
         StringAssert.Contains(Text(started), "its result comes back to this session as a prompt when it ends");
-        StringAssert.Contains(Text(waited), "It waits for 2 sub-agent sessions");
         StringAssert.Contains(result.ValueJson, "answer to Review A.", "the script itself goes on to its end");
     }
 
@@ -623,7 +618,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             try { await tools.read_file({ path: "missing.txt" }); return "no error"; }
@@ -635,13 +630,13 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
-    public async Task ARunPastItsYield_GoesOnInTheBackground_AndWaitCollectsItOnce()
+    public async Task ARunPastItsYield_GoesOnInTheBackground_AndItsResultComesBackAsOnePrompt()
     {
         using var root = TestTempDirectory.Create();
         var delivered = new List<string>();
         await using var runs = new CodeModeRunRegistry((_, prompt, _) => { lock (delivered) delivered.Add(prompt); return Task.CompletedTask; });
         var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, wait) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var started = await InvokeAsync(exec, """
             // @exec: {"title": "slow", "yield_ms": 50}
@@ -654,49 +649,16 @@ public sealed class CodeModeToolTests
         var task = runs.ListTasks("session-1").Single();
         Assert.AreEqual(("workflow", "slow", "call-1", (AgentBackgroundTaskOutcome?)null), (task.Kind, task.Description, task.ToolCallId, task.Outcome));
 
-        // The run ends while wait waits for it: the result is the wait's, not a prompt.
-        var waiting = InvokeAsync(wait, $$"""{"run":"{{runId}}","yield_ms":10000}""");
-        invoker.Gate.SetResult();
-        var waited = await waiting;
-        var again = await InvokeAsync(wait, $$"""{"run":"{{runId}}"}""");
-
-        Assert.IsTrue(waited.Success, Text(waited));
-        StringAssert.Contains(Text(waited), "hello");
-        StringAssert.Contains(Text(again), "already given");
-        Assert.IsEmpty(delivered, "a result that wait took is not delivered again");
-    }
-
-    [TestMethod]
-    public async Task ARunThatEndsDuringTheTurnThatStartedIt_IsLeftToAWaitOfThatTurn_AndNeverAPrompt()
-    {
-        using var root = TestTempDirectory.Create();
-        var delivered = new List<string>();
-        string? turn = "turn-1";
-        await using var runs = new CodeModeRunRegistry((_, prompt, _) => { lock (delivered) delivered.Add(prompt); return Task.CompletedTask; })
-        {
-            ActiveTurnOf = (_, _) => Task.FromResult<string?>(turn),
-        };
-        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, wait) = Create(root.Path, runs);
-        await InvokeAsync(exec, """
-            // @exec: {"yield_ms": 50}
-            return (await tools.read_file({ path: "a.txt" })).content;
-            """, invoker);
-        var runId = runs.List("session-1").Single().Id;
-
-        // The run ends a moment after exec went on, before the wait of the same turn: nobody waits for it yet.
         await EndAsync(runs, runId, invoker);
-        Assert.IsEmpty(delivered, "the turn that started the run still runs: its wait takes the result");
-        var waited = await InvokeAsync(wait, $$"""{"run":"{{runId}}"}""");
-        StringAssert.Contains(Text(waited), "hello");
 
-        turn = null;
-        await runs.TurnEndedAsync("session-1");
-        Assert.IsEmpty(delivered, "a result that wait took is not delivered");
+        lock (delivered)
+        {
+            StringAssert.Contains(delivered.Single(), "hello", "the result finds its session by itself");
+        }
     }
 
     [TestMethod]
-    public async Task ARunThatEndsDuringTheTurnThatStartedIt_IsAPromptOnceThatTurnEndsWithoutTakingIt()
+    public async Task ARunThatEndsDuringTheTurnThatStartedIt_IsAPromptOnceThatTurnEnds()
     {
         using var root = TestTempDirectory.Create();
         var delivered = new List<string>();
@@ -706,7 +668,7 @@ public sealed class CodeModeToolTests
             ActiveTurnOf = (_, _) => Task.FromResult<string?>(turn),
         };
         var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         await InvokeAsync(exec, """
             // @exec: {"yield_ms": 50}
             return (await tools.read_file({ path: "a.txt" })).content;
@@ -736,7 +698,7 @@ public sealed class CodeModeToolTests
             ActiveTurnOf = (_, _) => Task.FromResult<string?>(turn),
         };
         var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         await InvokeAsync(exec, """
             // @exec: {"yield_ms": 50}
             return (await tools.read_file({ path: "a.txt" })).content;
@@ -767,44 +729,17 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
-    public async Task AShortWait_LastsAtLeastTheFloor_SoThatTheEndOfTheRunIsItsResult()
+    public async Task TheDescriptionOfExec_AsksForBatches_AndNotToWait_TheSameForEverySession()
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, wait) = Create(root.Path, runs);
-
-        await InvokeAsync(exec, """
-            // @exec: {"yield_ms": 10}
-            return (await tools.read_file({ path: "a.txt" })).content;
-            """, invoker);
-        var runId = runs.List("session-1").Single().Id;
-
-        // A wait of 100 ms is held to the floor (10 s): the run that ends after a second is its result, not a poll.
-        var waiting = InvokeAsync(wait, $$"""{"run":"{{runId}}","yield_ms":100}""");
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        Assert.IsFalse(waiting.IsCompleted, "the wait is not over after 100 ms");
-        invoker.Gate.SetResult();
-        var waited = await waiting.WithinAsync(TestTime.Seconds(30));
-
-        Assert.IsTrue(waited.Success, Text(waited));
-        StringAssert.Contains(Text(waited), "hello");
-    }
-
-    [TestMethod]
-    public async Task TheDescriptionsOfExecAndWait_AskForBatches_AndNotToWait_TheSameForEverySession()
-    {
-        using var root = TestTempDirectory.Create();
-        await using var runs = new CodeModeRunRegistry(null);
-        var (exec, wait) = Create(root.Path, runs);
-        var (again, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
+        var again = Create(root.Path, runs);
 
         StringAssert.Contains(exec.Spec.Description, "Use it to batch independent reads and searches, or edits you have decided, into one step");
         StringAssert.Contains(exec.Spec.Description, "In a batch, use `Promise.allSettled`");
         StringAssert.Contains(exec.Spec.Description, $"`max_output_tokens` is {CodeModeResultFormatter.DefaultMaxOutputTokens} by default");
         Assert.DoesNotContain("\"max_output_tokens\": ", exec.Spec.Description);
-        StringAssert.Contains(wait.Spec.Description, "30000 by default");
-        StringAssert.Contains(wait.Spec.Description, "while this tool waits the user cannot reach you");
         StringAssert.Contains(exec.Spec.Description, "Do not wait for it: while a tool call waits, the user cannot reach you.");
         Assert.AreEqual(exec.Spec.Description, again.Spec.Description, "the prompt cache holds");
     }
@@ -855,7 +790,7 @@ public sealed class CodeModeToolTests
         var delivered = new TaskCompletionSource<(string Session, string Prompt)>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var runs = new CodeModeRunRegistry((session, prompt, _) => { delivered.TrySetResult((session, prompt)); return Task.CompletedTask; });
         var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         await InvokeAsync(exec, """
             // @exec: {"title": "slow", "yield_ms": 50}
@@ -878,7 +813,7 @@ public sealed class CodeModeToolTests
         var delivered = new TaskCompletionSource<(string Prompt, IReadOnlyList<PromptImageAttachment> Images)>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var runs = new CodeModeRunRegistry((_, prompt, images, _) => { delivered.TrySetResult((prompt, images)); return Task.CompletedTask; }, hold: null);
         var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         await InvokeAsync(exec, """
             // @exec: {"title": "slow", "yield_ms": 50}
@@ -904,7 +839,7 @@ public sealed class CodeModeToolTests
         File.WriteAllBytes(Path.Combine(root.Path, "out", "chart.png"), Png);
         File.WriteAllText(Path.Combine(root.Path, "notes.txt"), "not a picture");
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             image("out/chart.png", { title: "Chart" });
@@ -933,7 +868,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         var records = new List<AgentWorkflowEvent>();
         await using var runs = new CodeModeRunRegistry(null) { Journal = (_, record) => { lock (records) records.Add(record); return Task.CompletedTask; } };
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """
             present("## Reading");
@@ -960,7 +895,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         var records = new List<AgentWorkflowEvent>();
         await using var runs = new CodeModeRunRegistry(null) { Journal = (_, record) => { lock (records) records.Add(record); return Task.CompletedTask; } };
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         const string Code = """
             // @exec: {"title": "review", "yield_ms": 600000}
             return await workflow("review", {"pr":1});
@@ -986,18 +921,18 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null, maxPerSession: 1);
         var invoker = new FakeTools { Gate = new TaskCompletionSource() };
-        var (exec, wait) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         await InvokeAsync(exec, """
             // @exec: {"yield_ms": 10}
             return (await tools.read_file({ path: "a.txt" })).content;
             """, invoker);
         var refused = await InvokeAsync(exec, "return 1;", invoker);
-        var stopped = await InvokeAsync(wait, $$"""{"run":"{{runs.List("session-1").Single().Id}}","terminate":true,"yield_ms":10000}""");
+        runs.Find("session-1", runs.List("session-1").Single().Id)!.Stop();
 
         Assert.IsFalse(refused.Success);
         StringAssert.Contains(Text(refused), "already runs 1 scripts");
-        StringAssert.StartsWith(Text(stopped), "Script stopped");
+        StringAssert.Contains(Text(refused), "alta workflow cancel <run-id>");
     }
 
     [TestMethod]
@@ -1007,7 +942,7 @@ public sealed class CodeModeToolTests
         await using var runs = new CodeModeRunRegistry(null);
         var invoker = new FakeTools();
         invoker.Files["review.js"] = "return `reviewed ${args.pr}`;";
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
 
         var result = await InvokeAsync(exec, """return await workflow({ scriptPath: "review.js" }, { pr: 231 });""", invoker);
 
@@ -1026,7 +961,7 @@ public sealed class CodeModeToolTests
         Assert.IsNull(library.Save("review", CodeModeScriptScope.Global, Meta + "\nreturn `global ${args.pr}`;", null, null).Refusal);
         Assert.IsNull(library.Save("review", CodeModeScriptScope.Project, Meta + "\nreturn `project ${args.pr}`;", project, null).Refusal);
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(project, runs, library: library);
+        var exec = Create(project, runs, library: library);
 
         var result = await InvokeAsync(exec, """
             const errors = [];
@@ -1061,7 +996,7 @@ public sealed class CodeModeToolTests
             return args.limit;
             """, project, null).Refusal);
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(project, runs, library: library);
+        var exec = Create(project, runs, library: library);
 
         var result = await InvokeAsync(exec, """
             const hits = await codemode.search({ query: "triage backlog" });
@@ -1105,7 +1040,7 @@ public sealed class CodeModeToolTests
 
         var result = await InvokeAsync(exec, Script, new FakeTools());
         // A run without sessions to start has no agent().
-        var (bare, _) = Create(project, runs, library: library);
+        var bare = Create(project, runs, library: library);
         var without = await InvokeAsync(bare, "return { help: await codemode.help(), agent: await codemode.describe({ path: 'agent' }).catch(e => e.message) };", new FakeTools());
 
         Assert.IsTrue(result.Success, Text(result));
@@ -1150,9 +1085,9 @@ public sealed class CodeModeToolTests
         string[] Names(SpaceFilter? spaces) => [.. codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, Spaces = spaces }, others, null, null).Select(static tool => tool.Spec.Name)];
         var store = new CodeAltaConfigStore(options);
 
-        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "review_pr" }, Names(null), "without the space of the session, the scripts of the project only");
-        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "review_pr" }, Names(SpaceFilter.Load(store, "home")));
-        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "mine", "review_pr" }, Names(SpaceFilter.Load(store, "work")));
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "review_pr" }, Names(null), "without the space of the session, the scripts of the project only");
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "review_pr" }, Names(SpaceFilter.Load(store, "home")));
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "mine", "review_pr" }, Names(SpaceFilter.Load(store, "work")));
 
         var tool = codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, CallerKind = "cli" }, others, null, null).Single(static tool => tool.Spec.Name == "review_pr");
         Assert.IsTrue(tool.Spec.Deferred);
@@ -1184,7 +1119,7 @@ public sealed class CodeModeToolTests
         runs.RequireCodeMode("automation-session");
         Assert.AreEqual("on", runs.CodeModeOf("automation-session", null, null));
         Assert.AreEqual("off", runs.CodeModeOf("other", null, null));
-        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" },
+        CollectionAssert.AreEqual(new[] { "alta", "exec" },
             codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionIdProvider = static () => "automation-session" }, others, null, null).Select(static tool => tool.Spec.Name).ToArray());
         CollectionAssert.AreEqual(new[] { "alta" }, codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = "other" }, others, null, null).Select(static tool => tool.Spec.Name).ToArray());
         mode = "on";
@@ -1194,7 +1129,7 @@ public sealed class CodeModeToolTests
         Assert.AreEqual("only", runs.CodeModeOf("other", null, null));
 
         CollectionAssert.AreEqual(new[] { "alta" }, off.Select(static tool => tool.Spec.Name).ToArray());
-        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" }, with.Select(static tool => tool.Spec.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "alta", "exec" }, with.Select(static tool => tool.Spec.Name).ToArray());
         Assert.IsTrue(with.Skip(1).All(static tool => tool.Spec.Exposure == AgentToolExposure.Model), "a script does not run scripts through exec");
         Assert.IsFalse(with.Any(static tool => tool.Spec.ScriptsTakeOver));
         Assert.IsTrue(only.Single(static tool => tool.Spec.Name == "exec").Spec.ScriptsTakeOver, "in only, exec takes over the other tools");
@@ -1221,18 +1156,18 @@ public sealed class CodeModeToolTests
         }
 
         // Without a setting, Code Mode is on.
-        Agree("gpt", "gpt-6.1-sol", "on", "alta,exec,wait");
-        Agree("haiku", "claude-haiku-4.5", "on", "alta,exec,wait");
+        Agree("gpt", "gpt-6.1-sol", "on", "alta,exec");
+        Agree("haiku", "claude-haiku-4.5", "on", "alta,exec");
 
         // A model turned off, beside one of the same provider that is not.
         File.WriteAllText(config, "[providers.copilot]\ntype = \"openai-chat\"\n\n[providers.copilot.model_overrides.\"claude-haiku-4.5\"]\ncode_mode = \"off\"\n");
-        Agree("gpt", "gpt-6.1-sol", "on", "alta,exec,wait");
+        Agree("gpt", "gpt-6.1-sol", "on", "alta,exec");
         Agree("haiku", "claude-haiku-4.5", "off", "alta");
 
         // The model of a provider wins over the provider, which wins over every session.
         File.WriteAllText(config, "[code_mode]\nmode = \"only\"\n\n[providers.copilot]\ntype = \"openai-chat\"\ncode_mode = \"off\"\n\n[providers.copilot.model_overrides.\"claude-haiku-4.5\"]\ncode_mode = \"on\"\n");
         Agree("gpt", "gpt-6.1-sol", "off", "alta");
-        Agree("haiku", "claude-haiku-4.5", "on", "alta,exec,wait");
+        Agree("haiku", "claude-haiku-4.5", "on", "alta,exec");
     }
 
     [TestMethod]
@@ -1258,7 +1193,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
         await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         var first = new FakeTools();
 
         var failed = await InvokeAsync(exec, TwoReads, first);
@@ -1289,7 +1224,7 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
         await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         await InvokeAsync(exec, TwoReads, new FakeTools());
         var runId = runs.List("session-1").Single().Id;
 
@@ -1319,7 +1254,7 @@ public sealed class CodeModeToolTests
         var store = Path.Combine(root.Path, "runs");
         await using var before = new CodeModeRunRegistry(null);
         await before.UseStoreAsync(new CodeModeRunStore(store));
-        var (execBefore, _) = Create(root.Path, before);
+        var execBefore = Create(root.Path, before);
         var hanging = new FakeTools { Gate = new TaskCompletionSource() };
         const string code = """
             // @exec: {"yield_ms": 50}
@@ -1337,7 +1272,7 @@ public sealed class CodeModeToolTests
         // CodeAlta starts again: the run is interrupted, with its call in flight.
         await using var after = new CodeModeRunRegistry(null);
         await after.UseStoreAsync(new CodeModeRunStore(store));
-        var (exec, _) = Create(root.Path, after);
+        var exec = Create(root.Path, after);
         var tools = new FakeTools();
         var refused = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}"}""", tools);
         var agreed = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}", "rerun_in_flight": true}""", tools);
@@ -1375,7 +1310,7 @@ public sealed class CodeModeToolTests
         var (project, library) = LibraryOf(root.Path);
         await using var runs = new CodeModeRunRegistry(null);
         await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
-        var (exec, _) = Create(project, runs, library: library);
+        var exec = Create(project, runs, library: library);
         var first = new FakeTools();
 
         var ran = await InvokeAsync(exec, """return await workflow("count-steps", {});""", first);
@@ -1405,7 +1340,7 @@ public sealed class CodeModeToolTests
         var store = Path.Combine(root.Path, "runs");
         await using var before = new CodeModeRunRegistry(null);
         await before.UseStoreAsync(new CodeModeRunStore(store));
-        var (execBefore, _) = Create(project, before, library: library);
+        var execBefore = Create(project, before, library: library);
         var hanging = new FakeTools { Gate = new TaskCompletionSource(), GatedTool = "github_list_issues" };
         await InvokeAsync(execBefore, """
             // @exec: {"yield_ms": 50}
@@ -1422,7 +1357,7 @@ public sealed class CodeModeToolTests
         // CodeAlta starts again while the run waited for the issues.
         await using var after = new CodeModeRunRegistry(null);
         await after.UseStoreAsync(new CodeModeRunStore(store));
-        var (exec, _) = Create(project, after, library: library);
+        var exec = Create(project, after, library: library);
         var tools = new FakeTools();
         var refused = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}"}""", tools);
         var resumed = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}", "rerun_in_flight": true}""", tools);
@@ -1445,7 +1380,7 @@ public sealed class CodeModeToolTests
         var (dispatcher, _) = Dispatcher(root.Path);
         var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
             new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Questions = questions }).Single(static tool => tool.Spec.Name == "exec");
-        var (withoutQuestions, _) = Create(root.Path, runs);
+        var withoutQuestions = Create(root.Path, runs);
 
         var answered = await InvokeAsync(exec, """
             const tag = await step("tag", () => ask("Which tag?", { choices: ["v1", "v2"], default: "v1" }));
@@ -1489,7 +1424,7 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         var clock = System.Diagnostics.Stopwatch.StartNew();
 
         var result = await InvokeAsync(exec, """
@@ -1515,7 +1450,7 @@ public sealed class CodeModeToolTests
         var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }).Add(registry).Add(runs));
         var noStore = await dispatcher.InvokeAsync(["workflow", "resume", "run-1"]);
         await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
-        var (exec, _) = Create(root.Path, runs);
+        var exec = Create(root.Path, runs);
         await InvokeAsync(exec, TwoReads, new FakeTools());
         var runId = runs.List("session-1").Single().Id;
 
@@ -1540,7 +1475,7 @@ public sealed class CodeModeToolTests
     private static AgentToolDefinition AltaTool(string root)
         => AltaSessionToolFactory.Create(Dispatcher(root).Dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root });
 
-    private static (AgentToolDefinition Exec, AgentToolDefinition Wait) Create(string root, CodeModeRunRegistry runs, string? sourceFolder = null,
+    private static AgentToolDefinition Create(string root, CodeModeRunRegistry runs, string? sourceFolder = null,
         CodeModeScriptLibrary? library = null)
     {
         var (dispatcher, _) = Dispatcher(root);
@@ -1551,7 +1486,7 @@ public sealed class CodeModeToolTests
             Library = library,
             SourceFolder = sourceFolder is null ? null : _ => sourceFolder,
         });
-        return (tools.Single(static tool => tool.Spec.Name == "exec"), tools.Single(static tool => tool.Spec.Name == "wait"));
+        return tools.Single();
     }
 
     private static Task<AgentToolResult> InvokeAsync(AgentToolDefinition tool, string code, IAgentRunToolInvoker invoker)

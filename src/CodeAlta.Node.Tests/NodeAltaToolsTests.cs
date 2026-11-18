@@ -24,7 +24,7 @@ public sealed class NodeAltaToolsTests
 
         CollectionAssert.Contains(names, "alta");
         CollectionAssert.Contains(names, "exec");
-        CollectionAssert.Contains(names, "wait");
+        CollectionAssert.DoesNotContain(names, "wait", "a session never waits on a script: its result comes back as a prompt");
     }
 
     [TestMethod]

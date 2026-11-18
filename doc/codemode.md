@@ -56,7 +56,7 @@ paths of the functions, their schemas) and an `ICodeModeCallHandler` (what runs 
 
 ## Hosts
 
-`exec` and `wait` (`CodeModeToolFactory`, in `CodeAlta.LiveTool`) are tools of the session, given by the host beside
+`exec` (`CodeModeToolFactory`, in `CodeAlta.LiveTool`) is a tool of the session, given by the host beside
 `alta` while the mode of the session is `on` or `only` (`CodeModeSessionTools`, read at each send). The mode depends on
 the provider and the model of the send, by one rule (`CodeModeScopes`, in `CodeAlta.Catalog`): the model's
 `code_mode`, its provider's, `[code_mode] mode`, else `on`; only the user's file decides it. Every host passes the
@@ -74,11 +74,12 @@ A tool's structured value (`AgentToolResult.Structured`) is what a script receiv
 Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to a turn:
 
 - `exec` waits for its run until the yield time; the run then goes on in the background, and the turn may end. A turn
-  is never held for sessions: a run that waits for its sub-agents or sleeps is left by `exec` after the default yield
-  and is not waited for by `wait`, since its result finds the session by itself and a waiting tool call keeps the user
-  out.
-- Its result is taken once: by the `exec` that waited, by a `wait` that waits when it ends, or else delivered to its
-  session as a prompt of provenance `workflow`.
+  is never held for sessions: a run that waits for its sub-agents or sleeps is left by `exec` after the default yield,
+  whatever yield its script asks for.
+- No tool waits for a run that went on: its result finds the session by itself, and a tool call that waits keeps the
+  user out of the session.
+- Its result is taken once: by the `exec` that waited, or else delivered to its session as a prompt of provenance
+  `workflow`.
 - That result is one text for the model (`CodeModeResultFormatter`), the value last. The value is data for the model,
   never Markdown for the user: what is for the user, the script shows with `present()` (see [records](#records)), and the
   result tells the model what was shown, in a block of its own, so that it does not repeat it. The window shows the value
@@ -108,7 +109,7 @@ mode the host gives it (`CodeModeRunRegistry.CodeModeOf`, set by the tools that 
 and the tools never disagree. Without it, models rarely write a script on their own: they work through the parts of a
 request one turn after another. The section is the same text for every session of a mode, for prompt caches; a session
 a script started is also told to do its part itself, since each level of sub-agents is a whole session more. Claude
-Code loads `exec` and `wait` with `alta` instead of deferring them behind its tool search.
+Code loads `exec` with `alta` instead of deferring it behind its tool search.
 
 ## Records
 
@@ -190,7 +191,7 @@ guard (deep recursion would end the process), no promise timeout (its 10 s defau
 run's token bounds the wall time when the script sets one), and Task interop for host promises (the public promise API
 cannot be settled from another thread).
 
-A run is stopped by its model (`wait` with `terminate`), by the user (its card, its tab, the background tasks of its
+A run is stopped by its model (`alta workflow cancel`), by the user (its card, its tab, the background tasks of its
 session), by any session that may abort its session (`alta workflow cancel`; a sandboxed one, only its own runs and those
 of the sessions it started), and with the tree of its session. Who stopped it is in its result, so that its session does
 not start it again blindly.

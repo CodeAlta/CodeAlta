@@ -38,8 +38,7 @@ public sealed record CodeModeRunDetail(CodeModeRunInfo Info, string? Source, str
 
 /// <summary>
 /// The runs of the scripts of a host. <c>exec</c> waits for a run up to its yield; a run still going then goes on in the
-/// background, and its result comes back to its session as a prompt (provenance <c>workflow</c>) unless a <c>wait</c>
-/// collected it first. The limits count runs: a run over a limit is refused with the limit's name, never queued.
+/// background, and its result comes back to its session as a prompt (provenance <c>workflow</c>). The limits count runs: a run over a limit is refused with the limit's name, never queued.
 /// </summary>
 public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 {
@@ -53,8 +52,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 
     /// <summary>
     /// Gets or sets what reads the turn a session runs now (the id of its run), or null when it runs none: a run that goes
-    /// on in the background notes the turn of its <c>exec</c>, and its result is left to a <c>wait</c> of that turn while
-    /// it runs. Null for a host without turns: a result is then given as a prompt as soon as the run ends.
+    /// on in the background notes the turn of its <c>exec</c>, and its result is kept while that turn runs. Null for a host without turns: a result is then given as a prompt as soon as the run ends.
     /// </summary>
     public Func<string, CancellationToken, Task<string?>>? ActiveTurnOf { get; set; }
 
@@ -504,7 +502,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             var running = _runs.Values.Where(static run => run.Running).ToArray();
             if (running.Count(run => run.SessionId == sessionId) >= _maxPerSession)
             {
-                refusal = $"This session already runs {_maxPerSession} scripts, the most at the same time. Wait for one, or stop one with `wait` and `terminate: true`.";
+                refusal = $"This session already runs {_maxPerSession} scripts, the most at the same time. Wait for one to end, or stop one with `alta workflow cancel <run-id>`.";
                 return null;
             }
 
@@ -660,71 +658,12 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <param name="sessionId">The session.</param>
     /// <param name="runId">The id of the run.</param>
     /// <returns>The run, or null.</returns>
-    // How often a wait asks whether it should give up.
-    private static readonly TimeSpan WaitCheck = TimeSpan.FromMilliseconds(200);
-
     public CodeModeRunHandle? Find(string sessionId, string runId)
         => _runs.TryGetValue(runId, out var run) && run.SessionId == sessionId ? run : null;
 
     /// <summary>
-    /// Waits for a run, for a <c>wait</c> of its session: while it waits, the result of a run that ends is its own, not
-    /// a prompt; a wait that is cancelled after the run ended leaves the result to the prompt.
-    /// </summary>
-    /// <param name="run">The run.</param>
-    /// <param name="timeout">How long to wait.</param>
-    /// <param name="cancellationToken">Cancels the wait, not the run.</param>
-    /// <returns>Whether the run ended, and its result when this wait took it; null when the session was already given it.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
-    /// <exception cref="OperationCanceledException">The wait was cancelled.</exception>
-    public Task<(bool Ended, CodeModeRunResult? Result)> WaitAsync(CodeModeRunHandle run, TimeSpan timeout, CancellationToken cancellationToken)
-        => WaitAsync(run, timeout, null, cancellationToken);
-
-    /// <summary>
-    /// Waits for a run as <see cref="WaitAsync(CodeModeRunHandle, TimeSpan, CancellationToken)"/> does, and stops waiting
-    /// as soon as the caller says so: a run that started what takes long (sessions of its own) is not waited for.
-    /// </summary>
-    /// <param name="run">The run.</param>
-    /// <param name="timeout">How long to wait.</param>
-    /// <param name="giveUp">Asked while the run goes on: true stops the wait; null never does.</param>
-    /// <param name="cancellationToken">Cancels the wait, not the run.</param>
-    /// <returns>Whether the run ended, and its result when this wait took it; null when the session was already given it.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
-    /// <exception cref="OperationCanceledException">The wait was cancelled.</exception>
-    public async Task<(bool Ended, CodeModeRunResult? Result)> WaitAsync(CodeModeRunHandle run, TimeSpan timeout, Func<bool>? giveUp, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(run);
-        run.AddWaiter(1);
-        try
-        {
-            var waited = Stopwatch.StartNew();
-            while (!run.Completion.IsCompleted && waited.Elapsed < timeout && giveUp?.Invoke() != true)
-            {
-                var slice = timeout - waited.Elapsed;
-                await Task.WhenAny(run.Completion, Task.Delay(giveUp is not null && slice > WaitCheck ? WaitCheck : slice, cancellationToken)).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-        }
-        finally
-        {
-            run.AddWaiter(-1);
-            if (cancellationToken.IsCancellationRequested && run.Completion.IsCompleted)
-            {
-                // The run ended while this wait stopped: its delivery may have left it to this wait.
-                _ = DeliverAsync(run, await run.Completion.ConfigureAwait(false));
-            }
-        }
-
-        if (!run.Completion.IsCompleted)
-        {
-            return (false, null);
-        }
-
-        return run.TryCollect() ? (true, await run.Completion.ConfigureAwait(false)) : (true, null);
-    }
-
-    /// <summary>
     /// Lets a run go on in the background after its <c>exec</c>, noting the turn that runs it (<see cref="ActiveTurnOf"/>):
-    /// a result that comes during that turn is left to its <c>wait</c>, and comes back as a prompt only once it ended.
+    /// a result that comes during that turn comes back as a prompt only once it ended.
     /// </summary>
     /// <param name="run">The run.</param>
     /// <returns>A task that completes when the run is in the background.</returns>
@@ -768,13 +707,13 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
     }
 
-    // Whether the turn of the exec of a run still runs: a wait of that turn can still take the result.
+    // Whether the turn of the exec of a run still runs.
     private async Task<bool> InStartingTurnAsync(CodeModeRunHandle run)
         => run.StartedInTurn is { } turn && string.Equals(await ReadTurnAsync(run.SessionId).ConfigureAwait(false), turn, StringComparison.Ordinal);
 
-    // A run that ended in the background: its result goes to its session, unless a wait takes it. While the turn that
-    // started it runs, it is left to a wait of that turn, and goes once that turn ended (TurnEndedAsync): a prompt in the
-    // middle of that turn would reach the agent as a message, and the timeline as a card, for a result its wait takes. The
+    // A run that ended in the background: its result goes to its session as a prompt. While the turn that started it
+    // runs, it is kept, and goes once that turn ended (TurnEndedAsync): a prompt in the middle of that turn would reach
+    // the agent as a message between two of its steps. The
     // session is held until then: what waits for it to settle sees the result arrive before it settles.
     private async Task OnEndedAsync(CodeModeRunHandle run, CodeModeRunResult result)
     {
@@ -803,7 +742,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             });
             // What reads the journal after the result sees the whole run.
             await run.JournalWritten.ConfigureAwait(false);
-            if (run.Backgrounded && run.Waiters == 0 && !run.Silenced)
+            if (run.Backgrounded && !run.Silenced)
             {
                 if (await InStartingTurnAsync(run).ConfigureAwait(false) && !Volatile.Read(ref _disposed))
                 {
@@ -853,7 +792,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
     }
 
-    // An ended run stays known a little while, so that a `wait` that arrives late still finds it.
+    // An ended run stays known a little while, for what reads it just after its end.
     private void ForgetLater(CodeModeRunHandle run)
         => _ = Task.Delay(TimeSpan.FromMinutes(10)).ContinueWith(_ => _runs.TryRemove(run.Id, out var _), TaskScheduler.Default);
 
@@ -934,7 +873,7 @@ public sealed class CodeModeUserTurn : IDisposable
     }
 }
 
-/// <summary>One run of a script, as the registry, <c>exec</c> and <c>wait</c> see it.</summary>
+/// <summary>One run of a script, as the registry and <c>exec</c> see it.</summary>
 public sealed class CodeModeRunHandle : ICodeModeRunObserver
 {
     private const int RecentLines = 20;
@@ -946,7 +885,6 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     private readonly ConcurrentDictionary<(int Scope, int Index), string> _pendingCalls = new();
     private int _collected;
     private int _backgrounded;
-    private int _waiters;
 
     internal CodeModeRunHandle(string id, string sessionId, string? title, int maxOutputTokens)
     {
@@ -996,7 +934,6 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     /// <summary>Gets how long it has run.</summary>
     public TimeSpan Elapsed => _clock.Elapsed;
 
-    internal int Waiters => Volatile.Read(ref _waiters);
 
     private Task<string?>? _keptResult;
     private Task<CodeModeResultImages>? _images;
@@ -1163,7 +1100,6 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
         }
     }
 
-    internal void AddWaiter(int delta) => Interlocked.Add(ref _waiters, delta);
 
     internal void Start(Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run, Func<CodeModeRunHandle, CodeModeRunResult, Task> ended)
     {
@@ -1189,7 +1125,7 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     /// <returns>True for the first caller.</returns>
     public bool TryCollect() => Interlocked.Exchange(ref _collected, 1) == 0;
 
-    /// <summary>Marks the run as going on in the background: its result then comes back as a prompt, unless a wait takes it.</summary>
+    /// <summary>Marks the run as going on in the background: its result then comes back as a prompt.</summary>
     public void Background() => Volatile.Write(ref _backgrounded, 1);
 
     /// <summary>Stops the run.</summary>
