@@ -85,7 +85,7 @@ public sealed record NerModelDescription
     public IReadOnlyList<string>? Labels { get; set; }
 
     /// <summary>
-    /// Gets the kind of the pseudonymizer each entity of the model is (<c>PER</c> to <c>PERSONNE</c>); an entity it does not
+    /// Gets the kind of the pseudonymizer each entity of the model is (<c>PER</c> to <c>PERSON</c>); an entity it does not
     /// name, or names with null, is ignored.
     /// </summary>
     [JsonPropertyName("entities")]
@@ -120,12 +120,16 @@ public sealed record NerModelDescription
         if (description.Tokenizer.Kind is not (NerTokenizerDescription.SentencePiece or NerTokenizerDescription.WordPiece))
             throw new InvalidDataException($"The tokenizer '{description.Tokenizer.Kind}' of {directory} is not supported: sentencepiece or wordpiece.");
         if (description.MaxTokens is < 16 or > 4096) throw new InvalidDataException($"The model of {directory} takes {description.MaxTokens} tokens: between 16 and 4096.");
-        foreach (var kind in description.Entities.Values)
+        // The host and worker can read an older catalog or custom model without rewriting its definition.
+        var entities = new Dictionary<string, string?>(description.Entities.Count, StringComparer.Ordinal);
+        foreach (var (label, kind) in description.Entities)
         {
-            if (kind is not null && !PiiEntities.All.Contains(kind)) throw new InvalidDataException($"'{kind}' is not a kind of personal data the pseudonymizer knows.");
+            var current = kind is null ? null : PiiEntities.CanonicalName(kind);
+            if (current is not null && !PiiEntities.All.Contains(current)) throw new InvalidDataException($"'{kind}' is not a kind of personal data the pseudonymizer knows.");
+            entities.Add(label, current);
         }
 
-        return description with { Labels = labels };
+        return description with { Labels = labels, Entities = entities };
     }
 
     /// <summary>Writes the description in the folder of its model, as <see cref="FileName"/>.</summary>

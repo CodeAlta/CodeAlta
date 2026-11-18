@@ -9,7 +9,7 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class ConfidentialSessionTests
 {
     private const string Name = "Dupont";
-    private const string Token = "[PERSONNE_001]";
+    private const string Token = "[PERSON_001]";
 
     [TestMethod]
     public async Task ASessionOfAPseudonymizedProject_WithoutAPlugin_SendsNothing()
