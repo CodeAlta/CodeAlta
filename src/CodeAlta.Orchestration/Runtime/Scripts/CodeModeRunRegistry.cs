@@ -512,7 +512,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
                 return null;
             }
 
-            handle = new CodeModeRunHandle(NewId(), sessionId, title, maxOutputTokens) { CallId = callId, Journal = Journal };
+            handle = new CodeModeRunHandle(NewId(), sessionId, title, maxOutputTokens, OnEndedAsync) { CallId = callId, Journal = Journal };
             if (_hold is not null)
             {
                 // The session is held until the result is given: a headless run waits for it, and the session is not retired.
@@ -525,10 +525,16 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
                 handle.Hold = held;
             }
 
-            _runs[handle.Id] = handle;
-            if (start is not null && Store is { } store)
+            try
             {
-                handle.Writer = store.Begin(handle.Id, sessionId, title, callId, start);
+                if (start is not null && Store is { } store)
+                    handle.Writer = store.Begin(handle.Id, sessionId, title, callId, start);
+                _runs[handle.Id] = handle;
+            }
+            catch
+            {
+                handle.Hold?.Dispose();
+                throw;
             }
         }
 
@@ -536,7 +542,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         {
             Title = title, ResumesRunId = start?.ResumesRunId, RecordsScripts = true, ForUser = start is { ForUser: true } ? true : null,
         });
-        handle.Start(run, OnEndedAsync);
+        handle.Start(run);
         refusal = null;
         return handle;
     }
@@ -717,7 +723,6 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     // session is held until then: what waits for it to settle sees the result arrive before it settles.
     private async Task OnEndedAsync(CodeModeRunHandle run, CodeModeRunResult result)
     {
-        ForgetLater(run);
         var held = false;
         try
         {
@@ -742,9 +747,9 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             });
             // What reads the journal after the result sees the whole run.
             await run.JournalWritten.ConfigureAwait(false);
-            if (run.Backgrounded && !run.Silenced)
+            if (run.Backgrounded && !run.Silenced && !Volatile.Read(ref _disposed))
             {
-                if (await InStartingTurnAsync(run).ConfigureAwait(false) && !Volatile.Read(ref _disposed))
+                if (await InStartingTurnAsync(run).ConfigureAwait(false))
                 {
                     _heldForTurn[run.Id] = run;
                     held = true;
@@ -760,6 +765,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         finally
         {
             if (!held) run.Hold?.Dispose();
+            ForgetLater(run);
             RunEnded?.Invoke(run.Id);
         }
     }
@@ -816,14 +822,18 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             run.Stop();
         }
 
-        await Task.WhenAll(runs.Select(static run => run.Completion.ContinueWith(static _ => { }, TaskScheduler.Default))).ConfigureAwait(false);
-        // What the stopped runs wrote last (the end of a call they were in) is on disk before CodeAlta goes: the next start reads
-        // it to tell a run it resumes by itself from one stopped in a call that may not run twice.
-        await Task.WhenAll(runs.Select(static run => run.Writer?.FlushAsync() ?? Task.CompletedTask)).ConfigureAwait(false);
-        // A result held for a turn has nowhere to go any more.
-        foreach (var run in _heldForTurn.Values)
+        try
         {
-            if (_heldForTurn.TryRemove(run.Id, out _)) run.Hold?.Dispose();
+            // A script can already have returned its result while the finalizer is still writing or transferring its hold.
+            await Task.WhenAll(runs.Select(static run => run.Finalized)).ConfigureAwait(false);
+            await Task.WhenAll(runs.Select(static run => run.Writer?.FlushAsync() ?? Task.CompletedTask)).ConfigureAwait(false);
+        }
+        finally
+        {
+            foreach (var run in _heldForTurn.Values)
+            {
+                if (_heldForTurn.TryRemove(run.Id, out _)) run.Hold?.Dispose();
+            }
         }
     }
 }
@@ -878,6 +888,7 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 {
     private const int RecentLines = 20;
     private readonly CancellationTokenSource _cancellation = new();
+    private readonly TaskCompletionSource<CodeModeRunResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentQueue<string> _recent = new();
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private int _calls;
@@ -886,12 +897,15 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     private int _collected;
     private int _backgrounded;
 
-    internal CodeModeRunHandle(string id, string sessionId, string? title, int maxOutputTokens)
+    internal CodeModeRunHandle(string id, string sessionId, string? title, int maxOutputTokens, Func<CodeModeRunHandle, CodeModeRunResult, Task> ended)
     {
         Id = id;
         SessionId = sessionId;
         Title = title;
         MaxOutputTokens = maxOutputTokens;
+        Finalized = FinalizeAsync();
+
+        async Task FinalizeAsync() => await ended(this, await Completion.ConfigureAwait(false)).ConfigureAwait(false);
     }
 
     /// <summary>Gets the id of the run.</summary>
@@ -907,7 +921,9 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     public int MaxOutputTokens { get; }
 
     /// <summary>Gets the run itself: it completes with the result, never with an exception.</summary>
-    public Task<CodeModeRunResult> Completion { get; private set; } = Task.FromResult(new CodeModeRunResult(CodeModeRunStatus.Cancelled, TimeSpan.Zero));
+    public Task<CodeModeRunResult> Completion => _completion.Task;
+
+    internal Task Finalized { get; }
 
     /// <summary>Gets whether it still runs.</summary>
     public bool Running => !Completion.IsCompleted;
@@ -1109,24 +1125,26 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     }
 
 
-    internal void Start(Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run, Func<CodeModeRunHandle, CodeModeRunResult, Task> ended)
+    internal void Start(Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run)
     {
-        Completion = Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
+            CodeModeRunResult result;
             try
             {
-                return WhoStopped(await run(this, _cancellation.Token).ConfigureAwait(false));
+                result = WhoStopped(await run(this, _cancellation.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException)
             {
-                return WhoStopped(new CodeModeRunResult(CodeModeRunStatus.Cancelled, _clock.Elapsed));
+                result = WhoStopped(new CodeModeRunResult(CodeModeRunStatus.Cancelled, _clock.Elapsed));
             }
             catch (Exception exception)
             {
-                return new CodeModeRunResult(CodeModeRunStatus.Failed, _clock.Elapsed) { Error = new CodeModeRunError(CodeModeErrorKind.Script, "Error", exception.Message) };
+                result = new CodeModeRunResult(CodeModeRunStatus.Failed, _clock.Elapsed) { Error = new CodeModeRunError(CodeModeErrorKind.Script, "Error", exception.Message) };
             }
+
+            _completion.SetResult(result);
         });
-        _ = Completion.ContinueWith(task => ended(this, task.Result), TaskScheduler.Default).Unwrap();
     }
 
     /// <summary>Takes the result for the caller that reports it: true once, for the first caller.</summary>
