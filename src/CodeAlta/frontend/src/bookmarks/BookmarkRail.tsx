@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type RefObject } from "react";
 import { PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
+import { inHiddenPane } from "../keptPanes";
 import { useShellLanguage } from "../shellLanguage";
 import { bookmarkStep, bookmarkTitle, sessionBookmarks, type Bookmark } from "./bookmarks";
 import type { BookmarksHub } from "./bookmarksHub";
@@ -67,7 +68,7 @@ export function BookmarkRail({ sessionId, hub, marks, scroll, onGo, step }: {
     const read = () => {
       frame = 0;
       // A timeline that is no longer drawn (its tab went behind another) leaves no card of a mark behind.
-      if (element.clientWidth === 0) setShown(null);
+      if (element.clientWidth === 0 || inHiddenPane(element)) setShown(null);
       const next = measure();
       setPositions(current => current.length === next.length && current.every((value, index) => value === next[index]) ? current : next);
     };

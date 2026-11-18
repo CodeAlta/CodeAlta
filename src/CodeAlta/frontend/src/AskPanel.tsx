@@ -10,6 +10,7 @@ import { ObservationStatus } from "./ObservationStatus";
 import { Button, Dialog, DialogBody, DialogFooter, TextArea } from "@blueprintjs/core";
 import { MarkdownContent } from "./MarkdownContent";
 import { AppIcon } from "./AppIcon";
+import { inHiddenPane } from "./keptPanes";
 import { showToast } from "./appToaster";
 import { FileReview, type FileReviewHandle } from "./FileReview";
 import { questionTabTitle, selectedChoice, submitStep } from "./askReview";
@@ -171,7 +172,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     let frame = requestAnimationFrame(function focus() {
       const input = form.current?.querySelector<HTMLElement>("[data-ask-question] input:checked, [data-ask-question] textarea, [data-ask-question] input");
       if (modalDialogOpen()) return;
-      if (input && input.offsetParent !== null && !input.matches(":disabled")) {
+      if (input && input.offsetParent !== null && !inHiddenPane(input) && !input.matches(":disabled")) {
         // Text being typed elsewhere (another session's prompt, a search field) keeps the keyboard.
         const active = document.activeElement;
         if (!active || active === document.body || active.getBoundingClientRect().width === 0) input.focus();

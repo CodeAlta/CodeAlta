@@ -198,6 +198,9 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tabs { flex: 1; min-width: 0; min-height: 0; }
 .session-dock { position: absolute; inset: 0; }
 .session-dock[hidden] { display: none; }
+/* A kept pane (keptPanes.ts) stays laid out while the dock hides it, out of the dock. Only this element changes then: a
+   property its content inherits (visibility, pointer-events) or the inert attribute would compute every style in it again. */
+.session-dock .flexlayout__tab[data-kept-pane][style*="display: none"] { display: block !important; transform: translateX(-200vw); }
 .session-tab-content { height: 100%; min-width: 0; min-height: 0; overflow: hidden; overflow-anchor: none; }
 .session-dock { --flexlayout-splitter-size: 2px; --flexlayout-splitter-active-size: 10px; --flexlayout-splitter-handle-visibility: visible; --flexlayout-color-splitter-handle: var(--line-strong); }
 .session-dock .flexlayout__splitter, .session-dock .flexlayout__splitter:hover, .session-dock .flexlayout__splitter_drag { border-radius: 0; }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectGitStatusRequest } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { inHiddenPane } from "./keptPanes";
 import { projectGitStatus, type ProjectGitView } from "./changes/projectGit";
 import { useShellLanguage } from "./shellLanguage";
 import { BranchSwitcher, type BranchApi } from "./worktrees/BranchSwitcher";
@@ -94,7 +95,7 @@ export function useProjectGit(epoch: string | null, projectId: string, worktree:
     let reading = false, reported = false;
     const refresh = () => {
       // A composer of a tab that is not shown, or of a window that is, reads nothing.
-      if (reading || document.visibilityState === "hidden" || !element.current?.offsetParent) return;
+      if (reading || document.visibilityState === "hidden" || !element.current?.offsetParent || inHiddenPane(element.current)) return;
       reading = true;
       void read({ expectedEpoch: epoch, projectId, worktree: folder }, { signal: abort.signal, timeoutMilliseconds: 15_000 })
         .then(reply => {

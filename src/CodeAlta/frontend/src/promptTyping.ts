@@ -1,4 +1,5 @@
 import { workspaceEditingSelector } from "./shortcuts";
+import { inHiddenPane } from "./keptPanes";
 
 /** A key pressed in the window, as {@link promptTypedText} reads it. */
 export type PromptTypingKey = Readonly<{
@@ -47,7 +48,7 @@ export function typingPrompt(page: Document): HTMLElement | null {
   if (page.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]')) return null;
   if (Array.from(page.querySelectorAll(typingOverlaySelector)).some(node => node.getClientRects().length > 0)) return null;
   const prompt = Array.from(page.querySelectorAll<HTMLElement>("#session-prompt, #catalog-prompt"))
-    .find(node => node.getClientRects().length > 0 && !node.closest("[inert], [hidden]")
+    .find(node => node.getClientRects().length > 0 && !node.closest("[inert], [hidden]") && !inHiddenPane(node)
       && page.defaultView?.getComputedStyle(node).visibility === "visible");
   return !prompt || prompt.classList.contains("covered") || prompt.getAttribute("aria-disabled") === "true" ? null : prompt;
 }

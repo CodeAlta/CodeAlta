@@ -88,6 +88,7 @@ import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
 import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
 import { changeKeyKept } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
+import { inHiddenPane } from "./keptPanes";
 import { createSideQuestions, type SideQuestions } from "./sideQuestion/sideQuestions";
 import { SideQuestionPanel } from "./sideQuestion/SideQuestionPanel";
 import { createShellCommands, type ShellCommands } from "./shellCommands/shellCommands";
@@ -3919,7 +3920,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     window.dispatchEvent(new CustomEvent("codealta:composer", { detail: command }));
   }
   const activeComposerControl = (selector: string) => Array.from(workspaceShell.current?.querySelectorAll<HTMLButtonElement>(selector) ?? [])
-    .find(button => button.offsetParent !== null);
+    .find(button => button.offsetParent !== null && !inHiddenPane(button));
 
   function runCommand(command: CommandId) {
     // Only a shortcut gets here with a command that is not offered: it is told why, as the picker shows it.
@@ -7194,7 +7195,7 @@ function createSessionPaneOwners(reads: HostReads) {
 // it, which are those of the composer's session once it has one.
 // The part of an open ask (its questions, its file) in the session tab that is shown.
 function visibleAsk(selector: string): HTMLElement | null {
-  return Array.from(document.querySelectorAll<HTMLElement>(selector)).find(element => element.offsetParent !== null) ?? null;
+  return Array.from(document.querySelectorAll<HTMLElement>(selector)).find(element => element.offsetParent !== null && !inHiddenPane(element)) ?? null;
 }
 
 /**

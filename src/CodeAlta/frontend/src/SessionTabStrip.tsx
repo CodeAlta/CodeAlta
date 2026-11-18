@@ -20,6 +20,7 @@ import { useSessionTabDrag } from "./useSessionTabDrag";
 import { keepMiddleButtonFromTab } from "./tabMiddleButton";
 import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
+import { createKeptPanes, leaveHiddenPane, type KeptPanes } from "./keptPanes";
 import { dockTab, dockTabs, tabsToClose, type DockTab, type DockTabs, type TabCloseCommand } from "./sessionTabClosing";
 import { isSessionContextKey } from "./sessionRowActions";
 import { takeKeyContextMenu } from "./keyContextMenu";
@@ -208,6 +209,16 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   const alive = useRef(true);
   const [menu, setMenu] = useState<{ anchor: HTMLElement; at?: Readonly<{ x: number; y: number }>; title?: string; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // The panes of the sessions looked at last stay laid out while hidden: going back to one costs a frame (keptPanes.ts).
+  const [keptPanes] = useState(() => createKeptPanes());
+  useEffect(() => () => keptPanes.dispose(), [keptPanes]);
+  // The Tab key pressed last: the keyboard that goes into a hidden pane just after it goes on past the pane.
+  const tabKey = useRef<{ at: number; backward: boolean } | null>(null);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => { if (event.key === "Tab") tabKey.current = { at: event.timeStamp, backward: event.shiftKey }; };
+    document.addEventListener("keydown", key, true);
+    return () => document.removeEventListener("keydown", key, true);
+  }, []);
   // The tab bars along the top edge of the dock are the window's title bar: their empty space moves the
   // window, and the first and last one leave room for the application mark and the window controls.
   const markTitleBar = useRef(() => { });
@@ -426,6 +437,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     setMenu({ anchor, at, title: node.getName(), current, items });
   }
   return <div className="session-tabs workspace-layout" ref={root} data-dragging={!!drag.preview}
+    onFocusCapture={event => {
+      const tabbed = tabKey.current && event.timeStamp - tabKey.current.at < 100 ? tabKey.current : null;
+      leaveHiddenPane(event.target, event.relatedTarget, !!tabbed, tabbed?.backward);
+    }}
     onPointerDownCapture={event => {
       // A press on a tab is the dock's, which may drag it: no mouse press follows for an open menu to close on.
       if (menu && !(event.target as HTMLElement).closest(".session-tab-popup")) setMenu(null);
@@ -546,7 +561,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) return renderFile ? <SessionTabContent node={node}>{visible => renderFile(file, visible)}</SessionTabContent> : null;
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
-        return tab && renderSession ? <SessionTabContent node={node} retained={!state.active || sessionNodeId(state.active) !== node.getId()}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
+        return tab && renderSession ? <SessionTabContent node={node} kept={keptPanes} retained={!state.active || sessionNodeId(state.active) !== node.getId()}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
       }} /></div>
     {renderSession && !!background?.length && <div className="session-background-panes" hidden>
       {background.map(tab => <div key={sessionNodeId(tab)} className="session-tab-content">{renderSession(tab, false)}</div>)}</div>}
@@ -560,8 +575,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   </div>;
 }
 
-function SessionTabContent({ node, children, retained = false }: {
+function SessionTabContent({ node, children, retained = false, kept }: {
   node: TabNode; children: (visible: boolean) => ReactNode;
+  /** The panes that stay laid out while hidden, for the tab of a session: showing it again does not lay it out again. */
+  kept?: KeptPanes;
   /**
    * A hidden tab keeps what it rendered when it was hidden, until it is shown again. The window is rendered
    * for many reasons that change nothing of a session nobody sees, and each hidden pane took its share of
@@ -585,5 +602,12 @@ function SessionTabContent({ node, children, retained = false }: {
     update();
     return () => node.removeEventListener("visibility");
   }, [node]);
-  return <div className="session-tab-content">{hidden.current ?? children(visible)}</div>;
+  const content = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!kept || !content.current) return;
+    if (visible) kept.shown(node.getId(), content.current);
+    else kept.hidden(node.getId(), content.current);
+  }, [kept, node, visible]);
+  useLayoutEffect(() => () => kept?.gone(node.getId()), [kept, node]);
+  return <div className="session-tab-content" ref={content}>{hidden.current ?? children(visible)}</div>;
 }

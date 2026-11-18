@@ -1,4 +1,5 @@
 import type { SessionPromptImage } from "#neoastra";
+import { inHiddenPane } from "./keptPanes";
 import { AttachmentError, attachmentBytes, attachmentLimits, isImageAttachment, readAttachedFile } from "./promptImages";
 
 /**
@@ -57,7 +58,7 @@ export function readHostDrop(value: unknown): HostDrop | null {
 export function dropSurface(root: Document, x: number, y: number): HTMLElement | null {
   const hit = root.elementFromPoint(x, y);
   if (!hit) return null;
-  const shown = (element: Element) => element.getClientRects().length > 0 && !element.closest("[inert]");
+  const shown = (element: Element) => element.getClientRects().length > 0 && !element.closest("[inert]") && !inHiddenPane(element);
   const own = hit.closest<HTMLElement>(".prompt-surface");
   if (own) return shown(own) ? own : null;
   for (let node: Element | null = hit; node; node = node.parentElement) {
