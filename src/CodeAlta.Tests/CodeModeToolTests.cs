@@ -1084,6 +1084,7 @@ public sealed class CodeModeToolTests
               sessions: await paths("session create send"),
               library: await paths("script run library"),
               listing: await paths("library script list run"),
+              prefix: await paths("workflow:"),
               help: await codemode.help(),
               workflow: await codemode.help({ path: "workflow" }),
               agent: await codemode.describe({ path: "agent" }),
@@ -1107,6 +1108,7 @@ public sealed class CodeModeToolTests
         CollectionAssert.Contains(found, "workflow:release-code", "a query for library scripts lists them");
         CollectionAssert.Contains(root0.GetProperty("listing").EnumerateArray().Select(static hit => hit.GetString()).ToList(), "workflow:release-code",
             "the scripts of the library are among the first results of a query for them, before the many commands that list or run something");
+        CollectionAssert.Contains(root0.GetProperty("prefix").EnumerateArray().Select(static hit => hit.GetString()).ToList(), "workflow:release-code");
         StringAssert.Contains(root0.GetProperty("help").GetString(), "Functions called by name: agent, session, workflow");
         StringAssert.Contains(root0.GetProperty("workflow").GetString(), "declare function workflow(name: string");
         StringAssert.Contains(root0.GetProperty("agent").GetString(), "declare function agent(prompt: string");

@@ -101,7 +101,7 @@ public static class CodeModeToolFactory
         """ + ExecDescriptionEnd;
 
     private const string ExecDescriptionStart = """
-        Run JavaScript in CodeAlta to compose tool calls: independent calls run together, and only what the script returns comes back to you. Use it to batch independent reads and searches, or edits you have decided, into one step; a single call needs no script when its tool is in your tool list.
+        Run JavaScript in CodeAlta to compose tool calls: independent calls run together, and only what the script returns comes back to you. Use it to batch independent reads and searches, or edits you have decided, into one step; for a single call, call the tool directly when it is in your tool list.
 
         The script is the body of an async function: use `await` and `return`. It is plain JavaScript in strict mode, not Node.js: no TypeScript syntax, no `import` or `require`. It has no file, network or timer access of its own: every effect is a call of a function below, with this session's permissions.
 

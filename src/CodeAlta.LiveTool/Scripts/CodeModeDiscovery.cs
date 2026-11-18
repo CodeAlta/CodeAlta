@@ -203,7 +203,8 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
 
     private static CodeModeCallResult Search(CodeModeApi api, IReadOnlyList<CodeModeLibraryScript> scripts, string query, int limit)
     {
-        var words = query.ToLowerInvariant().Split([' ', '.', '_', '-', ',', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // `workflow:` is how the results name a script of the library: a query for it is a query for `workflow`.
+        var words = query.ToLowerInvariant().Split([' ', '.', '_', '-', ',', '/', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (words.Length == 0)
         {
             return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", "codemode.search({ query }): say what you want to do, in a few words."));
