@@ -39,6 +39,8 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
   // The token for which the picker was closed without a choice: it stays closed for that token.
   const dismissed = useRef<PromptTriggerDismissal | null>(null);
   const composing = useRef(false);
+  // Text was just pasted or dropped into the prompt.
+  const pasting = useRef(false);
   const [trigger, setTrigger] = useState<PromptTrigger | null>(null);
   const open = !!trigger;
 
@@ -52,7 +54,11 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
       if (dismissed.current && !promptTriggerDismissalHolds(dismissed.current, value)) dismissed.current = null;
       if (element.selectionStart !== element.selectionEnd) return false;
       const span = latest.current.detect(value, element.selectionStart);
-      if (!span || (!reopen && span.start === dismissed.current?.start)) return false;
+      if (!span) return false;
+      // A token that ends up at the caret by pasting (or dropping) text is not one being typed: it stays closed, also at the key-up
+      // that ends the paste.
+      if (!reopen && pasting.current) { dismissed.current = dismissPromptTrigger({ text: value, ...span }); return false; }
+      if (!reopen && span.start === dismissed.current?.start) return false;
       const parent = element.closest("dialog");
       if (Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(node => node !== parent)) return false;
       const next = { text: value, ...span };
@@ -65,12 +71,18 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
     const reopen = (event: Event) => {
       if (event instanceof KeyboardEvent && isPromptPickerReopenKey(event) && show(true)) { event.preventDefault(); event.stopPropagation(); }
     };
+    // The editor applies the pasted text while the event runs: its change, and the caret, are seen by `inspect` within this window.
+    let pasteTimer: ReturnType<typeof setTimeout> | undefined;
+    const paste = () => { pasting.current = true; clearTimeout(pasteTimer); pasteTimer = setTimeout(() => { pasting.current = false; }, 250); };
     const begin = () => { composing.current = true; };
     const end = () => { composing.current = false; inspect(); };
+    element.addEventListener("paste", paste, true); element.addEventListener("drop", paste, true);
     element.addEventListener("input", inspect); element.addEventListener("keyup", inspect); element.addEventListener("click", inspect);
     element.addEventListener("keydown", reopen, true);
     element.addEventListener("compositionstart", begin); element.addEventListener("compositionend", end);
     return () => {
+      clearTimeout(pasteTimer); pasting.current = false;
+      element.removeEventListener("paste", paste, true); element.removeEventListener("drop", paste, true);
       element.removeEventListener("input", inspect); element.removeEventListener("keyup", inspect); element.removeEventListener("click", inspect);
       element.removeEventListener("keydown", reopen, true);
       element.removeEventListener("compositionstart", begin); element.removeEventListener("compositionend", end);
@@ -99,15 +111,19 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
     return true;
   }
 
-  /** Closes the picker; with `next` the prompt takes the replacement text, otherwise it stays as typed. */
-  function close(next?: { text: string; caret: number }) {
+  /**
+   * Closes the picker; with `next` the prompt takes the replacement text, otherwise it stays as typed. `keepClosed` keeps the
+   * token closed in the replacement text too, when that still reads as one (`#12.`).
+   */
+  function close(next?: { text: string; caret: number; keepClosed?: boolean }) {
     const value = trigger;
     if (!value) return;
     setTrigger(null);
     // The window closes now, not at the next render: what the choice is given to may refuse to change under a modal window.
     if (dialog.current?.open) dialog.current.close();
     // A picker opened at the caret (`openAt`) has no token to keep closed.
-    if (next) latest.current.edit(next.text); else if (value.end > value.start) dismissed.current = dismissPromptTrigger(value);
+    if (next) { latest.current.edit(next.text); if (next.keepClosed) dismissed.current = dismissPromptTrigger(value); }
+    else if (value.end > value.start) dismissed.current = dismissPromptTrigger(value);
     const caret = next?.caret ?? value.end;
     // After the editor has taken the new text, put the caret back where the user continues typing.
     requestAnimationFrame(() => {

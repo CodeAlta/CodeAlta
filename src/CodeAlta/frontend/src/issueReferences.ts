@@ -11,6 +11,27 @@ export function activeIssueReference(text: string, caret: number) {
   return { start: caret - match[1].length - 1, end, query: match[1] };
 }
 
+/** The characters that end a `#123` typed in the picker: a space, or what ends a sentence or closes a bracket. */
+export function endsTypedIssueNumber(key: string) {
+  return key.length === 1 && /[\s.,;:!?)\]}]/u.test(key);
+}
+
+/**
+ * Keeps a `#123` typed in the picker as plain text: the number of an issue the user already knows, ended by `ending`
+ * (a key of `endsTypedIssueNumber`), replaces the `#token` and the caret goes after the ending. Only digits count;
+ * another query may be a real search. A closing bracket that the editor already added is not doubled, and no second
+ * space is added before one.
+ */
+export function typedIssueNumber(text: string, start: number, end: number, query: string, ending = " ") {
+  if (!/^\d{1,18}$/u.test(query) || !endsTypedIssueNumber(ending)) return null;
+  const reference = `#${query}`;
+  const space = /\s/u.test(ending);
+  const next = text[end] ?? "";
+  const present = space ? /\s/u.test(next) : next === ending;
+  const value = text.slice(0, start) + reference + (present ? "" : ending) + text.slice(end);
+  return value.length <= 32768 ? { text: value, caret: start + reference.length + 1 } : null;
+}
+
 /**
  * Replaces the `#token` with a Markdown link to the issue, as the terminal UI does: `[#123](url)`. The host
  * only hands out links to the repository's own provider; here the link must be plain `https` text that

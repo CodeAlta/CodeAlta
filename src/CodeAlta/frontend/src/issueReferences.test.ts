@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeIssueReference, insertIssueReference, insertIssueReferences } from "./issueReferences";
+import { activeIssueReference, insertIssueReference, endsTypedIssueNumber, insertIssueReferences, typedIssueNumber } from "./issueReferences";
 
 test("# opens the issue picker at a word start and carries the typed query", () => {
   assert.deepEqual(activeIssueReference("#", 1), { start: 0, end: 1, query: "" });
@@ -17,6 +17,22 @@ test("headings, anchors and identifiers are not issue triggers", () => {
   assert.equal(activeIssueReference("page.html#top", 13), null);
   assert.equal(activeIssueReference("# title", 7), null);
   assert.equal(activeIssueReference("fix #12 ", 8), null);
+});
+
+test("digits and a space keep the number as typed", () => {
+  assert.deepEqual(typedIssueNumber("fix #", 4, 5, "12"), { text: "fix #12 ", caret: 8 });
+  // Followed by a space already: no second one, the caret goes after it.
+  assert.deepEqual(typedIssueNumber("fix # now", 4, 5, "12"), { text: "fix #12 now", caret: 8 });
+  assert.deepEqual(typedIssueNumber("a #1x b", 2, 4, "1"), { text: "a #1 x b", caret: 5 });
+  for (const query of ["", "crash", "12a", "1 2", "#3"]) assert.equal(typedIssueNumber("#", 0, 1, query), null, query);
+  // A full stop, a comma or a closing bracket ends it too, without a space; a bracket the editor added is not doubled.
+  assert.deepEqual(typedIssueNumber("see #", 4, 5, "12", "."), { text: "see #12.", caret: 8 });
+  assert.deepEqual(typedIssueNumber("(#", 1, 2, "12", ")"), { text: "(#12)", caret: 5 });
+  assert.deepEqual(typedIssueNumber("(#)", 1, 2, "12", ")"), { text: "(#12)", caret: 5 });
+  assert.equal(typedIssueNumber("#", 0, 1, "12", "a"), null);
+  assert.equal(typedIssueNumber("#", 0, 1, "12", "#"), null);
+  for (const key of [" ", ".", ",", ";", ":", "!", "?", ")", "]", "}"]) assert.equal(endsTypedIssueNumber(key), true, key);
+  for (const key of ["a", "1", "#", "-", "(", "Enter", "Tab", ""]) assert.equal(endsTypedIssueNumber(key), false, key);
 });
 
 test("the chosen issue replaces the token with a Markdown link", () => {
