@@ -22,7 +22,7 @@ public static class CodeModeResume
     /// Plans the resume or the rerun the options of a source ask for. A resume (<c>replay</c> <c>resume</c>, the default) runs
     /// the kept script, unchanged; a rerun (<c>"replay": "all"</c>, or <c>from</c>) may run changed code over the recorded
     /// results. It is refused for a run the store does not have for this session, one that still runs, a changed script, or
-    /// a step that would run again a call that was in flight and is not idempotent, unless <c>rerun_in_flight</c> says so.
+    /// a replay that would repeat a call that is not idempotent, unless <c>rerun_in_flight</c> says so.
     /// </summary>
     /// <param name="store">The store of the host, or null for a host that keeps no runs.</param>
     /// <param name="sessionId">The session that resumes.</param>
@@ -100,7 +100,7 @@ public static class CodeModeResume
             source = code;
         }
 
-        if (!options.RerunInFlight && InFlightRerun(run, replay) is { Count: > 0 } calls)
+        if (!options.RerunInFlight && CallsToRepeat(run, replay) is { Count: > 0 } calls)
         {
             refusal = Describe(run.Id, calls);
             return null;
@@ -112,7 +112,7 @@ public static class CodeModeResume
     /// <summary>
     /// Says whether CodeAlta resumes a run by itself: the one automatic resume, of a run that stopped while it slept, as the
     /// script asked to go on later. It does when the run is interrupted in a sleep, its kept script is the one that ran, and no
-    /// call that may not run twice was in flight; a resume of the user, or an earlier automatic one, takes it over.
+    /// call that may not run twice would be repeated; a resume of the user, or an earlier automatic one, takes it over.
     /// </summary>
     /// <param name="store">The store.</param>
     /// <param name="run">The run, as the store has it.</param>
@@ -177,8 +177,7 @@ public static class CodeModeResume
 
     /// <summary>
     /// The prompt that asks the session of a run to resume it, or to rerun it over its recorded results: one <c>exec</c> call
-    /// with the options line only, then a short answer. It tells the session to ask the user before it reruns a call that was
-    /// in flight.
+    /// with the options line only, then a short answer. It tells the session to ask the user before it repeats a call that may not run twice.
     /// </summary>
     /// <param name="runId">The run.</param>
     /// <param name="fromKey">The step from which a rerun runs live, or null.</param>
@@ -217,15 +216,15 @@ public static class CodeModeResume
             // @exec: {options}
             ```
 
-            Wait for it to end, then answer with its result in a few lines. If `exec` refuses because a call was in flight when the run stopped, do not add `"rerun_in_flight": true` yourself: ask the user whether that call may run again, and add it only if they agree.
+            Wait for it to end, then answer with its result in a few lines. If `exec` refuses because a call might be repeated, do not add `"rerun_in_flight": true` yourself: ask the user whether that call may run again, and add it only if they agree.
             """;
     }
 
-    // The calls in flight, of functions that are not idempotent, whose step runs again: outside any step, or in a step the
+    // The calls of functions that are not idempotent that would run again: outside any step, or in a step the
     // replay does not give back. The steps replayed are those of the unchanged prefix, or every replayable one for "all".
-    private static List<CodeModeStoredCall> InFlightRerun(CodeModeStoredRun run, CodeModeReplay replay)
+    private static List<CodeModeStoredCall> CallsToRepeat(CodeModeStoredRun run, CodeModeReplay replay)
     {
-        if (run.InFlightCalls.Count == 0)
+        if (run.InFlightCalls.Count == 0 && run.CompletedCalls.Count == 0)
         {
             return [];
         }
@@ -267,7 +266,7 @@ public static class CodeModeResume
             }
         }
 
-        return [.. run.InFlightCalls.Where(call => call.StepKey is null || !replayed.Contains(call.StepKey))];
+        return [.. run.InFlightCalls.Concat(run.CompletedCalls).Where(call => call.StepKey is null || !replayed.Contains(call.StepKey))];
     }
 
     private static string Describe(string runId, List<CodeModeStoredCall> calls)
@@ -275,8 +274,8 @@ public static class CodeModeResume
         var listed = string.Join("; ", calls.Take(MaxListedCalls).Select(static call =>
             $"`{call.Path}` {(call.StepKey is null ? "outside any step" : $"in step {CodeModeReplay.Describe(call.StepKey)}")} with {call.Arguments}"));
         var more = calls.Count > MaxListedCalls ? $" and {calls.Count - MaxListedCalls} more" : string.Empty;
-        return $"Run `{runId}` stopped while {(calls.Count == 1 ? "a call" : "calls")} that may not run twice {(calls.Count == 1 ? "was" : "were")} in flight: {listed}{more}. "
-            + "Its outcome is unknown, and running the step again runs the call again. Ask the user; if they agree, add \"rerun_in_flight\": true to the options.";
+        return $"Replaying run `{runId}` can repeat calls that may already have changed something: {listed}{more}. "
+            + "Ask the user before repeating them; if they agree, add \"rerun_in_flight\": true to the options.";
     }
 
     private static string Quote(string value) => "\"" + System.Text.Json.JsonEncodedText.Encode(value) + "\"";

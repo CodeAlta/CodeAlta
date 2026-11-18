@@ -145,7 +145,7 @@ A run that CodeAlta closed during a `sleep()` resumes by itself when it wakes, a
 A run does not resume:
 
 - when the script changed: rerun it with recorded results instead;
-- when a call that may not run twice, such as a command, was in flight when it stopped: the agent asks you first, because its outcome is unknown.
+- when it would repeat a call that may change something, such as a command: the agent asks you first, even if the call finished. Put the call inside a `step()` so a resume can reuse its result.
 
 Reads, listings and searches are run again without asking. A step whose value is not JSON, or is larger than 256 KB, always runs again.
 

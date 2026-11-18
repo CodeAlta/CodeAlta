@@ -35,7 +35,7 @@ public sealed record CodeModeExecOptions
     /// <summary>Gets the step from which a rerun runs live (<c>"from": "merge#1"</c>), or null.</summary>
     public string? From { get; init; }
 
-    /// <summary>Gets whether a resume may run again a step during which a call that is not idempotent was in flight.</summary>
+    /// <summary>Gets whether the user allows repeating a non-idempotent call outside a replayed checkpoint.</summary>
     public bool RerunInFlight { get; init; }
 
     /// <summary>The names of the options, for the message of an unknown one.</summary>

@@ -136,8 +136,8 @@ Jint cannot save a suspended script, so a resume runs the script again over what
 its id and occurrence under the path of the `workflow()` calls that reach it (`lib#0/read#0`), and a run with the
 scripts it calls shares one step space (indexes, occurrences, the replay cursor, under one lock) so that parallel
 scripts keep their keys. A replayed step gives its recorded value without running; a resume replays the longest
-unchanged prefix, a rerun every matching step or the steps before one. A step that would repeat a call of a tool that
-is not idempotent and was in flight is refused unless the user agrees: its outcome is unknown. Closing CodeAlta leaves
+unchanged prefix, a rerun every matching step or the steps before one. A replay that would repeat a non-idempotent call
+needs the user's consent: the call may already have had an effect, whether or not the script received its result. Closing CodeAlta leaves
 its runs without an end, and the next start marks them interrupted. Only a run cut during `sleep()` resumes by itself,
 at its wake time: a sleep is the script's own request to go on later.
 

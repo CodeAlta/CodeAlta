@@ -206,7 +206,7 @@ public sealed class CodeModeRunStoreTests
         await using (var before = new CodeModeRunRegistry(null))
         {
             await before.UseStoreAsync(new CodeModeRunStore(folder.Path));
-            var run = before.TryStart("session-1", "Poll", 1000, "call-3", new CodeModeRunStart(Code), (observer, token) =>
+            var run = before.TryStart("session-1", "Poll", 1000, "call-3", new CodeModeRunStart(Code) { IsIdempotent = path => path == "codemode.sleep" }, (observer, token) =>
                 new CodeModeHost(CodeModeApi.Empty, new CodeModeScriptCache()).RunAsync(CodeModeSource.Prepare(Code), new NoCalls(), null, observer, token), out var refusal);
             Assert.IsNotNull(run, refusal);
             runId = run.Id;
@@ -270,6 +270,36 @@ public sealed class CodeModeRunStoreTests
         Assert.IsTrue(store.MarkAutoResumed("run-ok"));
         Assert.IsFalse(store.MarkAutoResumed("run-ok"), "once");
         Assert.IsNull(CodeModeResume.AutoResumeTime(store, store.TryLoad("run-ok")!, out _));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void InterruptedSleep_RepeatsACompletedMutationOnlyWithConsentOrAReplayedCheckpoint(bool checkpointed)
+    {
+        using var folder = new TemporaryFolder();
+        var wakeAt = DateTimeOffset.UtcNow.AddHours(1);
+        WriteRun(folder.Path, "run-mutate", endedAt: DateTimeOffset.UtcNow, status: "interrupted",
+            source: checkpointed ? """await step("write", () => alta.run(["change"])); await sleep("1h");""" : """await alta.run(["change"]); await sleep("1h");""",
+            calls: [checkpointed
+                ? """{"event":"started","call":"0:0","path":"alta.run","stepKey":"write#0","args":"change"}"""
+                : """{"event":"started","call":"0:0","path":"alta.run","args":"change"}""",
+                """{"event":"ended","call":"0:0","status":"succeeded"}"""],
+            steps: checkpointed ? [Step(0, "write#0", "1")] : [],
+            sleeps: [$$"""{"key":"sleep#0","wakeAt":"{{wakeAt:O}}"}"""]);
+        var store = new CodeModeRunStore(folder.Path);
+        var run = store.TryLoad("run-mutate")!;
+        var wake = CodeModeResume.AutoResumeTime(store, run, out var reason);
+        if (checkpointed)
+        {
+            Assert.AreEqual(wakeAt, wake, reason);
+        }
+        else
+        {
+            Assert.IsNull(wake, "the call completed, but a resume would execute it again");
+            StringAssert.Contains(reason, "`alta.run` outside any step");
+            Assert.IsNotNull(CodeModeResume.TryPlan(store, run.SessionId, Resume(run.Id), Options(run.Id) with { RerunInFlight = true }, out _));
+        }
     }
 
     [TestMethod]

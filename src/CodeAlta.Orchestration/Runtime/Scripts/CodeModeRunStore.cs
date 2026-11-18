@@ -25,12 +25,12 @@ public sealed record CodeModeRunStart(string Source)
 
     /// <summary>
     /// Gets whether a call of a function may run again with the same effect, by its path (<c>tools.read_file</c>). The calls
-    /// of the others are recorded as they start and end, so that a resume knows those that were in flight. Null records every call.
+    /// of the others are recorded as they start and end, so that a resume can check which calls it would repeat. Null records every call.
     /// </summary>
     public Func<string, bool>? IsIdempotent { get; init; }
 }
 
-/// <summary>A call that was in flight when a run stopped, of a function that is not idempotent.</summary>
+/// <summary>A recorded call of a function that is not idempotent.</summary>
 /// <param name="Path">The function, such as <c>tools.shell_command</c>.</param>
 /// <param name="StepKey">The key of its step, or null for a call outside any step.</param>
 /// <param name="Arguments">Its arguments, shortened.</param>
@@ -73,6 +73,9 @@ public sealed record CodeModeStoredRun(string Id, string SessionId)
 
     /// <summary>Gets the calls that started and did not end, of functions that are not idempotent.</summary>
     public IReadOnlyList<CodeModeStoredCall> InFlightCalls { get; init; } = [];
+
+    /// <summary>Gets the calls of functions that are not idempotent that started and ended.</summary>
+    public IReadOnlyList<CodeModeStoredCall> CompletedCalls { get; init; } = [];
 
     /// <summary>Gets the wake times of the sleeps the run started, by their key (<see cref="CodeModeSleep.KeyOf"/>).</summary>
     public IReadOnlyDictionary<string, DateTimeOffset> Sleeps { get; init; } = new Dictionary<string, DateTimeOffset>();
@@ -177,7 +180,8 @@ public sealed class CodeModeRunStore
             {
                 Source = File.Exists(sourcePath) ? File.ReadAllText(sourcePath) : string.Empty,
                 Steps = ReadSteps(Path.Combine(folder, StepsFile)),
-                InFlightCalls = ReadInFlightCalls(Path.Combine(folder, CallsFile)),
+                InFlightCalls = ReadCalls(Path.Combine(folder, CallsFile), out var completed),
+                CompletedCalls = completed,
                 Sleeps = ReadSleeps(Path.Combine(folder, SleepsFile), out var sleepingUntil),
                 SleepingUntil = sleepingUntil,
             };
@@ -525,8 +529,9 @@ public sealed class CodeModeRunStore
         return sleeps;
     }
 
-    private static List<CodeModeStoredCall> ReadInFlightCalls(string path)
+    private static List<CodeModeStoredCall> ReadCalls(string path, out List<CodeModeStoredCall> completed)
     {
+        completed = [];
         var started = new Dictionary<string, CodeModeStoredCall>(StringComparer.Ordinal);
         foreach (var line in Lines(path))
         {
@@ -539,9 +544,10 @@ public sealed class CodeModeRunStore
             {
                 started[call] = new CodeModeStoredCall(Text(root, "path") ?? "?", Text(root, "stepKey"), Text(root, "args") ?? "{}");
             }
-            else
+            else if (Text(root, "event") == "ended" && started.Remove(call, out var ended))
             {
-                started.Remove(call);
+                // Even a failed or cancelled call may already have changed something.
+                completed.Add(ended);
             }
         }
 
