@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { blueprintPaletteVariables } from "./src/blueprintPalette";
+import { monacoHoverStyle } from "./src/styleInvalidation";
 import { scaledTextSizes } from "./src/fonts/textScale";
 import { appModuleFile, appModules } from "./src/lent/appModules";
 import { importMapText, lentLibraries } from "./src/lent/libraries";
@@ -18,6 +19,16 @@ const blueprintPalette = (): Plugin => ({
   enforce: "pre",
   transform(code, id) {
     return /[\\/]@blueprintjs[\\/][^?]*\.css(\?|$)/.test(id) ? { code: blueprintPaletteVariables(code), map: null } : null;
+  },
+});
+
+// Monaco's stylesheet of its hovers reaches the bundle without the selector that makes every change of the focus walk the
+// whole document (src/styleInvalidation.ts).
+const monacoHover = (): Plugin => ({
+  name: "codealta:monaco-hover-style",
+  enforce: "pre",
+  transform(code, id) {
+    return /[\\/]monaco-editor[\\/].*[\\/]hover\.css(\?|$)/.test(id) ? { code: monacoHoverStyle(code), map: null } : null;
   },
 });
 
@@ -145,7 +156,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), thirdPartyNoticesFile(), speechWorklet(), chartWorker(), lentModules()],
+  plugins: [blueprintPalette(), monacoHover(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), thirdPartyNoticesFile(), speechWorklet(), chartWorker(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   // The phone page is a second document, built to dist/mobile.html; its files (manifest, icons, service worker, the script
   // that applies its theme before it paints) are in public/mobile and land in dist/mobile.

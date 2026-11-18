@@ -527,7 +527,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer-queue-strip .composer-queue-count[data-repeats="true"] input { color: var(--text); font-weight: 600; }
 .composer-queue-strip .composer-queue-count input:focus { outline: 0; color: var(--text); }
 .composer-queue-strip .composer-queue-count input:disabled { background: transparent; cursor: default; }
-@media (max-width: 720px) { .composer-queue-status { display: none; } .composer-queue-row:not(:hover):not(:focus-within) .composer-queue-actions > .bp6-button:not(.composer-queue-delete) { display: none; } }
+/* The row under the pointer or with the focus is said positively: a negated state on an ancestor is costly (styleInvalidation.ts). */
+@media (max-width: 720px) { .composer-queue-status { display: none; } .composer-queue-actions > .bp6-button:not(.composer-queue-delete) { display: none; }
+  .composer-queue-row:hover .composer-queue-actions > .bp6-button:not(.composer-queue-delete), .composer-queue-row:focus-within .composer-queue-actions > .bp6-button:not(.composer-queue-delete) { display: inline-flex; } }
 .active-provider-status .bp6-button-text { display: flex; gap: 8px; }
 .active-provider-status { white-space: nowrap; }
 .observation-status { display: inline-block; padding: 4px 8px; font-size: 12px; color: var(--muted); }
