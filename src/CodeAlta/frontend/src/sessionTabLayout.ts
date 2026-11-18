@@ -208,12 +208,11 @@ export function dockNodeIds(model: Model): string[] {
 }
 
 /**
- * The tabs of the pane that holds `current`, in the order they are shown there: the tabs Ctrl+Tab goes through, as it
- * goes through the editors of a group in VS Code. Every tab of the dock when `current` is in no pane.
+ * The tabs of the pane that holds `current`, in strip order. Empty if the current tab is no longer in the dock.
  */
 export function paneNodeIds(model: Model, current: string): string[] {
   const pane = model.getNodeById(current)?.getParent();
-  return pane instanceof TabSetNode ? pane.getChildren().map(node => node.getId()) : dockNodeIds(model);
+  return pane instanceof TabSetNode ? pane.getChildren().map(node => node.getId()) : [];
 }
 
 /** The title a tab of the dock shows: its node's name. */

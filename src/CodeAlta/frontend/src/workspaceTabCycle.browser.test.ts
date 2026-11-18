@@ -19,8 +19,8 @@ const holdTabs = async (command: Command, until: Until, presses: number, shift =
   await until(`!document.querySelector('.tab-switcher')`, "the list closed when Ctrl is released");
 };
 
-// The window itself (main.tsx) over an isolated host: Ctrl+Tab and Ctrl+Shift+Tab go through every tab of the dock by how
-// recently each was shown, the tools and the sessions alike, wherever the keyboard is, and Ctrl+PageDown, Ctrl+PageUp and
+// The window itself (main.tsx) over an isolated host: Ctrl+Tab and Ctrl+Shift+Tab go through tabs of the current pane by how
+// recently each was shown, the tools and the sessions alike, and Ctrl+PageDown, Ctrl+PageUp and
 // Ctrl+Alt+Left and Right go through them in the order of the strip; none opens a tab. A code editor that has the keyboard
 // goes through its own files with Ctrl+Tab.
 test("Ctrl+Tab and Ctrl+Shift+Tab go through the tabs of the window by how recently they were shown", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
@@ -81,19 +81,26 @@ test("Ctrl+Tab and Ctrl+Shift+Tab go through the tabs of the window by how recen
     // A code editor that has the keyboard keeps Ctrl+Tab for its files, the file shown before first; Ctrl+PageDown still leaves it.
     await evaluate(`document.querySelector('#project-list button[title="Open the code editor"]').click()`);
     await until(`!!document.querySelector('.project-editor .editor-new-file')`, "the code editor of the project");
-    for (let file = 0; file < 2; file++) await press(`document.querySelector('.project-editor .editor-new-file')`);
+    for (let file = 0; file < 3; file++) await press(`document.querySelector('.project-editor .editor-new-file')`);
     const activeFile = `document.querySelector('.project-editor .editor-tab[aria-selected="true"] .editor-tab-name')?.textContent`;
-    await until(`${activeFile}==='Untitled-2'`, "two new files in the editor");
+    await until(`${activeFile}==='Untitled-3'`, "three new files in the editor");
     const front = `document.querySelector('.session-dock .flexlayout__tab_button--selected [data-session-node]')?.textContent.trim()`;
     const editor = await evaluate(front) as string;
     assert.match(editor, /^Editor/);
     await until(`!!document.querySelector('.project-editor .monaco-editor :is(.inputarea, .native-edit-context)')`, "the text of the editor");
     await evaluate(`document.querySelector('.project-editor .monaco-editor :is(.inputarea, .native-edit-context)').focus()`);
+    // Command+Tab belongs to macOS, not a file switcher that never sees a Control release.
+    await command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 4 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 4 });
+    await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+    assert.equal(await evaluate(`!!document.querySelector('.tab-switcher')`), false);
     await cycle(1);
-    await until(`${activeFile}==='Untitled-1'`, "Ctrl+Tab in the editor shows the file shown before");
+    await until(`${activeFile}==='Untitled-2'`, "Ctrl+Tab in the editor shows the file shown before");
     assert.equal(await evaluate(front), editor, "the editor stays in front");
     await cycle(1);
-    await until(`${activeFile}==='Untitled-2'`, "Ctrl+Tab in the editor goes back to the file left");
+    await until(`${activeFile}==='Untitled-3'`, "Ctrl+Tab in the editor goes back to the file left");
+    await cycle(2);
+    await until(`${activeFile}==='Untitled-1'`, "Ctrl+Tab held in the editor goes further back");
     assert.equal(await evaluate(front), editor, "the editor stays in front");
     const count = (await evaluate(tabs) as string[]).length;
     await key("PageDown");
@@ -121,7 +128,7 @@ test("the list of Ctrl+Tab shows the tab that is only looked at in italics", { s
 });
 
 // As in VS Code, the list is that of a group: the tabs of the pane in front, not those of the other panes.
-test("Ctrl+Tab goes through the tabs of the pane in front only", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("Ctrl+Tab goes through the tabs of the pane in front only", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, press, session, title, exceptions }) => {
     const panes = `[...document.querySelectorAll('.session-dock .flexlayout__tabset')].map(pane => [...pane.querySelectorAll('.flexlayout__tab_button')]
       .map(button => (button.textContent ?? '').trim() + (button.classList.contains('flexlayout__tab_button--selected') ? '*' : '')).join(' | '))`;

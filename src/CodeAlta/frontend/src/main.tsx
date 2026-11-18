@@ -64,11 +64,11 @@ import { SystemPromptDiff } from "./SystemPromptDiff";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
-import { TabSwitcher, useTabSwitcher, type TabSwitcherItem } from "./TabSwitcher";
+import { isTabSwitcherKey, TabSwitcher, type TabSwitcherHandle, type TabSwitcherItem } from "./tabSwitcher/TabSwitcher";
 import { FileTabIcon } from "./fileTabLook";
-import { recentOrder, rememberRecent } from "./recentTabs";
+import { recentOrder, rememberRecent } from "./tabSwitcher/recentTabs";
 import { ActivityRail } from "./ActivityRail";
-import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeName, draftNodeId, paneNodeIds, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, dockNodeName, draftNodeId, paneNodeIds, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
@@ -2639,24 +2639,27 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const revision = browserRevision.current;
     return { revision, current: () => revision === browserRevision.current && currentView.current === "workspace" && !settingsVisible.current };
   }
-  // Ctrl+Tab goes to the tab shown before this one, and further back while Ctrl is held: the tabs by how recently they were shown.
-  const recentTabs = useRef<readonly string[]>([]);
-  const tabSwitcher = useTabSwitcher(id => showDockNode(id));
-  function tabSwitch(delta: 1 | -1) {
-    if (!snapshot || view !== "workspace" || settingsVisible.current) return;
-    const shown = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
-    // The tabs of the pane in front, by how recently each was shown: the history of a pane is its tabs in that order.
-    const current = activeDockNodeId(shown, fileTabs);
-    tabSwitcher.step(recentOrder(recentTabs.current, paneNodeIds(spaceLayout(spaceId), current), current), delta);
+  // Each space keeps its own history with its dock. A pane uses only its tabs from that history.
+  const [recentTabs] = useState(() => new WeakMap<ReturnType<typeof createSessionTabModel>, readonly string[]>());
+  const tabSwitcher = useRef<TabSwitcherHandle>(null);
+  function recentDockOrder() {
+    const layout = spaceLayout(spaceId);
+    return recentOrder(recentTabs.get(layout) ?? [], paneNodeIds(layout, frontTab), frontTab);
   }
-  function switcherItems(order: readonly string[]): ReadonlyMap<string, TabSwitcherItem> {
-    return new Map(order.map(id => {
+  function switcherItems(): TabSwitcherItem[] {
+    const layout = spaceLayout(spaceId);
+    return recentDockOrder().map(id => {
       const file = fileTabs.open.find(tab => fileNodeId(tab) === id);
-      const icon = file ? <FileTabIcon file={file} /> : <span className="file-tab-icon"><AppIcon name={id.startsWith("session:") ? "chat" : "newSession"} size={14} /></span>;
+      const terminal = file && isTerminalTab(file) ? terminalList.find(item => item.id === file.terminalId) : undefined;
+      const icon = file ? <FileTabIcon file={file} running={terminal?.running} /> : <span className="file-tab-icon"><AppIcon name={id.startsWith("session:") ? "chat" : "newSession"} size={14} /></span>;
       // As the strip shows them, a tab that is only looked at has its title in italics.
       const preview = id === sessionDraftNodeId ? !tabView.single : file ? isClaudeCodeTab(file) : isPreviewTab(tabView, tabView.open.find(tab => sessionNodeId(tab) === id));
-      return [id, { id, label: dockNodeName(spaceLayout(spaceId), id), icon, preview }];
-    }));
+      return { id, label: dockNodeName(layout, id), icon, preview };
+    });
+  }
+  function showRecentDockTab(id: string) {
+    if (currentView.current !== "workspace" || settingsVisible.current || searchOpen || dialog || modalDialogOpen()) return;
+    if (paneNodeIds(spaceLayout(spaceId), frontTab).includes(id)) showDockNode(id);
   }
   function tabCommand(action: "nextTab" | "previousTab" | "closeTab" | "reopenTab") {
     if (!snapshot || view !== "workspace" || settingsVisible.current) return;
@@ -3784,6 +3787,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "dictate": return view === "workspace" && !fileTabs.active && speechEnabled(speech.getState());
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
+      case "switchTabs": return view === "workspace" && !!snapshot && paneNodeIds(spaceLayout(spaceId), frontTab).length > 1;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "moveTabToNewWindow": return !!windowsState.current && (!!fileTabs.active || !!tabs.active);
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
@@ -3870,6 +3874,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "help": openHelp(); break;
       case "releaseNotes": setReleaseNotesShown({ version: null }); break;
       case "palette": openSearch(); break;
+      case "switchTabs": { const previous = recentDockOrder()[1]; if (previous !== undefined) showDockNode(previous); break; }
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
       case "projectEditor": openProjectEditor(); break;
@@ -4010,7 +4015,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!commandChord.current && changeKeyKept(event, target)) return;
       // The code editor goes through its own files with Ctrl+Tab and Ctrl+Shift+Tab; Ctrl+PageDown and Ctrl+PageUp
       // still go through the tabs of the window from there.
-      if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
+      if (!commandChord.current && isTabSwitcherKey(event) && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
       // The code editor searches the files of its project with Ctrl+Shift+F, which searches the sessions elsewhere.
@@ -4043,7 +4048,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // A key whose command has nothing to act on now is the editor's: F3 goes to the next match of its search.
       if (editing && resolved.command && !chorded && !commandAvailable(resolved.command)) return;
       event.preventDefault(); event.stopPropagation();
-      if (event.key === "Tab" && (resolved.command === "nextTab" || resolved.command === "previousTab")) tabSwitch(resolved.command === "nextTab" ? 1 : -1);
+      if (resolved.command === "switchTabs") tabSwitcher.current?.step(event.shiftKey ? -1 : 1);
       else if (resolved.command) runCommand(resolved.command);
     }
     // Bubble phase: Escape reaches here only when nothing inside (a popover, the editor) used it.
@@ -6081,16 +6086,22 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     && backgroundTabs?.some(value => value.sessionId === tab.sessionId) ? wholeCatalog : shown;
   // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
   const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
-  // The owners of the panes that are no longer mounted go once the dock has let them go.
-  // The tab in front is the most recent one.
   const frontTab = activeDockNodeId(tabView, fileTabs);
-  useEffect(() => { recentTabs.current = rememberRecent(recentTabs.current, frontTab); }, [frontTab]);
+  const dockReady = tabsReady && !!snapshot && view === "workspace";
+  // The strip has reconciled its model by then, and the next key must see the tab just shown.
+  useLayoutEffect(() => {
+    if (!dockReady) return;
+    const layout = spaceLayout(spaceId);
+    const open = dockNodeIds(layout);
+    if (open.includes(frontTab)) recentTabs.set(layout, rememberRecent(recentTabs.get(layout) ?? [], frontTab, open));
+  }, [dockReady, spaceId, frontTab, tabView.open, tabView.drafts, fileTabs.open]);
+  // The owners of the panes that are no longer mounted go once the dock has let them go.
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
   return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
-    {tabSwitcher.state && <TabSwitcher state={tabSwitcher.state} items={switcherItems(tabSwitcher.state.order)} />}
+    <TabSwitcher key={spaceId} ref={tabSwitcher} current={dockReady && !settingsOpen && !searchOpen && !dialog ? frontTab : null} items={switcherItems} show={showRecentDockTab} />
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}

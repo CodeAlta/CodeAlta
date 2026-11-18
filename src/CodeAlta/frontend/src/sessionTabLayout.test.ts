@@ -750,7 +750,8 @@ test("the tabs of the switcher are those of the pane that holds the tab in front
   model.doAction(Actions.moveNode(two, (model.getNodeById(one) as TabNode).getParent()!.getId(), DockLocation.RIGHT, -1, true));
   assert.deepEqual(paneNodeIds(model, one), [one, docs, editor]);
   assert.deepEqual(paneNodeIds(model, two), [two]);
-  assert.deepEqual(paneNodeIds(model, sessionDraftNodeId), dockNodeIds(model), "a tab that is in no pane: every tab");
+  assert.deepEqual(dockNodeIds(model), [one, docs, editor, two]);
+  assert.deepEqual(paneNodeIds(model, sessionDraftNodeId), [], "an absent source must not cycle through other panes");
 });
 
 test("the preview of a Claude Code conversation takes the place of the one before, and its session takes its place once imported", () => {

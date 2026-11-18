@@ -1968,6 +1968,7 @@ export const messages = dictionary({
   "Session Info": ["Información de la sesión", "Informations de session", "Sitzungsinformationen", "セッション情報", "会话信息"],
   "Open sessions": ["Sesiones abiertas", "Sessions ouvertes", "Offene Sitzungen", "開いているセッション", "打开的会话"],
   "Switch tabs": ["Cambiar de pestaña", "Changer d’onglet", "Tab wechseln", "タブを切り替え", "切换标签页"],
+  "Switch between recently shown tabs in the current pane.": ["Cambia entre las pestañas mostradas recientemente en el panel actual.", "Bascule entre les onglets affichés récemment dans le volet actuel.", "Wechselt zwischen den zuletzt angezeigten Tabs im aktuellen Bereich.", "現在のペインで最近表示したタブを切り替えます。", "在当前窗格中最近显示过的标签页之间切换。"],
   "Global": ["Global", "Global", "Global", "グローバル", "全局"],
   "Unavailable project": ["Proyecto no disponible", "Projet indisponible", "Projekt nicht verfügbar", "プロジェクトは利用不可", "项目不可用"],
   "Unavailable session": ["Sesión no disponible", "Session indisponible", "Sitzung nicht verfügbar", "セッションは利用不可", "会话不可用"],

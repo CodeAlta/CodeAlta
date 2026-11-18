@@ -3,11 +3,18 @@ import test from "node:test";
 import { openTabSwitcher, recentOrder, rememberRecent, stepTabSwitcher } from "./recentTabs";
 
 test("the tab shown comes first in the recent tabs, once", () => {
-  assert.deepEqual(rememberRecent(["a", "b"], "c"), ["c", "a", "b"]);
-  assert.deepEqual(rememberRecent(["a", "b", "c"], "c"), ["c", "a", "b"]);
-  const recent = ["a", "b"];
-  assert.equal(rememberRecent(recent, "a"), recent);
-  assert.equal(rememberRecent(Array.from({ length: 200 }, (_, at) => `t${at}`), "new").length, 128);
+  const open = ["a", "b", "c"];
+  assert.deepEqual(rememberRecent(["a", "b"], "c", open), ["c", "a", "b"]);
+  assert.deepEqual(rememberRecent(["a", "b", "c"], "c", open), ["c", "a", "b"]);
+});
+
+test("replacing previews cannot displace the history of tabs that are still open", () => {
+  let recent = ["previous", "oldest"] as readonly string[];
+  for (let index = 0; index < 128; index++) {
+    const preview = `preview-${index}`;
+    recent = rememberRecent(recent, preview, [preview, "oldest", "previous"]);
+  }
+  assert.deepEqual(recent, ["preview-127", "previous", "oldest"]);
 });
 
 test("the tabs are ordered by how recently they were shown, the tabs never shown after them", () => {
@@ -38,6 +45,6 @@ test("two quick Ctrl+Tab presses go back and forth between the last two tabs", (
     const switcher = openTabSwitcher(recentOrder(recent, ["a", "b", "c"], current), 1)!;
     current = switcher.order[switcher.index];
     assert.equal(current, expected);
-    recent = rememberRecent(recent, current);
+    recent = rememberRecent(recent, current, ["a", "b", "c"]);
   }
 });
