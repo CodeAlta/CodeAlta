@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The fixtures of the runs are projects under the temporary folder: prompt and catalog files refuse a linked ancestor (/var on macOS). -->
+    <Compile Include="..\CodeAlta.Tests\LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The projects of the scenarios and their hidden tests, read next to the executable. -->
     <None Update="Scenarios\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

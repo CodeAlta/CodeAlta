@@ -36,7 +36,7 @@ internal static class AltaScriptAnnotations
             Result = "SessionCurrent",
         },
 
-        // Refused without --project or --global (usage.missingScope), and with both.
+        // Refused with both --project and --global, and without either when the caller is no session of a project (usage.missingScope).
         ["session create"] = new()
         {
             Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal)
@@ -240,6 +240,25 @@ internal static class AltaScriptAnnotations
             Stdin = AltaStdinKind.None,
             Result = "(SearchHit | SearchSummary)[] | AltaRecord",
         },
+
+        ["task create"] = new()
+        {
+            Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal)
+            {
+                ["kind"] = AltaValue.Enum("gap", "problem", "improvement"),
+                ["tag"] = AltaValue.StringList,
+            },
+        },
+        ["task list"] = new()
+        {
+            Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal)
+            {
+                ["status"] = AltaValue.Enum("open", "pending", "later", "in-progress", "done", "dismissed", "all"),
+            },
+        },
+        ["prompt create"] = new() { Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal) { ["scope"] = AltaValue.Enum("global", "project") } },
+        ["prompt show"] = new() { Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal) { ["scope"] = AltaValue.Enum("global", "project", "builtin", "all") } },
+        ["prompt list"] = new() { Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal) { ["scope"] = AltaValue.Enum("global", "project", "builtin", "all") } },
 
         // The options that take several values in one, separated by commas: an array is joined, not repeated (the last
         // of a repeated option would be the only one kept).

@@ -1174,7 +1174,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var options = new SessionCreateOptions();
         var command = AltaSubSessionsGate.Leaf(context, "create", "Create a project or global session using resolved model selection.");
         AddModelSelectionOptions(command, options.Model);
-        command.Add("project=", "Target project id, slug, or path.", value => options.Project = value);
+        command.Add("project=", "Target project id, slug, or path. Defaults to the project of the calling session.", value => options.Project = value);
         command.Add("global", "Create a global coordinator session.", value => options.Global = value is not null);
         command.Add("title=", "Session title.", value => options.Title = value);
         command.Add("parent=", "Explicit parent session id for lineage.", value => options.ParentSessionId = value);
@@ -3110,7 +3110,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         if (!options.Global && string.IsNullOrWhiteSpace(options.Project))
         {
-            return UsageError(context, "usage.missingScope", "Session create requires --project <ref> or --global.", "alta session create");
+            // A session of a project that names none means its own: what a sub-agent is created in.
+            if (context.Caller.SourceProjectId is not { Length: > 0 } own)
+            {
+                return UsageError(context, "usage.missingScope", "Session create requires --project <ref> or --global.", "alta session create");
+            }
+
+            options.Project = own;
         }
 
         if (!string.IsNullOrWhiteSpace(options.ParentSessionId) && options.NoParent)

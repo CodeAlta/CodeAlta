@@ -2798,6 +2798,12 @@ public sealed partial class AltaLiveToolTests
         File.WriteAllText(options.ConfigPath, "[chat]\ndefault_provider = \"off\"\n");
         Assert.AreEqual("alpha", await Created("Disabled default").ConfigureAwait(false));
 
+        // A session of a project that names no project creates the session in its own; a caller of no project names one.
+        var own = await dispatcher.InvokeAsync(["session", "create", "--title", "In my project"], caller: new AltaCallerIdentity { Kind = "agent", SourceProjectId = project.Id }).ConfigureAwait(false);
+        Assert.AreEqual(project.Id, ReadJsonLines(own.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("projectId").GetString(), own.Stdout + own.Stderr);
+        var nowhere = await dispatcher.InvokeAsync(["session", "create", "--title", "Nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        StringAssert.Contains(nowhere.Stdout + nowhere.Stderr, "usage.missingScope");
+
         // A configuration that does not parse names no default, and fails nothing.
         File.WriteAllText(options.ConfigPath, "[chat\ndefault_provider = ");
         Assert.AreEqual("alpha", await Resolved().ConfigureAwait(false));
