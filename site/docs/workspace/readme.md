@@ -28,7 +28,8 @@ In CodeAlta Desktop, right-click a text field, the prompt or a code editor, or p
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` (also `Ctrl+PageDown` / `Ctrl+PageUp`) | Next / previous open tab, in the order of the tab strip (desktop). In a code editor, they go through its files instead |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Desktop: go to the tab shown before this one; press it again to go back. While `Ctrl` is held a list shows the tabs of the pane in front, most recently shown first, and each press moves down it (`Shift` moves up); releasing `Ctrl` shows the tab chosen, `Esc` cancels. In a code editor, they go through its files the same way |
+| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous open tab, in the order of the tab strip (desktop) |
 | `Ctrl+Alt+Right` / `Ctrl+Alt+Left` | Next / previous tab |
 | `Ctrl+T` or `/next_prompt` | Switch the session or draft to the next agent prompt |
 | `Ctrl+G Ctrl+G` | Collapse or expand the Explorer |

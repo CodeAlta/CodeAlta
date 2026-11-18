@@ -3616,3 +3616,11 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 ::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
 :root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }
 :root[data-theme="light"] ::highlight(find-in-page-current) { background-color: #f0b726; color: #111; }
+/* The tab switcher: the tabs by how recently they were shown, in front of the window while Ctrl is held. */
+.tab-switcher { position: fixed; z-index: 1000; top: 14vh; left: 50%; transform: translateX(-50%); display: grid; gap: 1px; width: min(460px, calc(100vw - 24px)); max-height: 60vh; overflow: auto;
+  padding: 4px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); pointer-events: none; }
+.tab-switcher-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 10px; border-radius: 5px; font-size: 13px; }
+.tab-switcher-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.tab-switcher-row[data-preview="true"] .tab-switcher-label { font-style: italic; }
+.tab-switcher-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-switcher-detail { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }

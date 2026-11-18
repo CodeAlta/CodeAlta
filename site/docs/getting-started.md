@@ -297,7 +297,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | [Archive the selected session](sessions/readme.md#archive-a-session) (desktop) | `Ctrl+Shift+A` or `/archive` |
 | Clear prompt queue | `F10` |
 | Previous/next user or assistant message | `F3` / `F4` |
-| Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+Shift+Tab` / `Ctrl+Tab` and `Ctrl+PageUp` / `Ctrl+PageDown` in the desktop app) |
+| Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown` in the desktop app). In the desktop app `Ctrl+Tab` goes to the tab shown before, see [Workspace](workspace/readme.md) |
 | Go to a [space](spaces.md) (desktop) | `Ctrl+G Ctrl+V` or `/space` |
 | Show the space at a place of the list (desktop) | `Ctrl+G 1` to `Ctrl+G 9` |
 | Previous / next space (desktop) | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` |

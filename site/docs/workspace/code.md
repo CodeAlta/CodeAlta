@@ -45,7 +45,7 @@ The **Files** pane (`Ctrl+B` shows or hides it) lists the project without what `
 | Select the language of the text | `Ctrl+K` `M` |
 | Find / replace in the file, also with a regular expression | `Ctrl+F` / `Ctrl+H` |
 | Go to a line | `Ctrl+G` |
-| Next file / previous file | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Previously shown file, and further back while `Ctrl` is held (a list shows them) | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Close the file | `Ctrl+W` |
 | Show the files / search in files | `Ctrl+Shift+E` / `Ctrl+Shift+F` |
 | Wrap lines | `Alt+Z` |

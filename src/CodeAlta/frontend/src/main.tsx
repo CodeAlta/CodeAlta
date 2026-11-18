@@ -64,15 +64,18 @@ import { SystemPromptDiff } from "./SystemPromptDiff";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
+import { TabSwitcher, useTabSwitcher, type TabSwitcherItem } from "./TabSwitcher";
+import { FileTabIcon } from "./fileTabLook";
+import { recentOrder, rememberRecent } from "./recentTabs";
 import { ActivityRail } from "./ActivityRail";
-import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeName, draftNodeId, paneNodeIds, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
 import { browserActivation } from "./sessionBrowser";
-import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
+import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, claudeCodeTabProvider, automationsTab, isWorkflowsTab, workflowsTab, isWorkflowRunTab, workflowRunTab,bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
@@ -2636,6 +2639,25 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const revision = browserRevision.current;
     return { revision, current: () => revision === browserRevision.current && currentView.current === "workspace" && !settingsVisible.current };
   }
+  // Ctrl+Tab goes to the tab shown before this one, and further back while Ctrl is held: the tabs by how recently they were shown.
+  const recentTabs = useRef<readonly string[]>([]);
+  const tabSwitcher = useTabSwitcher(id => showDockNode(id));
+  function tabSwitch(delta: 1 | -1) {
+    if (!snapshot || view !== "workspace" || settingsVisible.current) return;
+    const shown = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
+    // The tabs of the pane in front, by how recently each was shown: the history of a pane is its tabs in that order.
+    const current = activeDockNodeId(shown, fileTabs);
+    tabSwitcher.step(recentOrder(recentTabs.current, paneNodeIds(spaceLayout(spaceId), current), current), delta);
+  }
+  function switcherItems(order: readonly string[]): ReadonlyMap<string, TabSwitcherItem> {
+    return new Map(order.map(id => {
+      const file = fileTabs.open.find(tab => fileNodeId(tab) === id);
+      const icon = file ? <FileTabIcon file={file} /> : <span className="file-tab-icon"><AppIcon name={id.startsWith("session:") ? "chat" : "newSession"} size={14} /></span>;
+      // As the strip shows them, a tab that is only looked at has its title in italics.
+      const preview = id === sessionDraftNodeId ? !tabView.single : file ? isClaudeCodeTab(file) : isPreviewTab(tabView, tabView.open.find(tab => sessionNodeId(tab) === id));
+      return [id, { id, label: dockNodeName(spaceLayout(spaceId), id), icon, preview }];
+    }));
+  }
   function tabCommand(action: "nextTab" | "previousTab" | "closeTab" | "reopenTab") {
     if (!snapshot || view !== "workspace" || settingsVisible.current) return;
     const valid = reconcileSessionTabs(tabs, snapshot);
@@ -2662,17 +2684,22 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // tab of a new session is one of them only while it is there.
       const shown = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
       const next = cycleDockTab(spaceLayout(spaceId), activeDockNodeId(shown, fileTabs), action === "nextTab" ? 1 : -1);
-      if (next === null) return;
-      const file = fileTabs.open.find(tab => fileNodeId(tab) === next);
-      const session = valid.open.find(tab => sessionNodeId(tab) === next);
-      const prompt = valid.drafts?.find(draft => draftNodeId(draft) === next);
-      tabFocusPending.current = true;
-      if (file) activateFile(file);
-      // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
-      else if (session) selectSessionTab(session, "preview");
-      else if (prompt) selectProject(prompt.projectId);
-      else if (next === sessionDraftNodeId) { if (fileTabs.active) activateFile(null); else applyTabState({ ...valid, active: null }); }
+      if (next !== null) showDockNode(next);
     }
+  }
+  /** Shows a tab of the dock: the file tab, the session or the new-session prompt a node stands for. */
+  function showDockNode(next: string) {
+    if (!snapshot) return;
+    const valid = reconcileSessionTabs(tabs, snapshot);
+    const file = fileTabs.open.find(tab => fileNodeId(tab) === next);
+    const session = valid.open.find(tab => sessionNodeId(tab) === next);
+    const prompt = valid.drafts?.find(draft => draftNodeId(draft) === next);
+    tabFocusPending.current = true;
+    if (file) activateFile(file);
+    // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
+    else if (session) selectSessionTab(session, "preview");
+    else if (prompt) selectProject(prompt.projectId);
+    else if (next === sessionDraftNodeId) { if (fileTabs.active) activateFile(null); else applyTabState({ ...valid, active: null }); }
   }
   // The macOS menu consumes Cmd+W before the webview. Use the current tab state and the same close path
   // as the keyboard, including dirty-editor handling and the unclosable prompt tab. Never close behind a dialog.
@@ -4016,7 +4043,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // A key whose command has nothing to act on now is the editor's: F3 goes to the next match of its search.
       if (editing && resolved.command && !chorded && !commandAvailable(resolved.command)) return;
       event.preventDefault(); event.stopPropagation();
-      if (resolved.command) runCommand(resolved.command);
+      if (event.key === "Tab" && (resolved.command === "nextTab" || resolved.command === "previousTab")) tabSwitch(resolved.command === "nextTab" ? 1 : -1);
+      else if (resolved.command) runCommand(resolved.command);
     }
     // Bubble phase: Escape reaches here only when nothing inside (a popover, the editor) used it.
     function escapeKey(event: globalThis.KeyboardEvent) {
@@ -6054,11 +6082,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
   const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
   // The owners of the panes that are no longer mounted go once the dock has let them go.
+  // The tab in front is the most recent one.
+  const frontTab = activeDockNodeId(tabView, fileTabs);
+  useEffect(() => { recentTabs.current = rememberRecent(recentTabs.current, frontTab); }, [frontTab]);
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
   return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
+    {tabSwitcher.state && <TabSwitcher state={tabSwitcher.state} items={switcherItems(tabSwitcher.state.order)} />}
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}
