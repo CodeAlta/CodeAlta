@@ -167,6 +167,29 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await wait("!!document.querySelector('.project-editor')"), true);
     };
 
+    await t.test("Ctrl+Tab remembers the order of the tabs in each space separately", async () => {
+      await resetWork();
+      const front = "document.querySelector('.flexlayout__tab_button--selected')?.textContent.trim()";
+      const show = async (tool: string, label: string) => {
+        await evaluate(`document.querySelector('.activity-rail .activity-${tool}').click()`);
+        assert.equal(await wait(`${front}===${JSON.stringify(label)}`), true);
+      };
+      await show("automations", "Automations");
+      await show("work", "Work items");
+      await show("issues", "Issues");
+      await chip("Default");
+      assert.equal(await wait("document.querySelector('.space-switch-name')?.textContent==='Default'"), true);
+      await show("work", "Work items");
+      await show("automations", "Automations");
+      await show("issues", "Issues");
+      await chip("Work");
+      assert.equal(await wait(`document.querySelector('.space-switch-name')?.textContent==='Work' && ${front}==='Issues'`), true);
+      await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, cancelable: true }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' }));`);
+      assert.equal(await wait(`${front}==='Work items'`), true, "Work items was last in Work even though Automations was last in Default.");
+      assert.deepEqual(exceptions, []);
+    });
+
     await t.test("Add projects in an empty space opens the folder picker, not Organize spaces", async () => {
       await resetWork();
       await evaluate("localStorage.setItem('settingsFixtureEmptySpace','true')");

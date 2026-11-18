@@ -170,7 +170,7 @@ public sealed partial class TokenClassificationRecognizer : PiiRecognizer
                 var last = end;
                 while (first < last && Edges.Contains(text[first], StringComparison.Ordinal)) first++;
                 while (last > first && Edges.Contains(text[last - 1], StringComparison.Ordinal)) last--;
-                // A title before a name stays: "Madame [PERSONNE_001]" keeps the gender and the grammar of the sentence, and
+                // A title before a name stays: "Madame [PERSON_001]" keeps the gender and the grammar of the sentence, and
                 // tells nobody who she is.
                 if (entity == PiiEntities.Person && Title().Match(text, first, last - first) is { Success: true } title && title.Length < last - first) first += title.Length;
                 if (last > first) spans.Add(new PiiSpan(entity, first, last - first, total / count, Name));

@@ -8,7 +8,7 @@ namespace CodeAlta.Plugin.Pseudonymizer;
 
 /// <summary>
 /// Pseudonymizes what the confidential sessions send to their providers: the personal data a request holds (French
-/// identifiers, emails, IBAN, names...) is replaced by pseudonyms such as <c>[PERSONNE_001]</c> before it leaves the
+/// identifiers, emails, IBAN, names...) is replaced by pseudonyms such as <c>[PERSON_001]</c> before it leaves the
 /// machine, and the answers get the real values back. The pseudonyms of each session are kept on this machine only,
 /// encrypted. The sessions of a secure project are confidential (<c>[privacy] pseudonymize</c> of the project); the
 /// language of its documents chooses the model that finds names.
@@ -45,9 +45,11 @@ public sealed partial class PseudonymizerPlugin : PluginBase
 
     /// <summary>
     /// The words no project hides at first: those CodeAlta's own instructions put in every request (its name, the
-    /// address of the trailer of its commits), which name no one. The user changes the list in Settings.
+    /// address of the trailer of its commits, the technologies its skills and hints name), which name no one. The user
+    /// changes the list in Settings, and a name a project always hides stays hidden whatever this list holds.
     /// </summary>
-    internal static IReadOnlyList<string> DefaultSafeWords { get; } = ["CodeAlta", "noreply@codealta.io"];
+    internal static IReadOnlyList<string> DefaultSafeWords { get; } =
+        ["CodeAlta", "CodeAlta Desktop", "noreply@codealta.io", "CUDA", "ROCm", "Vulkan", "Metal", "EPUB", "MarkItDotNet", "Unicode", "CI", "PowerPoint", "io"];
 
     private readonly ConcurrentDictionary<string, SessionPseudonyms> _sessions = new(StringComparer.OrdinalIgnoreCase);
     // The recognizers of the identifiers of each language, made once: they hold no state, and some forty patterns are
@@ -242,15 +244,19 @@ public sealed partial class PseudonymizerPlugin : PluginBase
         };
     }
 
-    private static (string Entity, string Value)? ParseValue(string line)
+    internal static (string Entity, string Value)? ParseValue(string line)
     {
         var text = line.Trim();
         if (text.Length == 0) return null;
         var separator = text.IndexOf(':', StringComparison.Ordinal);
-        if (separator > 0 && PiiEntities.All.Contains(text[..separator].Trim().ToUpperInvariant()))
+        if (separator > 0)
         {
-            var value = text[(separator + 1)..].Trim();
-            return value.Length == 0 ? null : (text[..separator].Trim().ToUpperInvariant(), value);
+            var entity = PiiEntities.CanonicalName(text[..separator].Trim().ToUpperInvariant());
+            if (PiiEntities.All.Contains(entity))
+            {
+                var value = text[(separator + 1)..].Trim();
+                return value.Length == 0 ? null : (entity, value);
+            }
         }
 
         return (PiiEntities.Person, text);

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 
@@ -56,7 +57,7 @@ public sealed class BoundaryTests
             [
                 new AgentMessagePart.ToolCall("write", "write_file", JsonSerializer.SerializeToElement(new { path = "lettre.md", content = "Écrire à \"[EMAIL_001]\"." })),
                 new AgentMessagePart.ToolCall("fetch", "webget", JsonSerializer.SerializeToElement(new { url = "https://exemple.fr/?q=[EMAIL_001]" })),
-                new AgentMessagePart.ToolCall("bad", "write_file", JsonSerializer.SerializeToElement(new { path = "x.md", content = "[PERSONNE_007]" })),
+                new AgentMessagePart.ToolCall("bad", "write_file", JsonSerializer.SerializeToElement(new { path = "x.md", content = "[PERSON_007]" })),
             ]),
         };
 
@@ -111,7 +112,7 @@ public sealed class BoundaryTests
 
         var sent = await boundary.PrepareRequestAsync(Request(User("M. DUPONT signe l'acte le 3 mars 2026.")), CancellationToken.None);
 
-        Assert.AreEqual("M. [PERSONNE_001] signe l'acte le 3 mars 2026.", Text(sent));
+        Assert.AreEqual("M. [PERSON_001] signe l'acte le 3 mars 2026.", Text(sent));
     }
 
     [TestMethod]
@@ -121,7 +122,21 @@ public sealed class BoundaryTests
 
         var sent = await boundary.PrepareRequestAsync(Request(User("Mme Li lit le livre.")), CancellationToken.None);
 
-        Assert.AreEqual("Mme [PERSONNE_001] lit le livre.", Text(sent));
+        Assert.AreEqual("Mme [PERSON_001] lit le livre.", Text(sent));
+    }
+
+    [TestMethod]
+    public async Task ANeverHiddenWord_DoesNotOverrideAnExplicitlyHiddenName()
+    {
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([]), new PseudonymTable(), new PseudonymCache(),
+            new PseudonymizerOptions
+            {
+                AlwaysHide = [(PiiEntities.Person, "PowerPoint")],
+                NeverHide = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "PowerPoint" },
+            });
+
+        Assert.AreEqual("The client is [PERSON_001].",
+            await boundary.PseudonymizeAsync("The client is PowerPoint.", CancellationToken.None));
     }
 
     [TestMethod]
@@ -147,17 +162,53 @@ public sealed class BoundaryTests
     public void TheTable_KeepsItsNumbers_WhenItIsReadAgain()
     {
         var table = new PseudonymTable();
-        Assert.AreEqual("[PERSONNE_001]", table.TokenFor(PiiEntities.Person, "Dupont"));
-        Assert.AreEqual("[PERSONNE_002]", table.TokenFor(PiiEntities.Person, "Martin"));
-        Assert.AreEqual("[PERSONNE_001]", table.TokenFor(PiiEntities.Person, "Dupont"));
+        Assert.AreEqual("[PERSON_001]", table.TokenFor(PiiEntities.Person, "Dupont"));
+        Assert.AreEqual("[PERSON_002]", table.TokenFor(PiiEntities.Person, "Martin"));
+        Assert.AreEqual("[PERSON_001]", table.TokenFor(PiiEntities.Person, "Dupont"));
 
         var read = PseudonymTable.FromJson(table.ToJson());
 
-        Assert.AreEqual("[PERSONNE_003]", read.TokenFor(PiiEntities.Person, "Durand"));
-        Assert.AreEqual("[PERSONNE_002]", read.Canonical("PERSONNE-2"));
-        Assert.AreEqual("[PERSONNE_001]", read.Canonical("[PERSONE_001]"));
-        Assert.IsNull(read.Canonical("personne 1"), "Without brackets, a space is ordinary French.");
-        Assert.IsNull(read.Canonical("[PERSONNE_009]"));
+        Assert.AreEqual("[PERSON_003]", read.TokenFor(PiiEntities.Person, "Durand"));
+        Assert.AreEqual("[PERSON_002]", read.Canonical("PERSON-2"));
+        Assert.AreEqual("[PERSON_001]", read.Canonical("[PERSN_001]"));
+        Assert.IsNull(read.Canonical("person 1"), "Without brackets, a space is ordinary text.");
+        Assert.IsNull(read.Canonical("[PERSON_009]"));
+    }
+
+    [TestMethod]
+    public async Task AResumedSession_ReusesItsLegacyPseudonyms_AndCreatesNewOnesInEnglish()
+    {
+        var table = PseudonymTable.FromJson("""
+            {"entries":[{"token":"[PERSONNE_001]","entity":"PERSONNE","value":"Dupont","count":1}],"counters":{"PERSONNE":1}}
+            """u8);
+        var cache = new PseudonymCache();
+        cache.Set("Write to Dupont.", "Write to [PERSONNE_001].");
+        var recognizer = new PatternRecognizer(PiiEntities.Person, new Regex("Dupont|Martin", RegexOptions.CultureInvariant), 0.9);
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([recognizer]), table, cache, new PseudonymizerOptions());
+
+        var sent = await boundary.PrepareRequestAsync(Request(User("Write to Dupont."), User("Call Dupont and Martin.")), CancellationToken.None);
+
+        Assert.AreEqual("Write to [PERSONNE_001].\nCall [PERSONNE_001] and [PERSON_002].", Text(sent));
+        var reloaded = PseudonymTable.FromJson(table.ToJson());
+        Assert.AreEqual("[PERSONNE_001]", reloaded.Canonical("[PERSONE-1]"), "A legacy spelling is still restored after saving the table.");
+        Assert.AreEqual("[PERSON_002]", reloaded.Canonical("[PERSN_002]"));
+        Assert.AreEqual("[PERSON_003]", reloaded.TokenFor(PiiEntities.Person, "Durand"));
+        Assert.AreEqual("[PERSONNE_001]", reloaded.TokenFor(PiiEntities.Person, "Dupont"));
+        Assert.AreEqual("Call Dupont and Martin.", boundary.Restore("Call [PERSONNE_001] and [PERSON_002]."));
+    }
+
+    [TestMethod]
+    public async Task AValueKnownUnderALegacyKind_UsesThePolicyOfTheCurrentKind()
+    {
+        var table = PseudonymTable.FromJson("""
+            {"entries":[{"token":"[LIEU_001]","entity":"LIEU","value":"Bordeaux","count":1}]}
+            """u8);
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([]), table, new PseudonymCache(), new PseudonymizerOptions
+        {
+            Policies = PiiPolicies.Default.With(PiiEntities.Location, PiiPolicy.Keep),
+        });
+
+        Assert.AreEqual("Visit Bordeaux.", await boundary.PseudonymizeAsync("Visit Bordeaux.", CancellationToken.None));
     }
 
     private static PseudonymizingBoundary CreateBoundary(Func<string, bool>? tools = null, IReadOnlyList<(string, string)>? alwaysHide = null)

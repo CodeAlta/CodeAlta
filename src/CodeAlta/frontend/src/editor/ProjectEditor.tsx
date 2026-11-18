@@ -6,6 +6,8 @@ import { AppIcon } from "../AppIcon";
 import { showToast } from "../appToaster";
 import { changeListReply } from "../changes/projectChanges";
 import { fileAppearance } from "../fileAppearance";
+import { recentOrder } from "../tabSwitcher/recentTabs";
+import { isTabSwitcherKey, TabSwitcher, type TabSwitcherHandle, type TabSwitcherItem } from "../tabSwitcher/TabSwitcher";
 import { findKeyLabel, useFindInPage } from "../findInPage/useFindInPage";
 import { fileTabKey, isFolderTab, isReadOnlyTab, type FileTab } from "../fileTabs";
 import type { MessageKey } from "../localization";
@@ -26,7 +28,7 @@ import { EditorRootPath, EditorStatusPath } from "./EditorPaths";
 import { EditorSearch, type SearchHandle } from "./EditorSearch";
 import { EditorSurface, type EditorSurfaceHandle, type SurfaceCursor, type SurfaceInfo } from "./EditorSurface";
 import { EditorTabs } from "./EditorTabs";
-import { activateEditorFile, closeEditorFiles, cycleEditorFile, editorSideWidth, editorStorageKey, moveEditorFile, movedPath, openEditorFile, pinEditorFile, removeEditorPath,
+import { activateEditorFile, closeEditorFiles, editorSideWidth, editorTabNames, editorStorageKey, moveEditorFile, movedPath, openEditorFile, pinEditorFile, removeEditorPath,
   renameEditorPath, restoreEditorStorage, storedEditor, underPath, updateEditorStorage, type EditorFiles, type EditorPreferences, type EditorSide } from "./editorWorkbench";
 import { fileReadFailure } from "./fileEditorState";
 import type { FileEditors } from "./fileEditors";
@@ -430,6 +432,12 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const [focusAsked, setFocusAsked] = useState(0);
   const focusWanted = useRef(false);
   const focusEditor = () => { focusWanted.current = true; setFocusAsked(value => value + 1); };
+  // Ctrl+Tab goes to the file shown before this one, and further back while Ctrl is held.
+  const fileSwitcher = useRef<TabSwitcherHandle>(null);
+  function showRecentFile(path: string) {
+    if (!active || !visible || !files.open.some(file => file.path === path)) return;
+    setFiles(current => activateEditorFile(current, path)); focusEditor();
+  }
   // A dialog of the editor that closes is still there for a moment: the text takes the keyboard once it is gone.
   function focusAfterDialog() {
     let tries = 0;
@@ -728,6 +736,15 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     setMenu({ at, anchor: root.current!, title: documentName(path), items });
   }
 
+  function switcherFiles(): TabSwitcherItem[] {
+    const names = editorTabNames(files.open);
+    return recentOrder(files.recent, files.open.map(file => file.path), files.active ?? "").map(path => {
+      const look = fileAppearance(path, false), shown = names.get(path)!;
+      return { id: path, label: shown.name, detail: shown.folder ?? undefined, preview: files.open.some(file => file.path === path && file.preview),
+        icon: <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span> };
+    });
+  }
+
   // Ctrl+S saves, wherever the keyboard is in the editor; the other keys of the editor are its own.
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
@@ -756,7 +773,9 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       if (picked) setSearchOptions(current => ({ ...current, query: picked }));
       show("search");
     }
-    else if (control && key === "tab") { const next = cycleEditorFile(files, event.shiftKey ? -1 : 1); if (next !== null) { setFiles(current => activateEditorFile(current, next)); focusEditor(); } }
+    else if (isTabSwitcherKey(event) && event.target instanceof Node && root.current?.contains(event.target)) {
+      if (!event.repeat) fileSwitcher.current?.step(event.shiftKey ? -1 : 1);
+    }
     else if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && key === "z") prefer({ wrap: !preferences.wrap });
     else return;
     event.preventDefault(); event.stopPropagation();
@@ -817,6 +836,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} data-file-tab-keys data-find-files-keys
     data-find-keys={previewFind.available || undefined} tabIndex={-1}
     aria-label={`${t("Editor")} · ${projectName ?? tab.projectPath}`} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={keyDown}>
+    <TabSwitcher ref={fileSwitcher} current={active && visible ? files.active : null} items={switcherFiles} show={showRecentFile} />
     {side !== null && <>
       <aside className="editor-side" style={{ width: preferences.width }}>
         <div className="editor-side-views" role="tablist" aria-label={t("Editor")}>

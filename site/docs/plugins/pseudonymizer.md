@@ -4,7 +4,7 @@ title: Pseudonymizer plugin
 
 # Pseudonymizer plugin
 
-The built-in Pseudonymizer plugin keeps personal data away from the provider of a model. In a pseudonymized project, what its sessions send (prompts, files read, tool results) goes out with pseudonyms in place of names, places, phone numbers and identifiers: `[PERSONNE_001]`, `[LIEU_002]`, `[IBAN_001]`. The real values stay on your computer, and the answers, the tool calls and the files the agent writes get them back.
+The built-in Pseudonymizer plugin keeps personal data away from the provider of a model. In a pseudonymized project, what its sessions send (prompts, files read, tool results) goes out with pseudonyms in place of names, places, phone numbers and identifiers: `[PERSON_001]`, `[LOCATION_002]`, `[IBAN_001]`. The real values stay on your computer, and the answers, the tool calls and the files the agent writes get them back.
 
 Detection runs on your computer, in CodeAlta: patterns and checksums for identifiers, and for names a local model of the language of your documents. Nothing is sent to a service to find what to hide.
 
@@ -18,8 +18,8 @@ sequenceDiagram
     participant CodeAlta as CodeAlta (your computer)
     participant Provider as Provider of the model
     You->>CodeAlta: "Summarize the letter of Sophie Martin"
-    CodeAlta->>Provider: "Summarize the letter of [PERSONNE_001]"
-    Provider->>CodeAlta: "[PERSONNE_001] asks for…"
+    CodeAlta->>Provider: "Summarize the letter of [PERSON_001]"
+    Provider->>CodeAlta: "[PERSON_001] asks for…"
     CodeAlta->>You: "Sophie Martin asks for…"
 ```
 
@@ -34,8 +34,8 @@ sequenceDiagram
 1. In the Explorer, open the menu of the project and choose **Pseudonymize the project…**.
 2. Choose the **Language of the documents** (see below).
 3. Optionally, open **Names and words**:
-   - **Names always hidden**: the parties of the file, hidden wherever they appear, even where nothing finds them. One per line.
-   - **Words never hidden**: what was taken for personal data by mistake. One per line.
+   - **Names always hidden**: the parties of the file, hidden wherever they appear, even where nothing finds them. One per line. Use a prefix such as `LOCATION: Montauban` to choose the kind of pseudonym; older prefixes such as `LIEU:` still work.
+   - **Words never hidden**: what was taken for personal data by mistake. One per line. **Names always hidden** takes precedence in new text.
 4. Choose **Pseudonymize**. The project shows a padlock, and its next requests are pseudonymized.
 
 The same menu item, **Pseudonymization…**, changes these choices later or stops pseudonymizing the project. The choices are saved in the project's `.alta/config.toml`.
@@ -55,7 +55,7 @@ Each project chooses the language of its documents, which chooses the model that
 | Several languages | Ten languages, French and English among them, and the identifiers of France, the UK and the US. |
 | Identifiers only | Emails, phone numbers, IBAN, social security and company numbers of France, the UK and the US. Names are not looked for, and nothing is downloaded. |
 
-**Settings > Plugins > Pseudonymizer** lists the languages with their model and its size, and deletes a model or downloads it again. A **Custom model** setting takes the folder of a token classification model of yours (ONNX, with its tokenizer and a `ner-model.json` that describes it).
+**Settings > Plugins > Pseudonymizer** lists the languages with their model and its size, and deletes a model or downloads it again. A **Custom model** setting takes the folder of a token classification model of yours (ONNX, with its tokenizer and a `ner-model.json` that describes it). Descriptions that use older French kinds, such as `PERSONNE`, still work without edits or a new download.
 
 ## What is hidden
 
@@ -69,7 +69,7 @@ People, contact details (emails, phone numbers, postal codes) and identifiers (b
 | **Company numbers** | Hidden: SIREN and SIRET, Companies House numbers, EIN. |
 | **Every date** | Off: only dates of birth are hidden, the dates of acts and meetings are sent. |
 | **Web addresses** | Off: links to documentation, a repository or a site are sent. |
-| **Words never hidden** | `CodeAlta` and `noreply@codealta.io`: names of products or of your firm that name no one. |
+| **Words never hidden** | `CodeAlta`, `CodeAlta Desktop`, `noreply@codealta.io`, and the technologies CodeAlta's own instructions name (`CUDA`, `ROCm`, `Vulkan`, `Metal`, `EPUB`, `MarkItDotNet`, `Unicode`, `CI`, `PowerPoint`, `io`): add the names of products or of your firm that name no one. A project whose party has one of these names lists it in **Names always hidden**. |
 | **Tools that get pseudonyms** | The web tools and the pages of a browser. `*` stands for any characters. |
 
 ## See what was hidden

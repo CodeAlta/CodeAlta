@@ -11,7 +11,7 @@ namespace CodeAlta.Tests;
 public sealed class ProviderBoundaryTests
 {
     private const string Name = "Dupont";
-    private const string Token = "[PERSONNE_001]";
+    private const string Token = "[PERSON_001]";
 
     [TestMethod]
     public async Task AConfidentialSession_SendsOnlyTokens_AndKeepsTheRealValuesForTheToolsAndTheUser()
