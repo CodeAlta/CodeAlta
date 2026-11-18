@@ -146,6 +146,46 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     assert.equal(await until(`!${dialog}`), true);
     assert.equal(await evaluate(prompt), "fix `p53b` and [Parser review](session:s-run) [#2](https://github.com/owner/repo/issues/2) [Release \\[plan\\]](.alta/plans/2026-10-01-release.md)");
     assert.equal(await evaluate(attached), "1,2", "nothing more is attached");
+
+    // The number of a known issue and a space close the picker and stay in the prompt as typed.
+    await evaluate("{ const area = document.querySelector('#prompt'); area.value = ''; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); }");
+    await command("Input.insertText", { text: "see #" });
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "# opens the picker");
+    await command("Input.insertText", { text: "42" });
+    await key(" ", "Space", 32);
+    assert.equal(await until(`!${dialog}`), true, "digits and a space close the picker");
+    assert.equal(await evaluate(prompt), "see #42 ");
+    assert.equal(await evaluate("document.querySelector('#prompt').selectionStart"), 8, "the caret goes on after the space");
+    // A full stop ends it as well, without a space.
+    await evaluate("{ const area = document.querySelector('#prompt'); area.value = ''; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); }");
+    await command("Input.insertText", { text: "see #" });
+    assert.equal(await until(dialog), true);
+    await command("Input.insertText", { text: "7" });
+    await key(".", "Period", 190);
+    assert.equal(await until(`!${dialog}`), true, "digits and a full stop close the picker");
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(await evaluate(`!!${dialog}`), false, "the picker does not open again for #7.");
+    assert.equal(await evaluate(prompt), "see #7.");
+    await command("Input.insertText", { text: " " });
+    // Words may be a real search: a space is part of the query.
+    await command("Input.insertText", { text: "and #" });
+    assert.equal(await until(dialog), true);
+    await command("Input.insertText", { text: "crash" });
+    await key(" ", "Space", 32);
+    assert.equal(await evaluate(`!!${dialog}`), true, "a space after words does not close the picker");
+    await key("Escape", "Escape", 27);
+    assert.equal(await until(`!${dialog}`), true);
+
+    // Pasted text ending in a token does not open the picker, not even at the key-up that ends the paste.
+    await evaluate("{ const area = document.querySelector('#prompt'); area.value = ''; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); }");
+    await evaluate("{ const area = document.querySelector('#prompt'); area.dispatchEvent(new Event('paste', { bubbles: true })); document.execCommand('insertText', false, 'see #test'); }");
+    await key("v", "KeyV", 86, 2);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(await evaluate(`!!${dialog}`), false, "a paste does not open the picker");
+    assert.equal(await evaluate(prompt), "see #test");
+    // Typing a new # afterwards opens it as usual.
+    await command("Input.insertText", { text: " #" });
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a typed # opens the picker after a paste");
     await command("Browser.close").catch(() => { });
   } finally {
     socket?.close();

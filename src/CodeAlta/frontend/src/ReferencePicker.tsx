@@ -7,7 +7,7 @@ import { AppIcon } from "./AppIcon";
 import { BrandIcon } from "./BrandIcon";
 import { serviceBrand } from "./brands";
 import { AppWindowSurface } from "./AppWindow";
-import { activeIssueReference } from "./issueReferences";
+import { activeIssueReference, endsTypedIssueNumber, typedIssueNumber } from "./issueReferences";
 import type { MessageKey } from "./localization";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { usePromptPicker } from "./promptPicker";
@@ -42,7 +42,8 @@ function stateKey(item: ReferenceItem): MessageKey | null {
  * kind alone.
  * - Typing `#` at a word start opens it to insert: a click on a row, or Enter, replaces the `#query` with the reference:
  *   a link to an issue, the short id of a task in code, a link to the file of a plan, a `session:` link. Escape leaves the
- *   text as typed.
+ *   text as typed; digits and a space or a `.`, `)`… (`#123 `) put that text in the prompt and close it. Pasted text
+ *   never opens it.
  * - **Add issues** of the attach menu (`openRequest`) opens it on the issues alone, to attach several: a click on an
  *   issue, its box or Shift+Enter checks it, and **Attach** (Enter) gives the checked issues, or the selected one, to
  *   `onAttach`. Checked issues survive a press outside the window; Cancel (Escape) drops them.
@@ -180,6 +181,11 @@ export function ReferencePicker({ edit, input, openRequest = 0, onAttach }: { ed
       if (event.metaKey) return;
       if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "i") { event.preventDefault(); setIncludeClosed(value => !value); setSelected(0); return; }
       if (event.ctrlKey || event.altKey) return;
+      // A space, `.`, `)` and the like after only digits end a `#123` the user knew: it stays in the prompt as typed and the picker closes.
+      if (endsTypedIssueNumber(event.key) && !attaching && event.target === search.current && trigger && input.current?.value === trigger.text) {
+        const typed = typedIssueNumber(trigger.text, trigger.start, trigger.end, query, event.key);
+        if (typed) { event.preventDefault(); close({ ...typed, keepClosed: true }); return; }
+      }
       const handled = event.key === "ArrowDown" ? (move(1), true) : event.key === "ArrowUp" ? (move(-1), true)
         : event.key === "PageDown" ? (move(pageStep), true) : event.key === "PageUp" ? (move(-pageStep), true)
         : event.key === "Home" && event.target !== search.current ? (setSelected(0), true)
