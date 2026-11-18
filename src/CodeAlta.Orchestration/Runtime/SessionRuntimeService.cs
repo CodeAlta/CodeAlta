@@ -6890,15 +6890,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ParentMachineId: CreatedBy?.SourceMachineId);
 
         private static bool ShouldTrackRunId(AgentEvent @event)
-        {
-            if (@event is not AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted } &&
-                @event is not AgentActivityEvent { Kind: AgentActivityKind.Compaction })
-            {
-                return true;
-            }
-
-            return false;
-        }
+            // A nested tool call can publish after its turn went idle, even during a later turn. Its activity and
+            // tool output identify the original turn for the journal, but neither establishes an active turn.
+            => @event is not (AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted }
+                or AgentActivityEvent { Kind: AgentActivityKind.Compaction }
+                or AgentActivityEvent { Kind: AgentActivityKind.ToolCall, ParentActivityId: not null }
+                or AgentContentDeltaEvent { Kind: AgentContentKind.ToolOutput }
+                or AgentContentCompletedEvent { Kind: AgentContentKind.ToolOutput });
 
         public bool MarkActiveRunIfStillInFlight(AgentRunId runId, DateTimeOffset runStartedAt)
         {
