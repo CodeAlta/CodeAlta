@@ -28,6 +28,19 @@ test("the panes of a dock come back as they were: their tabs, their sizes and th
   assert.deepEqual(panes(restored), [["a", "b"], ["c"]]);
   assert.deepEqual(weights(restored), [70, 30], "the sizes are the shares of the window, not pixels");
   assert.deepEqual(front(restored), ["b", "c"]);
+  // FlexLayout draws the content of a tab only when it names a component.
+  for (const id of ["a", "b", "c"]) assert.ok((restored.getNodeById(id) as TabNode).getComponent(), id);
+});
+
+test("a restored tab is still the transient one or the preview of a conversation, and nothing else of its config is read", () => {
+  const model = createSessionTabModel();
+  const pane = model.getActiveTabset()!.getId();
+  model.doAction(Actions.addTab({ type: "tab", id: "looked", name: "looked", component: "session", config: { preview: true, other: "x" } }, pane, DockLocation.CENTER, -1, false));
+  model.doAction(Actions.addTab({ type: "tab", id: "conversation", name: "c", component: "claude-code-preview", config: { claudeCodePreview: true } }, pane, DockLocation.CENTER, -1, false));
+  model.doAction(Actions.addTab({ type: "tab", id: "kept", name: "kept", component: "session", config: { preview: false } }, pane, DockLocation.CENTER, -1, false));
+  const restored = restoreDockLayout(serializeDockLayout(model), new Set(["looked", "conversation", "kept"]))!;
+  assert.deepEqual(["looked", "conversation", "kept"].map(id => (restored.getNodeById(id) as TabNode).getConfig()),
+    [{ preview: true }, { claudeCodePreview: true }, { preview: false }]);
 });
 
 test("a tab that is no longer there leaves its place, and a pane that holds none leaves with them", () => {

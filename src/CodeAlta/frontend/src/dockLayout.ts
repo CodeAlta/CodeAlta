@@ -14,6 +14,17 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+// FlexLayout draws the content of a tab only when the tab names a component; the dock chooses that content by the id.
+const tabComponent = "tab";
+
+// What the dock reads back of the `config` of a tab: the transient tab and the preview of a Claude Code conversation,
+// whose places the next one takes.
+function flags(config: unknown): IJsonTabNode["config"] {
+  if (!config || typeof config !== "object") return undefined;
+  const { preview, claudeCodePreview } = config as Record<string, unknown>;
+  return claudeCodePreview === true ? { claudeCodePreview: true } : typeof preview === "boolean" ? { preview } : undefined;
+}
+
 // Keep only arrangement data. FlexLayout accepts node attributes without validating them; a stored pane must
 // not override the dock's behavior or even claim a tab's id. Labels and tab behavior come from the window.
 function keep(value: unknown, valid: ReadonlySet<string> | undefined, seen = new Set<string>()): Row | Pane | null {
@@ -25,12 +36,13 @@ function keep(value: unknown, valid: ReadonlySet<string> | undefined, seen = new
     const front = typeof selected === "number" && Number.isInteger(selected) ? selected : 0;
     let nextSelected = 0;
     for (const [index, child] of children.entries()) {
-      const { type, id } = record(child);
+      const { type, id, config } = record(child);
       if (type !== "tab" || typeof id !== "string" || !id || seen.has(id)) throw new Error("Invalid dock tab");
       seen.add(id);
       if (valid && !valid.has(id)) continue;
       if (index === front) nextSelected = tabs.length;
-      tabs.push(id === sessionDraftNodeId ? { type, id, enableDrag: false, config: { preview: true } } : { type, id });
+      tabs.push(id === sessionDraftNodeId ? { type, id, component: tabComponent, enableDrag: false, config: { preview: true } }
+        : { type, id, component: tabComponent, config: flags(config) });
     }
     return tabs.length ? { type, weight, children: tabs, selected: nextSelected, active: active === true ? true : undefined } : null;
   }
