@@ -220,8 +220,9 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
             .Select(function => (Path: function.Path, Description: FirstLine(function.Description), Score: Score(function.Path, function.Description + "\n" + ArgumentNames(function.InputSchemaJson), words)))
             .Concat(scripts.Where(static script => script.Problem is null).Select(script => (Path: WorkflowPrefix + script.Name,
                 Description: $"Script of the library, run with workflow(\"{script.Name}\", args): {FirstLine(script.Description)}",
-                // A query for library scripts or workflows finds them all.
-                Score: Score(script.Name, "script library workflow\n" + script.Description + "\n" + script.Source.Descriptor?.WhenToUse, words)))
+                // A query for library scripts or workflows finds them all, among its first results: what they are counts
+                // as their name does, so that the many commands that list or run something do not come before them.
+                Score: Score(script.Name + " script library workflow", script.Description + "\n" + script.Source.Descriptor?.WhenToUse, words)))
             .Concat(globals.Where(static hit => hit.Score < 2)))
             .Where(static hit => hit.Score > 0)
             .OrderByDescending(static hit => hit.Score)
