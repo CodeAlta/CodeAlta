@@ -1,4 +1,4 @@
-import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action, type Node as LayoutNode } from "flexlayout-react";
+import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action, type IJsonRowNode, type Node as LayoutNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { draftKey, draftTabLimit, draftTabOf, hasDraftTab, isPreviewTab, openSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, selectedTab, sessionTabLimit, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs } from "./sessionTabs";
@@ -22,6 +22,9 @@ export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null; s
 /** The node that shows the new-session prompt when no session is shown: the tab of the scope, or the transient one. */
 export const shownDraftNodeId = (state: SessionTabView) => state.scope && hasDraftTab(state, state.scope) ? draftNodeId(state.scope) : sessionDraftNodeId;
 
+/** Whether the dock shows the transient new-session prompt as a tab. */
+export const hasTransientDraft = (state: SessionTabView) => !state.active && !state.noPrompt && shownDraftNodeId(state) === sessionDraftNodeId;
+
 // Project App's selection synchronously: its persistence effect can lag a render.
 // Never rebind an invalid formerly active identity to a reused session ID.
 // A selected session that has no tab yet is looked at: it takes the transient tab, unless it is opened to be kept.
@@ -39,7 +42,13 @@ export function sessionTabPresentation(state: SessionTabs, snapshot: WorkspaceSn
   return shape({ ...(selected ? openSessionTab(valid, selected, mode) : { ...valid, active: null }), scope });
 }
 
-export function createSessionTabModel() {
+/** The panes of a dock that was never arranged: one, holding every tab. */
+const defaultDockLayout = (): IJsonRowNode => ({ type: "row", id: "session-tabs-row", children: [
+  { type: "tabset", id: panelId, selected: 0, children: [] },
+] });
+
+/** A dock with its panes: `layout` is the arrangement of one that was kept, by default the single pane. */
+export function createSessionTabModel(layout: IJsonRowNode = defaultDockLayout()) {
   return Model.fromJson({ global: {
     enableEdgeDock: false, enableEdgeDockIndicators: false,
     tabEnableDrag: true, tabEnableRename: false, tabEnablePin: false,
@@ -50,9 +59,7 @@ export function createSessionTabModel() {
     tabSetEnableClose: true, tabSetEnableCloseButton: false, tabSetEnableDeleteWhenEmpty: true,
     tabSetEnableDivide: true, tabSetEnableDrag: false, tabSetEnableDrop: true,
     tabSetEnableMaximize: false, tabSetEnableActiveIcon: false, tabSetEnableTabGroups: false,
-  }, borders: [], layout: { type: "row", id: "session-tabs-row", children: [
-    { type: "tabset", id: panelId, selected: 0, children: [] },
-  ] } });
+  }, borders: [], layout });
 }
 
 const noFiles = emptyFileTabs();
@@ -79,7 +86,7 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
   const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId), ...drafts.map(draftNodeId)]);
   const shownDraft = shownDraftNodeId(state);
   // The transient prompt: no session is shown, and the prompt of the scope has no tab of its own.
-  const transientDraft = !state.active && shownDraft === sessionDraftNodeId && !state.noPrompt;
+  const transientDraft = hasTransientDraft(state);
   if (transientDraft) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });

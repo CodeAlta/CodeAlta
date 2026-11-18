@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WindowsCurrentResponse, WindowsEvent, WindowsWindow } from "#neoastra";
 import { automationsTab, canvasTab, changesTab, documentationTab, editorTab, terminalTab } from "../fileTabs";
+import { testLimit } from "../testTime";
 import { fileTabRef, readTransfer, sessionTabRef, spaceBound, tabRefKind, transferOf } from "./tabRefs";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsApi } from "./windowsHub";
 
@@ -40,10 +41,20 @@ test("a moved tab carries what the window that receives it opens", () => {
 });
 
 test("a secondary window keeps its tabs in its window", () => {
-  const page = { sessionTabs: "{\"version\":1,\"open\":[]}", fileTabs: null };
+  const page = { sessionTabs: "{\"version\":1,\"open\":[]}", fileTabs: null, layout: "{\"version\":1}" };
   assert.deepEqual(readWindowPage(writeWindowPage(page)), page);
-  assert.deepEqual(readWindowPage(null), { sessionTabs: null, fileTabs: null });
-  assert.deepEqual(readWindowPage("not json"), { sessionTabs: null, fileTabs: null });
+  assert.deepEqual(readWindowPage(JSON.stringify({ version: 1, sessionTabs: page.sessionTabs, fileTabs: null })), { ...page, layout: null }, "a page written before the layout was kept");
+  assert.deepEqual(readWindowPage(null), { sessionTabs: null, fileTabs: null, layout: null });
+  assert.deepEqual(readWindowPage("not json"), { sessionTabs: null, fileTabs: null, layout: null });
+});
+
+test("a secondary window drops a layout that would exceed the host limit without losing its tabs", () => {
+  // The nested JSON fields grow when the window page escapes them. Each field fits on its own.
+  const page = { sessionTabs: JSON.stringify({ path: "\\".repeat(30_000) }), fileTabs: JSON.stringify({ path: "\\".repeat(60_000) }),
+    layout: JSON.stringify({ path: "\\".repeat(100_000) }) };
+  const stored = writeWindowPage(page);
+  assert.ok(stored.length <= 512 * 1024, "the host must accept the combined page");
+  assert.deepEqual(readWindowPage(stored), { ...page, layout: null });
 });
 
 const window = (id: string, changes: Partial<WindowsWindow> = {}): WindowsWindow => ({ id, main: id === "main", name: id === "main" ? "Main" : "Window 2", icon: null, color: null,
@@ -135,6 +146,32 @@ test("what the host asks of the window reaches the shell, and the tabs are repor
   hub.claim("editor:p1");
   assert.equal(hub.ownerOf("editor:p1"), "main");
   stop();
+});
+
+test("flushing a window report sends it without a timer and never passes an older in-flight report", { timeout: testLimit(5000) }, async () => {
+  const secondary = window("w2");
+  const { api } = fakeApi(() => [secondary]);
+  const layouts: (string | null)[] = [];
+  let acknowledgeFirst!: () => void;
+  const first = new Promise<void>(resolve => { acknowledgeFirst = resolve; });
+  let sentLatest!: () => void;
+  const latest = new Promise<void>(resolve => { sentLatest = resolve; });
+  const hub = createWindowsHub({ ...api, report: async request => {
+    layouts.push(request.pageState);
+    if (layouts.length === 1) await first; else sentLatest();
+    return { status: "ok" };
+  } }, current(secondary));
+
+  hub.report([], null, "old");
+  hub.flushReport();
+  assert.deepEqual(layouts, ["old"]);
+  hub.report([], null, "intermediate");
+  hub.report([], null, "latest");
+  hub.flushReport();
+  assert.deepEqual(layouts, ["old"]);
+  acknowledgeFirst();
+  await latest;
+  assert.deepEqual(layouts, ["old", "latest"]);
 });
 
 test("the tabs the windows hold do not change what the page shows of them", async () => {

@@ -138,7 +138,7 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, elsewhere, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout, layoutChanged,
   keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background, windowEntries, dragOut, externalDrag, arrival, onArrived }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
@@ -151,6 +151,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
    * space) then has its panes where they were. Without it the dock has a model of its own.
    */
   layout?: Model;
+  /** Told after each change of the panes of the dock (a tab moved, a pane split or resized, another tab in front of a pane). */
+  layoutChanged?: (model: Model) => void;
   /** The edited prompts of the window and the selected session, for the mark of a session tab. */
   drafts?: SessionTabDrafts;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
@@ -251,6 +253,17 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
   };
   const promptLabel = (draft: DraftTab) => draftLabel?.(draft) ?? label(null);
+  // Listen before the first reconciliation: FlexLayout attaches its listener after layout effects.
+  const layoutChangedLatest = useRef(layoutChanged);
+  layoutChangedLatest.current = layoutChanged;
+  useLayoutEffect(() => {
+    const save = (action: Action) => {
+      if (!action.isAdjusting() && action.type !== Actions.RENAME_TAB && action.type !== Actions.UPDATE_NODE_ATTRIBUTES)
+        layoutChangedLatest.current?.(model);
+    };
+    model.addChangeListener(save);
+    return () => model.removeChangeListener(save);
+  }, [model]);
   useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel, promptLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {

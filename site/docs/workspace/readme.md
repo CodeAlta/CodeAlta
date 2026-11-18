@@ -144,7 +144,7 @@ In CodeAlta Desktop, tabs can be arranged in panes:
 - drag it to an edge of a pane to split side by side or stacked, or to the center of another pane to move it there;
 - or use **Split right** and **Split below** in the `…` menu of a pane.
 
-Each pane has its own timeline and prompt. Sessions of different projects stay open together, and the layout comes back at the next start. Each [space](../spaces.md) has its own tabs and layout.
+Each pane has its own timeline and prompt. Sessions of different projects stay open together. When you restart CodeAlta, the tabs that reopen come back in the same panes, with the same split sizes and selected tab in each. Each [space](../spaces.md) has its own tabs and pane layout.
 
 <div class="row g-3 my-4">
   <div class="col-md-6">
@@ -181,7 +181,7 @@ A tab is in one window at a time: opening something another window shows brings 
 
 - A window closes with its last tab. Closing a window closes its tabs; the sessions keep running.
 - A window you name, or mark **Keep this window** in its badge, is kept: once closed, it is listed *closed* in **Move to window** and in **Settings > Windows** (**Open**, **Forget**), and opens again where it was.
-- Open windows come back at the next start, unless you turn off **Restore windows at startup** in **Settings > Windows**.
+- Open windows come back with their pane layouts at the next start, unless you turn off **Restore windows at startup** in **Settings > Windows**.
 - A window keeps the [space](../spaces.md) of its first tab: sessions and project tabs do not go to a window of another space.
 - A window opens again on its monitor (on Windows, on its virtual desktop too), or on a connected one. **Monitor**, in **Settings > Windows**, pins it to one.
 

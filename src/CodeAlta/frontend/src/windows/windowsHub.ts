@@ -30,22 +30,30 @@ export const mainWindowId = "main";
 
 /**
  * What the page of a secondary window keeps of its tabs, as the main page keeps them in the storage of the pages: the
- * text of its session tabs and the one of its other tabs. Its window keeps it, in `windows.json`.
+ * session tabs, its other tabs, and how the panes hold them. Its window keeps it in `windows.json`.
  */
-export type WindowPage = { sessionTabs: string | null; fileTabs: string | null };
+export type WindowPage = { sessionTabs: string | null; fileTabs: string | null; layout: string | null };
 
 /** What a secondary window kept of its page; nothing for one that is new or a text that is not understood. */
 export function readWindowPage(raw: string | null | undefined): WindowPage {
   try {
     const value: unknown = raw ? JSON.parse(raw) : null;
-    if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) return { sessionTabs: null, fileTabs: null };
+    if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) return { sessionTabs: null, fileTabs: null, layout: null };
     const text = (field: unknown) => typeof field === "string" && field.length <= 262_144 ? field : null;
-    return { sessionTabs: text((value as { sessionTabs?: unknown }).sessionTabs), fileTabs: text((value as { fileTabs?: unknown }).fileTabs) };
-  } catch { return { sessionTabs: null, fileTabs: null }; }
+    const page = value as { sessionTabs?: unknown; fileTabs?: unknown; layout?: unknown };
+    return { sessionTabs: text(page.sessionTabs), fileTabs: text(page.fileTabs), layout: text(page.layout) };
+  } catch { return { sessionTabs: null, fileTabs: null, layout: null }; }
 }
 
-/** The text a secondary window keeps of its page. */
-export const writeWindowPage = (page: WindowPage) => JSON.stringify({ version: 1, sessionTabs: page.sessionTabs, fileTabs: page.fileTabs });
+// DesktopWindowRecord.MaximumPageState in the host. The tab fields have smaller bounds in their owning stores.
+const maximumPageState = 512 * 1024;
+
+/** The text a secondary window keeps of its page. Omit the layout if the combined state would not fit. */
+export function writeWindowPage({ sessionTabs, fileTabs, layout }: WindowPage): string {
+  const value = { version: 1, sessionTabs, fileTabs, layout };
+  const text = JSON.stringify(value);
+  return text.length <= maximumPageState ? text : JSON.stringify({ ...value, layout: null });
+}
 
 /**
  * Keeps what the host says of the windows, from what the page was given when it started (`windows.current`). It reads
@@ -65,6 +73,7 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
   let request: (value: WindowsRequest) => void = () => { };
   let reported = "";
   let reportTimer: ReturnType<typeof setTimeout> | null = null;
+  let reporting = false;
   let pending: Readonly<{ tabs: readonly string[]; active: string | null; pageState: string | null }> | null = null;
   let listing = 0;
   const notify = () => { for (const listener of [...listeners]) listener(); };
@@ -98,6 +107,22 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       state = { ...state, current: self, windows: reply.windows, restoreAtStartup: reply.restoreAtStartup };
       notify();
     } catch { /* The windows are read again when the host says they changed. */ }
+  }
+
+  function flushReport() {
+    if (reportTimer !== null) clearTimeout(reportTimer);
+    reportTimer = null;
+    if (!pending || reporting) return;
+    const value = pending, key = reported;
+    pending = null;
+    reporting = true;
+    const failed = () => { if (reported === key) reported = ""; };
+    void api.report({ tabs: [...value.tabs], active: value.active, pageState: value.pageState }, { timeoutMilliseconds: 15_000 })
+      .then(reply => { if (reply.status !== "ok") failed(); }, failed).finally(() => {
+        reporting = false;
+        // Keep the host's snapshots in order even when a newer report was flushed before this one answered.
+        if (reportTimer === null) flushReport();
+      });
   }
 
   return {
@@ -162,13 +187,10 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       for (const [tab, owner] of held) if (owner === current.id && !tabs.includes(tab)) held.delete(tab);
       for (const tab of tabs) held.set(tab, current.id);
       owners = held;
-      if (reportTimer === null) reportTimer = setTimeout(() => {
-        reportTimer = null;
-        const value = pending;
-        pending = null;
-        if (value) void api.report({ tabs: [...value.tabs], active: value.active, pageState: value.pageState }, { timeoutMilliseconds: 15_000 }).catch(() => { reported = ""; });
-      }, 200);
+      if (reportTimer === null) reportTimer = setTimeout(flushReport, 200);
     },
+    /** Sends a queued report without waiting for its timer. An in-flight report still finishes first. */
+    flushReport,
     /** Moves a tab of this window to another window, or to a new one (no target); the page closes the tab on `ok`. */
     async moveTab(tab: string, payload: string, spaceBound: boolean, target: string | null, requestId: string | null = null): Promise<string> {
       try { return (await api.moveTab({ tab, payload, spaceBound, target, requestId }, { timeoutMilliseconds: 60_000 })).status; }
