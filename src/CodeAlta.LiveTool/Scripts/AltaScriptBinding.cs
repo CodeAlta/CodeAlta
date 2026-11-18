@@ -414,22 +414,7 @@ public sealed class AltaScriptBinding
         private AltaValue TypeOf(string cliName, AltaValue fallback)
             => _annotation?.Values.TryGetValue(cliName, out var value) == true ? value : fallback;
 
-        private string? Suggest(string name)
-        {
-            string? best = null;
-            var bestDistance = int.MaxValue;
-            foreach (var parameter in _parameters)
-            {
-                var distance = Distance(name.ToLowerInvariant(), parameter.JsName.ToLowerInvariant());
-                if (distance < bestDistance)
-                {
-                    best = parameter.JsName;
-                    bestDistance = distance;
-                }
-            }
-
-            return bestDistance <= Math.Max(2, name.Length / 3) ? best : null;
-        }
+        private string? Suggest(string name) => CodeModeNames.Closest(name, _parameters.Select(static parameter => parameter.JsName));
 
         private string BuildSchema()
         {
@@ -554,29 +539,5 @@ public sealed class AltaScriptBinding
             JsonValueKind.Number => value.GetRawText(),
             _ => value.GetRawText(),
         };
-
-        private static int Distance(string a, string b)
-        {
-            var previous = new int[b.Length + 1];
-            var current = new int[b.Length + 1];
-            for (var j = 0; j <= b.Length; j++)
-            {
-                previous[j] = j;
-            }
-
-            for (var i = 1; i <= a.Length; i++)
-            {
-                current[0] = i;
-                for (var j = 1; j <= b.Length; j++)
-                {
-                    var cost = a[i - 1] == b[j - 1] ? 0 : 1;
-                    current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
-                }
-
-                (previous, current) = (current, previous);
-            }
-
-            return previous[b.Length];
-        }
     }
 }

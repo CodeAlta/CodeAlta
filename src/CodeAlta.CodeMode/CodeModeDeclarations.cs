@@ -469,4 +469,54 @@ public static class CodeModeNames
 
         return ToIdentifier(builder.ToString());
     }
+
+    /// <summary>
+    /// Finds the name a misspelled one most likely stands for, for the error of an unknown property: the nearest by edit
+    /// distance, case ignored, when it is near enough to be a slip rather than another word.
+    /// </summary>
+    /// <param name="name">The name that was given.</param>
+    /// <param name="candidates">The names that exist.</param>
+    /// <returns>The nearest name, or null when none is near.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static string? Closest(string name, IEnumerable<string> candidates)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(candidates);
+        string? best = null;
+        var bestDistance = int.MaxValue;
+        var lowered = name.ToLowerInvariant();
+        foreach (var candidate in candidates)
+        {
+            var distance = Distance(lowered, candidate.ToLowerInvariant());
+            if (distance < bestDistance)
+            {
+                (best, bestDistance) = (candidate, distance);
+            }
+        }
+
+        return bestDistance <= Math.Max(2, name.Length / 3) ? best : null;
+    }
+
+    private static int Distance(string a, string b)
+    {
+        var previous = new int[b.Length + 1];
+        var current = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++)
+        {
+            previous[j] = j;
+        }
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[b.Length];
+    }
 }

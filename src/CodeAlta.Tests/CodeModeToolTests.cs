@@ -253,6 +253,102 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Agent_AndSession_TakeTheModelSelectionOfSessionCreate_UnderItsNamesToo()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new FakeAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """
+            await agent("one", { model: "codex:gpt@low", reasoning: "max", agent: "plan", sandbox: "workspace", timeout: 5000 });
+            await agent("two", { provider: "codex", model: "gpt", effort: "xhigh", promptId: "plan" });
+            await agent("three", { modelRef: "codex:gpt", reasoning: "none", title: undefined, tier: null });
+            await session({ title: "kept", provider: "codex", model: "codex:gpt", reasoning: "minimal" });
+            return "done";
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        var requests = agents.All.ToArray();
+        Assert.AreEqual(("codex:gpt@low", AgentReasoningEffort.Max, "plan", "workspace", TimeSpan.FromSeconds(5)),
+            (requests[0].ModelRef, requests[0].Effort, requests[0].AgentPromptId, requests[0].Sandbox, requests[0].Timeout));
+        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.XHigh, "plan"), (requests[1].ModelRef, requests[1].Effort, requests[1].AgentPromptId));
+        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.None, null, null), (requests[2].ModelRef, requests[2].Effort, requests[2].Title, requests[2].Tier));
+        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.Minimal), (requests[3].ModelRef, requests[3].Effort));
+    }
+
+    // Issue #475: `reasoning` was dropped in silence, and the session ran at another effort than the one asked for.
+    [TestMethod]
+    public async Task Agent_AndSession_RefuseAnOptionTheyDoNotTake_AndStartNoSession()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new FakeAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """
+            const failure = (promise) => promise.then(() => "started", (e) => `${e.name}: ${e.message}`);
+            const kept = await session({ title: "kept" });
+            return [
+              await failure(agent("a", { reasonning: "max" })),
+              await failure(agent("a", { reasoning: "extreme" })),
+              await failure(agent("a", { reasoning: "max", effort: "low" })),
+              await failure(agent("a", { timeout: "5m" })),
+              await failure(agent("a", { worktree: "yes" })),
+              await failure(agent("a", { provider: "codex" })),
+              await failure(agent("a", { provider: "codex", model: "claude:opus" })),
+              await failure(session({ schema: {} })),
+              await failure(kept.run("a", { tier: "quick" })),
+            ];
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        var failures = value.RootElement.EnumerateArray().Select(static item => item.GetString()!).ToArray();
+        StringAssert.Contains(failures[0], "TypeError: agent(prompt, options): unknown option `reasonning`. Did you mean `reasoning`? It takes: title, model, provider, tier, reasoning, agent,");
+        StringAssert.Contains(failures[1], "'extreme' is not a reasoning effort");
+        StringAssert.Contains(failures[2], "`reasoning` and `effort` are the same option");
+        StringAssert.Contains(failures[3], "`timeout` is a positive integer");
+        StringAssert.Contains(failures[4], "`worktree` is a boolean");
+        StringAssert.Contains(failures[5], "`provider` goes with `model`");
+        StringAssert.Contains(failures[6], "names another provider");
+        StringAssert.Contains(failures[7], "session(options): unknown option `schema`");
+        StringAssert.Contains(failures[8], "session.run(prompt, options): unknown option `tier`. It takes: timeout, schema.");
+        Assert.AreEqual(1, agents.All.Count, "only the session that was kept started");
+    }
+
+    [TestMethod]
+    public async Task Describe_OfAgentAndSession_DeclaresEveryOptionTheirFunctionsTake()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = new FakeAgents() }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """return { agent: await codemode.describe({ path: "agent" }), session: await codemode.describe({ path: "session" }) };""", new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        var declarations = new[] { value.RootElement.GetProperty("agent").GetString()!, value.RootElement.GetProperty("session").GetString()! };
+        foreach (var (declaration, function, own) in new[] { (declarations[0], CodeModeAgentBinding.Function, "prompt"), (declarations[1], CodeModeAgentBinding.Functions[1], "") })
+        {
+            using var schema = JsonDocument.Parse(function.InputSchemaJson!);
+            foreach (var option in schema.RootElement.GetProperty("properties").EnumerateObject().Where(option => option.Name != own))
+            {
+                StringAssert.Contains(declaration, option.Name + "?: ", $"`{option.Name}` of {function.Path}");
+            }
+        }
+
+        StringAssert.Contains(declarations[0], "reasoning?: \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\" | \"none\"");
+        StringAssert.Contains(declarations[1], "run(prompt: string, options?: {");
+    }
+
+    [TestMethod]
     public async Task AWarningOfTheSessionsOfAScript_GoesToItsOutput_WhetherTheSessionAnsweredOrFailed()
     {
         using var root = TestTempDirectory.Create();
