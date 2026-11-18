@@ -97,7 +97,7 @@ test("sessions are looked at in one transient tab, kept by a double click, and a
 // again.
 test("a session whose tab leaves while a prompt waits above its composer keeps its pane out of sight", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, shown, press, session, title, exceptions }) => {
-    const pane = `[...document.querySelectorAll('.session-workspace')].find(node => node.getBoundingClientRect().width > 0)`;
+    const pane = `[...document.querySelectorAll('.session-workspace')].find(node => node.getBoundingClientRect().width > 0 && !node.closest('.flexlayout__tab[style*="display: none"]'))`;
     const waiting = `[...document.querySelectorAll('.session-background-panes .session-workspace')].map(node => node.querySelectorAll('.composer-queue-row').length)`;
     const background = `!!document.querySelector('.session-background-panes')`;
     const enqueue = async (text: string) => {

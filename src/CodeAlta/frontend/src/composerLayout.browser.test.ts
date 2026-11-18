@@ -10,7 +10,7 @@ import { testLimit } from "./testTime";
 // that jumps to the latest entry does not push the timeline under the divider (#174).
 test("the prompt keeps its toolbar in a short window, and the timeline is centered above it", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ command, evaluate, until, session, exceptions }) => {
-    const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent)`;
+    const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent && !view.closest('.flexlayout__tab[style*="display: none"]'))`;
     const part = (selector: string) => `${workspace}?.querySelector(${JSON.stringify(selector)})`;
     await until(`${session("one")}?.getAttribute('aria-pressed')==='true' && !!${part(".prompt-surface #session-prompt")}`, "the session that is shown, with its prompt");
     await command("Emulation.setDeviceMetricsOverride", { width: 1500, height: 520, deviceScaleFactor: 1, mobile: false });
@@ -95,7 +95,7 @@ test("the prompt keeps its toolbar in a short window, and the timeline is center
 // had as its least one: in the session shown when the window starts, and in one opened later from the Explorer.
 test("the prompt gives back the room of what showed in it for a while", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ evaluate, until, press, session, exceptions }) => {
-    const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent)`;
+    const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent && !view.closest('.flexlayout__tab[style*="display: none"]'))`;
     const part = (selector: string) => `${workspace}?.querySelector(${JSON.stringify(selector)})`;
     await until(`${session("one")}?.getAttribute('aria-pressed')==='true' && !!${part(".prompt-surface #session-prompt")}`, "the session that is shown, with its prompt");
     const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => resolve(true), 50))))");

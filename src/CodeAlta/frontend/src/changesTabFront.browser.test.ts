@@ -50,9 +50,10 @@ test("Review changes brings the Changes tab in front of the session of its pane"
     await showing(["one - Project*", "two - Project*", "Changes Project | chat-1 - Chat*"], "the session still in front of the Changes tab");
     await reviewChanges();
     await showing(["one - Project*", "two - Project*", "Changes Project* | chat-1 - Chat"], "the Changes tab in front, asked from another pane");
-    // The panel of each tab is the one its button names: the one of the changes is shown, the one of the session is not.
+    // The panel of each tab is the one its button names: the one of the changes is shown, the one of the session is not
+    // (the dock hides it; the pane of a session stays laid out, out of the dock: keptPanes.ts).
     const shownPanel = (tab: string) => `(() => { const button = [...document.querySelectorAll('.session-dock .flexlayout__tab_button')].find(item => item.textContent.trim() === ${JSON.stringify(tab)});
-      const panel = document.getElementById(button.getAttribute('aria-controls')); return getComputedStyle(panel).display !== 'none' && panel.getBoundingClientRect().width > 0; })()`;
+      const panel = document.getElementById(button.getAttribute('aria-controls')); return panel.style.display !== 'none' && panel.getBoundingClientRect().width > 0; })()`;
     assert.equal(await evaluate(shownPanel("Changes Project")), true, "the panel of the changes is shown");
     assert.equal(await evaluate(shownPanel("chat-1 - Chat")), false, "the panel of the session behind it is not");
     assert.deepEqual(exceptions, []);

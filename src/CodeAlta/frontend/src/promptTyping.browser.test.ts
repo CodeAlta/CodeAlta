@@ -107,7 +107,7 @@ test("a click on a row of the Explorer and a character typed outside text give t
       await evaluate("typingControl.remove(), true");
     }
     // The More menu of the composer, open with the keyboard on its button, keeps typing out too.
-    const shownMenu = `[...document.querySelectorAll('details.composer-actions-menu')].find(menu => menu.getClientRects().length > 0)`;
+    const shownMenu = `[...document.querySelectorAll('details.composer-actions-menu')].find(menu => menu.getClientRects().length > 0 && !menu.closest('.flexlayout__tab[style*="display: none"]'))`;
     assert.equal(await evaluate(`!!${shownMenu}`), true, "the composer shown has its More menu");
     await evaluate(`window.typingMenu = ${shownMenu}; typingMenu.open = true; typingMenu.querySelector('summary').focus(); true`);
     assert.equal(await evaluate(`typingMenu.open && document.activeElement === typingMenu.querySelector('summary')`), true, "the More menu is open with the keyboard");
