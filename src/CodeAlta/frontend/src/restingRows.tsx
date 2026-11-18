@@ -32,6 +32,9 @@ const mirroredSelector = mirrored.map(name => `[${name}]`).join(", ");
 /** What is never put to rest: it holds a state of its own that drawing it again would lose. */
 const keptAwake = "iframe, video, audio";
 
+/** The time the rows that were asked for stay drawn at least, in milliseconds. */
+const wakeFor = 2000;
+
 const wakeEvent = "codealta:wake-rows";
 type WakeRequest = Readonly<{ selector?: string; hold: number; later: boolean }>;
 
@@ -186,7 +189,7 @@ export function useRestingRows(keys: readonly string[], whole: boolean) {
     if (!messages || !scroller) return;
     const wakeRows = (event: Event) => {
       const { selector, hold, later } = (event as CustomEvent<WakeRequest>).detail;
-      if (hold > 0) holdUntil.current = Math.max(holdUntil.current, performance.now() + hold);
+      holdUntil.current = Math.max(holdUntil.current, performance.now() + Math.max(hold, wakeFor));
       const { keys } = latest.current;
       if (messages.children.length !== keys.length) return;
       const wake = Array.from(messages.children).flatMap((child, index) => child.classList.contains("timeline-rest")
@@ -194,7 +197,12 @@ export function useRestingRows(keys: readonly string[], whole: boolean) {
       if (!wake.length) return;
       if (later) rows.apply([], wake);
       else flushSync(() => rows.apply([], wake));
+      // Nothing else may look at the rows again (the view may not move): they rest again once what asked for them is
+      // done with them, which a view that goes to them slowly is not at once.
+      clearTimeout(again);
+      again = setTimeout(ask, Math.max(hold, wakeFor) + 50);
     };
+    let again: ReturnType<typeof setTimeout> | undefined;
     const touch = (event: Event) => {
       const { keys } = latest.current;
       const row = event.target instanceof Element ? Array.from(messages.children).findIndex(child => child.contains(event.target as Element)) : -1;
@@ -219,6 +227,7 @@ export function useRestingRows(keys: readonly string[], whole: boolean) {
       messages.removeEventListener("pointerdown", touch, true);
       messages.removeEventListener("keydown", touch, true);
       messages.ownerDocument.removeEventListener("keydown", selectAll, true);
+      clearTimeout(again);
       cancelAnimationFrame(frame.current); frame.current = 0;
     };
   }, [rows, ask]);
