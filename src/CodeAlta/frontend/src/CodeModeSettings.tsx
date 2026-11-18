@@ -12,12 +12,12 @@ import { useShellLanguage } from "./shellLanguage";
 // The modes this version shows, with their help; a mode the host knows and this list does not is shown by its name.
 const modes: readonly { value: string; label: MessageKey; help: MessageKey }[] = [
   { value: "off", label: "Off", help: "Agents call their tools one at a time, as usual." },
-  { value: "on", label: "On", help: "Agents also get exec, which runs JavaScript that calls their tools in loops and in parallel, and wait, for a script that goes on in the background." },
-  { value: "only", label: "Only", help: "Agents get exec and wait in place of their tools, which they call from scripts; they still look at images and ask you questions directly." },
+  { value: "on", label: "On", help: "Agents also get exec, which runs JavaScript that calls their tools in loops and in parallel." },
+  { value: "only", label: "Only", help: "Agents get exec in place of their tools, which they call from scripts; they still look at images and ask you questions directly." },
 ];
 
 /**
- * Settings page of Code Mode: whether the sessions get the `exec` and `wait` tools (On when the file says nothing), and
+ * Settings page of Code Mode: whether the sessions get the `exec` tool (On when the file says nothing), and
  * the providers and models that choose a mode of their own, each a link to the editor of its provider. The choice is
  * saved at once in the configuration file of the user; a session takes it with its next prompt.
  */

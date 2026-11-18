@@ -92,7 +92,8 @@ public sealed class AltaScriptBinding
             {
                 Description = command.Description,
                 InputSchemaJson = entry.InputSchemaJson,
-                ResultType = annotation?.Result ?? "AltaRecord | AltaRecord[]",
+                // One record, several, none, or the text of a command that writes no record.
+                ResultType = annotation?.Result ?? "AltaRecord | AltaRecord[] | string | null",
                 Parallel = true,
                 Annotations = PolicyTags(command.Policy),
             });
@@ -225,6 +226,19 @@ public sealed class AltaScriptBinding
         return CodeModeCallResult.Success(new JsonObject { ["exitCode"] = result.ExitCode, ["output"] = output, ["records"] = records }.ToJsonString());
     }
 
+    // Whether a line is a record of `alta`, its header included: an object that says its type.
+    private static bool IsRecord(string line)
+    {
+        try
+        {
+            return JsonNode.Parse(line) is JsonObject record && record["type"] is JsonValue type && type.TryGetValue<string>(out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     // The records of an output, without its header nor their envelope fields.
     private static IEnumerable<JsonObject> Records(AltaCommandResult result)
     {
@@ -301,7 +315,7 @@ public sealed class AltaScriptBinding
 
         // A command that wrote something else than records (the command of a plugin, a help) gives its text: what it
         // wrote is never lost as an empty result.
-        if (records.Count == 0 && error is null && result.Stdout.Trim() is { Length: > 0 } text && !Lines(text).Any())
+        if (records.Count == 0 && error is null && result.Stdout.Trim() is { Length: > 0 } text && !Lines(text).Any(IsRecord))
         {
             return CodeModeCallResult.Text(text);
         }

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -62,7 +63,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
     // What a script says of the session it starts: the one list the schemas of the functions, the declarations of
     // agent() and session() and the check of a call are made from, so that an option cannot be taken without being
     // declared, nor given without being taken. An alias is the name `alta session create` has for the same thing.
-    private static readonly Option[] Options =
+    private static readonly ImmutableArray<Option> Options =
     [
         new("title", """{"type":"string","description":"The title of the session."}"""),
         new("model", """{"type":"string","description":"provider:model or provider:model@reasoning, as alta.model.list({}) lists them; with `provider`, the id of a model of that provider. The model and the reasoning effort of this session when neither model nor tier is given."}""", Alias: "modelRef"),
@@ -82,11 +83,11 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
 
     private static readonly Option Prompt = new("prompt", """{"type":"string","description":"What the session is asked: all it needs to know, it sees nothing else."}""");
 
-    private static readonly Option[] AgentOptions = [Prompt, .. Options];
+    private static readonly ImmutableArray<Option> AgentOptions = [Prompt, .. Options];
 
-    private static readonly Option[] SessionOptions = [.. Options.Where(static option => !option.AgentOnly)];
+    private static readonly ImmutableArray<Option> SessionOptions = [.. Options.Where(static option => !option.AgentOnly)];
 
-    private static readonly Option[] AskOptions =
+    private static readonly ImmutableArray<Option> AskOptions =
     [
         new("sessionId", """{"type":"string"}"""),
         Prompt,
@@ -187,13 +188,11 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
                 return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", $"{name}: `provider` goes with `model`, the id of one of its models (alta.model.list({{ provider: \"{provider}\" }}) lists them)."));
             }
 
-            if (!model.Contains(':', StringComparison.Ordinal))
+            // With its provider, `model` is the id of a model, which may hold a colon of its own (`llama3:8b`): only a
+            // reference that already starts with that provider is left as it is.
+            if (!model.StartsWith(provider + ":", StringComparison.OrdinalIgnoreCase))
             {
                 model = $"{provider}:{model}";
-            }
-            else if (!model.StartsWith(provider + ":", StringComparison.OrdinalIgnoreCase))
-            {
-                return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", $"{name}: `model` '{model}' names another provider than `provider` '{provider}': give one of them."));
             }
         }
 

@@ -76,8 +76,12 @@ public sealed class AltaScriptCallHandler : ICodeModeCallHandler
             // A call that did not reach the command (a hook that blocks it, a tool that is refused) fails as a tool does.
             if (answer.Structured is not { ValueKind: JsonValueKind.Object } written || !written.TryGetProperty(AltaSessionToolFactory.ScriptExitCode, out var exitCode))
             {
-                return ToolScriptBinding.Read(answer.Success ? answer with { Success = false, Error = "The `alta` tool of this session did not answer the script with the output of the command." } : answer,
-                    AltaSessionToolFactory.ToolName);
+                var said = string.Join('\n', answer.Items.OfType<AgentToolResultItem.Text>().Select(static text => text.Value)).Trim();
+                return CodeModeCallResult.Failure(new CodeModeCallError("ToolError",
+                    answer.Error ?? (!answer.Success && said.Length > 0 ? said : "The `alta` tool of this session did not answer the script with the output of the command."))
+                {
+                    Code = AltaSessionToolFactory.ToolName,
+                });
             }
 
             result = new AltaCommandResult

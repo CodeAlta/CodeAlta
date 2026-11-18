@@ -14,19 +14,19 @@ export const codeModeSettingsMessages = {
     "Agenten rufen ihre Werkzeuge wie gewohnt einzeln auf.",
     "エージェントは通常どおり、ツールを一つずつ呼びます。",
     "智能体照常逐个调用其工具。"],
-  "Agents also get exec, which runs JavaScript that calls their tools in loops and in parallel, and wait, for a script that goes on in the background.": [
-    "Los agentes también reciben exec, que ejecuta JavaScript que llama a sus herramientas en bucles y en paralelo, y wait, para un script que sigue en segundo plano.",
-    "Les agents reçoivent aussi exec, qui exécute du JavaScript appelant leurs outils en boucle et en parallèle, et wait, pour un script qui continue en arrière-plan.",
-    "Agenten erhalten zusätzlich exec, das JavaScript ausführt, das ihre Werkzeuge in Schleifen und parallel aufruft, und wait für ein Skript, das im Hintergrund weiterläuft.",
-    "エージェントには、ツールをループや並列で呼ぶ JavaScript を実行する exec と、バックグラウンドで続くスクリプトを待つ wait も与えられます。",
-    "智能体还会获得 exec（运行可循环、并行调用其工具的 JavaScript）和 wait（等待在后台继续运行的脚本）。"],
+  "Agents also get exec, which runs JavaScript that calls their tools in loops and in parallel.": [
+    "Los agentes también reciben exec, que ejecuta JavaScript que llama a sus herramientas en bucles y en paralelo.",
+    "Les agents reçoivent aussi exec, qui exécute du JavaScript appelant leurs outils en boucle et en parallèle.",
+    "Agenten erhalten zusätzlich exec, das JavaScript ausführt, das ihre Werkzeuge in Schleifen und parallel aufruft.",
+    "エージェントには、ツールをループや並列で呼ぶ JavaScript を実行する exec も与えられます。",
+    "智能体还会获得 exec（运行可循环、并行调用其工具的 JavaScript）。"],
   "Only": ["Solo", "Seulement", "Nur", "のみ", "仅"],
-  "Agents get exec and wait in place of their tools, which they call from scripts; they still look at images and ask you questions directly.": [
-    "Los agentes reciben exec y wait en lugar de sus herramientas, que llaman desde scripts; siguen viendo imágenes y haciéndote preguntas directamente.",
-    "Les agents reçoivent exec et wait à la place de leurs outils, qu’ils appellent depuis des scripts ; ils regardent toujours les images et vous posent leurs questions directement.",
-    "Agenten erhalten exec und wait anstelle ihrer Werkzeuge, die sie aus Skripten aufrufen; Bilder sehen sie sich weiterhin direkt an und stellen Ihnen Fragen direkt.",
-    "エージェントはツールの代わりに exec と wait を受け取り、ツールはスクリプトから呼びます。画像の確認と質問は引き続き直接行います。",
-    "智能体获得 exec 和 wait 以代替其工具，并从脚本调用这些工具；它们仍直接查看图片并直接向你提问。"],
+  "Agents get exec in place of their tools, which they call from scripts; they still look at images and ask you questions directly.": [
+    "Los agentes reciben exec en lugar de sus herramientas, que llaman desde scripts; siguen viendo imágenes y haciéndote preguntas directamente.",
+    "Les agents reçoivent exec à la place de leurs outils, qu’ils appellent depuis des scripts ; ils regardent toujours les images et vous posent leurs questions directement.",
+    "Agenten erhalten exec anstelle ihrer Werkzeuge, die sie aus Skripten aufrufen; Bilder sehen sie sich weiterhin direkt an und stellen Ihnen Fragen direkt.",
+    "エージェントはツールの代わりに exec を受け取り、ツールはスクリプトから呼びます。画像の確認と質問は引き続き直接行います。",
+    "智能体获得 exec 以代替其工具，并从脚本调用这些工具；它们仍直接查看图片并直接向你提问。"],
   "A session takes the mode of its model, else of its provider, else this one. Each provider chooses in its settings.": [
     "Una sesión toma el modo de su modelo, si no el de su proveedor, si no este. Cada proveedor lo elige en sus ajustes.",
     "Une session prend le mode de son modèle, sinon de son fournisseur, sinon celui-ci. Chaque fournisseur le choisit dans ses réglages.",

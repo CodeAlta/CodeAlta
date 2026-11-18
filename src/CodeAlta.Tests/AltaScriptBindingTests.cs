@@ -207,7 +207,10 @@ public sealed class AltaScriptBindingTests
         var text = AltaScriptBinding.ReadResult(new AltaCommandResult { ExitCode = 0, Stdout = "Three items\n- a\n", Stderr = string.Empty, CorrelationId = "c", Duration = TimeSpan.Zero }, "plugin report");
         var none = AltaScriptBinding.ReadResult(new AltaCommandResult { ExitCode = 0, Stdout = """{"type":"alta.result","version":1}""" + "\n", Stderr = string.Empty, CorrelationId = "c", Duration = TimeSpan.Zero }, "notes clear");
 
+        var json = AltaScriptBinding.ReadResult(new AltaCommandResult { ExitCode = 0, Stdout = "{\"ok\":true}\n", Stderr = string.Empty, CorrelationId = "c", Duration = TimeSpan.Zero }, "plugin report");
+
         Assert.AreEqual("\"Three items\\n- a\"", text.ValueJson);
+        Assert.AreEqual("\"{\\u0022ok\\u0022:true}\"", json.ValueJson, "JSON that is no record of alta is what the command wrote, too");
         Assert.IsNull(none.ValueJson);
     }
 

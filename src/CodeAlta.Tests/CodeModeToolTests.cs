@@ -264,6 +264,7 @@ public sealed class CodeModeToolTests
         var result = await InvokeAsync(exec, """
             await agent("one", { model: "codex:gpt@low", reasoning: "max", agent: "plan", sandbox: "workspace", timeout: 5000 });
             await agent("two", { provider: "codex", model: "gpt", effort: "xhigh", promptId: "plan" });
+            await agent("colon", { provider: "ollama", model: "llama3:8b" });
             await agent("three", { modelRef: "codex:gpt", reasoning: "none", title: undefined, tier: null });
             await session({ title: "kept", provider: "codex", model: "codex:gpt", reasoning: "minimal" });
             return "done";
@@ -274,8 +275,9 @@ public sealed class CodeModeToolTests
         Assert.AreEqual(("codex:gpt@low", AgentReasoningEffort.Max, "plan", "workspace", TimeSpan.FromSeconds(5)),
             (requests[0].ModelRef, requests[0].Effort, requests[0].AgentPromptId, requests[0].Sandbox, requests[0].Timeout));
         Assert.AreEqual(("codex:gpt", AgentReasoningEffort.XHigh, "plan"), (requests[1].ModelRef, requests[1].Effort, requests[1].AgentPromptId));
-        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.None, null, null), (requests[2].ModelRef, requests[2].Effort, requests[2].Title, requests[2].Tier));
-        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.Minimal), (requests[3].ModelRef, requests[3].Effort));
+        Assert.AreEqual("ollama:llama3:8b", requests[2].ModelRef, "the id of a model may hold a colon of its own");
+        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.None, null, null), (requests[3].ModelRef, requests[3].Effort, requests[3].Title, requests[3].Tier));
+        Assert.AreEqual(("codex:gpt", AgentReasoningEffort.Minimal), (requests[4].ModelRef, requests[4].Effort));
     }
 
     // Issue #475: `reasoning` was dropped in silence, and the session ran at another effort than the one asked for.
@@ -299,7 +301,6 @@ public sealed class CodeModeToolTests
               await failure(agent("a", { timeout: "5m" })),
               await failure(agent("a", { worktree: "yes" })),
               await failure(agent("a", { provider: "codex" })),
-              await failure(agent("a", { provider: "codex", model: "claude:opus" })),
               await failure(session({ schema: {} })),
               await failure(kept.run("a", { tier: "quick" })),
             ];
@@ -314,9 +315,8 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(failures[3], "`timeout` is a positive integer");
         StringAssert.Contains(failures[4], "`worktree` is a boolean");
         StringAssert.Contains(failures[5], "`provider` goes with `model`");
-        StringAssert.Contains(failures[6], "names another provider");
-        StringAssert.Contains(failures[7], "session(options): unknown option `schema`");
-        StringAssert.Contains(failures[8], "session.run(prompt, options): unknown option `tier`. It takes: timeout, schema.");
+        StringAssert.Contains(failures[6], "session(options): unknown option `schema`");
+        StringAssert.Contains(failures[7], "session.run(prompt, options): unknown option `tier`. It takes: timeout, schema.");
         Assert.AreEqual(1, agents.All.Count, "only the session that was kept started");
     }
 
@@ -371,6 +371,19 @@ public sealed class CodeModeToolTests
         StringAssert.StartsWith(call.ScriptRunId, "run-");
         using var error = ValueOf(refused);
         Assert.AreEqual("ToolError: The policy of this project refuses `alta prompt create`.", error.RootElement.GetString(), Text(refused));
+
+        // A hook that replaces the result: what is not the output of the command is a failure, never a value.
+        using var other = JsonDocument.Parse("""{"note":"redacted"}""");
+        foreach (var success in new[] { true, false })
+        {
+            var replaced = await InvokeAsync(exec, script, new FakeTools
+            {
+                Alta = AltaTool(root.Path),
+                AltaReplaced = new AgentToolResult(success, [new AgentToolResultItem.Text("redacted")]) { Structured = other.RootElement.Clone() },
+            });
+            using var answer = ValueOf(replaced);
+            StringAssert.StartsWith(answer.RootElement.GetString(), "ToolError: ", Text(replaced));
+        }
     }
 
     // The sub-sessions of a session answer it by themselves: a turn is never held for them, whatever the script or the
@@ -1631,6 +1644,9 @@ public sealed class CodeModeToolTests
         // What a hook of the session answers a call of `alta` with instead of running it; null runs it.
         public string? AltaBlocked { get; init; }
 
+        // What a hook of the session answers a call of `alta` with after it ran, in the place of its result; null leaves it.
+        public AgentToolResult? AltaReplaced { get; init; }
+
         public async Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
         {
             lock (Calls) Calls.Add(call.ToolName);
@@ -1647,6 +1663,7 @@ public sealed class CodeModeToolTests
             {
                 lock (AltaCalls) AltaCalls.Add(call);
                 if (AltaBlocked is { } blocked) return new AgentToolResult(false, [new AgentToolResultItem.Text(blocked)], blocked);
+                if (AltaReplaced is { } replaced) return replaced;
                 return await Alta.Handler(new AgentToolInvocation(new ModelProviderId("provider"), "session-1", "call-1/1", "alta", call.Arguments)
                 {
                     ParentToolCallId = "call-1",

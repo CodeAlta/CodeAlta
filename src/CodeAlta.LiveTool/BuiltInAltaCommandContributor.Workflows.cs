@@ -125,7 +125,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var profile = false;
         string? format = null;
         var command = Leaf("show", "Show one run: its state, its calls, its graph (the steps its script declares, and how far each went), and the sessions it started, from the journal of its session.");
-        command.Add("<run-id>", "Run id, such as run-7f3c2a, from `exec`, `wait` or `alta workflow list`.", value => id = value);
+        command.Add("<run-id>", "Run id, such as run-7f3c2a, from `exec` or `alta workflow list`.", value => id = value);
         command.Add("profile", "Add where the time of a run that ended went: each step, each function (calls, total, slowest, time queued) and the script's own time.", value => profile = value is not null);
         command.Add("format=", "`json` (the default), or `mermaid`: the graph of the run as a Mermaid flowchart, in the `mermaid` field, as Copy as Mermaid gives it.", value => format = value);
         command.Add(async (_, _) => await HandleWorkflowShowAsync(context, id, profile, format).ConfigureAwait(false));
