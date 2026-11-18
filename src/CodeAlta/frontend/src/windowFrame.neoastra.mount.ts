@@ -1,14 +1,20 @@
 // The real shell over an inert host; /landing sends the same canvas request as the Desktop plugin.
 import type { CanvasEvent, CanvasItem, CanvasOpenRequest, PluginUiInvokeRequest } from "#neoastra";
-import { canvases as demoCanvases, pluginUi as demoPluginUi } from "./demo-api";
+import { canvases as demoCanvases, pluginUi as demoPluginUi, spaces as demoSpaces } from "./demo-api";
 import { desktopShell as fixtureShell } from "./projectFocus.neoastra.mount";
+import { defaultSpace, shownSpaceKey } from "./spaces/spaces";
 export * from "./projectFocus.neoastra.mount";
 
 export const desktopShell = { ...fixtureShell, preferences: async () => ({ ...await fixtureShell.preferences(), zoom: 100 }) };
 
+const spaceWasSaved = localStorage.getItem(shownSpaceKey) !== null;
+export const spaces = { ...demoSpaces, list: async () => spaceWasSaved ? { status: "ok", spaces: [defaultSpace] } : demoSpaces.list() };
+
 const landing: CanvasItem = { pluginKey: "builtin:landing", plugin: "Landing page", package: null, id: "landing", title: "Welcome",
   description: null, icon: "house", iconData: null, scope: "Application", input: false, actions: 0, describes: true, placement: "Tab" };
-const fixture = { enabled: true, commands: [] as PluginUiInvokeRequest[], opens: [] as CanvasOpenRequest[] };
+const fixture = { enabled: true, catalogReads: 0, declareWelcome: () => {}, commands: [] as PluginUiInvokeRequest[], opens: [] as CanvasOpenRequest[] };
+const declaration = localStorage.getItem("windowFrameFixtureDeferWelcome") === "true"
+  ? new Promise<void>(resolve => { fixture.declareWelcome = resolve; }) : Promise.resolve();
 Object.assign(window, { windowFrameFixture: fixture });
 const queued: CanvasEvent[] = [];
 let wake = () => {};
@@ -34,7 +40,11 @@ export const pluginUi = {
 
 export const canvases = {
   ...demoCanvases,
-  list: async () => ({ status: "ok", canvases: fixture.enabled ? [landing] : [] }),
+  list: async () => {
+    fixture.catalogReads++;
+    await declaration;
+    return { status: "ok", canvases: fixture.enabled ? [landing] : [] };
+  },
   open: async (request: CanvasOpenRequest) => {
     fixture.opens.push(request);
     return { status: "ok", instanceId: "welcome-instance", title: "Welcome", statusText: null, html: "<p>Welcome fixture</p>", actions: false,

@@ -4,27 +4,27 @@ namespace CodeAlta.Pseudonymization;
 
 /// <summary>
 /// The kinds of personal data the pseudonymizer knows. Each name is also the label of the pseudonyms of its kind:
-/// <c>[PERSONNE_001]</c>.
+/// <c>[PERSON_001]</c>.
 /// </summary>
 public static class PiiEntities
 {
     /// <summary>A person.</summary>
-    public const string Person = "PERSONNE";
+    public const string Person = "PERSON";
 
     /// <summary>An organization.</summary>
-    public const string Organization = "ORGANISATION";
+    public const string Organization = "ORGANIZATION";
 
     /// <summary>A place.</summary>
-    public const string Location = "LIEU";
+    public const string Location = "LOCATION";
 
     /// <summary>A postal address.</summary>
-    public const string Address = "ADRESSE";
+    public const string Address = "ADDRESS";
 
     /// <summary>An email address.</summary>
     public const string Email = "EMAIL";
 
     /// <summary>A phone number.</summary>
-    public const string Phone = "TELEPHONE";
+    public const string Phone = "PHONE_NUMBER";
 
     /// <summary>A French social security number (NIR) whose key checks out.</summary>
     public const string Nir = "NIR";
@@ -33,10 +33,10 @@ public static class PiiEntities
     public const string NirSuspect = "NIR_SUSPECT";
 
     /// <summary>A French tax number (numéro fiscal, SPI) whose key checks out: it names the taxpayer.</summary>
-    public const string TaxNumber = "NUMERO_FISCAL";
+    public const string TaxNumber = "FR_TAX_NUMBER";
 
     /// <summary>The reference of a French tax notice whose key checks out: it names the notice of one household.</summary>
-    public const string TaxNoticeReference = "REFERENCE_AVIS";
+    public const string TaxNoticeReference = "FR_TAX_NOTICE";
 
     /// <summary>A SIREN whose Luhn key checks out.</summary>
     public const string Siren = "SIREN";
@@ -57,22 +57,22 @@ public static class PiiEntities
     public const string IbanSuspect = "IBAN_SUSPECT";
 
     /// <summary>A payment card number whose Luhn key checks out.</summary>
-    public const string CreditCard = "CARTE";
+    public const string CreditCard = "CREDIT_CARD";
 
     /// <summary>An IPv4 address.</summary>
     public const string IpAddress = "IP";
 
     /// <summary>A date of birth.</summary>
-    public const string BirthDate = "DATE_NAISSANCE";
+    public const string BirthDate = "DATE_OF_BIRTH";
 
     /// <summary>Any other date (of an act, a meeting, a decision): kept by default.</summary>
     public const string Date = "DATE";
 
     /// <summary>A French postal code followed by its town.</summary>
-    public const string PostalCode = "CODE_POSTAL";
+    public const string PostalCode = "POSTAL_CODE";
 
     /// <summary>A French vehicle registration plate.</summary>
-    public const string Plate = "PLAQUE";
+    public const string Plate = "LICENSE_PLATE";
 
     /// <summary>The RPPS number of a health professional.</summary>
     public const string Rpps = "RPPS";
@@ -157,6 +157,30 @@ public static class PiiEntities
 
     private static readonly FrozenDictionary<string, int> Ranks = Priority.Select(static (entity, index) => (entity, index))
         .ToFrozenDictionary(static pair => pair.entity, static pair => pair.index, StringComparer.Ordinal);
+
+    /// <summary>Gets the current name of a kind. The former French names are accepted; other names are unchanged.</summary>
+    /// <param name="entity">The case-sensitive name of the kind.</param>
+    /// <returns>The current name, or <paramref name="entity"/> if it is not a former name.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entity"/> is <see langword="null"/>.</exception>
+    public static string CanonicalName(string entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        return entity switch
+        {
+            "PERSONNE" => Person,
+            "ORGANISATION" => Organization,
+            "LIEU" => Location,
+            "ADRESSE" => Address,
+            "TELEPHONE" => Phone,
+            "CARTE" => CreditCard,
+            "DATE_NAISSANCE" => BirthDate,
+            "CODE_POSTAL" => PostalCode,
+            "PLAQUE" => Plate,
+            "NUMERO_FISCAL" => TaxNumber,
+            "REFERENCE_AVIS" => TaxNoticeReference,
+            _ => entity,
+        };
+    }
 
     /// <summary>Gets the rank of a kind in <see cref="Priority"/>; an unknown kind comes just before <see cref="Date"/>.</summary>
     /// <param name="entity">The kind.</param>

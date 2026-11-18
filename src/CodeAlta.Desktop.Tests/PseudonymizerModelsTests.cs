@@ -2,6 +2,7 @@ using CodeAlta.Desktop.Rpc;
 using CodeAlta.NativeEngines;
 using CodeAlta.Plugin.Pseudonymizer;
 using CodeAlta.Pseudonymization;
+using CodeAlta.Pseudonymization.Ner;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -75,6 +76,41 @@ public sealed class PseudonymizerModelsTests
         Assert.AreEqual("bert-en-8e892123e8b7", preset.FolderName);
         Assert.AreEqual("model_quantized.onnx", preset.Description.Model);
         Assert.AreEqual("vocab.txt", preset.Description.Tokenizer.File);
+    }
+
+    [TestMethod]
+    public void LoadingAPreviouslyDownloadedModel_DoesNotRewriteItsDescription()
+    {
+        using var folder = new TemporaryFolder();
+        var host = new Host(folder.Path) { Runtime = "unused-in-this-test" };
+        using var models = new NerModels(host);
+        var preset = NerModelCatalog.Find(NerModelCatalog.EnglishId)!;
+        var directory = Directory.CreateDirectory(models.DirectoryOf(preset)).FullName;
+        foreach (var file in preset.Files)
+        {
+            var path = Path.Combine(directory, file.Name);
+            if (file.Name == "model_quantized.onnx")
+            {
+                using var graph = File.Create(path);
+                graph.SetLength(file.Size);
+                continue;
+            }
+
+            var content = file.Name == "vocab.txt"
+                ? "[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nJohn\n"
+                : """{"id2label":{"0":"O","1":"B-PER"}}""";
+            File.WriteAllText(path, content.PadRight((int)file.Size));
+        }
+
+        File.WriteAllText(Path.Combine(directory, "model.json"), "{}");
+        var descriptionPath = Path.Combine(directory, NerModelDescription.FileName);
+        const string description = """
+            {"id":"bert-en","model":"model_quantized.onnx","tokenizer":{"kind":"wordpiece","file":"vocab.txt"},"entities":{"PER":"PERSONNE"}}
+            """;
+        File.WriteAllText(descriptionPath, description);
+
+        Assert.IsInstanceOfType<TokenClassificationRecognizer>(models.Recognizer(preset.Id, null));
+        Assert.AreEqual(description, File.ReadAllText(descriptionPath), "The same installation may still be used by the previous app version.");
     }
 
     [TestMethod]
@@ -157,7 +193,9 @@ public sealed class PseudonymizerModelsTests
         // What a download waits for before it fails, when a test holds it.
         public TaskCompletionSource? Gate { get; init; }
 
-        public string? OnnxRuntimeLibrary() => null;
+        public string? Runtime { get; init; }
+
+        public string? OnnxRuntimeLibrary() => Runtime;
 
         public async Task InstallOnnxRuntimeAsync(PinnedDownloader downloads, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
         {

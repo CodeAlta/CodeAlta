@@ -60,7 +60,7 @@ public sealed class NerTests
 
         var spans = await recognizer.AnalyzeAsync(text, CancellationToken.None);
 
-        CollectionAssert.AreEqual(new[] { "PERSONNE:John Smith", "PERSONNE:Mary", "LIEU:London" },
+        CollectionAssert.AreEqual(new[] { "PERSON:John Smith", "PERSON:Mary", "LOCATION:London" },
             spans.Select(span => $"{span.Entity}:{text.Substring(span.Start, span.Length)}").ToArray());
         Assert.AreEqual(0.9, spans[0].Score, 1e-6);
     }
@@ -83,7 +83,7 @@ public sealed class NerTests
 
         var spans = await recognizer.AnalyzeAsync(text, CancellationToken.None);
 
-        CollectionAssert.AreEqual(new[] { "LIEU:CEDEX", "PERSONNE:DURAND PIERRE", "PERSONNE:MARTIN SOPHIE" },
+        CollectionAssert.AreEqual(new[] { "LOCATION:CEDEX", "PERSON:DURAND PIERRE", "PERSON:MARTIN SOPHIE" },
             spans.Select(span => $"{span.Entity}:{text.Substring(span.Start, span.Length)}").ToArray());
     }
 
@@ -105,7 +105,7 @@ public sealed class NerTests
 
         var spans = await recognizer.AnalyzeAsync(text, CancellationToken.None);
 
-        CollectionAssert.AreEqual(new[] { "PERSONNE:DUPONT", "LIEU:33000", "LIEU:BORDEAUX" },
+        CollectionAssert.AreEqual(new[] { "PERSON:DUPONT", "LOCATION:33000", "LOCATION:BORDEAUX" },
             spans.Select(span => $"{span.Entity}:{text.Substring(span.Start, span.Length)}").ToArray());
     }
 
@@ -121,6 +121,32 @@ public sealed class NerTests
         Assert.AreEqual(512, description.MaxTokens);
         Assert.AreEqual("model.onnx", description.Model);
         Assert.AreEqual(PiiEntities.Person, description.Entities["PER"]);
+    }
+
+    [TestMethod]
+    [DataRow("PERSONNE", "PERSON")]
+    [DataRow("ORGANISATION", "ORGANIZATION")]
+    [DataRow("LIEU", "LOCATION")]
+    [DataRow("ADRESSE", "ADDRESS")]
+    [DataRow("TELEPHONE", "PHONE_NUMBER")]
+    [DataRow("CARTE", "CREDIT_CARD")]
+    [DataRow("DATE_NAISSANCE", "DATE_OF_BIRTH")]
+    [DataRow("CODE_POSTAL", "POSTAL_CODE")]
+    [DataRow("PLAQUE", "LICENSE_PLATE")]
+    [DataRow("NUMERO_FISCAL", "FR_TAX_NUMBER")]
+    [DataRow("REFERENCE_AVIS", "FR_TAX_NOTICE")]
+    public void ADescription_WithALegacyKind_LoadsWithoutChangingTheFile(string legacy, string current)
+    {
+        using var folder = new TempVocabulary("[PAD]");
+        var path = System.IO.Path.Combine(folder.Path, NerModelDescription.FileName);
+        var json = $$$"""{"id":"x","labels":["O","B-ENTITY"],"entities":{"ENTITY":"{{{legacy}}}","MISC":null}}""";
+        File.WriteAllText(path, json);
+
+        var description = NerModelDescription.Load(folder.Path);
+
+        Assert.AreEqual((current, true), description.Read("B-ENTITY"));
+        Assert.IsNull(description.Read("B-MISC").Entity);
+        Assert.AreEqual(json, File.ReadAllText(path));
     }
 
     [TestMethod]
