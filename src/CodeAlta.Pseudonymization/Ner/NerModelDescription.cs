@@ -85,7 +85,7 @@ public sealed record NerModelDescription
     public IReadOnlyList<string>? Labels { get; set; }
 
     /// <summary>
-    /// Gets the kind of the pseudonymizer each entity of the model is (<c>PER</c> to <c>PERSONNE</c>); an entity it does not
+    /// Gets the kind of the pseudonymizer each entity of the model is (<c>PER</c> to <c>PERSON</c>); an entity it does not
     /// name, or names with null, is ignored.
     /// </summary>
     [JsonPropertyName("entities")]

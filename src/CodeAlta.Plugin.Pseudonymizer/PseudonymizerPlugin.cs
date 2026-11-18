@@ -8,7 +8,7 @@ namespace CodeAlta.Plugin.Pseudonymizer;
 
 /// <summary>
 /// Pseudonymizes what the confidential sessions send to their providers: the personal data a request holds (French
-/// identifiers, emails, IBAN, names...) is replaced by pseudonyms such as <c>[PERSONNE_001]</c> before it leaves the
+/// identifiers, emails, IBAN, names...) is replaced by pseudonyms such as <c>[PERSON_001]</c> before it leaves the
 /// machine, and the answers get the real values back. The pseudonyms of each session are kept on this machine only,
 /// encrypted. The sessions of a secure project are confidential (<c>[privacy] pseudonymize</c> of the project); the
 /// language of its documents chooses the model that finds names.

@@ -30,7 +30,7 @@ public sealed class NerWorkerTests
         var spans = await recognizer.AnalyzeAsync(text, CancellationToken.None);
 
         var found = spans.Select(span => $"{span.Entity}:{text.Substring(span.Start, span.Length)}").ToArray();
-        CollectionAssert.IsSubsetOf(new[] { "PERSONNE:John Smith", "ORGANISATION:Microsoft", "LIEU:London" }, found, string.Join(" | ", found));
+        CollectionAssert.IsSubsetOf(new[] { "PERSON:John Smith", "ORGANIZATION:Microsoft", "LOCATION:London" }, found, string.Join(" | ", found));
         Assert.IsTrue(spans.All(static span => span.Score is > 0.5 and <= 1), "Each result has the mean probability of its tokens.");
     }
 
@@ -51,7 +51,7 @@ public sealed class NerWorkerTests
         var spans = await recognizer.AnalyzeAsync(text, CancellationToken.None);
 
         var found = spans.Select(span => $"{span.Entity}:{text.Substring(span.Start, span.Length)}").ToArray();
-        CollectionAssert.IsSubsetOf(new[] { "PERSONNE:Durand", "PERSONNE:Sophie Martin", "LIEU:Montauban" }, found, string.Join(" | ", found));
+        CollectionAssert.IsSubsetOf(new[] { "PERSON:Durand", "PERSON:Sophie Martin", "LOCATION:Montauban" }, found, string.Join(" | ", found));
     }
 
     [TestMethod]

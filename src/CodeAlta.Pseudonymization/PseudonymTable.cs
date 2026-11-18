@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace CodeAlta.Pseudonymization;
 
 /// <summary>One pseudonym of a session and the value it stands for.</summary>
-/// <param name="Token">The pseudonym, such as <c>[PERSONNE_001]</c>.</param>
+/// <param name="Token">The pseudonym, such as <c>[PERSON_001]</c>.</param>
 /// <param name="Entity">The kind of the value.</param>
 /// <param name="Value">The value.</param>
 public sealed record PseudonymEntry(string Token, string Entity, string Value)
@@ -116,7 +116,7 @@ public sealed partial class PseudonymTable
         }
     }
 
-    /// <summary>Gets the pseudonym of a kind and a number: <c>[PERSONNE_001]</c>.</summary>
+    /// <summary>Gets the pseudonym of a kind and a number: <c>[PERSON_001]</c>.</summary>
     /// <param name="entity">The kind.</param>
     /// <param name="number">The number, from 1.</param>
     /// <returns>The pseudonym.</returns>
@@ -135,7 +135,7 @@ public sealed partial class PseudonymTable
         var match = TolerantToken().Match(candidate);
         if (!match.Success || match.Length != candidate.Length) return null;
         var bracketed = candidate.StartsWith('[') && candidate.EndsWith(']');
-        // Without brackets, a space is ordinary French ("personne 1"): only a dash or an underscore counts.
+        // Without brackets, a space is ordinary text ("person 1"): only a dash or an underscore counts.
         if (!bracketed && match.Groups["sep"].Value == " ") return null;
         var label = RemoveAccents(match.Groups["label"].Value).ToUpperInvariant();
         if (!int.TryParse(match.Groups["number"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number)) return null;

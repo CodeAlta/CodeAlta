@@ -4,7 +4,7 @@ title: Pseudonymizer plugin
 
 # Pseudonymizer plugin
 
-The built-in Pseudonymizer plugin keeps personal data away from the provider of a model. In a pseudonymized project, what its sessions send (prompts, files read, tool results) goes out with pseudonyms in place of names, places, phone numbers and identifiers: `[PERSONNE_001]`, `[LIEU_002]`, `[IBAN_001]`. The real values stay on your computer, and the answers, the tool calls and the files the agent writes get them back.
+The built-in Pseudonymizer plugin keeps personal data away from the provider of a model. In a pseudonymized project, what its sessions send (prompts, files read, tool results) goes out with pseudonyms in place of names, places, phone numbers and identifiers: `[PERSON_001]`, `[LOCATION_002]`, `[IBAN_001]`. The real values stay on your computer, and the answers, the tool calls and the files the agent writes get them back.
 
 Detection runs on your computer, in CodeAlta: patterns and checksums for identifiers, and for names a local model of the language of your documents. Nothing is sent to a service to find what to hide.
 
@@ -18,8 +18,8 @@ sequenceDiagram
     participant CodeAlta as CodeAlta (your computer)
     participant Provider as Provider of the model
     You->>CodeAlta: "Summarize the letter of Sophie Martin"
-    CodeAlta->>Provider: "Summarize the letter of [PERSONNE_001]"
-    Provider->>CodeAlta: "[PERSONNE_001] asks for…"
+    CodeAlta->>Provider: "Summarize the letter of [PERSON_001]"
+    Provider->>CodeAlta: "[PERSON_001] asks for…"
     CodeAlta->>You: "Sophie Martin asks for…"
 ```
 

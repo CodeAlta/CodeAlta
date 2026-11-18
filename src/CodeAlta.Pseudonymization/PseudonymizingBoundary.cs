@@ -41,7 +41,7 @@ public sealed partial class PseudonymizingBoundary : IAgentProviderBoundary
 {
     /// <summary>What the model of a confidential session is told about the pseudonyms.</summary>
     public const string Instruction =
-        "<codealta-context>Pseudonymization: on. Values written as [KIND_NNN], such as [PERSONNE_001] or [IBAN_002], are pseudonyms of personal data the user keeps from you. " +
+        "<codealta-context>Pseudonymization: on. Values written as [KIND_NNN], such as [PERSON_001] or [IBAN_002], are pseudonyms of personal data the user keeps from you. " +
         "Copy each one exactly as it is, with its brackets, capitals, underscore and digits, wherever you refer to it, also in the arguments of tool calls and in the files you write: " +
         "the tools of this machine receive the real value. Never translate one, never invent one, never try to guess the value it stands for.</codealta-context>";
 
