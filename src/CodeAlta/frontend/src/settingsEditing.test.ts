@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { McpServerEntry } from "#neoastra";
-import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, scopedKey, settingsFailure, validateMcpServerForm } from "./settingsEditing";
+import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, scopedKey, settingsFailure, validateMcpServerForm, mcpServerSwitchOfAnother } from "./settingsEditing";
 
 const entry: McpServerEntry = { key: "files", scope: "Project", transport: "Stdio", enabled: true, command: "npx", arguments: ["-y", "server", "[redacted]"],
   argumentsRedacted: true, workingDirectory: null, url: null, urlRedacted: false, disabledTools: [], overridesGlobal: false, shadowed: false,
@@ -65,4 +65,13 @@ test("a server of another tool is read-only: saving it writes one of the same na
   // Once CodeAlta has a server of that name, saving the other one again would replace it.
   assert.match(validateMcpServerForm(mcpServerForm(shared), [entry, shared], shared)!, /already exists/);
   assert.equal(validateMcpServerForm(mcpServerForm(entry), [entry, shared], entry), null);
+});
+
+test("an overridden MCP server leaves the switch to the definition in use of its scope", () => {
+  const row = (key: string, scope: string, shadowed = false) => ({ key, scope, shadowed });
+  const used = row("docs", "Project"), overridden = row("docs", "Project", true), global = row("docs", "Global", true);
+  assert.equal(mcpServerSwitchOfAnother(overridden, [used, overridden, global]), true);
+  assert.equal(mcpServerSwitchOfAnother(used, [used, overridden, global]), false);
+  assert.equal(mcpServerSwitchOfAnother(global, [used, overridden, global]), false, "the enablement of another scope is its own");
+  assert.equal(mcpServerSwitchOfAnother(overridden, [overridden, row("other", "Project")]), false);
 });

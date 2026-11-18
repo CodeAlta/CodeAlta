@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { translate } from "./localization";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
@@ -18,7 +17,7 @@ const calls = (method: string) => `${fixture}.state.calls.filter(call => call.me
 const rows = "[...document.querySelectorAll('.settings-file-locations > .settings-file-location')]";
 const button = (scope: string, title: string) => `${scope}.querySelector('button[title=${JSON.stringify(title)}]')`;
 
-test("a settings page says where its files are, and opens, copies and shows them", { skip: !edge, timeout: testLimit(120_000) }, async () => {
+test("a settings page says where its files are, and opens, copies and shows them", { skip: !edge, timeout: testLimit(120_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-settings-files-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -400,11 +399,57 @@ test("a settings page says where its files are, and opens, copies and shows them
       return [name.textContent, name.scrollWidth > name.clientWidth, tags.getBoundingClientRect().top >= row.querySelector('.settings-editor-name').getBoundingClientRect().bottom - 1,
         row.scrollWidth > row.clientWidth + 1]; })`),
       [["Implementation", false, true, false], ["Planning", false, true, false], ["default", false, false, false]]);
+
+    await t.test("MCP details explain removal and target the selected definition's file without hiding the form", async () => {
+      await command("Page.navigate", { url: pathToFileURL(page).href + "?mcp" });
+      const list = "document.querySelectorAll('.mcp-settings .settings-editor-list > .bp6-card')";
+      const detail = "document.querySelector('.mcp-settings .settings-split-detail')";
+      const note = "document.querySelector('.mcp-settings .settings-editor-note')";
+      await until(`${list}.length === 5 && ${rows}.length === 5 && ${detail}?.querySelector('#mcp-key')?.value === 'local'`);
+      assert.equal(await evaluate(note + " === null"), true, "the writable definition has no note");
+      assert.ok(await evaluate(`${detail}.querySelector('.settings-editor-footer').textContent.includes('Remove')`));
+
+      await act(`${list}[1].click()`);
+      assert.equal(await evaluate(`${note}.querySelector('code').title`), "D:\\work\\a-project\\.mcp.json");
+      assert.ok(await evaluate(`${note}.textContent.includes('Enabled')`));
+      assert.equal(await evaluate(`${detail}.querySelector('.settings-editor-footer').textContent.includes('Remove')`), false);
+      await act(`${list}[1].querySelector('input').click()`);
+      assert.deepEqual(await evaluate(calls("mcp.setEnabled")),
+        [{ expectedEpoch: "epoch", projectId: "p", scope: "Project", key: "docs", origin: "Common", enabled: false }]);
+
+      // A short, side-by-side Settings dialog still lets the input be scrolled into view and clicked.
+      await command("Emulation.setDeviceMetricsOverride", { width: 1050, height: 710, deviceScaleFactor: 1, mobile: false });
+      await act(`${fixture}.setWidth(625); ${fixture}.setHeight(515)`);
+      await act(`${detail}.querySelector('#mcp-key').scrollIntoView({ block: 'center' })`);
+      assert.deepEqual(await evaluate(`(() => {
+        const pane = ${detail}, input = pane.querySelector('#mcp-key'), box = input.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        const bounds = el => ({ y: el.getBoundingClientRect().y, height: el.getBoundingClientRect().height });
+        return hit === input ? null : { hit: hit?.className, input: bounds(input), pane: bounds(pane), header: bounds(pane.firstElementChild),
+          footer: bounds(pane.lastElementChild), note: bounds(${note}), scrollTop: pane.scrollTop };
+      })()`), null, "the note does not cover the form");
+
+      // The overridden definition shares its scope with the one in use: its switch would turn that one off.
+      assert.deepEqual(await evaluate(`[1, 2, 3].map(at => ${list}[at].querySelector('input').disabled)`), [false, true, false]);
+      await act(`${list}[2].click()`);
+      assert.equal(await evaluate(`${note}.querySelector('code').title`), "D:\\work\\a-project\\.github\\mcp.json");
+      assert.ok(await evaluate(`${note}.textContent.includes('no effect') && !${note}.textContent.includes('Enabled')`));
+      await act(`${button(note, "Edit in the code editor")}.click()`);
+      await act(`${list}[3].click()`);
+      assert.equal(await evaluate(`${note}.querySelector('code').title`), "C:\\Users\\someone\\.copilot\\mcp-config.json");
+      await act(`${button(note, "Edit in the code editor")}.click()`);
+      assert.deepEqual(await evaluate(calls("files.open")), ["Project", "Global"].map(scope =>
+        ({ expectedEpoch: "epoch", projectId: "p", kind: "mcp", scope, id: "Copilot", part: null })));
+      assert.equal(await evaluate(`${fixture}.state.opened`), 2);
+      await act(`${list}[4].click()`);
+      assert.ok(await evaluate(`${list}[4].textContent.includes('Built-in')`));
+      assert.ok(await evaluate(`${note}.textContent.includes('cannot be removed') && !${note}.querySelector('code, button')`));
+    });
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, testLimit(5000)))]); }
+    await endBrowser(browser);
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

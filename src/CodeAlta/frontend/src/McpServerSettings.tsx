@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import { Button, Card, CardList, FormGroup, InputGroup, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
-import { mcpServers, type McpServerEntry } from "#neoastra";
+import { Button, Callout, Card, CardList, FormGroup, InputGroup, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
+import { mcpServers, type McpServerEntry, type SettingsFileLocation as SettingsFileLocationEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { BrandIcon } from "./BrandIcon";
 import { namedBrand } from "./brands";
 import { McpServerAuthorization } from "./McpServerAuthorization";
 import { authorizationBlocked } from "./mcpAuthorization";
-import { SettingsFileLocations } from "./SettingsFileLocation";
+import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
-import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
+import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, mcpServerSwitchOfAnother, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
 import { CopilotTag } from "./CopilotTag";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -23,9 +23,29 @@ const unsupportedReasons: Record<string, MessageKey> = {
   environment_file: "Reads its environment from a file.",
 };
 
-/** Where a server of another tool is read from: the mark of GitHub Copilot for its files, the name of the file for the others. */
-function SourceTag({ server }: { server: { origin: string; source: string } }) {
-  return server.origin === "CodeAlta" ? null : server.origin === "Copilot" ? <CopilotTag title={server.source} /> : <Tag minimal round>{server.source}</Tag>;
+/** The source of a read-only definition: a built-in server, a Copilot file, or the name of another tool's file. */
+function SourceTag({ server }: { server: { origin: string; source: string | null } }) {
+  const { t } = useShellLanguage();
+  return server.origin === "CodeAlta" ? null : server.origin === "Copilot" && server.source !== null
+    ? <CopilotTag title={server.source} /> : <Tag minimal round>{server.source ?? t("Built-in")}</Tag>;
+}
+
+/**
+ * Explains why a read-only definition has no Remove button. Only imported definitions have a file to edit.
+ * The list switch changes policy; the form saves a separate definition to CodeAlta's file.
+ */
+export function McpServerReadOnlyNote({ server, file, files, disabled }: { server: Pick<McpServerEntry, "source" | "shadowed">; file?: SettingsFileLocationEntry; files: SettingsFiles; disabled: boolean }) {
+  const { t } = useShellLanguage();
+  const target = file && { kind: file.kind, scope: file.scope, id: file.id };
+  const reason = t(server.source === null ? "This built-in server cannot be removed."
+    : "This server comes from another tool's file. CodeAlta does not change that file. To remove the server, delete its entry there.");
+  const action = server.shadowed ? t("Another definition takes precedence, so this one has no effect.")
+    : t("To stop using it, turn off its {enabled} switch in the list.", { enabled: t("Enabled") });
+  return <Callout compact className="settings-editor-note settings-editor-wide" icon={<AppIcon name="info" size={15} className="bp6-icon" />}><div className="settings-editor-note-body">
+    <span>{reason} {action}</span>
+    {file && target && <SettingsFileLocation path={file.path} label={<Tag minimal round>{server.source}</Tag>} missing={!file.exists} readOnly={file.readOnly} platform={files.platform}
+      disabled={disabled} onOpen={files.open && file.canOpen ? () => files.open!(target) : undefined} onReveal={() => files.reveal(target)} />}
+  </div></Callout>;
 }
 
 /** Editable name/value rows (environment variables or HTTP headers). Stored values are never shown. */
@@ -67,8 +87,10 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
   const servers = listing?.servers ?? [];
   const files = useSettingsFiles({ page: "mcp", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
   const original = selected && selected !== added ? servers.find(server => mcpServerId(server) === selected) ?? null : null;
-  // A server of another tool is not changed: saving writes one of the same name to the file of CodeAlta, which comes first.
+  // A read-only definition is not changed: saving writes a separate definition to the file of CodeAlta.
   const readOnly = !!original && mcpServerReadOnly(original);
+  const sourceFile = readOnly && original.source !== null
+    ? files.locations.find(location => location.kind === "mcp" && location.scope === original.scope && location.id === original.origin) : undefined;
   // Keep the selection across reloads; fall back to the first server.
   useEffect(() => {
     if (!listing) { setForm(null); return; }
@@ -111,7 +133,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
             <span className="settings-editor-logo">{namedBrand(server.key) ? <BrandIcon name={namedBrand(server.key)!} size={20} /> : <AppIcon name="server" size={18} />}</span>
             <span className="settings-editor-name"><strong>{server.key}</strong>
               <small>{server.transport === "Http" ? server.url ?? "HTTP" : [server.command, ...server.arguments].filter(Boolean).join(" ")}</small></span>
-            <Switch checked={server.enabled} disabled={busy} aria-label={t("Enabled")} onClick={event => event.stopPropagation()}
+            <Switch checked={server.enabled} disabled={busy || mcpServerSwitchOfAnother(server, servers)} aria-label={t("Enabled")} onClick={event => event.stopPropagation()}
               onChange={event => toggle(server, event.currentTarget.checked)} />
             <span className="settings-editor-tags"><Tag minimal round>{server.scope === "Project" ? t("Project") : t("Global")}</Tag>
               <SourceTag server={server} />
@@ -130,6 +152,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
         {form && <Section className="settings-editor-form settings-split-detail" title={original ? original.key : t("New server")}
           rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end" onChange={event => edit({ enabled: event.currentTarget.checked })} />}>
           <SectionCard className="settings-editor-fields">
+            {original && readOnly && <McpServerReadOnlyNote server={original} file={sourceFile} files={files} disabled={busy} />}
             <FormGroup label={t("Name")} labelFor="mcp-key">
               <InputGroup id="mcp-key" value={form.key} disabled={busy} maxLength={128} spellCheck={false} placeholder="my-server" onChange={event => edit({ key: event.target.value })} /></FormGroup>
             <FormGroup label={t("Connection")}>
