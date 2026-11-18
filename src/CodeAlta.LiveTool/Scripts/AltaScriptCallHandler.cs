@@ -42,6 +42,6 @@ public sealed class AltaScriptCallHandler : ICodeModeCallHandler
 
         var result = await _dispatcher.InvokeRawAsync(commandLine!.Arguments, commandLine.Stdin, _caller with { ScriptStepId = call.StepId }, _cwd, cancellationToken)
             .ConfigureAwait(false);
-        return AltaScriptBinding.ReadResult(result, commandLine.CommandPath);
+        return commandLine.Raw ? AltaScriptBinding.ReadRun(result) : AltaScriptBinding.ReadResult(result, commandLine.CommandPath);
     }
 }

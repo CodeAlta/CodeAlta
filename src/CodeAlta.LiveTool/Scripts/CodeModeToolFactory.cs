@@ -107,7 +107,7 @@ public static class CodeModeToolFactory
 
         Functions (each takes one object and returns a promise of a value, not of text):
         - `tools.<name>(args)`: the tools of this session, such as `tools.read_file({ path })` (resolves to `{ content, startLine, endLine, more }`), `tools.list_dir({ path })` (resolves to text: one `[file] name` or `[dir] name` per line), `tools.grep({ pattern, path })`, `tools.shell_command({ command })` (resolves to `{ exitCode, stdout, stderr }`, also when the exit code is not 0).
-        - `alta.<group>.<command>(args)`: the commands of `alta` as functions, not a shell, such as `alta.session.list({ limit: 20 })`. Positional arguments and options go by name in camelCase, and `stdin` holds what `--stdin` reads. Resolves to the record the command writes, or to the list of its records; a failure throws an `AltaError` with a `code`.
+        - `alta.<group>.<command>(args)`: the commands of `alta` as functions, not a shell, such as `alta.session.list({ limit: 20 })`. Positional arguments and options go by name in camelCase, and `stdin` holds what `--stdin` reads: `alta session send <id> --queue-if-busy --stdin` is `alta.session.send({ sessionId, queueIfBusy: true, stdin })`. Resolves to the record the command writes, to the list of its records, or to `null` when it writes none; a failure throws an `AltaError` with a `code`. `alta.run({ args: ["session", "send", "--help"] })` runs a command line as it is and resolves to `{ exitCode, output, records }`: for the help of a command, or a syntax its function does not have.
         - `mcp.<server>.<tool>(args)`: the tools of the MCP servers active in this session. A server that `alta.mcp.activate({ id: ["<server>"] })` activates is in `mcp` from the next `exec`, not in the script that activates it.
         - `codemode.help({ path })`, `codemode.search({ query })`, `codemode.describe({ path })`: find functions and read their TypeScript declarations, results included. Never guess a function or a field of a result: describe it first.
         """;
@@ -339,7 +339,10 @@ public static class CodeModeToolFactory
 
         // A session without sub-sessions has no agent() nor session(): not in the API its scripts see, so a call is refused.
         var agentHost = caller.SessionOptions.SubSessions ? options.Agents : null;
-        var alta = new AltaScriptBinding(dispatcher.Describe(identity, cwd));
+        // The scripts of a session have the `alta` its model has: none when its tools leave `alta` out (a tool turned off
+        // for the session), every command line of its tree otherwise.
+        var hasAlta = invocation.Tools is not { } offered || offered.ListTools().Any(static spec => spec.Name == AltaSessionToolFactory.ToolName);
+        var alta = new AltaScriptBinding(hasAlta ? dispatcher.Describe(identity, cwd) : [], runsCommandLines: true);
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,

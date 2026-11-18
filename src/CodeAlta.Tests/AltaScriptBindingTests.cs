@@ -14,7 +14,7 @@ public sealed class AltaScriptBindingTests
         var registry = new AltaCommandRegistry();
         var services = new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = globalRoot }).Add(registry);
         var dispatcher = new AltaCommandDispatcher(registry, services);
-        return (dispatcher, new AltaScriptBinding(dispatcher.Describe(AltaCallerIdentity.Cli, globalRoot)));
+        return (dispatcher, new AltaScriptBinding(dispatcher.Describe(AltaCallerIdentity.Cli, globalRoot), runsCommandLines: true));
     }
 
     private static Task<CodeModeRunResult> RunAsync(AltaCommandDispatcher dispatcher, AltaScriptBinding binding, string code)
@@ -22,7 +22,7 @@ public sealed class AltaScriptBindingTests
             .RunAsync(CodeModeSource.Prepare(code), new AltaScriptCallHandler(dispatcher, binding, AltaCallerIdentity.Cli with { ScriptRunId = "run-test" }, null));
 
     [TestMethod]
-    public void TheTree_BecomesFunctions_WithoutOlderNamesOrCommandsThatWaitForTheUser()
+    public void TheTree_BecomesFunctions_WithoutOlderNames()
     {
         using var root = TestTempDirectory.Create();
         var (_, binding) = Create(root.Path);
@@ -30,7 +30,7 @@ public sealed class AltaScriptBindingTests
 
         Assert.IsTrue(paths.Contains("alta.prompt.list"));
         Assert.IsTrue(paths.Contains("alta.prompt.create"));
-        Assert.IsFalse(paths.Any(static path => path.StartsWith("alta.ask", StringComparison.Ordinal)), "a script cannot wait for the user");
+        Assert.IsTrue(paths.Contains("alta.ask"), "a command that queues for the user is a command too");
         Assert.IsFalse(paths.Contains("alta.note.get"), "older names are left out");
         var declarations = new CodeModeApi(binding.Functions).Declarations;
         StringAssert.Contains(declarations, "declare const alta: {");
@@ -91,7 +91,7 @@ public sealed class AltaScriptBindingTests
 
         Assert.IsTrue(binding.TryCreateCommandLine("alta.prompt.show", """{"promptId":"reviewer","system":true,"scope":"global"}""", out var line, out var error), error?.Message);
 
-        CollectionAssert.AreEqual(new[] { "prompt", "show", "reviewer", "--system", "--scope=global" }, line!.Arguments.ToArray());
+        CollectionAssert.AreEqual(new[] { "prompt", "show", "--system", "--scope=global", "--", "reviewer" }, line!.Arguments.ToArray());
         Assert.IsNull(line.Stdin);
     }
 
@@ -135,6 +135,80 @@ public sealed class AltaScriptBindingTests
                 StringAssert.Contains(AltaScriptBinding.Types, $"interface {result} ", $"`{path}` answers `{result}`, which is not declared");
             }
         }
+    }
+
+    [TestMethod]
+    public async Task APositionalValueThatStartsWithADash_IsAValue_NotAnOptionOfTheCommand()
+    {
+        using var root = TestTempDirectory.Create();
+        var (dispatcher, binding) = Create(root.Path);
+
+        // `prompt show --help` writes the help and succeeds: the value must reach the command as the id of a prompt.
+        var result = await RunAsync(dispatcher, binding, """
+            return await alta.prompt.show({ promptId: "--help", scope: "global" }).then(() => "ran as an option", (e) => e.name);
+            """);
+
+        Assert.AreEqual("\"AltaError\"", result.ValueJson, result.Error?.Message);
+    }
+
+    [TestMethod]
+    public void WhatACommandTakes_IsWhatAScriptCanGive()
+    {
+        var binding = new AltaScriptBinding(
+        [
+            new AltaCommandDescriptor("pack add", "Adds.",
+                [new AltaArgumentDescriptor("name", Optional: false, IsList: false), new AltaArgumentDescriptor(AltaArgumentDescriptor.RemainderName, Optional: true, IsList: true)],
+                [
+                    new AltaOptionDescriptor("optional", [], TakesValue: true) { ValueOptional = true },
+                    new AltaOptionDescriptor("tag", ["t"], TakesValue: true),
+                ]),
+        ]);
+
+        Assert.IsTrue(binding.TryCreateCommandLine("alta.pack.add", """{"name":"-n","rest":["--x","y"],"optional":true,"tag":["a","b"]}""", out var line, out var error), error?.Message);
+        CollectionAssert.AreEqual(new[] { "pack", "add", "--optional", "--tag=a", "--tag=b", "--", "-n", "--x", "y" }, line!.Arguments.ToArray());
+
+        Assert.IsTrue(binding.TryCreateCommandLine("alta.pack.add", """{"name":"n","optional":false}""", out line, out error), error?.Message);
+        CollectionAssert.AreEqual(new[] { "pack", "add", "--optional=false", "--", "n" }, line!.Arguments.ToArray());
+
+        Assert.IsFalse(binding.TryCreateCommandLine("alta.pack.add", """{"name":["a","b"]}""", out _, out error));
+        StringAssert.Contains(error!.Message, "`name` takes one value, not an array");
+        StringAssert.Contains(CodeModeDeclarations.RenderFunction(binding.Functions[0]), "optional?: boolean | string");
+        Assert.IsFalse(binding.Contains(AltaScriptBinding.RunPath), "a binding gives command lines only when asked to");
+    }
+
+    [TestMethod]
+    public async Task Run_RunsACommandLineAsItIs_AndGivesAllItWrote_AlsoWhenItFails()
+    {
+        using var root = TestTempDirectory.Create();
+        var (dispatcher, binding) = Create(root.Path);
+
+        var result = await RunAsync(dispatcher, binding, """
+            const help = await alta.run({ args: ["prompt", "show", "--help"] });
+            const asked = await alta.run({ args: ["prompt", "create", "reviewer", "--scope=global", "--stdin"], stdin: "Review." });
+            const failed = await alta.run({ args: ["prompt", "show", "nope", "--scope=global"] });
+            const refused = await alta.run({ args: "prompt list" }).catch((e) => e.name);
+            return { help: help.output, helpRecords: help.records.length, created: asked.records[0].type, exitCode: failed.exitCode, error: failed.records[0].type, refused };
+            """);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var value = JsonDocument.Parse(result.ValueJson!);
+        StringAssert.Contains(value.RootElement.GetProperty("help").GetString(), "Usage: alta prompt show");
+        Assert.AreEqual(0, value.RootElement.GetProperty("helpRecords").GetInt32());
+        StringAssert.StartsWith(value.RootElement.GetProperty("created").GetString(), "alta.prompt");
+        Assert.AreNotEqual(0, value.RootElement.GetProperty("exitCode").GetInt32());
+        Assert.AreEqual("alta.error", value.RootElement.GetProperty("error").GetString());
+        Assert.AreEqual("TypeError", value.RootElement.GetProperty("refused").GetString());
+        Assert.IsFalse(binding.IsReadOnly(AltaScriptBinding.RunPath), "a resumed script never reruns a command line by itself");
+    }
+
+    [TestMethod]
+    public void WhatACommandWroteThatIsNoRecord_IsItsText_NeverAnEmptyResult()
+    {
+        var text = AltaScriptBinding.ReadResult(new AltaCommandResult { ExitCode = 0, Stdout = "Three items\n- a\n", Stderr = string.Empty, CorrelationId = "c", Duration = TimeSpan.Zero }, "plugin report");
+        var none = AltaScriptBinding.ReadResult(new AltaCommandResult { ExitCode = 0, Stdout = """{"type":"alta.result","version":1}""" + "\n", Stderr = string.Empty, CorrelationId = "c", Duration = TimeSpan.Zero }, "notes clear");
+
+        Assert.AreEqual("\"Three items\\n- a\"", text.ValueJson);
+        Assert.IsNull(none.ValueJson);
     }
 
     [TestMethod]

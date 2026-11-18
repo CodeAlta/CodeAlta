@@ -217,7 +217,7 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
             .ToArray();
         var hits = globals.Where(static hit => hit.Score >= 2).OrderByDescending(static hit => hit.Score).Concat(api.Functions
             .Where(static function => !function.Path.StartsWith(Namespace + ".", StringComparison.Ordinal))
-            .Select(function => (Path: function.Path, Description: FirstLine(function.Description), Score: Score(function.Path, function.Description, words)))
+            .Select(function => (Path: function.Path, Description: FirstLine(function.Description), Score: Score(function.Path, function.Description + "\n" + ArgumentNames(function.InputSchemaJson), words)))
             .Concat(scripts.Where(static script => script.Problem is null).Select(script => (Path: WorkflowPrefix + script.Name,
                 Description: $"Script of the library, run with workflow(\"{script.Name}\", args): {FirstLine(script.Description)}",
                 // A query for library scripts or workflows finds them all.
@@ -274,7 +274,29 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
     // A function a script calls by its name, outside the namespaces.
     private sealed record GlobalFunction(string Name, string Description, string Declaration, string? Requires);
 
-    // A word of the query in the path (or the name of a script) counts more than one in the description.
+    // The names of the arguments of a function: a function is also found by an option it takes.
+    private static string ArgumentNames(string? schemaJson)
+    {
+        if (string.IsNullOrEmpty(schemaJson))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var schema = JsonDocument.Parse(schemaJson);
+            return schema.RootElement.ValueKind == JsonValueKind.Object && schema.RootElement.TryGetProperty("properties", out var properties) && properties.ValueKind == JsonValueKind.Object
+                ? string.Join(' ', properties.EnumerateObject().Select(static property => property.Name))
+                : string.Empty;
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
+    // A word of the query in the path (or the name of a script) counts more than one in the description or in the
+    // names of the arguments.
     private static int Score(string functionPath, string? text, string[] words)
     {
         var path = functionPath.ToLowerInvariant();
@@ -295,6 +317,9 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
         return score;
     }
 
+    // The most functions one describe declares: more would not fit the result of a script.
+    private const int MaxDescribed = 100;
+
     private static CodeModeCallResult Describe(CodeModeApi api, string path)
     {
         var trimmed = path.Trim().TrimEnd('.');
@@ -310,7 +335,12 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
 
         var declarations = functions.Length == 1 && functions[0].Path == trimmed
             ? CodeModeDeclarations.RenderFunction(functions[0])
-            : CodeModeDeclarations.Render(functions.Take(100));
+            : CodeModeDeclarations.Render(functions.Take(MaxDescribed));
+        if (functions.Length > MaxDescribed)
+        {
+            declarations += $"\n// … {(functions.Length - MaxDescribed).ToString(CultureInfo.InvariantCulture)} more functions under `{trimmed}` are not shown: describe a narrower path (codemode.help({{ path: \"{trimmed}\" }}) lists its namespaces).\n";
+        }
+
         if (trimmed.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) || trimmed == AltaScriptBinding.Namespace)
         {
             declarations += ReferencedTypes(declarations, AltaScriptBinding.Types);

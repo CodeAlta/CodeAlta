@@ -19,6 +19,13 @@ internal static class AltaScriptAnnotations
     // `--scope` of `session result` and `session report`; `turn` and `all` are accepted as aliases.
     private static readonly AltaValue ResultScope = AltaValue.Enum("last-turn", "session");
 
+    private static readonly Dictionary<string, AltaValue> SessionEventLists = new(StringComparer.Ordinal)
+    {
+        ["include"] = new AltaValue(AltaValueKind.CommaList) { Values = ["user", "assistant", "reasoning", "tool", "host", "workflow", "event"] },
+        ["kind"] = AltaValue.CommaList,
+        ["fields"] = AltaValue.CommaList,
+    };
+
     /// <summary>Gets the annotations by command path (<c>session create</c>).</summary>
     public static FrozenDictionary<string, AltaCommandAnnotation> Commands { get; } = new Dictionary<string, AltaCommandAnnotation>(StringComparer.Ordinal)
     {
@@ -205,11 +212,11 @@ internal static class AltaScriptAnnotations
         {
             Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal)
             {
-                // `<query>*`: the words are joined with spaces, so one string holds the whole query.
-                ["query"] = AltaValue.String,
+                // `<query>*`: one string is the whole query; the other forms give their words apart (`["show", "<ref>"]`).
+                ["query"] = AltaValue.StringList,
                 ["kind"] = new AltaValue(AltaValueKind.CommaList)
                 {
-                    Values = ["message", "session", "note", "plan", "task", "skill", "tool", "mcp", "plugin", "command", "doc"],
+                    Values = ["message", "session", "note", "plan", "task", "skill", "tool", "mcp", "plugin", "command", "doc", "script", "setting"],
                 },
                 ["role"] = AltaValue.Enum("user", "assistant", "agent"),
                 // `keyword` also accepts `keywords` and `words`; `meaning` also `semantic`.
@@ -231,8 +238,15 @@ internal static class AltaScriptAnnotations
                 ["limit"] = "10",
             },
             Stdin = AltaStdinKind.None,
-            Result = "(SearchHit | SearchSummary)[]",
+            Result = "(SearchHit | SearchSummary)[] | AltaRecord",
         },
+
+        // The options that take several values in one, separated by commas: an array is joined, not repeated (the last
+        // of a repeated option would be the only one kept).
+        ["session tail"] = new() { Values = SessionEventLists },
+        ["session events"] = new() { Values = SessionEventLists },
+        ["fleet statistics"] = new() { Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal) { ["group-by"] = AltaValue.CommaList } },
+        ["fleet audit list"] = new() { Values = new Dictionary<string, AltaValue>(StringComparer.Ordinal) { ["action"] = AltaValue.CommaList } },
 
         ["issue list"] = new()
         {

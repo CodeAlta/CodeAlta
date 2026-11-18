@@ -12,7 +12,11 @@ namespace CodeAlta.LiveTool.Scripts;
 /// <param name="CommandPath">The path of the command, such as <c>session create</c>.</param>
 /// <param name="Arguments">The arguments, without the executable name.</param>
 /// <param name="Stdin">What <c>--stdin</c> reads, or null.</param>
-public sealed record AltaScriptCommandLine(string CommandPath, IReadOnlyList<string> Arguments, string? Stdin);
+public sealed record AltaScriptCommandLine(string CommandPath, IReadOnlyList<string> Arguments, string? Stdin)
+{
+    /// <summary>Gets whether the script gave the arguments itself (<c>alta.run</c>): it receives all the command wrote, whatever its exit code.</summary>
+    public bool Raw { get; init; }
+}
 
 /// <summary>
 /// The <c>alta</c> commands as functions of the scripts of Code Mode. Each function takes one object: positional
@@ -20,25 +24,50 @@ public sealed record AltaScriptCommandLine(string CommandPath, IReadOnlyList<str
 /// quotes a command line: <c>alta.session.create({ project: "CodeAlta", tier: "quick" })</c> becomes
 /// <c>session create --project=CodeAlta --tier=quick</c>. The script receives the records the command writes: the
 /// record when it writes one, else the list; a failure throws an <c>AltaError</c> with the code of the command.
+/// <c>alta.run({ args, stdin })</c> runs any command line of the tree as the <c>alta</c> tool does, for what the
+/// functions do not say: the help of a command, or a syntax of its own.
 /// </summary>
 public sealed class AltaScriptBinding
 {
     /// <summary>The namespace of the functions in scripts.</summary>
     public const string Namespace = "alta";
 
-    // What a script does not get: older names of other commands, and commands that end the turn to wait for the user,
-    // which a script cannot do (its run would go on without the answer).
+    /// <summary>The path of the function that runs a command line as it is given.</summary>
+    public const string RunPath = Namespace + ".run";
+
+    // What a script does not get as functions: older names of other commands. `alta.run` still runs them.
     private static readonly FrozenSet<string> ExcludedPaths = new[]
     {
-        "note", "skills", "skills_activate", "issues", "ask", "review request",
+        "note", "skills", "skills_activate", "issues",
     }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly CodeModeFunction RunFunction = new(RunPath)
+    {
+        Description = "Runs a command line of `alta` as the `alta` tool does, and resolves with all it wrote, also when it fails: for the help of a command (`{ args: [\"session\", \"create\", \"--help\"] }`) and for a syntax the functions do not have. Prefer the function of a command, which checks its arguments and gives its records.",
+        InputSchemaJson = """{"type":"object","properties":{"args":{"type":"array","items":{"type":"string"},"description":"The arguments, without `alta`: one string each, never quoted."},"stdin":{"type":"string","description":"What a command reads with --stdin."}},"required":["args"],"additionalProperties":false}""",
+        ResultType = "{ exitCode: number; output: string; records: AltaRecord[] }",
+        Parallel = true,
+        Annotations = ["mutating"],
+    };
 
     private readonly FrozenDictionary<string, Entry> _byFunction;
 
-    /// <summary>Creates the binding of the commands a caller gets.</summary>
+    /// <summary>Creates the binding of the commands a caller gets, without <c>alta.run</c>.</summary>
     /// <param name="commands">The commands, from <see cref="AltaCommandRegistry.Describe"/>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="commands"/> is null.</exception>
     public AltaScriptBinding(IReadOnlyList<AltaCommandDescriptor> commands)
+        : this(commands, runsCommandLines: false)
+    {
+    }
+
+    /// <summary>Creates the binding of the commands a caller gets.</summary>
+    /// <param name="commands">The commands, from <see cref="AltaCommandRegistry.Describe"/>.</param>
+    /// <param name="runsCommandLines">
+    /// Whether scripts get <c>alta.run</c>, which runs any command of the tree of the caller. False for a caller whose
+    /// scripts get fewer commands than its tree has, which <c>alta.run</c> would give back.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="commands"/> is null.</exception>
+    public AltaScriptBinding(IReadOnlyList<AltaCommandDescriptor> commands, bool runsCommandLines)
     {
         ArgumentNullException.ThrowIfNull(commands);
         var entries = new Dictionary<string, Entry>(StringComparer.Ordinal);
@@ -69,9 +98,18 @@ public sealed class AltaScriptBinding
             });
         }
 
+        // A command named `run` at the root keeps its function: its name is the tree's.
+        _runsCommandLines = runsCommandLines && commands.Count > 0 && !entries.ContainsKey(RunPath);
+        if (_runsCommandLines)
+        {
+            functions.Add(RunFunction);
+        }
+
         _byFunction = entries.ToFrozenDictionary(StringComparer.Ordinal);
         Functions = functions;
     }
+
+    private readonly bool _runsCommandLines;
 
     /// <summary>Gets the functions, one per command.</summary>
     public IReadOnlyList<CodeModeFunction> Functions { get; }
@@ -85,7 +123,7 @@ public sealed class AltaScriptBinding
     /// <summary>Gets whether a path of a script function is a command of this binding.</summary>
     /// <param name="functionPath">The path, such as <c>alta.session.create</c>.</param>
     /// <returns>True when it is one.</returns>
-    public bool Contains(string functionPath) => _byFunction.ContainsKey(functionPath);
+    public bool Contains(string functionPath) => _byFunction.ContainsKey(functionPath) || (_runsCommandLines && functionPath == RunPath);
 
     /// <summary>
     /// Gets whether a function is a command that only reads (a policy that does not mutate): it may run again with the same
@@ -105,7 +143,8 @@ public sealed class AltaScriptBinding
     public bool TryCreateCommandLine(string functionPath, string argumentsJson, out AltaScriptCommandLine? commandLine, out CodeModeCallError? error)
     {
         commandLine = null;
-        if (!_byFunction.TryGetValue(functionPath, out var entry))
+        var runs = _runsCommandLines && functionPath == RunPath;
+        if (!_byFunction.TryGetValue(functionPath, out var entry) && !runs)
         {
             error = new CodeModeCallError("TypeError", $"`{functionPath}` is not a command of this session.");
             return false;
@@ -129,7 +168,85 @@ public sealed class AltaScriptBinding
             return false;
         }
 
-        return entry.TryBuild(functionPath, arguments, out commandLine, out error);
+        return runs ? TryBuildRun(arguments, out commandLine, out error) : entry!.TryBuild(functionPath, arguments, out commandLine, out error);
+    }
+
+    private static bool TryBuildRun(JsonElement arguments, out AltaScriptCommandLine? commandLine, out CodeModeCallError? error)
+    {
+        commandLine = null;
+        string? stdin = null;
+        List<string>? args = null;
+        foreach (var property in arguments.EnumerateObject())
+        {
+            switch (property.Name)
+            {
+                case "args" when property.Value.ValueKind == JsonValueKind.Array && property.Value.EnumerateArray().All(static item => item.ValueKind == JsonValueKind.String):
+                    args = [.. property.Value.EnumerateArray().Select(static item => item.GetString()!)];
+                    break;
+                case "stdin" when property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null:
+                    stdin = property.Value.GetString();
+                    break;
+                default:
+                    error = new CodeModeCallError("TypeError", $"{RunPath}({{ args, stdin }}): `args` is an array of strings, such as [\"session\", \"list\", \"--limit=5\"], and `stdin` a string.");
+                    return false;
+            }
+        }
+
+        if (args is not { Count: > 0 })
+        {
+            error = new CodeModeCallError("TypeError", $"{RunPath}({{ args, stdin }}): `args` names a command, such as [\"session\", \"list\"].");
+            return false;
+        }
+
+        commandLine = new AltaScriptCommandLine(string.Join(' ', args.TakeWhile(static arg => !arg.StartsWith('-'))), args, stdin) { Raw = true };
+        error = null;
+        return true;
+    }
+
+    /// <summary>Reads what a command line of <c>alta.run</c> wrote: its exit code, its output as text, and the records in it.</summary>
+    /// <param name="result">The result of the command.</param>
+    /// <returns>The value of the call; a command that failed is a value too, with its exit code.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
+    public static CodeModeCallResult ReadRun(AltaCommandResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var records = new JsonArray();
+        foreach (var record in Records(result))
+        {
+            records.Add(record);
+        }
+
+        var output = result.Stdout.TrimEnd();
+        if (result.Stderr.Trim() is { Length: > 0 } errors)
+        {
+            output = output.Length == 0 ? errors : output + "\n" + errors;
+        }
+
+        return CodeModeCallResult.Success(new JsonObject { ["exitCode"] = result.ExitCode, ["output"] = output, ["records"] = records }.ToJsonString());
+    }
+
+    // The records of an output, without its header nor their envelope fields.
+    private static IEnumerable<JsonObject> Records(AltaCommandResult result)
+    {
+        foreach (var line in Lines(result.Stdout).Concat(Lines(result.Stderr)))
+        {
+            JsonNode? node;
+            try
+            {
+                node = JsonNode.Parse(line);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (node is JsonObject record && record["type"] is JsonValue type && type.TryGetValue<string>(out var name) && name != "alta.result")
+            {
+                record.Remove("version");
+                record.Remove("correlationId");
+                yield return record;
+            }
+        }
     }
 
     /// <summary>
@@ -145,31 +262,14 @@ public sealed class AltaScriptBinding
         ArgumentNullException.ThrowIfNull(result);
         var records = new List<JsonNode>();
         JsonObject? error = null;
-        foreach (var line in Lines(result.Stdout).Concat(Lines(result.Stderr)))
+        foreach (var record in Records(result))
         {
-            JsonNode? node;
-            try
-            {
-                node = JsonNode.Parse(line);
-            }
-            catch (JsonException)
-            {
-                continue;
-            }
-
-            if (node is not JsonObject record || record["type"]?.GetValue<string>() is not { } type || type == "alta.result")
-            {
-                continue;
-            }
-
-            if (type == "alta.error")
+            if (record["type"]!.GetValue<string>() == "alta.error")
             {
                 error ??= record;
                 continue;
             }
 
-            record.Remove("version");
-            record.Remove("correlationId");
             records.Add(record);
         }
 
@@ -197,6 +297,13 @@ public sealed class AltaScriptBinding
                 Code = error?["code"]?.GetValue<string>() ?? "alta.failed",
                 DataJson = data.ToJsonString(),
             });
+        }
+
+        // A command that wrote something else than records (the command of a plugin, a help) gives its text: what it
+        // wrote is never lost as an empty result.
+        if (records.Count == 0 && error is null && result.Stdout.Trim() is { Length: > 0 } text && !Lines(text).Any())
+        {
+            return CodeModeCallResult.Text(text);
         }
 
         return records.Count switch
@@ -257,6 +364,8 @@ public sealed class AltaScriptBinding
     {
         Argument,
         Option,
+        // An option whose value can be left out: true gives it alone, a value gives it with the value.
+        OptionalValue,
         Flag,
         Stdin,
     }
@@ -285,7 +394,7 @@ public sealed class AltaScriptBinding
 
             foreach (var option in command.Options)
             {
-                var kind = option.Name == "stdin" ? ParameterKind.Stdin : option.TakesValue ? ParameterKind.Option : ParameterKind.Flag;
+                var kind = option.Name == "stdin" ? ParameterKind.Stdin : !option.TakesValue ? ParameterKind.Flag : option.ValueOptional ? ParameterKind.OptionalValue : ParameterKind.Option;
                 var description = option.Description;
                 if (annotation?.Defaults.TryGetValue(option.Name, out var fallback) == true)
                 {
@@ -349,7 +458,16 @@ public sealed class AltaScriptBinding
                         }
 
                         break;
+                    case ParameterKind.OptionalValue:
+                        options.Add(property.Value.ValueKind == JsonValueKind.True ? "--" + parameter.CliName : $"--{parameter.CliName}={Text(property.Value)}");
+                        break;
                     case ParameterKind.Argument:
+                        if (property.Value.ValueKind == JsonValueKind.Array && !parameter.IsList)
+                        {
+                            error = new CodeModeCallError("TypeError", $"{functionPath}: `{parameter.JsName}` takes one value, not an array.");
+                            return false;
+                        }
+
                         var index = _parameters.IndexOf(parameter);
                         positional[index] = property.Value.ValueKind == JsonValueKind.Array
                             ? [.. property.Value.EnumerateArray().Select(Text)]
@@ -384,12 +502,18 @@ public sealed class AltaScriptBinding
                 return false;
             }
 
-            foreach (var values in positional.Values)
+            // The options first, then `--`: a positional value that starts with `-` (a title, a query, a file name) is
+            // a value, never an option of the command.
+            argv.AddRange(options);
+            if (positional.Count > 0)
             {
-                argv.AddRange(values);
+                argv.Add("--");
+                foreach (var values in positional.Values)
+                {
+                    argv.AddRange(values);
+                }
             }
 
-            argv.AddRange(options);
             commandLine = new AltaScriptCommandLine(_command.Path, argv, stdin);
             error = null;
             return true;
@@ -433,6 +557,13 @@ public sealed class AltaScriptBinding
                     {
                         case ParameterKind.Flag:
                             writer.WriteString("type", "boolean");
+                            break;
+                        case ParameterKind.OptionalValue:
+                            writer.WritePropertyName("type");
+                            writer.WriteStartArray();
+                            writer.WriteStringValue("boolean");
+                            writer.WriteStringValue("string");
+                            writer.WriteEndArray();
                             break;
                         case ParameterKind.Stdin:
                             if (_annotation?.Stdin != AltaStdinKind.Json)

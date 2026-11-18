@@ -9,7 +9,7 @@ namespace CodeAlta.LiveTool;
 /// </summary>
 public static class AltaSessionToolFactory
 {
-    private const string ToolName = "alta";
+    internal const string ToolName = "alta";
     private const string ToolDescription =
         "In-process gateway to the current CodeAlta host. " +
         "Use it to discover the current session identity, projects, sessions, providers/models, skills, plugins, and tool capabilities; " +

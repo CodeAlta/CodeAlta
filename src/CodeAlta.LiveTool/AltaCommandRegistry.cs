@@ -172,11 +172,14 @@ public sealed class AltaCommandRegistry
         if (command.Action is not null)
         {
             var arguments = command.Arguments
-                .Where(static argument => !argument.Hidden && !argument.IsRemainder)
-                .Select(static argument => new Scripts.AltaArgumentDescriptor(argument.BasePrototype.Trim('<', '>', '[', ']', '?', '*', '+'), argument.Optional, argument.IsList)
-                {
-                    Description = argument.Description,
-                })
+                .Where(static argument => !argument.Hidden)
+                // What a command takes after its named arguments (`<>`) is a list a script gives under `rest`.
+                .Select(static argument => argument.IsRemainder
+                    ? new Scripts.AltaArgumentDescriptor(Scripts.AltaArgumentDescriptor.RemainderName, Optional: true, IsList: true) { Description = argument.Description }
+                    : new Scripts.AltaArgumentDescriptor(argument.BasePrototype.Trim('<', '>', '[', ']', '?', '*', '+'), argument.Optional, argument.IsList)
+                    {
+                        Description = argument.Description,
+                    })
                 .ToArray();
             var options = command.Options.Values
                 .Distinct()
@@ -187,10 +190,17 @@ public sealed class AltaCommandRegistry
                     return new Scripts.AltaOptionDescriptor(names[0], names[1..], option.OptionValueType != OptionValueType.None)
                     {
                         Description = option.Description,
+                        ValueOptional = option.OptionValueType == OptionValueType.Optional,
                     };
                 })
                 .ToArray();
-            commands.Add(new Scripts.AltaCommandDescriptor(path, command.Description, arguments, options) { Policy = policies.GetValueOrDefault(path) });
+            // A command whose first words choose what it does (`search load <ref>`) declares a policy for each of them, and
+            // is one function for scripts: it is told as the form that changes something, so a script never repeats it as a read.
+            var policy = command.SubCommands.Count == 0
+                && policies.Values.FirstOrDefault(form => form.IsMutating && form.Path.StartsWith(path + " ", StringComparison.OrdinalIgnoreCase)) is { } changing
+                ? changing
+                : policies.GetValueOrDefault(path);
+            commands.Add(new Scripts.AltaCommandDescriptor(path, command.Description, arguments, options) { Policy = policy });
         }
 
         foreach (var child in command.SubCommands.Values)

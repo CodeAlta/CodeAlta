@@ -889,6 +889,7 @@ public sealed class SystemPromptBuilder
         - **Several independent reads or searches: one `exec`.** When you need two or more files, ranges, searches or listings whose results do not depend on each other, get them in one script with `await Promise.allSettled([...])` and look at every result: a wrong path must not lose the other reads.
         - **Several edits you have decided: one `exec`.** When you know two or more changes, in one file or in several, make them in one script, one after the other, and return what each call answered.
         - **Keep sequential what depends on a result:** an edit that depends on what you are reading, the test run after a change, the next step of a diagnosis. For a single call, call the tool directly.
+        - **`alta` in a script:** a command your instructions give as `alta <group> <command> ...` is the function `alta.<group>.<command>({ ... })`, its arguments and options by name in camelCase and `stdin` for what `--stdin` reads. `codemode.describe({ path: "alta.<group>.<command>" })` gives its arguments and its result, and `alta.run({ args: [..., "--help"] })` its help.
         - **Return only what you will use:** the lines or matches you need, the exit code and the failing part of a test run; not whole tool objects or long logs. A result past `max_output_tokens` is kept in a file and you see only its start and end.
         - **A script still running:** do other work, or call `wait` with a `yield_ms` of 30000 or more; do not poll in short steps.
         - **A long script the user waits on:** `present(markdown)` shows them its progress, its findings and its report on the card of the run as it goes; what the script returns stays yours. A quick script presents nothing: your answer does.
@@ -924,6 +925,7 @@ public sealed class SystemPromptBuilder
         - **Several independent reads or searches: one `exec`.** When you need two or more files, ranges, searches or listings whose results do not depend on each other, get them in one script with `await Promise.allSettled([...])` and look at every result: a wrong path must not lose the other reads.
         - **Several edits you have decided: one `exec`.** When you know two or more changes, in one file or in several, make them in one script, one after the other, and return what each call answered.
         - **Keep sequential what depends on a result:** an edit that depends on what you are reading, the test run after a change, the next step of a diagnosis. For a single call, call the tool directly.
+        - **`alta` in a script:** a command your instructions give as `alta <group> <command> ...` is the function `alta.<group>.<command>({ ... })`, its arguments and options by name in camelCase and `stdin` for what `--stdin` reads. `codemode.describe({ path: "alta.<group>.<command>" })` gives its arguments and its result, and `alta.run({ args: [..., "--help"] })` its help.
         - **Return only what you will use:** the lines or matches you need, the exit code and the failing part of a test run; not whole tool objects or long logs. A result past `max_output_tokens` is kept in a file and you see only its start and end.
         - **A script still running:** do other work, or call `wait` with a `yield_ms` of 30000 or more; do not poll in short steps.
         - **A long script the user waits on:** `present(markdown)` shows them its progress, its findings and its report on the card of the run as it goes; what the script returns stays yours. A quick script presents nothing: your answer does.
@@ -949,7 +951,7 @@ public sealed class SystemPromptBuilder
         """;
 
     /// <summary>The line added for a session where <c>exec</c> takes over the other tools.</summary>
-    internal const string CodeModeOnlyGuidance = "The tools of CodeAlta that are not in your tool list are called from scripts, as `tools.<name>(args)` in `exec`: batch them in one script instead of one `exec` per call.";
+    internal const string CodeModeOnlyGuidance = "The tools of CodeAlta that are not in your tool list are called from scripts in `exec`, as `tools.<name>(args)`, the commands of `alta` as `alta.<group>.<command>(args)` and the tools of MCP servers as `mcp.<server>.<tool>(args)`: batch them in one script instead of one `exec` per call.";
 
     /// <summary>The line added for a session a script started: each level of sub-agents is a whole session more.</summary>
     internal const string CodeModeSubAgentGuidance = "You are a sub-agent of a script: do your part yourself, with direct calls or a script of tool calls; start sub-agents only when your part is itself large and splits.";

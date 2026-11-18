@@ -349,6 +349,36 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task ASessionWhoseAltaToolIsOff_HasNoAltaInItsScripts()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache() }).Single(static tool => tool.Spec.Name == "exec");
+        const string script = """
+            const help = await codemode.help({});
+            return { namespaces: help, list: typeof alta === "undefined" ? "none" : typeof alta.prompt, run: typeof alta === "undefined" ? "none" : typeof alta.run };
+            """;
+
+        var with = await InvokeAsync(exec, script, new FakeTools());
+        var without = await InvokeAsync(exec, script, new WithoutAlta(new FakeTools()));
+
+        using var offered = ValueOf(with);
+        Assert.AreEqual("function", offered.RootElement.GetProperty("run").GetString(), Text(with));
+        using var value = ValueOf(without);
+        Assert.AreEqual("none", value.RootElement.GetProperty("list").GetString(), Text(without));
+        Assert.IsFalse(value.RootElement.GetProperty("namespaces").GetString()!.Contains("alta (", StringComparison.Ordinal));
+    }
+
+    private sealed class WithoutAlta(IAgentRunToolInvoker inner) : IAgentRunToolInvoker
+    {
+        public IReadOnlyList<AgentToolSpec> ListTools() => [.. inner.ListTools().Where(static spec => spec.Name != "alta")];
+
+        public Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken) => inner.InvokeAsync(call, cancellationToken);
+    }
+
+    [TestMethod]
     public async Task AWarningOfTheSessionsOfAScript_GoesToItsOutput_WhetherTheSessionAnsweredOrFailed()
     {
         using var root = TestTempDirectory.Create();

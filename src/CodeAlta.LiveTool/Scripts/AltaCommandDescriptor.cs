@@ -21,6 +21,9 @@ public sealed record AltaCommandDescriptor(
 /// <param name="IsList">Whether it takes several values.</param>
 public sealed record AltaArgumentDescriptor(string Name, bool Optional, bool IsList)
 {
+    /// <summary>The name of the argument that takes what follows the named arguments of a command.</summary>
+    public const string RemainderName = "rest";
+
     /// <summary>Gets its description.</summary>
     public string? Description { get; init; }
 }
@@ -33,4 +36,7 @@ public sealed record AltaOptionDescriptor(string Name, IReadOnlyList<string> Ali
 {
     /// <summary>Gets its description.</summary>
     public string? Description { get; init; }
+
+    /// <summary>Gets whether its value can be left out (<c>--name</c> alone, or <c>--name=value</c>).</summary>
+    public bool ValueOptional { get; init; }
 }
