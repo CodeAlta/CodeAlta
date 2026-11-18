@@ -1472,6 +1472,65 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Resume_UsesTheNewCallsYield_NotTheYieldInTheKeptSource()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new(), DefaultYield = TimeSpan.FromMilliseconds(50) }).Single();
+        var original = await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 600000}
+            return await tools.read_file({ path: "a.txt" });
+            """, new FakeTools());
+        Assert.IsTrue(original.Success, Text(original));
+        var runId = runs.List("session-1").Single().Id;
+        var tools = new FakeTools { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            var resumed = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}"}""", tools).WithinAsync(TestTime.Seconds(5));
+            StringAssert.Contains(Text(resumed), "in the background");
+        }
+        finally
+        {
+            tools.Gate.SetResult();
+        }
+    }
+
+    [TestMethod]
+    public async Task ANestedWorkflowsUnawaitedSleep_DoesNotLeaveItsCallerSleeping()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var tools = new FakeTools { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), GatedTool = "github_list_issues" };
+        tools.Files["nested.js"] = """sleep("1h"); return 1;""";
+        var exec = Create(root.Path, runs);
+        var started = await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 1}
+            await workflow({ scriptPath: "nested.js" });
+            return await mcp.github.list_issues({});
+            """, tools);
+        Assert.IsTrue(started.Success, Text(started));
+        var run = runs.FindAny(runs.List("session-1").Single().Id)!;
+        try
+        {
+            async Task WaitForParentCallAsync()
+            {
+                while (run.Running && run.PendingCalls(["mcp.github.list_issues"]) == 0) await Task.Delay(10);
+            }
+
+            await WaitForParentCallAsync().WithinAsync(TestTime.Seconds(30));
+            Assert.IsTrue(run.Running);
+            Assert.IsFalse(run.Sleeping, "the nested engine cancelled its unawaited call");
+        }
+        finally
+        {
+            tools.Gate.SetResult();
+        }
+    }
+
+    [TestMethod]
     public async Task ASleepingScript_GoesToTheBackground_AtTheYieldOfExec()
     {
         using var root = TestTempDirectory.Create();

@@ -449,14 +449,20 @@ internal sealed partial class CodeModeRun
 
         var sleep = _space.Sleep(call.Step?.Key, call.Step?.Id, duration, DateTimeOffset.UtcNow);
         _observer?.SleepStarted(sleep);
-        var left = sleep.WakeAt - DateTimeOffset.UtcNow;
-        if (left > TimeSpan.Zero)
+        try
         {
-            await Task.Delay(left, cancellationToken).ConfigureAwait(false);
-        }
+            var left = sleep.WakeAt - DateTimeOffset.UtcNow;
+            if (left > TimeSpan.Zero)
+            {
+                await Task.Delay(left, cancellationToken).ConfigureAwait(false);
+            }
 
-        _observer?.SleepEnded(sleep);
-        return CodeModeCallResult.Success(null);
+            return CodeModeCallResult.Success(null);
+        }
+        finally
+        {
+            _observer?.SleepEnded(cancellationToken.IsCancellationRequested ? sleep with { Cancelled = true } : sleep);
+        }
     }
 
     // workflow(name | { scriptPath }, args): the script runs in an engine of its own, with the same functions and the

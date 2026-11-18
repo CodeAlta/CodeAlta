@@ -1234,7 +1234,9 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     void ICodeModeRunObserver.SleepEnded(CodeModeSleep sleep)
     {
         Interlocked.Decrement(ref _sleeping);
-        Writer?.SleepEnded(sleep);
+        // A timer abandoned by a nested script is over. If the whole run was stopped in its sleep, keep its wake time
+        // open on disk: after shutdown the interrupted script resumes when it would have woken.
+        if (!sleep.Cancelled || !_cancellation.IsCancellationRequested) Writer?.SleepEnded(sleep);
         Record(AgentWorkflowEventKind.WaitEnded, record => record with { Status = "sleep", StepId = sleep.StepId });
     }
 

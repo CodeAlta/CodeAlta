@@ -208,7 +208,7 @@ public static class CodeModeResume
             what = $"Resume the run `{runId}`, which stopped before its end: the steps it completed give their recorded results, and the script goes on from there.";
         }
 
-        options.Append(", \"yield_ms\": 600000}");
+        options.Append('}');
         return $"""
             {what} Call `exec` with this code only, as it is written: CodeAlta takes the script, its arguments and its recorded results from the run.
 
@@ -216,7 +216,7 @@ public static class CodeModeResume
             // @exec: {options}
             ```
 
-            Wait for it to end, then answer with its result in a few lines. If `exec` refuses because a call might be repeated, do not add `"rerun_in_flight": true` yourself: ask the user whether that call may run again, and add it only if they agree.
+            {CodeModeScriptRunPrompt.ResultInstructions} If `exec` refuses because a call might be repeated, do not add `"rerun_in_flight": true` yourself: ask the user whether that call may run again, and add it only if they agree.
             """;
     }
 

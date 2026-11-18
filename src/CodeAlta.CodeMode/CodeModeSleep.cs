@@ -13,6 +13,9 @@ namespace CodeAlta.CodeMode;
 /// <param name="WakeAt">When it wakes.</param>
 public sealed partial record CodeModeSleep(string Key, string? StepId, DateTimeOffset WakeAt)
 {
+    /// <summary>Gets whether the sleep ended by cancellation rather than waking.</summary>
+    public bool Cancelled { get; init; }
+
     /// <summary>The longest sleep.</summary>
     public static readonly TimeSpan MaxDuration = TimeSpan.FromDays(7);
 

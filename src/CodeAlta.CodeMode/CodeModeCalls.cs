@@ -125,7 +125,7 @@ public interface ICodeModeRunObserver
     /// <param name="sleep">The sleep.</param>
     void SleepStarted(CodeModeSleep sleep) { }
 
-    /// <summary>A sleep woke. A sleep the run stopped during does not end.</summary>
+    /// <summary>A sleep woke or was cancelled. Every started sleep ends, including an unawaited sleep of a nested script.</summary>
     /// <param name="sleep">The sleep.</param>
     void SleepEnded(CodeModeSleep sleep) { }
 }

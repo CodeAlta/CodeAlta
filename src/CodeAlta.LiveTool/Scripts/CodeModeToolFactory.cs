@@ -59,9 +59,8 @@ public sealed record CodeModeToolOptions
 }
 
 /// <summary>
-/// Creates the tools of Code Mode: <c>exec</c>, which runs a script with every tool of the session as a function, and
-/// <c>wait</c>, which waits for a script that went on in the background. Their names, descriptions and schemas never
-/// change, so the prompt cache holds; what a script can call is found inside it (<c>codemode.help()</c>).
+/// Creates the tools of Code Mode: <c>exec</c> runs a script with the tools of the session as functions. Its description
+/// and schema stay the same for the prompt cache; the script discovers its functions with <c>codemode.help()</c>.
 /// </summary>
 public static class CodeModeToolFactory
 {
@@ -303,7 +302,7 @@ public static class CodeModeToolFactory
                 execOptions = kept.Options with
                 {
                     Title = execOptions.Title ?? kept.Options.Title,
-                    YieldMilliseconds = execOptions.YieldMilliseconds ?? kept.Options.YieldMilliseconds,
+                    YieldMilliseconds = execOptions.YieldMilliseconds,
                     MaxOutputTokens = execOptions.MaxOutputTokens ?? kept.Options.MaxOutputTokens,
                     TimeoutMilliseconds = execOptions.TimeoutMilliseconds ?? kept.Options.TimeoutMilliseconds,
                     BudgetTokens = execOptions.BudgetTokens ?? kept.Options.BudgetTokens,

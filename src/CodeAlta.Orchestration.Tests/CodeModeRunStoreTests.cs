@@ -164,7 +164,9 @@ public sealed class CodeModeRunStoreTests
         var from = CodeModeResume.Prompt("run-1a", "merge#1", all: false);
         var all = CodeModeResume.Prompt("run-1a", null, all: true);
 
-        StringAssert.Contains(resume, "// @exec: {\"resume\": \"run-1a\", \"yield_ms\": 600000}");
+        StringAssert.Contains(resume, "// @exec: {\"resume\": \"run-1a\"}");
+        StringAssert.Contains(resume, "end the turn");
+        StringAssert.Contains(resume, "as a prompt");
         StringAssert.Contains(resume, "ask the user");
         StringAssert.Contains(from, "\"from\": \"merge#1\"");
         StringAssert.Contains(from, "`merge` (2nd occurrence)");

@@ -12,6 +12,8 @@ namespace CodeAlta.Orchestration.Runtime.Scripts;
 /// </summary>
 public static partial class CodeModeScriptRunPrompt
 {
+    internal const string ResultInstructions = "If it finishes now, answer with its result in a few lines. If it goes on in the background, end the turn: its result comes back as a prompt.";
+
     /// <summary>Checks a script and its arguments, and writes the prompt that runs it.</summary>
     /// <param name="library">The library of the host.</param>
     /// <param name="name">The name of the script.</param>
@@ -55,12 +57,12 @@ public static partial class CodeModeScriptRunPrompt
     public static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? eventJson, string? projectPath, SpaceFilter? spaces,
         out string? problem)
         => TryArguments(library, name, argumentsJson, trigger, eventJson, projectPath, spaces, out _, out var json, out problem)
-            ? $"""
-                Run the script `{name}` of the library with `exec`, as it is written below, and wait for it to end. Then answer with its result in a few lines: do nothing else.
+            ? $$"""
+                Run the script `{{name}}` of the library with `exec`, as written below. {{ResultInstructions}}
 
                 ```js
-                // @exec: {"{"}"title": "{name}", "yield_ms": 600000{"}"}
-                return await workflow("{name}", {json});
+                // @exec: {"title": "{{name}}"}
+                return await workflow("{{name}}", {{json}});
                 ```
                 """
             : null;

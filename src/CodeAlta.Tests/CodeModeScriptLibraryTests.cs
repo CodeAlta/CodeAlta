@@ -154,6 +154,9 @@ public sealed class CodeModeScriptLibraryTests
         var prompt = CodeModeScriptRunPrompt.Build(library, "review", """{"pr":1,"depth":"a; b"}""", null, project, out _)!.ReplaceLineEndings("\n");
         var code = prompt[(prompt.IndexOf("```js\n", StringComparison.Ordinal) + 6)..prompt.LastIndexOf("\n```", StringComparison.Ordinal)];
 
+        Assert.DoesNotContain("yield_ms", code);
+        StringAssert.Contains(prompt, "end the turn");
+        StringAssert.Contains(prompt, "as a prompt");
         Assert.IsTrue(CodeModeScriptRunPrompt.IsRunOfScript(code), code);
         Assert.IsTrue(CodeModeScriptRunPrompt.IsRunOfScript("```js\n" + code + "\n```"), "as a model may send it");
         Assert.IsTrue(CodeModeScriptRunPrompt.IsRunOfScript(code.Replace("\n", "\r\n", StringComparison.Ordinal)));

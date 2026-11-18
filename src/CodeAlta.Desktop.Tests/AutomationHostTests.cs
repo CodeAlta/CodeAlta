@@ -1381,7 +1381,7 @@ public sealed class AutomationHostTests
             Assert.AreEqual("refused", (await rpc.ResumeAsync(new(Epoch, "other-session", kept.Id, null, false), default)).Status);
             Assert.AreEqual("ok", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, null, true), default)).Status);
             Assert.AreEqual(sessionId, asked[^1].SessionId);
-            StringAssert.Contains(asked[^1].Text, $"// @exec: {{\"resume\": \"{kept.Id}\", \"replay\": \"all\", \"yield_ms\": 600000}}");
+            StringAssert.Contains(asked[^1].Text, $"// @exec: {{\"resume\": \"{kept.Id}\", \"replay\": \"all\"}}");
             Assert.IsTrue(File.Exists(Path.Combine(CodeModeRunStore.RootOf(host.CatalogOptions), kept.Id, "run.json")), "the record is under the state root");
 
             // Delete on a card: a script of the project or one of yours; a sample never.
