@@ -36,6 +36,9 @@ internal sealed class GitIssuesService : IDisposable
     /// <summary>Longest returned failure message, in UTF-16 units.</summary>
     internal const int MaximumMessageLength = 512;
 
+    /// <summary>Longest accepted cursor of a following page, in UTF-16 units.</summary>
+    internal const int MaximumCursorLength = 512;
+
     private const int MaximumIdentityLength = 256;
     private const int MaximumRepositoryLength = 512;
     private const int MaximumUrlLength = 2048;
@@ -109,7 +112,8 @@ internal sealed class GitIssuesService : IDisposable
         GitIssuesSearchResponse Refused(string status, string? repository = null, string? message = null)
             => new(status, _epoch, provider, repository, [], message);
 
-        if (request is null || !Identity(request.ExpectedEpoch) || !SingleLine(request.Query, MaximumQueryLength)) return Refused("invalid_request");
+        if (request is null || !Identity(request.ExpectedEpoch) || !SingleLine(request.Query, MaximumQueryLength)
+            || request.Cursor is not null && !Identity(request.Cursor, MaximumCursorLength)) return Refused("invalid_request");
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Refused("stale_epoch");
         // Issues belong to a project's repository: without a project there is nothing to look up.
         if (request.ProjectId is null) return Refused("no_repository");
@@ -130,17 +134,10 @@ internal sealed class GitIssuesService : IDisposable
             if (repository is null || repository.FullName.Length > MaximumRepositoryLength) return Refused("no_repository");
             provider = ProviderName(repository.Provider);
             repositoryName = repository.FullName;
-            var result = await lookup.QueryAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false);
-            // The pull requests are found beside the issues: a provider that refuses them still shows its issues.
-            IReadOnlyList<GitIssueReferenceItem> pulls = [];
-            try { pulls = await lookup.QueryPullRequestsAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false); }
-            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                Log?.Warn(exception, $"{repository.Provider.GetDisplayName()} {repository.FullName}: the pull requests of a # lookup could not be read.");
-            }
-            var issues = Entries(Merge(result.Issues, pulls), repository.Host, limit);
+            var result = await lookup.QueryReferencesAsync(repository, request.Query, request.IncludeClosed ?? false, limit, request.Cursor, cancellationToken).ConfigureAwait(false);
+            var issues = Entries(result.Items, repository.Host);
             // Matches found beside a refused request (a rate-limited search) are still worth showing.
-            if (issues.Count > 0 || result.FailureStatusCode is not { } refusal) return new("ok", _epoch, provider, repositoryName, issues, null);
+            if (issues.Count > 0 || result.FailureStatusCode is not { } refusal) return new("ok", _epoch, provider, repositoryName, issues, null, result.NextCursor);
             var problem = string.Create(CultureInfo.InvariantCulture, $"{repository.Provider.GetDisplayName()} answered the request with HTTP {(int)refusal}.");
             Log?.Warn($"{repository.Provider.GetDisplayName()} {repository.FullName}: a # lookup shows: {problem} The requests are in the log at the Debug level of the issue trackers.");
             return Refused("failed", repositoryName, problem);
@@ -172,25 +169,12 @@ internal sealed class GitIssuesService : IDisposable
             _ => "github",
         };
 
-    // Both lists come in the order they are shown in: the one whose next item changed last gives the next row.
-    private static List<GitIssueReferenceItem> Merge(IReadOnlyList<GitIssueReferenceItem> issues, IReadOnlyList<GitIssueReferenceItem> pulls)
+    // The lookup bounds a page: every item of it is given, so that the page that follows starts where this one ends.
+    private static List<GitIssueEntry> Entries(IReadOnlyList<GitIssueReferenceItem> issues, string host)
     {
-        var merged = new List<GitIssueReferenceItem>(issues.Count + pulls.Count);
-        int issue = 0, pull = 0;
-        while (issue < issues.Count || pull < pulls.Count)
-        {
-            merged.Add(pull >= pulls.Count || issue < issues.Count && issues[issue].UpdatedAt >= pulls[pull].UpdatedAt ? issues[issue++] : pulls[pull++]);
-        }
-
-        return merged;
-    }
-
-    private static List<GitIssueEntry> Entries(IReadOnlyList<GitIssueReferenceItem> issues, string host, int limit)
-    {
-        var entries = new List<GitIssueEntry>(Math.Min(issues.Count, limit));
+        var entries = new List<GitIssueEntry>(issues.Count);
         foreach (var issue in issues)
         {
-            if (entries.Count >= limit) break;
             var title = Clean(issue.Title, MaximumTitleLength);
             if (issue.Number <= 0 || title.Length == 0 || IssueUrl(issue.Url, host) is not { } url) continue;
             entries.Add(new(issue.Number, title, url, Clean(issue.State, MaximumStateLength), issue.IsOpen, issue.UpdatedAt, issue.IsPullRequest ? "pull_request" : "issue"));
@@ -231,7 +215,10 @@ internal sealed class GitIssuesService : IDisposable
     }
 
     internal static bool Identity(string? value)
-        => SingleLine(value, MaximumIdentityLength) && !string.IsNullOrWhiteSpace(value) && value == value.Trim();
+        => Identity(value, MaximumIdentityLength);
+
+    private static bool Identity(string? value, int maximum)
+        => SingleLine(value, maximum) && !string.IsNullOrWhiteSpace(value) && value == value.Trim();
 
     internal static bool SingleLine(string? value, int maximum)
     {
@@ -246,18 +233,23 @@ internal sealed class GitIssuesService : IDisposable
     }
 }
 
-/// <summary>A lookup of the named project's issues; an empty query lists the most recently updated ones.</summary>
-internal sealed record GitIssuesSearchRequest(string ExpectedEpoch, string? ProjectId, string Query, int? Limit);
+/// <summary>
+/// A lookup of the named project's issues and pull requests; an empty query lists the most recently updated ones.
+/// Closed and merged ones are listed only when asked. The cursor is the <c>NextCursor</c> of the page before, with
+/// the same query and choice of closed items; without it the first page is answered.
+/// </summary>
+internal sealed record GitIssuesSearchRequest(string ExpectedEpoch, string? ProjectId, string Query, int? Limit, bool? IncludeClosed = null, string? Cursor = null);
 
 /// <summary>
-/// The found issues, most recently updated first. The status is <c>ok</c>, <c>invalid_request</c>,
+/// One page of the found issues and pull requests, most recently updated first; <c>NextCursor</c> asks for the page
+/// that follows, and is null when there is none. The status is <c>ok</c>, <c>invalid_request</c>,
 /// <c>stale_epoch</c>, <c>unknown_project</c>, <c>archived_project</c>, <c>project_unavailable</c>,
 /// <c>no_repository</c> (no project, or its folder has no GitHub, GitLab, Azure DevOps or Bitbucket remote) or
 /// <c>failed</c>; only a failure carries a message. The provider is <c>github</c>, <c>gitlab</c>,
 /// <c>azure_devops</c> or <c>bitbucket</c> once the repository is known.
 /// </summary>
 internal sealed record GitIssuesSearchResponse(string Status, string Epoch, string? Provider, string? Repository,
-    IReadOnlyList<GitIssueEntry> Issues, string? Message);
+    IReadOnlyList<GitIssueEntry> Issues, string? Message, string? NextCursor = null);
 
 /// <summary>
 /// One issue, work item or pull request; the title is untrusted text to render as text. The state is the

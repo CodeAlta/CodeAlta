@@ -186,6 +186,25 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     // Typing a new # afterwards opens it as usual.
     await command("Input.insertText", { text: " #" });
     assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a typed # opens the picker after a paste");
+
+    // Closed issues are left out until asked for: the host is told so, and Ctrl+I asks for them.
+    const issueRows = "document.querySelectorAll('.reference-item[data-kind=\"issue\"]').length";
+    const lastSearch = "JSON.stringify(window.issueSearches.at(-1))";
+    await key("!", "Digit1", 49, 2 | 8);
+    assert.equal(await until(`${issueRows} === 3 && !document.querySelector('.reference-remote')`), true, "the open issues are listed");
+    assert.equal(await evaluate(lastSearch), '{"includeClosed":false,"cursor":null,"query":""}', "closed issues are not asked for at first");
+    await key("i", "KeyI", 73, 2);
+    assert.equal(await until(`${issueRows} === 4`), true, "Ctrl+I lists the closed issue too");
+    assert.equal(await evaluate(lastSearch), '{"includeClosed":true,"cursor":null,"query":""}');
+    // While the service answers, a row above the list names it, and the issues found before stay; the page that follows
+    // is asked for as long as the list is not filled, and its issues come under the others.
+    await evaluate("window.issueDelay = 500; window.issuePages = true");
+    await key("i", "KeyI", 73, 2);
+    assert.equal(await until("document.querySelector('.reference-remote')?.textContent === 'Loading issues from GitHub…'"), true, "the list says that the issues are loading");
+    assert.equal(await evaluate(`${issueRows} > 0`), true, "the issues found before stay while the service answers");
+    assert.equal(await until(`${issueRows} === 5 && !document.querySelector('.reference-remote')`), true, "the second page is added to the first");
+    assert.equal(await evaluate(lastSearch), '{"includeClosed":false,"cursor":"page-2","query":""}', "the next page is asked with the cursor of the first");
+    assert.equal(await evaluate("Array.from(document.querySelectorAll('.reference-item .issue-number'), cell => cell.textContent).join(',')"), "#1,#2,#3,#8,#7");
     await command("Browser.close").catch(() => { });
   } finally {
     socket?.close();

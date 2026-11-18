@@ -2077,6 +2077,10 @@ dialog.command-help-dialog:has(> .app-window) > .app-window > .app-window-body {
 .reference-item .issue-icon[data-tone="warning"] { color: var(--yellow); }
 .reference-item .issue-icon[data-tone="primary"] { color: var(--accent); }
 .reference-item .issue-icon[data-tone="idle"] { color: var(--muted); }
+.reference-remote { display: flex; align-items: center; gap: 6px; margin: 4px 6px 0; padding: 4px 10px; border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--muted); font-size: 12px; }
+.reference-remote > .activity-spinner { margin-inline-start: auto; }
+.reference-kind > .activity-spinner { flex: none; }
 .reference-empty.reference-note { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 12px; font-size: 12px; }
 
 /* Open project: saved projects as a picker list, with the add-folder controls underneath. */

@@ -29,7 +29,7 @@ Type `#` in the prompt to search the issues of the project's repository, most re
 [#18](https://dev.azure.com/organization/project/_workitems/edit/18)
 ```
 
-- Closed issues are listed too; **Include closed** (`Ctrl+I`) hides them.
+- In CodeAlta Desktop the open issues are listed; **Include closed** (`Ctrl+I`) adds the closed ones. More issues load as you scroll the list. In CodeAlta TUI closed issues are listed too, and **Include closed** hides them.
 - In CodeAlta Desktop, typing only digits and then a space, `.`, `,`, `;`, `:`, `!`, `?`, `)`, `]` or `}` closes the picker and leaves `#18` and that character in the prompt as typed. Pasted text never opens the picker.
 - In CodeAlta Desktop the picker also lists pull requests and merge requests, with their own icon.
 - On Azure DevOps it lists the work items of the project that owns the repository, of any type, matched by title.

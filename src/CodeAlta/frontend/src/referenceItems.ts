@@ -70,6 +70,12 @@ export function issueReference(issue: GitIssueEntry): ReferenceItem | null {
     tone: issue.open ? "open" : "closed", insert, words: String(issue.number), issue: { number: issue.number, url: issue.url, title: issue.title } };
 }
 
+/** The issues shown with those of the page that follows: one the provider gives again (it changed meanwhile) is not shown twice. */
+export function mergedIssues(shown: readonly GitIssueEntry[], page: readonly GitIssueEntry[]): readonly GitIssueEntry[] {
+  const known = new Set(shown.map(issue => `${issue.kind}:${issue.number}`));
+  return [...shown, ...page.filter(issue => !known.has(`${issue.kind}:${issue.number}`))];
+}
+
 export function workReference(item: WorkItem): ReferenceItem | null {
   const updated = timeOf(item.updated) || timeOf(item.created);
   if (item.kind === "task") {

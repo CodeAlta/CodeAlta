@@ -37,7 +37,8 @@ public sealed class GitIssueLookup
     private readonly Dictionary<string, CacheEntry<GitRepositoryReference?>> _repositories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CacheEntry<IReadOnlyList<GitIssueReferenceItem>>> _recentIssues = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CacheEntry<IReadOnlyList<GitIssueReferenceItem>>> _recentPullRequests = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, CacheEntry<GitRemoteCredential?>> _credentials = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CacheEntry<GitReferenceFetch>> _recentReferences = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CacheEntry<GitRemoteCredential?>> _credentials =new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _repositoryGate = new(1, 1);
     private readonly SemaphoreSlim _recentIssuesGate = new(1, 1);
     private readonly SemaphoreSlim _credentialGate = new(1, 1);
@@ -344,6 +345,153 @@ public sealed class GitIssueLookup
         var query = new GitIssueQuery(_client, repository, await GetAuthorizationAsync(repository, cancellationToken).ConfigureAwait(false));
         var issues = await QueryIssuesAsync(query, queryText.Trim(), resultLimit, cancellationToken).ConfigureAwait(false);
         return new GitIssueLookupResult(issues.OrderByDescending(static issue => issue.UpdatedAt).ToArray(), query.FailureStatusCode);
+    }
+
+    /// <summary>
+    /// Queries one page of the issues and the pull requests of a repository for the text typed after <c>#</c>, the
+    /// most recently updated first.
+    /// </summary>
+    /// <param name="repository">The repository to query.</param>
+    /// <param name="queryText">The typed text; empty lists the most recently updated items.</param>
+    /// <param name="includeClosed">Whether closed and merged items are listed beside the open ones.</param>
+    /// <param name="maximumResults">The preferred size of the page, clamped to 1..100.</param>
+    /// <param name="cursor">The <see cref="GitReferencePage.NextCursor"/> of the page before; null for the first page.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The page; an issue or a pull request named by its exact number is listed whatever its state.</returns>
+    /// <remarks>
+    /// A signed-in GitHub repository is read with one GraphQL request for both kinds, and has following pages. Another
+    /// provider, a visitor, or a GitHub that refuses GraphQL is read as <see cref="QueryAsync"/> and
+    /// <see cref="QueryPullRequestsAsync"/> read it, both at once: one page of the items they find.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="repository"/> or <paramref name="queryText"/> is null.</exception>
+    /// <exception cref="HttpRequestException">The provider could not be reached.</exception>
+    /// <exception cref="JsonException">The provider returned a response that is not valid JSON.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled or the request timed out.</exception>
+    public async ValueTask<GitReferencePage> QueryReferencesAsync(GitRepositoryReference repository, string queryText, bool includeClosed, int maximumResults, string? cursor, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(queryText);
+        var limit = Math.Clamp(maximumResults, 1, GitIssueSource.MaximumPageSize);
+        var text = queryText.Trim();
+        if (repository.Provider == GitRemoteProvider.GitHub)
+        {
+            var query = new GitIssueQuery(_client, repository, await GetAuthorizationAsync(repository, cancellationToken).ConfigureAwait(false));
+            if (query.Identity != "anonymous" && await QueryGitHubReferencesAsync(query, text, includeClosed, limit, cursor, cancellationToken).ConfigureAwait(false) is { } page)
+            {
+                return page;
+            }
+        }
+
+        // Only a GraphQL page names a following one.
+        if (cursor is not null)
+        {
+            return new([], null, null);
+        }
+
+        var issues = QueryAsync(repository, text, limit, cancellationToken).AsTask();
+        var pulls = QueryPullRequestsOrNoneAsync(repository, text, limit, cancellationToken);
+        await Task.WhenAll(issues, pulls).ConfigureAwait(false);
+        var found = await issues.ConfigureAwait(false);
+        return new([.. Merge(found.Issues, await pulls.ConfigureAwait(false)).Where(item => includeClosed || item.IsOpen).Take(limit)], null, found.FailureStatusCode);
+    }
+
+    // The pull requests are found beside the issues: a provider that refuses them still shows its issues.
+    private async Task<IReadOnlyList<GitIssueReferenceItem>> QueryPullRequestsOrNoneAsync(GitRepositoryReference repository, string text, int limit, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await QueryPullRequestsAsync(repository, text, limit, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            GitIssueLog.Log?.Warn(exception, $"{repository.Provider.GetDisplayName()} {repository.FullName}: the pull requests of a # lookup could not be read.");
+            return [];
+        }
+    }
+
+    // Both lists come in the order they are shown in: the one whose next item changed last gives the next row.
+    private static List<GitIssueReferenceItem> Merge(IReadOnlyList<GitIssueReferenceItem> issues, IReadOnlyList<GitIssueReferenceItem> pulls)
+    {
+        var merged = new List<GitIssueReferenceItem>(issues.Count + pulls.Count);
+        int issue = 0, pull = 0;
+        while (issue < issues.Count || pull < pulls.Count)
+        {
+            merged.Add(pull >= pulls.Count || issue < issues.Count && issues[issue].UpdatedAt >= pulls[pull].UpdatedAt ? issues[issue++] : pulls[pull++]);
+        }
+
+        return merged;
+    }
+
+    // Null when GitHub refused the request and left nothing to show: the REST listings are asked instead.
+    private async Task<GitReferencePage?> QueryGitHubReferencesAsync(GitIssueQuery query, string text, bool includeClosed, int limit, string? cursor, CancellationToken cancellationToken)
+    {
+        if (cursor is not null)
+        {
+            var following = await GitHubReferenceSearch.SearchAsync(query, text.Length == 0 ? null : text, includeClosed, limit, cursor, cancellationToken).ConfigureAwait(false);
+            return new(following?.Items ?? [], following?.NextCursor, query.FailureStatusCode);
+        }
+
+        if (text.Length == 0)
+        {
+            return await GetFirstReferencesAsync(query, includeClosed, limit, cancellationToken).ConfigureAwait(false) is { } first
+                ? new(first.Items, first.NextCursor, null)
+                : null;
+        }
+
+        // A number, or one or two letters: the item of that number, and the recent ones whose number or title has what is typed.
+        if (ShouldFilterRecentIssues(text))
+        {
+            var exact = int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number > 0
+                ? GitHubReferenceSearch.GetAsync(query.Fork(), number, cancellationToken)
+                : Task.FromResult<GitIssueReferenceItem?>(null);
+            var recent = GetFirstReferencesAsync(query, includeClosed, limit, cancellationToken);
+            await Task.WhenAll(exact, recent).ConfigureAwait(false);
+            if (await recent.ConfigureAwait(false) is not { } first)
+            {
+                return null;
+            }
+
+            IReadOnlyList<GitIssueReferenceItem> named = await exact.ConfigureAwait(false) is { } item ? [item] : [];
+            return new(MergeIssueResults(named, FilterRecentIssues(first.Items, text, limit), limit), null, null);
+        }
+
+        // Words: the search of GitHub matches whole words, so the recent items whose title has what is typed so far come too.
+        var search = query.Fork();
+        var searched = GitHubReferenceSearch.SearchAsync(search, text, includeClosed, limit, null, cancellationToken);
+        var listed = IsPlainIssueWordQuery(text) ? GetFirstReferencesAsync(query, includeClosed, limit, cancellationToken) : Task.FromResult<GitReferenceFetch?>(new([], null));
+        await Task.WhenAll(searched, listed).ConfigureAwait(false);
+        if (await listed.ConfigureAwait(false) is not { } local)
+        {
+            return null;
+        }
+
+        var page = await searched.ConfigureAwait(false);
+        var matches = MergeIssueResults(FilterRecentIssues(local.Items, text, limit), page?.Items ?? [], 2 * limit);
+        if (page is null && matches.Count == 0)
+        {
+            return null;
+        }
+
+        return new([.. matches.OrderByDescending(static item => item.UpdatedAt)], page?.NextCursor, search.FailureStatusCode);
+    }
+
+    // The first page of the items of a repository, which every typed text starts from: kept like the other recent lists.
+    private async Task<GitReferenceFetch?> GetFirstReferencesAsync(GitIssueQuery query, bool includeClosed, int limit, CancellationToken cancellationToken)
+    {
+        var key = string.Create(CultureInfo.InvariantCulture, $"{HostKey(query.Repository)}/{query.Repository.FullName}|{includeClosed}|{limit}");
+        if (IsCaching && TryGetCached(_recentReferences, key, out var cached))
+        {
+            return cached;
+        }
+
+        var fetched = await GitHubReferenceSearch.SearchAsync(query, null, includeClosed, limit, null, cancellationToken).ConfigureAwait(false);
+        // A refused listing is never retained: the next query asks the provider again.
+        if (IsCaching && fetched is { } page)
+        {
+            Store(_recentReferences, key, page);
+        }
+
+        return fetched;
     }
 
     private bool IsCaching => _cacheDuration > TimeSpan.Zero;
@@ -783,3 +931,12 @@ public sealed class GitRemoteCredential
 /// refusal are still returned.
 /// </param>
 public sealed record GitIssueLookupResult(IReadOnlyList<GitIssueReferenceItem> Issues, HttpStatusCode? FailureStatusCode);
+
+/// <summary>One page of the issues and the pull requests found by a <see cref="GitIssueLookup.QueryReferencesAsync"/> call.</summary>
+/// <param name="Items">The matching items of the page, most recently updated first.</param>
+/// <param name="NextCursor">What asks for the page that follows; <see langword="null"/> when the provider has no more, or gives one page only.</param>
+/// <param name="FailureStatusCode">
+/// The status of the first request the provider refused, or <see langword="null"/> when every request succeeded. The
+/// items gathered beside the refusal are still returned.
+/// </param>
+public sealed record GitReferencePage(IReadOnlyList<GitIssueReferenceItem> Items, string? NextCursor, HttpStatusCode? FailureStatusCode);

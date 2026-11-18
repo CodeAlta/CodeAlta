@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { insertReferences, issueReference, linkText, matchesReference, referenceKindOfKey, referenceRows, sessionReference, toggledKinds, workReference,
+import { insertReferences, issueReference, linkText, matchesReference, mergedIssues, referenceKindOfKey, referenceRows, sessionReference, toggledKinds, workReference,
   defaultReferenceKinds, type ReferenceItem } from "./referenceItems";
 import type { WorkItem } from "./workItems/workItems";
 
@@ -39,6 +39,12 @@ test("the rows mix the kinds shown, the most recent first, and leave the closed 
   assert.deepEqual(keys(referenceRows(items, defaultReferenceKinds, true, "#ab12")), ["task:2026-11-03-task-ab12", "issue:issue:2", "issue:issue:1"]);
   assert.equal(matchesReference(items[5], "parser REV"), true);
   assert.equal(matchesReference(items[5], "parser fix"), false);
+});
+
+test("a following page is added under the issues shown, without the ones already there", () => {
+  const entry = (number: number, kind = "issue") => ({ kind, number, title: `Issue ${number}`, state: "open", open: true, url: `https://github.com/o/r/issues/${number}`, updatedAt: null });
+  const merged = mergedIssues([entry(3), entry(2)], [entry(2), entry(2, "pull_request"), entry(1)]);
+  assert.deepEqual(merged.map(issue => `${issue.kind}:${issue.number}`), ["issue:3", "issue:2", "pull_request:2", "issue:1"]);
 });
 
 test("the keys and the toggles of the kinds", () => {
