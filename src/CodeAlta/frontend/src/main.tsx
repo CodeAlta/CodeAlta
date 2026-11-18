@@ -384,7 +384,7 @@ import { CommandHelp } from "./CommandHelp";
 import { commandDefinitions, commandKeys, resolveCommandKey, type CommandId } from "./commandRegistry";
 import { composerCommandBlock, composerControlState, isComposerControlCommand, type ComposerControlCommand } from "./composerCommands";
 import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
-import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
+import { restoredOwnTabs, useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
@@ -3948,8 +3948,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // A message found by search, as a bookmark of a message is shown: the pane of the session reads its history up to it.
     openMessage: (id, offset) => { bookmarkHost.reveals.open(id, offset); void openAutomationSession(id); } });
   // The Welcome page is the main window's: a secondary window opens with the tabs it had.
-  // A Welcome page that another window holds stays there: a start does not bring that window to the front.
-  useLandingAtStartup(owned && tabsReady && !secondary, canvasCatalog, item => {
+  // A Welcome page that another window holds stays there: a start does not bring that window to the front. A window that
+  // restored its tabs shows them as they were: the page opens in an empty window.
+  useLandingAtStartup(owned && tabsReady && !secondary, restoredOwnTabs(restoredTabs, restoredFileTabs), canvasCatalog, item => {
     const target = defaultCanvasTarget(item, canvasSelection);
     if (target && windowsHub.heldElsewhere(fileTabRef(canvasTabOf(item, target)))) return;
     openCanvasHere(item);

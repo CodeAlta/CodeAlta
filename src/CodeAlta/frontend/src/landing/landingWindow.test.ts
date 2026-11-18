@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { BootStatus, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { aboutFacts } from "../AboutDialog";
+import { editorTab, type FileTab, type FileTabs } from "../fileTabs";
 import { locales, translate } from "../localization";
-import { landingProjects, landingSessions, landingStartupMilliseconds, opensLandingAtStartup } from "./landingWindow";
+import { emptySessionTabs } from "../sessionTabs";
+import { landingProjects, landingSessions, landingStartupMilliseconds, opensLandingAtStartup, restoredOwnTabs } from "./landingWindow";
 
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `/code/${id}`, archived });
 const session = (id: string, over: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
@@ -34,7 +36,7 @@ test("Home, Version and the development fallback are translated in every shell l
 });
 
 test("the page opens for the start once the window is ready and its canvas is declared", () => {
-  const start = { ready: true, handled: false, openAtStartup: true, elapsedMilliseconds: 0, declared: true };
+  const start = { ready: true, handled: false, restored: false, openAtStartup: true, elapsedMilliseconds: 0, declared: true };
   assert.equal(opensLandingAtStartup(start), "open");
   assert.equal(opensLandingAtStartup({ ...start, ready: false }), "wait");
   assert.equal(opensLandingAtStartup({ ...start, ready: false, declared: false }), "wait");
@@ -45,8 +47,30 @@ test("the page opens for the start once the window is ready and its canvas is de
   assert.equal(opensLandingAtStartup({ ...start, elapsedMilliseconds: landingStartupMilliseconds }), "open");
 });
 
+test("a window that restored its tabs shows them as they were: the page does not come in front of them", () => {
+  const start = { ready: true, handled: false, restored: true, openAtStartup: true, elapsedMilliseconds: 0, declared: true };
+  assert.equal(opensLandingAtStartup(start), "done");
+  assert.equal(opensLandingAtStartup({ ...start, declared: false }), "done", "it does not wait for a canvas it will not open");
+  assert.equal(opensLandingAtStartup({ ...start, ready: false }), "wait", "nothing is decided before the window is ready");
+  assert.equal(opensLandingAtStartup({ ...start, restored: false }), "open");
+});
+
+test("the tabs a window restored are its own, but the landing page is not one", () => {
+  const landing = { projectId: "", projectPath: "", view: "canvas", pluginKey: "builtin:landing", canvasId: "landing" } as const;
+  const other = { projectId: "", projectPath: "", view: "canvas", pluginKey: "builtin:landing", canvasId: "other" } as const;
+  const files = (...open: FileTab[]): FileTabs => ({ open, active: null, closed: [] });
+  const session = { sessionId: "one", projectId: "p", path: "/p" };
+  assert.equal(restoredOwnTabs(null, null), false, "nothing was stored: the window of a first start");
+  assert.equal(restoredOwnTabs(emptySessionTabs(), files()), false);
+  assert.equal(restoredOwnTabs(null, files(landing)), false, "the page that was left open is not a tab of its own");
+  assert.equal(restoredOwnTabs(null, files(landing, other)), true);
+  assert.equal(restoredOwnTabs(null, files(editorTab({ id: "p", path: "/p" }))), true);
+  assert.equal(restoredOwnTabs({ ...emptySessionTabs(), open: [session] }, files(landing)), true);
+  assert.equal(restoredOwnTabs({ ...emptySessionTabs(), drafts: [{ projectId: "p", path: "/p" }] }, null), true, "a prompt of a new session kept in a tab");
+});
+
 test("the start is over when the user does not want the page, when it took too long, and once it was handled", () => {
-  const start = { ready: true, handled: false, openAtStartup: true, elapsedMilliseconds: 0, declared: true };
+  const start = { ready: true, handled: false, restored: false, openAtStartup: true, elapsedMilliseconds: 0, declared: true };
   assert.equal(opensLandingAtStartup({ ...start, openAtStartup: false }), "done");
   assert.equal(opensLandingAtStartup({ ...start, openAtStartup: false, declared: false }), "done", "it does not wait for a canvas it will not open");
   assert.equal(opensLandingAtStartup({ ...start, elapsedMilliseconds: landingStartupMilliseconds + 1 }), "done", "a plugin that comes late does not open the page");
@@ -57,7 +81,7 @@ test("the start is over when the user does not want the page, when it took too l
   // As the window runs it: the decision is taken once, and a preference turned on later opens nothing.
   let handled = false;
   const decide = (state: { openAtStartup: boolean; declared: boolean; elapsedMilliseconds?: number }) => {
-    const decision = opensLandingAtStartup({ ready: true, handled, elapsedMilliseconds: 0, ...state });
+    const decision = opensLandingAtStartup({ ready: true, handled, restored: false, elapsedMilliseconds: 0, ...state });
     if (decision !== "wait") handled = true;
     return decision;
   };

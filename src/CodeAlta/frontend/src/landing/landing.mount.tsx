@@ -84,8 +84,8 @@ function sample(): Pick<Shown, "projects" | "sessions"> {
 }
 
 /** The decision of the start, as the shell of the window takes it. */
-function Startup({ ready, catalog }: { ready: boolean; catalog: readonly Readonly<{ pluginKey: string; id: string }>[] }) {
-  useLandingAtStartup(ready, catalog, item => { state.started.push(`${item.pluginKey}/${item.id}`); }, preferences);
+function Startup({ ready, restored = false, catalog }: { ready: boolean; restored?: boolean; catalog: readonly Readonly<{ pluginKey: string; id: string }>[] }) {
+  useLandingAtStartup(ready, restored, catalog, item => { state.started.push(`${item.pluginKey}/${item.id}`); }, preferences);
   return null;
 }
 
@@ -116,9 +116,9 @@ const fixture = {
   setPreference(name: "openAtStartup" | "animate", value: boolean) { flushSync(() => preferences.set(name, value)); },
   stored: () => Object.fromEntries(storage),
   /** The start of the window: its tabs are there or not, and the canvas of the page is declared or not. */
-  startup(options: { ready: boolean; declared: boolean }) {
+  startup(options: { ready: boolean; declared: boolean; restored?: boolean }) {
     const catalog = [{ pluginKey: "builtin:statistics", id: "statistics" }, { pluginKey: landingPluginKey, id: "other" }, ...(options.declared ? [{ pluginKey: landingPluginKey, id: landingCanvasId }] : [])];
-    flushSync(() => root.render(createElement(StrictMode, null, createElement(Startup, { ready: options.ready, catalog }))));
+    flushSync(() => root.render(createElement(StrictMode, null, createElement(Startup, { ready: options.ready, restored: options.restored, catalog }))));
   },
 };
 Object.assign(window, { landingFixture: fixture });

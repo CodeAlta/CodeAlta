@@ -422,6 +422,10 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       await evaluate("landingFixture.reset(); landingFixture.startup({ ready: true, declared: true })");
       assert.deepEqual(await state("started"), ["builtin:landing/landing"]);
 
+      // A window that restored its tabs shows them as they were: the page opens in none, and not later when it is declared.
+      await evaluate("landingFixture.reset(); landingFixture.startup({ ready: true, declared: false, restored: true }); landingFixture.startup({ ready: true, declared: true, restored: true })");
+      assert.deepEqual(await state("started"), []);
+
       // The user does not want it: nothing opens, and turning the preference on later opens nothing in this run of the window.
       await evaluate("landingFixture.reset({ 'codealta.desktop.landing.startup.v1': 'off' }); landingFixture.startup({ ready: true, declared: true })");
       assert.deepEqual(await state("started"), []);

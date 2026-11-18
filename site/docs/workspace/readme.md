@@ -196,7 +196,7 @@ A tab is in one window at a time: opening something another window shows brings 
   <figcaption class="small text-secondary mt-2">Start a session, return to recent work or explore CodeAlta from the Welcome tab.</figcaption>
 </figure>
 
-CodeAlta Desktop starts on a **Welcome** tab with:
+CodeAlta Desktop starts on a **Welcome** tab when it has no tabs to restore, such as at a first start; otherwise your tabs come back as you left them. The tab has:
 
 - **New session**, **Open a project** and **Documentation**;
 - **Get started**, while a model provider or a first project is missing;
@@ -205,7 +205,7 @@ CodeAlta Desktop starts on a **Welcome** tab with:
 - **Fleet**: how many of your machines are online and your server, or how to start a fleet, with **Open Fleet** ([Fleet](../fleet/readme.md#open-fleet));
 - **Explore**: the documentation, Canvases, Plugins, Model Providers, Settings and the keyboard shortcuts.
 
-Open it with the **Home** icon of the title bar, **Welcome** in the search or `/landing`; an agent uses `alta landing open`. The switches at its bottom, also in **Settings > General > Welcome page**, choose whether it opens at startup and whether it is animated (it never moves when your system asks for reduced motion). To remove it, turn off the **Landing page** plugin in **Settings > Plugins**. A plugin can add [its own card](../plugins/ui.md#welcome-page-cards).
+Open it with the **Home** icon of the title bar, **Welcome** in the search or `/landing`; an agent uses `alta landing open`. The switches at its bottom, also in **Settings > General > Welcome page**, choose whether it opens at a start with no tab to restore and whether it is animated (it never moves when your system asks for reduced motion). To remove it, turn off the **Landing page** plugin in **Settings > Plugins**. A plugin can add [its own card](../plugins/ui.md#welcome-page-cards).
 
 ## Open a project
 
