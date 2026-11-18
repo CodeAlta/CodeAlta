@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState,
 import type { NewestHistoryRequest, NewestHistoryResult, OlderHistoryRequest } from "./HistoryPanel";
 import { historyMessage } from "./history";
 import { translate, type Locale, type MessageKey } from "./localization";
+import { isRestingRow, wakeTimelineRows } from "./restingRows";
 
 export type TimelineNotice = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string>>; error?: string }> | null;
 // Only typed UI notices enter this formatter; never translate captured message text.
@@ -410,17 +411,24 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   // row is pointed out for a moment.
   function showRow(key: string, mark = false): boolean {
     const element = elementRef.current;
-    const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(`[data-row-offset="${key}"], [data-prompt-offset="${key}"]`) : null;
+    const selector = `[data-row-offset="${key}"], [data-prompt-offset="${key}"]`;
+    const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(selector) : null;
     if (!element || !row) return false;
+    // A row at rest is where it would be drawn: the view goes there, and the row is drawn for the next frame (an effect
+    // asks for this too, which cannot have it drawn at once).
+    const resting = isRestingRow(row);
+    if (resting) wakeTimelineRows(element, selector, 0, true);
     element.scrollTop += row.getBoundingClientRect().top - element.getBoundingClientRect().top - 8;
     moved();
-    if (mark) {
+    const point = (row: HTMLElement) => {
       // Asked for twice, the mark is drawn again from its start.
       row.removeAttribute("data-revealed");
       void row.offsetWidth;
       row.setAttribute("data-revealed", "true");
       row.addEventListener("animationend", () => row.removeAttribute("data-revealed"), { once: true });
-    }
+    };
+    if (mark && !resting) point(row);
+    else if (mark) requestAnimationFrame(() => { const drawn = element.querySelector<HTMLElement>(selector); if (drawn && !isRestingRow(drawn)) point(drawn); });
     return true;
   }
   // Where the timeline is, and what puts it back there: a window that moved it to show a row gives it back as it was.
@@ -459,8 +467,15 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
       // No message before the first loaded one: the turns before it are read, and the next press goes there.
       return { status: "boundary", older: action === "messagePrevious" && askOlder() };
     }
-    const row = rows[index];
+    let row = rows[index];
+    // A message at rest is where it would be drawn: it is drawn once the view is on it, for its text and for the next step.
+    const offset = isRestingRow(row) ? row.dataset.rowOffset ?? row.dataset.promptOffset : undefined;
     element.scrollTop += row.getBoundingClientRect().top - viewport.top;
+    if (offset) {
+      const selector = `[data-row-offset="${offset}"], [data-prompt-offset="${offset}"]`;
+      wakeTimelineRows(element, selector);
+      row = element.querySelector<HTMLElement>(selector) ?? row;
+    }
     placed(element);
     messageAnchor.current = { row, top: element.scrollTop };
     selection.pauseAt(element.scrollTop);

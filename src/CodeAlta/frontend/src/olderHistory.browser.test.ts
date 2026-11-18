@@ -10,10 +10,13 @@ const options = { entry: "../olderHistory.mount.tsx", fixture: "olderFixture", r
 const scroller = `document.querySelector('.timeline-scroll')`;
 const ready = `document.querySelector('.history[data-window-ready="true"]') && document.querySelectorAll('.timeline-message').length > 0`;
 const reads = `olderFixture.state.reads.length`;
+/** Draws the rows that rest far from the view, for what reads the text of every row the window holds. */
+const wakeRows = `document.querySelectorAll('.messages').forEach(rows => rows.dispatchEvent(new CustomEvent('codealta:wake-rows', { detail: { hold: 0 } })))`;
 /** The first turn the window holds: the turns are numbered from the start of the journal. */
-const firstTurn = `Math.min(...[...document.querySelectorAll('.timeline-message')].map(row => Number(/turn (\\d+)/.exec(row.textContent)?.[1] ?? NaN)).filter(Number.isFinite))`;
+const firstTurn = `(${wakeRows}, Math.min(...[...document.querySelectorAll('.timeline-message')].map(row => Number(/turn (\\d+)/.exec(row.textContent)?.[1] ?? NaN)).filter(Number.isFinite)))`;
 /** How far below the top of the view the prompt of a turn is drawn. */
 const promptTop = (turn: number) => `(() => {
+  ${wakeRows};
   const view = ${scroller}, row = [...view.querySelectorAll('.timeline-message')].find(candidate => candidate.textContent.includes('Prompt of turn ${turn}'));
   return Math.round(row.getBoundingClientRect().top - view.getBoundingClientRect().top);
 })()`;
@@ -149,7 +152,8 @@ test("going up in a timeline reads the turns before, a chunk at a time, and the 
     await turnsFrom(page, 1, "the start of the journal");
     assert.equal(await page.evaluate(`document.querySelector('.load-more-bar')`), null);
     assert.equal(await page.evaluate(promptTop(3)), before, "the reader stays on the first row that was loaded");
-    assert.equal(await page.evaluate(`document.querySelectorAll('.timeline-message').length`), 9 * 120);
+    // Every row of the journal is in the timeline: the ones near the view drawn, the others at rest at their height.
+    assert.equal(await page.evaluate(`document.querySelector('.messages').children.length`), 9 * 120);
     // Nothing is left to read: going up reads nothing.
     const all = await page.evaluate<number>(reads);
     await page.key("Home", 36);
@@ -260,7 +264,8 @@ test("a short latest turn, a read that fails, a timeline behind another tab, and
     await page.evaluate(`olderFixture.release()`);
     await page.until(`${ready} && ${firstTurn} === 1 && !document.querySelector('.load-more-bar')`, "the whole session");
     await still(page);
-    assert.equal(await page.evaluate(`document.querySelectorAll('.timeline-message').length`), 9 * 120);
+    // Every row of the journal is in the timeline: the ones near the view drawn, the others at rest at their height.
+    assert.equal(await page.evaluate(`document.querySelector('.messages').children.length`), 9 * 120);
     assert.equal(await page.evaluate(`${scroller}.dataset.following`), "true");
     assert.equal(await page.evaluate(atEnd), true);
 

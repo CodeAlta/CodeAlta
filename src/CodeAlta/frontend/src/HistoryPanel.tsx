@@ -29,6 +29,7 @@ import type { SystemPromptReader } from "./systemPromptReader";
 import type { ToolOutputs } from "./toolOutput";
 import type { TimelineItem } from "./timeline";
 import { modalDialogOpen } from "./modalDialogs";
+import { RestingRow, useRestingRows } from "./restingRows";
 import { turnPromptKeys, type BranchMode } from "./sessionBranch/branchPoints";
 import { revealStep, type RevealOutcome, type RevealRequest } from "./bookmarks/revealRequests";
 import { TimelineBookmarksContext } from "./bookmarks/timelineBookmarks";
@@ -177,6 +178,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
     const holder = blocks.find(block => block.kind === "activity" && block.groups.some(group => group.rows.some(row => row.source === "history" && row.item.key === shown)));
     if (holder?.kind === "activity" && !activityExpanded(holder.groups, chosen, focused)) toggleActivity(holder.groups, true);
   });
+  // The rows far from the view rest (restingRows.tsx); a search reads the text of every row.
+  const resting = useRestingRows(blocks.map(block => block.key), !!find);
   const last = blocks.at(-1);
   const liveActivity = last?.kind === "activity" && (running ?? activitySummary(last.groups, backgroundCalls).running > 0) ? last.key : null;
   const context: TimelineGroupContext = { sessionId, revision, sources, echoImages, readImages, toolOutputs, canInspect, onOpenSource,
@@ -188,11 +191,11 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   const toolImages = shownTool?.toolCall?.images?.length && shownTool.toolCall.outputOffset ? readImages?.(shownTool.toolCall.outputOffset) : undefined;
   return <SystemPromptReaderContext.Provider value={readPrompt ?? null}>
     {items.length === 0 && empty && <div className="empty-history">{emptyText ?? t("No visible events in this history.")}</div>}
-    <div className={`messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`} style={emphasisStyle}>
-      {blocks.map(block => block.kind === "row"
-        ? <TimelineGroupView key={`${sessionId}:${block.key}`} {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
-        : <TimelineActivity key={`${sessionId}:${block.key}`} {...context} groups={block.groups} entryTypes={entryTypes}
-          expanded={activityExpanded(block.groups, chosen, focused, shown, opening)} live={block.key === liveActivity} images={emphasis.foldedImages} onToggle={toggleActivity} />)}
+    <div className={`messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`} style={emphasisStyle} ref={resting.messages}>
+      {blocks.map(block => <RestingRow key={`${sessionId}:${block.key}`} rows={resting.rows} rowKey={block.key}>{block.kind === "row"
+        ? <TimelineGroupView {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
+        : <TimelineActivity {...context} groups={block.groups} entryTypes={entryTypes}
+          expanded={activityExpanded(block.groups, chosen, focused, shown, opening)} live={block.key === liveActivity} images={emphasis.foldedImages} onToggle={toggleActivity} />}</RestingRow>)}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </SystemPromptReaderContext.Provider>;

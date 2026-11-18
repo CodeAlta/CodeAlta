@@ -1,4 +1,5 @@
 import type { BackgroundTask } from "./backgroundTasks";
+import { wakeTimelineRows } from "./restingRows";
 
 /** Brings an element of the timeline into view and draws the eye to it, with the focus when it takes one. */
 export function flashTimelineTarget(element: HTMLElement): void {
@@ -19,6 +20,9 @@ export function revealableTask(task: BackgroundTask): boolean {
  * call older than the history the timeline has read).
  */
 export function revealBackgroundTask(workspace: ParentNode, task: BackgroundTask): boolean {
+  // The rows of the task are drawn when they were at rest.
+  const id = CSS.escape(task.kind === "workflow" ? task.id : task.toolCallId ?? "");
+  if (id) wakeTimelineRows(workspace, `[data-run-id="${id}"], [data-tool-call="${id}"], [data-tool-calls~="${id}"]`);
   const run = task.kind === "workflow" ? workspace.querySelector<HTMLElement>(`.workflow-block[data-run-id="${CSS.escape(task.id)}"]`) : null;
   if (run) { flashTimelineTarget(run); return true; }
   if (!task.toolCallId) return false;

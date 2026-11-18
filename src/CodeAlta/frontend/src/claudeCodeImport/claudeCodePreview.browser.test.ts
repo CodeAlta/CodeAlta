@@ -120,7 +120,9 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       assert.deepEqual(await page.evaluate("preview.state.reads"), [{ cliSessionId: A, offset: null }], "one page, from the end");
       await page.until("!!document.querySelector('.claude-code-preview .load-more')", "older turns can be read");
       await page.evaluate("document.querySelector('.claude-code-preview .load-more').click()");
-      await page.until(`${timelineText}.includes('Prompt of turn 1')`, "the older turns are read");
+      // The rows far from the view rest: they are drawn for what reads the text of every row.
+      const wakeRows = `document.querySelectorAll('.messages').forEach(rows => rows.dispatchEvent(new CustomEvent('codealta:wake-rows', { detail: { hold: 60000 } })))`;
+      await page.until(`(${wakeRows}, ${timelineText}.includes('Prompt of turn 1'))`, "the older turns are read");
       assert.deepEqual(await page.evaluate("preview.state.reads.map(read => read.offset)"), [null, "91", "41"], "the pages before, from the first record of the latest turn");
 
       // The prompt says what it continues; its first message goes to the window, which imports then sends it.
