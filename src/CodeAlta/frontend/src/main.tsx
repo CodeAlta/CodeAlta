@@ -685,6 +685,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const noteRunActivity = (id: string, running: boolean | null) => {
     const was = liveRuns.current.has(id);
     if (running) liveRuns.current.add(id); else liveRuns.current.delete(id);
+    // A pane that stops watching its session (its tab went behind another) says nothing of the run: nothing ended.
+    if (running === null) return;
     if (was && !running) { readSessionList.current(); refreshWorkItems.current(); }
     // The first prompt of a session titles it when its run starts: the list is read once that is written.
     if (!was && running) setTimeout(() => readSessionList.current(), 1_500);

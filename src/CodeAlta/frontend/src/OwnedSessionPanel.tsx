@@ -529,7 +529,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const stopShown = invalidEpoch ? null : stopFailure;
   // Presentation only, like the run above: the host decides what a compaction refuses.
   const compacting = !invalidEpoch && (!!pendingCompact?.inFlight || !!submittedCompact || hasPendingCompaction(sessionId, page));
-  const thinkingSeconds = useThinkingElapsed(composerBusy);
+  const thinkingSeconds = useThinkingElapsed(composerBusy, observing);
   // What the provider goes on doing in the background, outside its runs. The list is kept while a reading
   // changes nothing of it, so that what follows it is not shown again every second.
   const [background, setBackground] = useState<readonly BackgroundTask[]>([]);

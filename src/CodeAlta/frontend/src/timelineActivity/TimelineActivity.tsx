@@ -2,6 +2,7 @@ import { memo, useCallback, useContext, useEffect, useId, useMemo, useState } fr
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { BackgroundCallsContext } from "../BackgroundTaskViews";
+import { PaneObservingContext } from "../hostReadsContext";
 import { useShellLanguage } from "../shellLanguage";
 import { commandPreview } from "../TimelineMessage";
 import { TimelineGroupView } from "../TimelineEntryGroup";
@@ -99,7 +100,8 @@ export const TimelineActivity = memo(function TimelineActivity(props: TimelineAc
   const { t } = useShellLanguage();
   const backgroundCalls = useContext(BackgroundCallsContext);
   const summary = activitySummary(groups, backgroundCalls);
-  const now = useNow(live);
+  // The pane of a tab nobody sees has no clock.
+  const now = useNow(live && useContext(PaneObservingContext));
   const bodyId = useId();
   const duration = activityDuration((live ? Math.max(now, summary.endedAt) : summary.endedAt) - summary.startedAt);
   const state = live ? "running" : summary.failed > 0 ? "failed" : "done";

@@ -380,22 +380,25 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
       && observing && !timeline?.newerOmitted && !sourceTarget && (canInspect?.() ?? true),
     retry: historyCanRetry(current),
     refresh: () => { refreshNewest(false); } };
+  const refreshed = useRef<{ sessionId: string; revision: string | undefined; retries: number }>(null);
   useEffect(() => {
-    let refreshed: string | undefined;
-    let retries = 0;
+    // The history of a tab nobody sees refreshes nothing, so it has no timer; what it had refreshed is kept for its return.
+    if (!observing) return;
+    if (refreshed.current?.sessionId !== sessionId) refreshed.current = { sessionId, revision: undefined, retries: 0 };
+    const done = refreshed.current;
     // Live revisions invalidate persisted presentation. Coalesce journal reads,
     // never cancel an in-progress page chain or replace an explicitly older view.
     const timer = globalThis.window.setInterval(() => {
       const value = liveRefresh.current;
       if (!value?.ready || !value.revision) return;
-      if (value.revision === refreshed) {
-        if (!value.retry || retries++ >= 2) return;
-      } else retries = 0;
-      refreshed = value.revision;
+      if (value.revision === done.revision) {
+        if (!value.retry || done.retries++ >= 2) return;
+      } else done.retries = 0;
+      done.revision = value.revision;
       value.refresh();
     }, 500);
     return () => globalThis.window.clearInterval(timer);
-  }, [sessionId]);
+  }, [sessionId, observing]);
   const accumulation = target.explicitNewest || target.all ? candidate : window;
   useLayoutEffect(() => {
     if (accumulation?.timeline.turnReached && retainedStart.current === undefined) retainedStart.current = accumulation.timeline.entries[0]?.offset;
