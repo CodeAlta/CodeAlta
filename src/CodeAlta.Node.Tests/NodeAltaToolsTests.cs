@@ -119,7 +119,8 @@ public sealed class NodeAltaToolsTests
         {
             ["code"] = """return await ask("Go on?").then((answer) => `answered: ${answer}`, (e) => `${e.code}`);""",
         };
-        var result = await exec.Handler(new AgentToolInvocation(new ModelProviderId("scripted"), SessionId, "call-exec", "exec", Element(arguments)),
+        // A call of a turn comes with the tools of its session: none here, the script only asks.
+        var result = await exec.Handler(new AgentToolInvocation(new ModelProviderId("scripted"), SessionId, "call-exec", "exec", Element(arguments)) { Tools = new NoTools() },
             TestContext.CancellationToken);
 
         Assert.IsTrue(result.Success, Text(result));
@@ -171,4 +172,12 @@ public sealed class NodeAltaToolsTests
 
     private static string Text(AgentToolResult result)
         => string.Join('\n', result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value)) + (result.Error is { } error ? "\n" + error : "");
+
+    private sealed class NoTools : IAgentRunToolInvoker
+    {
+        public IReadOnlyList<AgentToolSpec> ListTools() => [];
+
+        public Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
+            => Task.FromResult(new AgentToolResult(false, [new AgentToolResultItem.Text($"'{call.ToolName}' is not a tool of this session.")]));
+    }
 }
