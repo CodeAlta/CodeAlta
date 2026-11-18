@@ -9,7 +9,7 @@ import { authorizationBlocked } from "./mcpAuthorization";
 import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
-import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
+import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, mcpServerSwitchOfAnother, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
 import { CopilotTag } from "./CopilotTag";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -133,7 +133,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
             <span className="settings-editor-logo">{namedBrand(server.key) ? <BrandIcon name={namedBrand(server.key)!} size={20} /> : <AppIcon name="server" size={18} />}</span>
             <span className="settings-editor-name"><strong>{server.key}</strong>
               <small>{server.transport === "Http" ? server.url ?? "HTTP" : [server.command, ...server.arguments].filter(Boolean).join(" ")}</small></span>
-            <Switch checked={server.enabled} disabled={busy} aria-label={t("Enabled")} onClick={event => event.stopPropagation()}
+            <Switch checked={server.enabled} disabled={busy || mcpServerSwitchOfAnother(server, servers)} aria-label={t("Enabled")} onClick={event => event.stopPropagation()}
               onChange={event => toggle(server, event.currentTarget.checked)} />
             <span className="settings-editor-tags"><Tag minimal round>{server.scope === "Project" ? t("Project") : t("Global")}</Tag>
               <SourceTag server={server} />

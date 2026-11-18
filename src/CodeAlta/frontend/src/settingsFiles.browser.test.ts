@@ -429,6 +429,8 @@ test("a settings page says where its files are, and opens, copies and shows them
           footer: bounds(pane.lastElementChild), note: bounds(${note}), scrollTop: pane.scrollTop };
       })()`), null, "the note does not cover the form");
 
+      // The overridden definition shares its scope with the one in use: its switch would turn that one off.
+      assert.deepEqual(await evaluate(`[1, 2, 3].map(at => ${list}[at].querySelector('input').disabled)`), [false, true, false]);
       await act(`${list}[2].click()`);
       assert.equal(await evaluate(`${note}.querySelector('code').title`), "D:\\work\\a-project\\.github\\mcp.json");
       assert.ok(await evaluate(`${note}.textContent.includes('no effect') && !${note}.textContent.includes('Enabled')`));
