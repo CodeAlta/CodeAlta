@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { modelCatalog, pluginUi, type WorkspaceSnapshot } from "#neoastra";
 import { providerSummary } from "../providerSummary";
 import { landingPreferences, type LandingPreferenceStore } from "./landingPreferences";
-import { isCanvasTab, type FileTab, type FileTabs } from "../fileTabs";
+import type { FileTabs } from "../fileTabs";
 import type { SessionTabs } from "../sessionTabs";
 import { landingCanvasId, landingPluginKey, type LandingProject, type LandingSession, type LandingShell } from "./landingShell";
 
@@ -76,22 +76,21 @@ export function useLandingShell(input: LandingShellInput): LandingShell {
 /** How long after the window is ready the landing page is still opened for the start: a plugin that comes later does not open it. */
 export const landingStartupMilliseconds = 20_000;
 
-/** Whether a tab is the landing page. */
-export const isLandingTab = (tab: FileTab) => isCanvasTab(tab) && tab.pluginKey === landingPluginKey && tab.canvasId === landingCanvasId;
-
-/** Whether the window restored a tab of its own at the start. The landing page is not one: it is what an empty window opens. */
-export const restoredOwnTabs = (sessions: SessionTabs | null, files: FileTabs | null) =>
-  !!sessions && sessions.open.length + (sessions.drafts?.length ?? 0) > 0 || !!files?.open.some(tab => !isLandingTab(tab));
+/**
+ * Whether there are tabs whose selection startup should leave alone. That includes an already open Welcome tab:
+ * opening it again would activate it. A fallback session opened with nothing saved does not count.
+ */
+export const hasStartupTabs = (sessions: SessionTabs, files: FileTabs, fallbackSessionId: string | null): boolean =>
+  !!(files.open.length || sessions.drafts?.length || sessions.open.some(tab => tab.sessionId !== fallbackSessionId));
 
 /**
- * Whether the landing page opens now, for the start of the application: the user wants it, the window is ready and has no tab
- * restored, the start was not handled yet and is not too long ago, and the canvas of the page is among those the plugins declare.
- * A window that restored its tabs shows them as they were, as the editors of VS Code are: the page does not come in front of them.
+ * Whether the landing page opens now: the user wants it, the window is ready and has no tabs to preserve, the start
+ * was not handled yet and is not too long ago, and the canvas of the page is among those the plugins declare.
  */
-export function opensLandingAtStartup(state: Readonly<{ ready: boolean; handled: boolean; restored: boolean; openAtStartup: boolean; elapsedMilliseconds: number; declared: boolean }>): "open" | "wait" | "done" {
+export function opensLandingAtStartup(state: Readonly<{ ready: boolean; handled: boolean; hasTabs: boolean; openAtStartup: boolean; elapsedMilliseconds: number; declared: boolean }>): "open" | "wait" | "done" {
   if (state.handled) return "done";
   if (!state.ready) return "wait";
-  if (state.restored || !state.openAtStartup || state.elapsedMilliseconds > landingStartupMilliseconds) return "done";
+  if (state.hasTabs || !state.openAtStartup || state.elapsedMilliseconds > landingStartupMilliseconds) return "done";
   return state.declared ? "open" : "wait";
 }
 
@@ -101,11 +100,11 @@ export function opensLandingAtStartup(state: Readonly<{ ready: boolean; handled:
  * and not for a tab the user closed. A tab of the page that was left open is restored with the other tabs, whatever the preference.
  *
  * @param ready The window has its tabs and a host that plugins run in.
- * @param restored The window restored a tab of its own: see `restoredOwnTabs`.
+ * @param hasTabs The window has a tab whose selection startup should leave alone: see `hasStartupTabs`.
  * @param catalog The canvases the plugins declare now.
  * @param open Opens the tab of a canvas of the application.
  */
-export function useLandingAtStartup<T extends Readonly<{ pluginKey: string; id: string }>>(ready: boolean, restored: boolean, catalog: readonly T[], open: (item: T) => void,
+export function useLandingAtStartup<T extends Readonly<{ pluginKey: string; id: string }>>(ready: boolean, hasTabs: boolean, catalog: readonly T[], open: (item: T) => void,
   preferences: LandingPreferenceStore = landingPreferences): void {
   const handled = useRef(false);
   const readyAt = useRef<number | null>(null);
@@ -114,10 +113,10 @@ export function useLandingAtStartup<T extends Readonly<{ pluginKey: string; id: 
   useEffect(() => {
     if (ready && readyAt.current === null) readyAt.current = Date.now();
     const item = catalog.find(candidate => candidate.pluginKey === landingPluginKey && candidate.id === landingCanvasId);
-    const decision = opensLandingAtStartup({ ready, handled: handled.current, restored, openAtStartup: preferences.get().openAtStartup,
+    const decision = opensLandingAtStartup({ ready, handled: handled.current, hasTabs, openAtStartup: preferences.get().openAtStartup,
       elapsedMilliseconds: readyAt.current === null ? 0 : Date.now() - readyAt.current, declared: !!item });
     if (decision === "wait") return;
     handled.current = true;
     if (decision === "open" && item) latest.current(item);
-  }, [ready, restored, catalog, preferences]);
+  }, [ready, hasTabs, catalog, preferences]);
 }

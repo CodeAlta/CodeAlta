@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { blueprintPaletteVariables } from "../blueprintPalette";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
@@ -423,7 +423,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       assert.deepEqual(await state("started"), ["builtin:landing/landing"]);
 
       // A window that restored its tabs shows them as they were: the page opens in none, and not later when it is declared.
-      await evaluate("landingFixture.reset(); landingFixture.startup({ ready: true, declared: false, restored: true }); landingFixture.startup({ ready: true, declared: true, restored: true })");
+      await evaluate("landingFixture.reset(); landingFixture.startup({ ready: true, declared: false, hasTabs: true }); landingFixture.startup({ ready: true, declared: true, hasTabs: true })");
       assert.deepEqual(await state("started"), []);
 
       // The user does not want it: nothing opens, and turning the preference on later opens nothing in this run of the window.
@@ -436,9 +436,9 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
 
     assert.deepEqual(problems, [], "no exception and no error in the console of the page");
   } finally {
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    browser?.kill();
-    await pause(200);
+    await endBrowser(browser);
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => { });
   }
 });
