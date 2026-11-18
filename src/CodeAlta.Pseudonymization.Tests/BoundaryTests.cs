@@ -126,6 +126,20 @@ public sealed class BoundaryTests
     }
 
     [TestMethod]
+    public async Task ANeverHiddenWord_DoesNotOverrideAnExplicitlyHiddenName()
+    {
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([]), new PseudonymTable(), new PseudonymCache(),
+            new PseudonymizerOptions
+            {
+                AlwaysHide = [(PiiEntities.Person, "PowerPoint")],
+                NeverHide = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "PowerPoint" },
+            });
+
+        Assert.AreEqual("The client is [PERSON_001].",
+            await boundary.PseudonymizeAsync("The client is PowerPoint.", CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task ATry_PseudonymizesOneText_AsARequestWould()
     {
         var boundary = CreateBoundary();

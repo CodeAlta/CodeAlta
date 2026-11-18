@@ -24,6 +24,21 @@ public sealed class PseudonymizerWordsTests
     }
 
     [TestMethod]
+    public async Task TheTechnologyDefaults_KeepDistinctiveNames_ButDoNotExemptAmbiguousWords()
+    {
+        var organizations = new PatternRecognizer(PiiEntities.Organization,
+            new Regex("CodeAlta Desktop|CUDA|ROCm|Vulkan|EPUB|MarkItDotNet|Unicode|PowerPoint|Metal|CI|Io", RegexOptions.CultureInvariant), 0.8);
+        var boundary = new PseudonymizingBoundary(new PiiAnalyzer([organizations]), new PseudonymTable(), new PseudonymCache(),
+            new PseudonymizerOptions { NeverHide = new HashSet<string>(PseudonymizerPlugin.DefaultSafeWords, StringComparer.OrdinalIgnoreCase) });
+
+        var sent = await boundary.PseudonymizeAsync(
+            "CodeAlta Desktop: CUDA, ROCm, Vulkan, EPUB, MarkItDotNet, Unicode, PowerPoint. The parties are Metal, CI and Io.", CancellationToken.None);
+
+        Assert.AreEqual(
+            "CodeAlta Desktop: CUDA, ROCm, Vulkan, EPUB, MarkItDotNet, Unicode, PowerPoint. The parties are [ORGANIZATION_001], [ORGANIZATION_002] and [ORGANIZATION_003].", sent);
+    }
+
+    [TestMethod]
     [DataRow("lieu: Montauban", "Montauban", "[LOCATION_001]")]
     [DataRow("ADRESSE: 7 rue des Lilas", "7 rue des Lilas", "[ADDRESS_001]")]
     public async Task AProject_CanStillExplicitlyHideValuesWithAnOldKindPrefix(string setting, string value, string token)

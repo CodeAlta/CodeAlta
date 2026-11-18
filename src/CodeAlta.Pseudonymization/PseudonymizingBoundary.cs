@@ -17,10 +17,10 @@ public sealed record PseudonymizerOptions
     /// </summary>
     public Func<string, bool> ToolReceivesRealValues { get; init; } = static _ => true;
 
-    /// <summary>Gets values hidden wherever they are, whatever finds them or not: the names of a file of the user.</summary>
+    /// <summary>Gets values hidden even if no recognizer finds them. These take precedence over <see cref="NeverHide"/>.</summary>
     public IReadOnlyList<(string Entity, string Value)> AlwaysHide { get; init; } = [];
 
-    /// <summary>Gets values never hidden: what a recognizer took for personal data by mistake.</summary>
+    /// <summary>Gets exceptions for false positives, unless the value was explicitly included in <see cref="AlwaysHide"/>.</summary>
     public IReadOnlySet<string> NeverHide { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets the policy of each kind.</summary>
@@ -393,7 +393,10 @@ public sealed partial class PseudonymizingBoundary : IAgentProviderBoundary
             var candidates = new List<PiiSpan>(analyzed);
             foreach (var (entity, value) in owner._table.KnownValues()) AddOccurrences(text, entity, value, 3, StringComparison.Ordinal, candidates);
             // What the user listed is hidden from two characters on: a name such as "Li" is one.
-            foreach (var (entity, value) in owner._options.AlwaysHide) AddOccurrences(text, entity, value, 2, StringComparison.OrdinalIgnoreCase, candidates);
+            List<PiiSpan>? explicitlyHidden = null;
+            foreach (var (entity, value) in owner._options.AlwaysHide)
+                AddOccurrences(text, entity, value, 2, StringComparison.OrdinalIgnoreCase, explicitlyHidden ??= []);
+            if (explicitlyHidden is not null) candidates.AddRange(explicitlyHidden);
             var spans = PiiAnalyzer.Resolve(text, candidates);
             if (spans.Count == 0) return text;
             var builder = new StringBuilder(text.Length);
@@ -401,7 +404,9 @@ public sealed partial class PseudonymizingBoundary : IAgentProviderBoundary
             foreach (var span in spans)
             {
                 var value = text.Substring(span.Start, span.Length);
-                if (owner._options.NeverHide.Contains(value)) continue;
+                if (owner._options.NeverHide.Contains(value)
+                    && (explicitlyHidden is null || !explicitlyHidden.Exists(hidden => hidden.Start < span.End && span.Start < hidden.End)))
+                    continue;
                 var policy = owner._options.Policies.For(span.Entity);
                 if (policy == PiiPolicy.Keep) continue;
                 var replacement = policy == PiiPolicy.Mask ? $"[{span.Entity}]" : owner._table.TokenFor(span.Entity, value);

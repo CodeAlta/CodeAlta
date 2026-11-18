@@ -35,7 +35,7 @@ sequenceDiagram
 2. Choose the **Language of the documents** (see below).
 3. Optionally, open **Names and words**:
    - **Names always hidden**: the parties of the file, hidden wherever they appear, even where nothing finds them. One per line. Use a prefix such as `LOCATION: Montauban` to choose the kind of pseudonym; older prefixes such as `LIEU:` still work.
-   - **Words never hidden**: what was taken for personal data by mistake. One per line.
+   - **Words never hidden**: what was taken for personal data by mistake. One per line. **Names always hidden** takes precedence in new text.
 4. Choose **Pseudonymize**. The project shows a padlock, and its next requests are pseudonymized.
 
 The same menu item, **Pseudonymization…**, changes these choices later or stops pseudonymizing the project. The choices are saved in the project's `.alta/config.toml`.
@@ -69,7 +69,7 @@ People, contact details (emails, phone numbers, postal codes) and identifiers (b
 | **Company numbers** | Hidden: SIREN and SIRET, Companies House numbers, EIN. |
 | **Every date** | Off: only dates of birth are hidden, the dates of acts and meetings are sent. |
 | **Web addresses** | Off: links to documentation, a repository or a site are sent. |
-| **Words never hidden** | `CodeAlta`, `CodeAlta Desktop`, `noreply@codealta.io`, and the technologies CodeAlta's own instructions name (`CUDA`, `ROCm`, `Vulkan`, `Metal`, `EPUB`, `MarkItDotNet`, `Unicode`, `CI`, `PowerPoint`, `io`): add the names of products or of your firm that name no one. |
+| **Words never hidden** | `CodeAlta`, `CodeAlta Desktop`, `noreply@codealta.io`, and distinctive technology names in CodeAlta's instructions (`CUDA`, `ROCm`, `Vulkan`, `EPUB`, `MarkItDotNet`, `Unicode`, `PowerPoint`). Add only words that are safe to send in every project. |
 | **Tools that get pseudonyms** | The web tools and the pages of a browser. `*` stands for any characters. |
 
 ## See what was hidden
