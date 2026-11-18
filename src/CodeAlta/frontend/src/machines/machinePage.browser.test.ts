@@ -479,6 +479,10 @@ test("a machine that lets other people in cannot serve the phone page, and a com
     await page.until(`document.querySelector("${mobileSection} input[type=checkbox]")`, "the switch");
     await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").click()`);
     await page.until(`document.querySelector("${mobileSection} [role=alert]")?.textContent.includes('This machine lets other people in.')`, "the refusal");
+    // The state of the machine is read again right after the refusal: the reason stays once that read is done.
+    await page.until(`!document.querySelector("${mobileSection} input[type=checkbox]").disabled`, "the state read again");
+    await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+    assert.match(await page.evaluate(`document.querySelector("${mobileSection} [role=alert]")?.textContent ?? ""`) as string, /This machine lets other people in\./, "the refusal outlives the read of the state");
     assert.equal(await page.evaluate(`document.querySelector("${mobileSection} input[type=checkbox]").checked`), false);
     assert.equal(await page.evaluate(`document.querySelector("${mobileSection} .mobile-canvas")`), null);
 

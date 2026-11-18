@@ -20,8 +20,12 @@ export function MachineMobile({ epoch, machine, api = machines }: { epoch: strin
   const [state, setState] = useState<MachineMobileView | null>(null);
   const [busy, setBusy] = useState(false);
   const [generation, setGeneration] = useState(0);
-  // The machine's own refusal, kept until the next read of its state.
+  // Why the state of the machine could not be read, until the next read.
   const [problem, setProblem] = useState<{ status: string; message?: string | null } | null>(null);
+  // Why the machine refused what the person asked, kept until they ask again or look at another machine: the state is
+  // read again right after an action, and a read that succeeds says nothing of the action that failed.
+  const [refused, setRefused] = useState<{ status: string; message?: string | null } | null>(null);
+  useEffect(() => setRefused(null), [epoch, machine.id]);
   useEffect(() => {
     const abort = new AbortController();
     api.mobile({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal }).then(value => {
@@ -34,11 +38,12 @@ export function MachineMobile({ epoch, machine, api = machines }: { epoch: strin
 
   async function enable(enabled: boolean) {
     setBusy(true);
+    setRefused(null);
     try {
       const value = await api.mobileEnable({ expectedEpoch: epoch, machineId: machine.id, enabled });
-      if (value.status === "ok") { setState(value); setProblem(null); } else setProblem(value);
+      if (value.status === "ok") { setState(value); setProblem(null); } else setRefused(value);
     } catch {
-      setProblem({ status: "offline" });
+      setRefused({ status: "offline" });
     } finally {
       setBusy(false);
       setGeneration(value => value + 1);
@@ -46,7 +51,8 @@ export function MachineMobile({ epoch, machine, api = machines }: { epoch: strin
   }
 
   // A machine that does not take the calls (an older version) offers nothing here: the section says to update it.
-  const words = problem ? mobileProblem(problem.status) ?? "The machine could not do it." : null;
+  const said = refused ?? problem;
+  const words = said ? mobileProblem(said.status) ?? "The machine could not do it." : null;
   const refusal = state?.refusal;
   const reasons = !state ? null : !state.available ? t("This machine cannot serve the page of the phones.") : null;
   return <section className="machine-section machine-mobile" aria-label={t("Connect a phone")}>
@@ -55,7 +61,7 @@ export function MachineMobile({ epoch, machine, api = machines }: { epoch: strin
       {state?.running && <Tag minimal round intent="success">{t("On")}</Tag>}
     </div>
     <p className="muted-text">{t("Serve the sessions of {name} to a phone: scan its code with the phone, within a few minutes. {name} serves the page itself, through its own private network.", { name: machine.name })}</p>
-    {words && <Callout compact intent="warning" role="alert">{t(words)}{problem?.message && problem.status !== "mobile.unsupported" && <div className="muted-text">{problem.message}</div>}</Callout>}
+    {words && <Callout compact intent="warning" role="alert">{t(words)}{said?.message && said.status !== "mobile.unsupported" && <div className="muted-text">{said.message}</div>}</Callout>}
     {!state && !problem && <ActivitySpinner size={14} />}
     {state && <>
       {reasons && <Callout compact intent="warning" role="alert">{reasons}</Callout>}
