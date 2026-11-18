@@ -47,6 +47,15 @@ test("a secondary window keeps its tabs in its window", () => {
   assert.deepEqual(readWindowPage("not json"), { sessionTabs: null, fileTabs: null, layout: null });
 });
 
+test("a secondary window drops a layout that would exceed the host limit without losing its tabs", () => {
+  // The nested JSON fields grow when the window page escapes them. Each field fits on its own.
+  const page = { sessionTabs: JSON.stringify({ path: "\\".repeat(30_000) }), fileTabs: JSON.stringify({ path: "\\".repeat(60_000) }),
+    layout: JSON.stringify({ path: "\\".repeat(100_000) }) };
+  const stored = writeWindowPage(page);
+  assert.ok(stored.length <= 512 * 1024, "the host must accept the combined page");
+  assert.deepEqual(readWindowPage(stored), { ...page, layout: null });
+});
+
 const window = (id: string, changes: Partial<WindowsWindow> = {}): WindowsWindow => ({ id, main: id === "main", name: id === "main" ? "Main" : "Window 2", icon: null, color: null,
   saved: false, open: true, spaceId: "default", displayId: null, displayName: null, displayPrimary: false, pinnedDisplayId: null, pinnedDisplayName: null, pinnedConnected: false,
   state: "normal", focused: false, tabs: [], activeTab: null, ...changes });

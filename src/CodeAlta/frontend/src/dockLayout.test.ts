@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Actions, DockLocation, RowNode, TabSetNode, type Model } from "flexlayout-react";
+import { Actions, DockLocation, RowNode, TabNode, TabSetNode, type Model } from "flexlayout-react";
 import { restoreDockLayout, serializeDockLayout } from "./dockLayout";
 import { createSessionTabModel } from "./sessionTabLayout";
 
@@ -44,13 +44,30 @@ test("a tab that is no longer there leaves its place, and a pane that holds none
 
 test("an arrangement that cannot be read is no arrangement, and a dock without tabs has none to keep", () => {
   const valid = new Set(["a"]);
+  const invalidWeight = { version: 1, layout: { type: "row", children: [{ type: "tabset", weight: "wide", children: [{ type: "tab", id: "a" }] }] } };
   for (const text of [null, undefined, "", "not json", "{}", "[]", JSON.stringify({ version: 2, layout: {} }), JSON.stringify({ version: 1 }),
     JSON.stringify({ version: 1, layout: { type: "tabset", children: [{ type: "tab", id: "a" }] } }), JSON.stringify({ version: 1, layout: { type: "row", children: "a" } }),
-    JSON.stringify({ version: 1, layout: { type: "row", children: [{ type: "tabset", children: [{ type: "tab", id: "a" }, { type: "tab", id: "a" }] }] } })])
-    assert.equal(restoreDockLayout(text, valid), null, String(text));
+    JSON.stringify({ version: 1, layout: { type: "row", children: [{ type: "tabset", children: [{ type: "tab", id: "a" }, { type: "tab", id: "a" }] }] } }),
+    JSON.stringify(invalidWeight)])
+    assert.ok(restoreDockLayout(text, valid) === null, String(text));
   assert.equal(restoreDockLayout("x".repeat(262_145), valid), null);
   assert.equal(serializeDockLayout(createSessionTabModel()), null);
   const model = createSessionTabModel();
-  tabs(model, ...Array.from({ length: 6000 }, (_, at) => `session:${"x".repeat(60)}${at}`));
+  tabs(model, ...Array.from({ length: 128 }, (_, at) => `session:${"x".repeat(2048)}${at}`));
   assert.equal(serializeDockLayout(model), null, "too long for a page to keep");
+});
+
+test("saved pane state cannot override tab behavior or claim the identity of a tab to be added", () => {
+  const saved = { version: 1, layout: { type: "row", children: [
+    { type: "tabset", id: "b", maximized: true, children: [{ type: "tab", id: "a", enableDrag: false, name: "old title" }] },
+  ] } };
+  const model = restoreDockLayout(JSON.stringify(saved), new Set(["a", "b"]))!;
+  assert.ok(!model.getNodeById("b"), "the pane cannot masquerade as tab b");
+  assert.equal(model.getMaximizedTabset(), undefined);
+  const tab = model.getNodeById("a");
+  assert.ok(tab instanceof TabNode && tab.isEnableDrag(), "which tabs can drag is owned by the dock, not its saved layout");
+
+  const arrangedModel = arranged();
+  arrangedModel.doAction(Actions.renameTab("a", "a title is not part of the arrangement"));
+  assert.ok(!serializeDockLayout(arrangedModel)!.includes("a title is not part of the arrangement"));
 });

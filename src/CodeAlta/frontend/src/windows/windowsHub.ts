@@ -30,9 +30,8 @@ export const mainWindowId = "main";
 
 /**
  * What the page of a secondary window keeps of its tabs, as the main page keeps them in the storage of the pages: the
- * text of its session tabs and the one of its other tabs. Its window keeps it, in `windows.json`.
+ * session tabs, its other tabs, and how the panes hold them. Its window keeps it in `windows.json`.
  */
-/** What a secondary window keeps: its tabs, and how its panes hold them. */
 export type WindowPage = { sessionTabs: string | null; fileTabs: string | null; layout: string | null };
 
 /** What a secondary window kept of its page; nothing for one that is new or a text that is not understood. */
@@ -46,8 +45,15 @@ export function readWindowPage(raw: string | null | undefined): WindowPage {
   } catch { return { sessionTabs: null, fileTabs: null, layout: null }; }
 }
 
-/** The text a secondary window keeps of its page. */
-export const writeWindowPage = (page: WindowPage) => JSON.stringify({ version: 1, sessionTabs: page.sessionTabs, fileTabs: page.fileTabs, layout: page.layout });
+// DesktopWindowRecord.MaximumPageState in the host. The tab fields have smaller bounds in their owning stores.
+const maximumPageState = 512 * 1024;
+
+/** The text a secondary window keeps of its page. Omit the layout if the combined state would not fit. */
+export function writeWindowPage({ sessionTabs, fileTabs, layout }: WindowPage): string {
+  const value = { version: 1, sessionTabs, fileTabs, layout };
+  const text = JSON.stringify(value);
+  return text.length <= maximumPageState ? text : JSON.stringify({ ...value, layout: null });
+}
 
 /**
  * Keeps what the host says of the windows, from what the page was given when it started (`windows.current`). It reads

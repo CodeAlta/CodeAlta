@@ -1,31 +1,42 @@
-import type { IJsonRowNode, Model } from "flexlayout-react";
-import { createSessionTabModel } from "./sessionTabLayout";
+import type { IJsonTabNode, Model } from "flexlayout-react";
+import { createSessionTabModel, sessionDraftNodeId } from "./sessionTabLayout";
 
 /** Where the main window keeps the arrangement of the dock of a space (a secondary window keeps it in its page). */
 export const dockLayoutKey = "codealta.desktop.dockLayout.v1";
 /** What a window keeps of its page is bounded: an arrangement that does not fit is not kept. */
 const textLimit = 262_144;
 
-type Json = { type?: unknown; id?: unknown; children?: unknown; selected?: unknown; [key: string]: unknown };
-const nodes = (value: unknown): Json[] => Array.isArray(value) ? value.filter((node): node is Json => !!node && typeof node === "object") : [];
+type Row = { type: "row"; weight?: number; children: (Row | Pane)[] };
+type Pane = { type: "tabset"; weight?: number; selected: number; active?: true; children: IJsonTabNode[] };
 
-const collectTabs = (node: Json): string[] => node.type === "tab" ? (typeof node.id === "string" ? [node.id] : []) : nodes(node.children).flatMap(collectTabs);
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid dock node");
+  return value as Record<string, unknown>;
+}
 
-/**
- * The tabs of a pane that are still `valid`, the one in front kept in front. Rows keep what is left in them, with the
- * sizes they had: a size is a weight among its neighbors, so it comes back as the share of the window it was.
- */
-function keep(node: Json, valid: ReadonlySet<string>): Json | null {
-  if (node.type === "tabset") {
-    const all = nodes(node.children);
-    const tabs = all.filter(tab => tab.type === "tab" && typeof tab.id === "string" && valid.has(tab.id));
-    if (!tabs.length) return null;
-    const front = typeof node.selected === "number" ? all[node.selected]?.id : undefined;
-    return { ...node, children: tabs, selected: Math.max(0, tabs.findIndex(tab => tab.id === front)) };
+// Keep only arrangement data. FlexLayout accepts node attributes without validating them; a stored pane must
+// not override the dock's behavior or even claim a tab's id. Labels and tab behavior come from the window.
+function keep(value: unknown, valid: ReadonlySet<string> | undefined, seen = new Set<string>()): Row | Pane | null {
+  const { type, weight, selected, active, children } = record(value);
+  if (!Array.isArray(children) || weight !== undefined && (typeof weight !== "number" || !(weight >= 0 && weight <= Number.MAX_SAFE_INTEGER)))
+    throw new Error("Invalid dock children or weight");
+  if (type === "tabset") {
+    const tabs: IJsonTabNode[] = [];
+    const front = typeof selected === "number" && Number.isInteger(selected) ? selected : 0;
+    let nextSelected = 0;
+    for (const [index, child] of children.entries()) {
+      const { type, id } = record(child);
+      if (type !== "tab" || typeof id !== "string" || !id || seen.has(id)) throw new Error("Invalid dock tab");
+      seen.add(id);
+      if (valid && !valid.has(id)) continue;
+      if (index === front) nextSelected = tabs.length;
+      tabs.push(id === sessionDraftNodeId ? { type, id, enableDrag: false, config: { preview: true } } : { type, id });
+    }
+    return tabs.length ? { type, weight, children: tabs, selected: nextSelected, active: active === true ? true : undefined } : null;
   }
-  if (node.type !== "row") return null;
-  const children = nodes(node.children).map(child => keep(child, valid)).filter((child): child is Json => child !== null);
-  return children.length ? { ...node, children } : null;
+  if (type !== "row") throw new Error("Invalid dock row");
+  const panes = children.map(child => keep(child, valid, seen)).filter(child => child !== null);
+  return panes.length ? { type, weight, children: panes } : null;
 }
 
 /**
@@ -34,12 +45,13 @@ function keep(node: Json, valid: ReadonlySet<string>): Json | null {
  * would be too long for a page to keep.
  */
 export function serializeDockLayout(model: Model): string | null {
-  const layout = model.toJson().layout;
-  if (!collectTabs(layout as Json).length) return null;
-  const text = JSON.stringify({ version: 1, layout });
-  return text.length <= textLimit ? text : null;
+  try {
+    const layout = keep(model.toJson().layout, undefined);
+    if (!layout) return null;
+    const text = JSON.stringify({ version: 1, layout });
+    return text.length <= textLimit ? text : null;
+  } catch { return null; }
 }
-
 
 /**
  * A dock arranged as kept in `text`, with the tabs that are `valid` (the tabs the window restores) in the panes they
@@ -47,10 +59,11 @@ export function serializeDockLayout(model: Model): string | null {
  * its single pane, and the tabs of the window the places they take there.
  */
 export function restoreDockLayout(text: string | null | undefined, valid: ReadonlySet<string>): Model | null {
+  if (!text || text.length > textLimit) return null;
   try {
-    const value: unknown = text ? JSON.parse(text) : null;
-    if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1 || text!.length > textLimit) return null;
-    const layout = keep((value as { layout?: Json }).layout ?? {}, valid);
-    return layout?.type === "row" ? createSessionTabModel(layout as unknown as IJsonRowNode) : null;
+    const { version, layout } = record(JSON.parse(text));
+    if (version !== 1) return null;
+    const kept = keep(layout, valid);
+    return kept?.type === "row" ? createSessionTabModel(kept) : null;
   } catch { return null; }
 }
