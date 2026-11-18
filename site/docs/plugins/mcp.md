@@ -67,7 +67,7 @@ CodeAlta also reads the MCP files of other tools, so a server defined for GitHub
 
 These servers are listed with the name of their file, or the **Copilot** mark for the GitHub Copilot files. You enable, disable, activate and authorize them like any server. CodeAlta never changes these files:
 
-- Such a server has no **Remove**: disable it, or remove it in its own tool.
+- Such a server has no **Remove**: turn it off with the switch of its row in the list, or delete it from its file. A note in its details says so, and shows the file with a button that opens it.
 - Editing and saving one writes a server of the same name to CodeAlta's file, which is used from then on. Remove yours to go back.
 
 Order of precedence: CodeAlta's file, then `.mcp.json`, `.github/mcp.json` and `.vscode/mcp.json`; project files before global ones.
