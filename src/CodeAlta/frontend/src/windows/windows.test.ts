@@ -40,10 +40,11 @@ test("a moved tab carries what the window that receives it opens", () => {
 });
 
 test("a secondary window keeps its tabs in its window", () => {
-  const page = { sessionTabs: "{\"version\":1,\"open\":[]}", fileTabs: null };
+  const page = { sessionTabs: "{\"version\":1,\"open\":[]}", fileTabs: null, layout: "{\"version\":1}" };
   assert.deepEqual(readWindowPage(writeWindowPage(page)), page);
-  assert.deepEqual(readWindowPage(null), { sessionTabs: null, fileTabs: null });
-  assert.deepEqual(readWindowPage("not json"), { sessionTabs: null, fileTabs: null });
+  assert.deepEqual(readWindowPage(JSON.stringify({ version: 1, sessionTabs: page.sessionTabs, fileTabs: null })), { ...page, layout: null }, "a page written before the layout was kept");
+  assert.deepEqual(readWindowPage(null), { sessionTabs: null, fileTabs: null, layout: null });
+  assert.deepEqual(readWindowPage("not json"), { sessionTabs: null, fileTabs: null, layout: null });
 });
 
 const window = (id: string, changes: Partial<WindowsWindow> = {}): WindowsWindow => ({ id, main: id === "main", name: id === "main" ? "Main" : "Window 2", icon: null, color: null,

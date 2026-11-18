@@ -64,6 +64,7 @@ import { SystemPromptDiff } from "./SystemPromptDiff";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
+import { dockLayoutKey, restoreDockLayout, serializeDockLayout } from "./dockLayout";
 import { ActivityRail } from "./ActivityRail";
 import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
@@ -733,6 +734,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   function setTabs(next: SessionTabsState) { protectNavigation(next.open.map(tab => tab.sessionId), () => writeTabs(next)); }
   const [tabsReady, setTabsReady] = useState(false);
+  // What the window kept of the arrangement of its dock needs: whether the tabs are read, and the report of the window to the host.
+  const layoutLive = useRef({ ready: false, report: () => { } });
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
   // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
   const [restoredFileTabs] = useState(() => {
@@ -1433,7 +1436,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!spacesState.loaded || !spacesState.available || secondary) return;
     if (tabsReady && !spacesState.spaces.some(space => space.id === spaceId)) showSpace(defaultSpaceId, undefined, true);
     try {
-      for (const base of [sessionTabsKey, fileTabsKey]) {
+      for (const base of [sessionTabsKey, fileTabsKey, dockLayoutKey]) {
         for (const key of Object.keys(localStorage)) {
           if (key.startsWith(`${base}.`) && !spacesState.spaces.some(space => spaceStorageKey(base, space.id) === key)) localStorage.removeItem(key);
         }
@@ -1520,12 +1523,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (tabsReady && snapshot) persistFileTabs(value => { if (secondary) windowPage.fileTabs = value; else localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value); }, fileTabs);
   }, [fileTabs, tabsReady, snapshot, spaceId]);
   // The host is told which tabs this window holds: a tab is in one window, and a link to it brings that window to the front.
-  useEffect(() => {
+  function reportWindow() {
     if (!tabsReady || !snapshot) return;
     const refs = [...tabs.open.map(tab => sessionTabRef(tab.sessionId)), ...fileTabs.open.map(fileTabRef)];
     const active = fileTabs.active ? fileTabRef(fileTabs.active) : tabs.active ? sessionTabRef(tabs.active.sessionId) : null;
     windowsHub.report(refs, active, secondary ? writeWindowPage(windowPage) : null);
-  }, [tabs, fileTabs, tabsReady, snapshot, windowsHub]);
+  }
+  layoutLive.current = { ready: tabsReady && !!snapshot, report: reportWindow };
+  useEffect(reportWindow, [tabs, fileTabs, tabsReady, snapshot, windowsHub]);
   // The host holds the sessions this window has a tab of, so that the command line does not run one open here: the main
   // window says those of every space, a secondary window its own.
   useEffect(() => {
@@ -1633,11 +1638,47 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   type SpaceTarget = Readonly<{ projectId: string | null; sessionId: string | null; then?: () => void }>;
   const spaceTabs = useRef(new Map<string, Readonly<{ tabs: SessionTabsState; files: FileTabs; projectId: string | null }>>());
   const spaceLayouts = useRef(new Map<string, ReturnType<typeof createSessionTabModel>>());
+  // The dock of the shown space is arranged as it was kept (a secondary window keeps it in its page), with the tabs the
+  // window restored. While they are not read it holds nothing: the one that is given to the dock then is not kept.
+  const loadingLayout = useRef<ReturnType<typeof createSessionTabModel> | null>(null);
   function spaceLayout(id: string) {
     let layout = spaceLayouts.current.get(id);
-    if (!layout) { layout = createSessionTabModel(); spaceLayouts.current.set(id, layout); }
+    if (!layout) {
+      if (!tabsReady) return loadingLayout.current ??= createSessionTabModel();
+      const valid = new Set([...tabs.open.map(sessionNodeId), ...(tabs.drafts ?? []).map(draftNodeId), ...fileTabs.open.map(fileNodeId), sessionDraftNodeId]);
+      let kept: string | null = null;
+      try { kept = secondary ? windowPage.layout : localStorage.getItem(spaceStorageKey(dockLayoutKey, id)); } catch { /* Storage that cannot be read keeps nothing. */ }
+      layout = restoreDockLayout(kept, valid) ?? createSessionTabModel();
+      spaceLayouts.current.set(id, layout);
+    }
     return layout;
   }
+  // The arrangement is kept shortly after the last change of it: a pane dragged to its place writes once, and the last
+  // change is not lost when the window closes.
+  const layoutPending = useRef<{ model: ReturnType<typeof createSessionTabModel>; spaceId: string } | null>(null);
+  const layoutTimer = useRef<number | undefined>(undefined);
+  function dockLayoutChanged(model: ReturnType<typeof createSessionTabModel>) {
+    layoutPending.current = { model, spaceId };
+    window.clearTimeout(layoutTimer.current);
+    layoutTimer.current = window.setTimeout(() => flushDockLayout.current(), 400);
+  }
+  const flushDockLayout = useRef(() => { });
+  flushDockLayout.current = () => {
+    window.clearTimeout(layoutTimer.current);
+    const pending = layoutPending.current;
+    layoutPending.current = null;
+    // Only the dock that is shown, once its tabs are there: what the dock held while they were read is not an arrangement.
+    if (!pending || !layoutLive.current.ready || spaceLayouts.current.get(pending.spaceId) !== pending.model) return;
+    const text = serializeDockLayout(pending.model);
+    if (text === null) return;
+    if (secondary) { windowPage.layout = text; layoutLive.current.report(); }
+    else try { localStorage.setItem(spaceStorageKey(dockLayoutKey, pending.spaceId), text); } catch { /* Storage that is full keeps what it has. */ }
+  };
+  useEffect(() => {
+    const flush = () => flushDockLayout.current();
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
+  }, []);
   // Leaving a space takes its code editors out of the page: while files hold unsaved edits, the window asks first.
   const [leavingSpace, setLeavingSpace] = useState<{ spaceId: string; target?: SpaceTarget; tabs: FileTab[]; busy: boolean } | null>(null);
   const [spaceMenuRequest, setSpaceMenuRequest] = useState(0);
@@ -6412,7 +6453,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
-          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={tabView} snapshot={snapshot}
+          <SessionTabStrip key={tabsReady ? spaceId : `${spaceId}:loading`} layout={spaceLayout(spaceId)} layoutChanged={dockLayoutChanged} state={tabView} snapshot={snapshot}
             background={backgroundTabs}
             draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
               return newSessionTabLabel(project, creatingScope?.projectId === draft.projectId); }}

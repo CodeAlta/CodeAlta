@@ -139,7 +139,7 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, elsewhere, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout, layoutChanged,
   keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background, windowEntries, dragOut, externalDrag, arrival, onArrived }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
@@ -152,6 +152,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
    * space) then has its panes where they were. Without it the dock has a model of its own.
    */
   layout?: Model;
+  /** Told after each change of the panes of the dock (a tab moved, a pane split or resized, another tab in front of a pane). */
+  layoutChanged?: (model: Model) => void;
   /** The edited prompts of the window and the selected session, for the mark of a session tab. */
   drafts?: SessionTabDrafts;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
@@ -466,7 +468,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     <div className="session-dock"><Layout model={model} supportsPopout={false} invalidateTabContentOnParentRender={true}
       keyMap={{ closeTab: undefined, renameTab: undefined, focusTabToggle: undefined,
         focusNextTabset: undefined, focusPreviousTabset: undefined, closeOverlayBorder: undefined }}
-      onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
+      onAction={action => dispatch(action)} onModelChange={(_model, action) => { changed(action); layoutChanged?.(model); }}
       onContextMenu={(node, event) => {
         event.preventDefault();
         if (node instanceof TabNode) tabMenu(node, event.currentTarget as HTMLElement, { x: event.clientX, y: event.clientY });

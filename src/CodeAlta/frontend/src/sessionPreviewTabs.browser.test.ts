@@ -85,7 +85,7 @@ test("sessions are looked at in one transient tab, kept by a double click, and a
     // The tabs come back as they were at the next start: the kept ones, the prompts, and the transient one.
     await command("Page.reload");
     await until(`!!${session("two")} && ${tabs}.length === 6`, "the window loaded again");
-    // The dock is laid out anew at a start: the tabs are the same ones, in an order of its own.
+    // The tabs are the same ones, in the panes they were in (the arrangement of the dock is tested apart).
     assert.deepEqual((await evaluate(tabs) as string[]).sort(),
       ["one - Project", "chat-2 - Chat", "chat-1 - Chat", "~two - Project*", "New session — Other project", "New session — Project"].sort());
     assert.deepEqual(exceptions, []);

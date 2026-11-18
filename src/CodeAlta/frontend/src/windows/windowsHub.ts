@@ -32,20 +32,22 @@ export const mainWindowId = "main";
  * What the page of a secondary window keeps of its tabs, as the main page keeps them in the storage of the pages: the
  * text of its session tabs and the one of its other tabs. Its window keeps it, in `windows.json`.
  */
-export type WindowPage = { sessionTabs: string | null; fileTabs: string | null };
+/** What a secondary window keeps: its tabs, and how its panes hold them. */
+export type WindowPage = { sessionTabs: string | null; fileTabs: string | null; layout: string | null };
 
 /** What a secondary window kept of its page; nothing for one that is new or a text that is not understood. */
 export function readWindowPage(raw: string | null | undefined): WindowPage {
   try {
     const value: unknown = raw ? JSON.parse(raw) : null;
-    if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) return { sessionTabs: null, fileTabs: null };
+    if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) return { sessionTabs: null, fileTabs: null, layout: null };
     const text = (field: unknown) => typeof field === "string" && field.length <= 262_144 ? field : null;
-    return { sessionTabs: text((value as { sessionTabs?: unknown }).sessionTabs), fileTabs: text((value as { fileTabs?: unknown }).fileTabs) };
-  } catch { return { sessionTabs: null, fileTabs: null }; }
+    const page = value as { sessionTabs?: unknown; fileTabs?: unknown; layout?: unknown };
+    return { sessionTabs: text(page.sessionTabs), fileTabs: text(page.fileTabs), layout: text(page.layout) };
+  } catch { return { sessionTabs: null, fileTabs: null, layout: null }; }
 }
 
 /** The text a secondary window keeps of its page. */
-export const writeWindowPage = (page: WindowPage) => JSON.stringify({ version: 1, sessionTabs: page.sessionTabs, fileTabs: page.fileTabs });
+export const writeWindowPage = (page: WindowPage) => JSON.stringify({ version: 1, sessionTabs: page.sessionTabs, fileTabs: page.fileTabs, layout: page.layout });
 
 /**
  * Keeps what the host says of the windows, from what the page was given when it started (`windows.current`). It reads
