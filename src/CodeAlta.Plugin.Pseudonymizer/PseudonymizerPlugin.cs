@@ -45,9 +45,11 @@ public sealed partial class PseudonymizerPlugin : PluginBase
 
     /// <summary>
     /// The words no project hides at first: those CodeAlta's own instructions put in every request (its name, the
-    /// address of the trailer of its commits), which name no one. The user changes the list in Settings.
+    /// address of the trailer of its commits, the technologies its skills and hints name), which name no one. The user
+    /// changes the list in Settings.
     /// </summary>
-    internal static IReadOnlyList<string> DefaultSafeWords { get; } = ["CodeAlta", "noreply@codealta.io"];
+    internal static IReadOnlyList<string> DefaultSafeWords { get; } =
+        ["CodeAlta", "CodeAlta Desktop", "noreply@codealta.io", "CUDA", "ROCm", "Vulkan", "Metal", "EPUB", "MarkItDotNet", "Unicode", "CI", "PowerPoint", "io"];
 
     private readonly ConcurrentDictionary<string, SessionPseudonyms> _sessions = new(StringComparer.OrdinalIgnoreCase);
     // The recognizers of the identifiers of each language, made once: they hold no state, and some forty patterns are
