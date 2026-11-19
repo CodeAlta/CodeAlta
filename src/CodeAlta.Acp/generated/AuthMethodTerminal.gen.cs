@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// The client runs the configured agent program as a separate interactive
 /// process for the user to authenticate via a TUI. Agents MUST advertise this
 /// method only when the client enabled its terminal authentication capability.
-/// A zero exit status signals success; any other termination signals failure.
+/// A zero exit status signals success. Any other termination signals failure.
 /// The client MUST NOT pass this method to `authenticate`.
 /// </summary>
 public sealed partial record AuthMethodTerminal
@@ -26,13 +26,13 @@ public sealed partial record AuthMethodTerminal
     /// <summary>Additional arguments to append to the configured agent invocation for terminal auth.</summary>
     [JsonPropertyName("args")]
     public List<string>? Args { get; set; }
-    /// <summary>Optional description providing more details about this authentication method.</summary>
+    /// <summary>Optional human-readable description of this authentication method.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
     /// <summary>Additional environment variables to set on the configured agent invocation for terminal auth. These values override same-named variables in the base launch configuration.</summary>
     [JsonPropertyName("env")]
     public Dictionary<string, string>? Env { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

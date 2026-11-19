@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// Used to report progress and results as tools execute. All fields except
 /// the tool call ID are optional - only changed fields need to be included.
 /// 
-/// See protocol docs: [Updating](https://agentclientprotocol.com/protocol/tool-calls#updating)
+/// See protocol docs: [Updating](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#updating)
 /// </summary>
 public sealed partial record ToolCallUpdate
 {
@@ -28,7 +28,7 @@ public sealed partial record ToolCallUpdate
     /// <summary>Replace the locations collection.</summary>
     [JsonPropertyName("locations")]
     public List<ToolCallLocation>? Locations { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Update the programmatic name of the tool being invoked.  This field is optional. Omitting it or sending `null` both mean that the existing name is left unchanged.</summary>

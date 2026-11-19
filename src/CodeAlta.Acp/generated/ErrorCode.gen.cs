@@ -9,8 +9,9 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Predefined error codes for common JSON-RPC and ACP-specific errors.
 /// 
-/// These codes follow the JSON-RPC 2.0 specification for standard errors
-/// and use the reserved range (-32000 to -32099) for protocol-specific errors.
+/// Standard errors use the JSON-RPC 2.0 codes. ACP-specific errors use the JSON-RPC
+/// server-error range (-32000 to -32099), and request cancellation uses -32800 from the
+/// range LSP reserves (-32899 to -32800).
 /// </summary>
 public partial struct ErrorCode
 {

@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// Allowed wire representations for [`ElicitationContentValue`].
+/// Allowed wire representations for `ElicitationContentValue`.
 /// </summary>
 public partial struct ElicitationContentValue
 {

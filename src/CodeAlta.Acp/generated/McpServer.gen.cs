@@ -12,6 +12,6 @@ namespace CodeAlta.Acp;
 /// MCP servers provide tools and context that the agent can use when
 /// processing prompts.
 /// 
-/// See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
+/// See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/v1/draft/session-setup#mcp-servers)
 /// </summary>
 public abstract partial record McpServer;

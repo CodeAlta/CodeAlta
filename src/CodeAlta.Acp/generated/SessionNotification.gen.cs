@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Used to stream real-time progress and results during prompt processing.
 /// 
-/// See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/prompt-turn#3-agent-reports-output)
+/// See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#3-agent-reports-output)
 /// </summary>
 public sealed partial record SessionNotification
 {
@@ -21,7 +21,7 @@ public sealed partial record SessionNotification
     /// <summary>The actual update content.</summary>
     [JsonPropertyName("update")]
     public SessionUpdate Update { get; set; } = default!;
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

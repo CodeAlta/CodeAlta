@@ -15,7 +15,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record AuthCapabilities
 {
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Whether the client supports `terminal` authentication methods.  The client should set this to `true` only when it can reproduce the configured agent invocation in an interactive terminal. When `true`, the agent may include `terminal` entries in its authentication methods.</summary>

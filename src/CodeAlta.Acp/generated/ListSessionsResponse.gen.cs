@@ -14,7 +14,7 @@ public sealed partial record ListSessionsResponse
     /// <summary>Array of session information objects</summary>
     [JsonPropertyName("sessions")]
     public List<SessionInfo> Sessions { get; set; } = [];
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Opaque cursor token. If present, pass this in the next request's cursor parameter to fetch the next page. If absent, there are no more results.</summary>

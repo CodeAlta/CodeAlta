@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// Extension methods provide a way to add custom functionality while maintaining
 /// protocol compatibility.
 /// 
-/// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+/// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
 /// </summary>
 public partial record struct ExtRequest
 {

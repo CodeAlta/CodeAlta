@@ -16,39 +16,47 @@ namespace CodeAlta.Acp;
 /// Later updates modify the existing association's metadata, not its ownership.
 /// 
 /// Sent on the immediate parent session. The first update for an unknown
-/// [`SubagentUpdate::session_id`] announces the child and MUST be sent
+/// `sessionId` announces the child and MUST be sent
 /// before any live child traffic or live message naming the child as sender
 /// or recipient. Parents may message and reuse an announced child across
 /// multiple operations.
-/// Child events are delivered automatically on the same connection; no child
+/// Child events are delivered automatically on the same connection. No child
 /// load, resume, or subscription is needed.
 /// 
 /// Only the subagent session ID is required. Omitted patch fields keep their
-/// previous values; `null` clears them. Clearing capabilities disables child
+/// previous values. `null` clears them. Clearing capabilities disables child
 /// mutations. Clearing state leaves current activity unset/unconfirmed: it does
 /// not imply idle, stop work, or create an `unknown` state snapshot. A concrete
 /// state replaces the entire previous state object, not the session.
 /// The title and description provide the parent's display metadata for the
 /// child. They do not replace the content of individual messages or operations.
+/// `cwd` and `additionalDirectories` report where the Agent placed the child.
+/// While unset, each inherits the immediate parent's effective value.
 /// </summary>
 public sealed partial record SubagentUpdate
 {
     /// <summary>The opaque session ID identifying the child in all ACP messages.</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>Client-initiated session mutations permitted for this subagent session.  Omitted means unchanged; `null` clears the capability set and disables child mutations. If never supplied, no session mutations are permitted. Read-only operations retain their normal protocol semantics and capability requirements. A concrete object replaces the whole capability set.</summary>
+    /// <summary>Additional workspace roots for the child. Each path must be absolute.  Optional and nullable. Omitted means unchanged. `null` clears the reported value. While unset, the child inherits its immediate parent's effective additional directories, independently of `cwd`. A concrete array replaces the whole list. `[]` reports no additional directories. Clients use these values for the child's root set.</summary>
+    [JsonPropertyName("additionalDirectories")]
+    public List<string>? AdditionalDirectories { get; set; }
+    /// <summary>Client-initiated session mutations permitted for this subagent session.  Omitted means unchanged. `null` clears the capability set and disables child mutations. If never supplied, no session mutations are permitted. Read-only operations retain their normal protocol semantics and capability requirements. A concrete object replaces the whole capability set.</summary>
     [JsonPropertyName("capabilities")]
     public SubagentSessionCapabilities? Capabilities { get; set; }
-    /// <summary>The parent's human-readable description of the child's role or purpose.  Omitted means unchanged; `null` clears it. If unset, the Client chooses a fallback presentation. This is current display metadata, not the history of instructions sent to the child.</summary>
+    /// <summary>The child's working directory. Must be an absolute path.  Optional and nullable. Omitted means unchanged. `null` clears the reported value. While unset, the child inherits its immediate parent's effective working directory. Clients use this value for the child's root set and as the default terminal working directory.</summary>
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; set; }
+    /// <summary>The parent's human-readable description of the child's role or purpose.  Omitted means unchanged. `null` clears it. If unset, the Client chooses a fallback presentation. This is current display metadata, not the history of instructions sent to the child.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility) Omitted means unchanged; `null` removes the metadata.</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility) Omitted means unchanged. `null` removes the metadata.</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>Current state snapshot for the child session.  Omitted means unchanged; `null` clears the current activity without asserting idle or sending an `unknown` snapshot. A concrete state replaces the previous state object wholesale. If never supplied, the current activity is unset/unconfirmed.</summary>
+    /// <summary>Current state snapshot for the child session.  Omitted means unchanged. `null` clears the current activity without asserting idle or sending an `unknown` snapshot. A concrete state replaces the previous state object wholesale. If never supplied, the current activity is unset/unconfirmed.</summary>
     [JsonPropertyName("state")]
     public StateUpdate? State { get; set; }
-    /// <summary>The parent's human-readable display title for this child. It need not be unique.  Omitted means unchanged; `null` clears it. If unset, the Client chooses a fallback presentation.</summary>
+    /// <summary>The parent's human-readable display title for this child. It need not be unique.  Omitted means unchanged. `null` clears it. If unset, the Client chooses a fallback presentation.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 }

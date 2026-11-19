@@ -14,9 +14,9 @@ namespace CodeAlta.Acp;
 /// Outer ACP errors are reserved for binding and runtime failures.
 /// 
 /// Both branches require their carrier key. An error must be a non-null object.
-/// Unknown outer fields are ignored; inner result and error fields are preserved.
-/// Carrier `_meta` is optional; null or invalid values are treated as absent.
-/// Senders must include exactly one outcome; receivers prefer `result` if both are present.
+/// Unknown outer fields are ignored. Inner result and error fields are preserved.
+/// Carrier `_meta` is optional. Null or invalid values are treated as absent.
+/// Senders must include exactly one outcome. Receivers prefer `result` if both are present.
 /// </summary>
 public partial struct MessageMcpResponse
 {

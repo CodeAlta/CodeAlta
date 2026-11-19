@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Sent when the agent needs authorization before performing a sensitive operation.
 /// 
-/// See protocol docs: [Requesting Permission](https://agentclientprotocol.com/protocol/tool-calls#requesting-permission)
+/// See protocol docs: [Requesting Permission](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#requesting-permission)
 /// </summary>
 public sealed partial record RequestPermissionRequest
 {
@@ -24,7 +24,7 @@ public sealed partial record RequestPermissionRequest
     /// <summary>Details about the tool call requiring permission.</summary>
     [JsonPropertyName("toolCall")]
     public ToolCallUpdate ToolCall { get; set; } = default!;
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

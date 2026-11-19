@@ -7,11 +7,11 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// Allows for sending an arbitrary response to an [`ExtRequest`] that is not part of the ACP spec.
+/// Allows for sending an arbitrary response to an extension request that is not part of the ACP spec.
 /// Extension methods provide a way to add custom functionality while maintaining
 /// protocol compatibility.
 /// 
-/// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+/// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
 /// </summary>
 public partial record struct ExtResponse
 {

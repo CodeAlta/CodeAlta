@@ -14,7 +14,7 @@ public sealed partial record ElicitationCapabilities
     /// <summary>Whether the client supports form-based elicitation.  Optional. Omitted and `null` are equivalent and mean form support is not advertised. Supplying `{}` explicitly advertises form support.</summary>
     [JsonPropertyName("form")]
     public ElicitationFormCapabilities? Form { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Whether the client supports URL-based elicitation.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client supports URL-based elicitation.</summary>

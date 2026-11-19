@@ -7,13 +7,9 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// How the Agent combines a client-provided system prompt with its own instructions.
 /// 
-/// Unknown modes parse as [`SystemPromptMode::Other`] so they can be stored,
+/// Unknown modes are preserved so they can be stored,
 /// proxied, or forwarded. An Agent MUST return an error for a mode it does not
 /// support rather than treating it as `append` or `override`.
 /// </summary>

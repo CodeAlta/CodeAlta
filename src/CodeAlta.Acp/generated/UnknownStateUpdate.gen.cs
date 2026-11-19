@@ -19,11 +19,14 @@ namespace CodeAlta.Acp;
 /// snapshot normally.
 /// 
 /// This is not a task outcome or session closure. It does not cancel work, resolve
-/// pending requests, or revoke capabilities; capabilities are updated separately.
+/// pending requests, or revoke capabilities. If a control is no longer available,
+/// the Agent updates the capabilities explicitly. Unfinished tool calls and
+/// terminals stay as last reported. The Agent does not invent a final status
+/// for them, and Clients do not present them as confirmed live activity.
 /// </summary>
 public sealed partial record UnknownStateUpdate
 {
-    /// <summary>The _meta property is reserved by ACP for additional metadata. Implementations MUST NOT make assumptions about values at these keys. Optional; omitted and `null` mean no metadata for this state snapshot.</summary>
+    /// <summary>The _meta property is reserved by ACP for additional metadata. Implementations MUST NOT make assumptions about values at these keys. Optional. Omitted and `null` mean no metadata for this state snapshot.</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Request parameters for creating a new session.
 /// 
-/// See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/session-setup#creating-a-session)
+/// See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/v1/draft/session-setup#creating-a-session)
 /// </summary>
 public sealed partial record NewSessionRequest
 {
@@ -22,10 +22,13 @@ public sealed partial record NewSessionRequest
     /// <summary>Additional workspace roots for this session. Each path must be absolute.  These expand the session's filesystem scope without changing `cwd`, which remains the base for relative paths. When omitted or empty, no additional roots are activated for the new session.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Initial values for the session's config options.  Optional. Omitted and `null` are equivalent to an empty list. Clients MUST only send this when the Agent advertises `sessionCapabilities.options`.  The Agent applies the entries in list order, as if the Client had called `session/set_config_option` for each entry after the session was set up. Malformed entries and duplicate `configId` values fail the request with `-32602`. The Agent MUST ignore an entry whose `configId` is unknown, whose `type` does not match the option, or whose value is not allowed when it is applied. The `configOptions` in the response contain the values the session actually has. The Agent SHOULD NOT send `config_option_update` notifications for these entries, and SHOULD NOT send other `session/update` notifications caused by applying them before it responds.</summary>
+    [JsonPropertyName("configOptions")]
+    public List<InitialSessionConfigOption>? ConfigOptions { get; set; }
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  System-level instructions for the new session.  Optional. Omitted and `null` are equivalent and mean the Agent uses its own default instructions. Clients MUST only send this when the Agent advertises `sessionCapabilities.systemPrompt`.</summary>
+    /// <summary>System-level instructions for the new session.  Optional. Omitted and `null` are equivalent and mean the Agent uses its own default instructions. Clients MUST only send this when the Agent advertises `sessionCapabilities.systemPrompt`.</summary>
     [JsonPropertyName("systemPrompt")]
     public SystemPrompt? SystemPrompt { get; set; }
 }

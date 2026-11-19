@@ -18,22 +18,22 @@ public sealed partial record SessionMessage
     /// <summary>Identifier of this message within the enclosing session's transcript.</summary>
     [JsonPropertyName("messageId")]
     public MessageId MessageId { get; set; } = default!;
-    /// <summary>Omitted leaves content unchanged; `null` or `[]` clears it. A non-empty array replaces all content.</summary>
+    /// <summary>Omitted leaves content unchanged. `null` or `[]` clears it. A non-empty array replaces all content.</summary>
     [JsonPropertyName("content")]
     public List<ContentBlock>? Content { get; set; }
-    /// <summary>Omitted leaves metadata unchanged; `null` removes it.  Implementations MUST NOT make assumptions about values in `_meta`.</summary>
+    /// <summary>Omitted leaves metadata unchanged. `null` removes it.  Implementations MUST NOT make assumptions about values in `_meta`.</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>On an outgoing view, the `messageId` of the same message's incoming view in the recipient's transcript.  Optional and nullable: omission or `null` means not supplied and retains a known value, so it can arrive after the message starts streaming.</summary>
+    /// <summary>On an outgoing view, the `messageId` of the same message's incoming view in the recipient's transcript.  Omitted leaves the stored value unchanged. `null` clears it. A value replaces it. It can arrive after the message starts streaming.</summary>
     [JsonPropertyName("recipientMessageId")]
     public MessageId? RecipientMessageId { get; set; }
-    /// <summary>Optional receiving session identity; omission or `null` retains a known value.</summary>
+    /// <summary>The receiving session.  Omitted leaves the stored value unchanged. `null` clears it. A value replaces it.</summary>
     [JsonPropertyName("recipientSessionId")]
     public SessionId? RecipientSessionId { get; set; }
-    /// <summary>On an incoming view, the `messageId` of the same message's outgoing view in the sender's transcript.  Optional and nullable: omission or `null` means not supplied and retains a known value, so it can arrive after the message starts streaming.</summary>
+    /// <summary>On an incoming view, the `messageId` of the same message's outgoing view in the sender's transcript.  Omitted leaves the stored value unchanged. `null` clears it. A value replaces it. It can arrive after the message starts streaming.</summary>
     [JsonPropertyName("senderMessageId")]
     public MessageId? SenderMessageId { get; set; }
-    /// <summary>Optional sending session identity; omission or `null` retains a known value.</summary>
+    /// <summary>The sending session.  Omitted leaves the stored value unchanged. `null` clears it. A value replaces it.</summary>
     [JsonPropertyName("senderSessionId")]
     public SessionId? SenderSessionId { get; set; }
 }

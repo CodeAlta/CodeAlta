@@ -9,18 +9,15 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Content blocks represent displayable information in the Agent Client Protocol.
 /// 
-/// They provide a structured way to handle various types of user-facing content—whether
-/// it's text from language models, images for analysis, or embedded resources for context.
-/// 
 /// Content blocks appear in:
 /// - User prompts sent via `session/prompt`
 /// - Language model output streamed through `session/update` notifications
 /// - Progress updates and results from tool calls
 /// 
-/// This structure is compatible with the Model Context Protocol (MCP), enabling
-/// agents to seamlessly forward content from MCP tool outputs without transformation.
+/// This structure is compatible with the Model Context Protocol (MCP), so agents can
+/// forward content from MCP tool outputs without transformation.
 /// 
-/// See protocol docs: [Content](https://agentclientprotocol.com/protocol/content)
+/// See protocol docs: [Content](https://agentclientprotocol.com/protocol/v1/draft/content)
 /// </summary>
 public partial struct ContentBlock
 {

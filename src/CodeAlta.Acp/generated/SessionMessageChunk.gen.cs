@@ -24,7 +24,7 @@ public sealed partial record SessionMessageChunk
     /// <summary>Identifier of this message within the enclosing session's transcript.</summary>
     [JsonPropertyName("messageId")]
     public MessageId MessageId { get; set; } = default!;
-    /// <summary>Optional and nullable chunk-scoped metadata; omitted or `null` means none.  Implementations MUST NOT make assumptions about values in `_meta`.</summary>
+    /// <summary>Optional and nullable chunk-scoped metadata. Omitted or `null` means none.  Implementations MUST NOT make assumptions about values in `_meta`.</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

@@ -11,18 +11,18 @@ namespace CodeAlta.Acp;
 /// 
 /// An inner MCP error, distinct from an outer ACP binding or runtime error.
 /// 
-/// `code` and `message` are required and non-null. `data` is optional;
-/// explicit `null` is preserved separately from an omitted key.
+/// `code` and `message` are required and non-null. `data` is optional.
+/// Explicit `null` is preserved separately from an omitted key.
 /// </summary>
 public sealed partial record McpError
 {
-    /// <summary>Inner MCP error code; never an ACP error code.</summary>
+    /// <summary>Inner MCP error code. Never an ACP error code.</summary>
     [JsonPropertyName("code")]
     public int Code { get; set; }
     /// <summary>Inner MCP error message.</summary>
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
-    /// <summary>Optional error data; explicit null is retained.</summary>
+    /// <summary>Optional error data. Explicit null is retained.</summary>
     [JsonPropertyName("data")]
     public JsonElement? Data { get; set; }
 }

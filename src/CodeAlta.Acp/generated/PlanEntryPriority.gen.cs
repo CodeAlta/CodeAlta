@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Used to indicate the relative importance or urgency of different
 /// tasks in the execution plan.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
+/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v1/draft/agent-plan#plan-entries)
 /// </summary>
 public partial struct PlanEntryPriority
 {

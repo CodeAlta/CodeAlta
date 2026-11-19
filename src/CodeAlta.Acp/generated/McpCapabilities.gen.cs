@@ -11,16 +11,16 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record McpCapabilities
 {
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Agent supports [`McpServer::Acp`].</summary>
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Agent supports `acp` MCP servers.</summary>
     [JsonPropertyName("acp")]
     public bool? Acp { get; set; }
-    /// <summary>Agent supports [`McpServer::Http`].</summary>
+    /// <summary>Agent supports `http` MCP servers.</summary>
     [JsonPropertyName("http")]
     public bool? Http { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>Agent supports [`McpServer::Sse`].</summary>
+    /// <summary>Agent supports `sse` MCP servers.</summary>
     [JsonPropertyName("sse")]
     public bool? Sse { get; set; }
 }

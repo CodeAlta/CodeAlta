@@ -13,12 +13,12 @@ namespace CodeAlta.Acp;
 /// 
 /// Client-initiated session mutations permitted for a specific subagent session.
 /// 
-/// A mutation requires an explicit per-child capability; support for the method
+/// A mutation requires an explicit per-child capability. Support for the method
 /// on ordinary sessions does not grant support on a child.
 /// </summary>
 public sealed partial record SubagentSessionCapabilities
 {
-    /// <summary>Permits the client to cancel this child's current work without ending the session. Omitted or `null` means unsupported; an object (including `{}`) means supported.</summary>
+    /// <summary>Permits the client to cancel this child's current work without ending the session. Omitted or `null` means unsupported. An object (including `{}`) means supported.</summary>
     [JsonPropertyName("cancel")]
     public SessionCancelCapabilities? Cancel { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.</summary>

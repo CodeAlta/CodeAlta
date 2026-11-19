@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Tool calls progress through different statuses during their lifecycle.
 /// 
-/// See protocol docs: [Status](https://agentclientprotocol.com/protocol/tool-calls#status)
+/// See protocol docs: [Status](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#status)
 /// </summary>
 public partial struct ToolCallStatus
 {

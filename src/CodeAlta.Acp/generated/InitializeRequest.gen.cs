@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Sent by the client to establish connection and negotiate capabilities.
 /// 
-/// See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/initialization)
+/// See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/v1/draft/initialization)
 /// </summary>
 public sealed partial record InitializeRequest
 {
@@ -24,7 +24,7 @@ public sealed partial record InitializeRequest
     /// <summary>Information about the Client name and version sent to the Agent.  Note: in future versions of the protocol, this will be required.</summary>
     [JsonPropertyName("clientInfo")]
     public Implementation? ClientInfo { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

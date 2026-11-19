@@ -11,17 +11,17 @@ namespace CodeAlta.Acp;
 /// 
 /// Contains the user's message and any additional context.
 /// 
-/// See protocol docs: [User Message](https://agentclientprotocol.com/protocol/prompt-turn#1-user-message)
+/// See protocol docs: [User Message](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#1-user-message)
 /// </summary>
 public sealed partial record PromptRequest
 {
-    /// <summary>The blocks of content that compose the user's message.  As a baseline, the Agent MUST support [`ContentBlock::Text`] and [`ContentBlock::ResourceLink`], while other variants are optionally enabled via [`PromptCapabilities`].  The Client MUST adapt its interface according to [`PromptCapabilities`].  The client MAY include referenced pieces of context as either [`ContentBlock::Resource`] or [`ContentBlock::ResourceLink`].  When available, [`ContentBlock::Resource`] is preferred as it avoids extra round-trips and allows the message to include pieces of context from sources the agent may not have access to.</summary>
+    /// <summary>The blocks of content that compose the user's message.  As a baseline, the Agent MUST support `text` and `resource_link` content blocks, while other variants are optionally enabled via `PromptCapabilities`.  The Client MUST adapt its interface according to `PromptCapabilities`.  The client MAY include referenced pieces of context as either `resource` or `resource_link` content blocks.  When available, `resource` is preferred as it avoids extra round-trips and allows the message to include pieces of context from sources the agent may not have access to.</summary>
     [JsonPropertyName("prompt")]
     public List<ContentBlock> Prompt { get; set; } = [];
     /// <summary>The ID of the session to send this user message to</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

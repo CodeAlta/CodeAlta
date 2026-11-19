@@ -11,16 +11,22 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ClientSessionCapabilities
 {
-    /// <summary>Support for ID-addressed context compaction updates. Omitted or `null` means unsupported; `{}` advertises the complete compaction contract.</summary>
+    /// <summary>Support for ID-addressed context compaction updates. Omitted or `null` means unsupported. `{}` advertises the complete compaction contract.</summary>
     [JsonPropertyName("compaction")]
     public CompactionCapabilities? Compaction { get; set; }
     /// <summary>Config option capabilities supported by the client.  Omitted or `null` both mean the client does not advertise support for any config option extensions.</summary>
     [JsonPropertyName("configOptions")]
     public SessionConfigOptionsCapabilities? ConfigOptions { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Support for `cursor_update` session updates.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client handles `cursor_update`.</summary>
+    [JsonPropertyName("cursors")]
+    public SessionCursorsCapabilities? Cursors { get; set; }
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Support for live user-facing `notice` session updates.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client can present notices to the user.</summary>
     [JsonPropertyName("notices")]
     public NoticeCapabilities? Notices { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Support for `prompt_suggestions_update` session updates.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client can offer prompt suggestions made of `text` and `resource_link` content blocks.</summary>
+    [JsonPropertyName("promptSuggestions")]
+    public PromptSuggestionsCapabilities? PromptSuggestions { get; set; }
 }

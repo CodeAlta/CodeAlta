@@ -10,7 +10,7 @@ namespace CodeAlta.Acp;
 /// A context compaction upsert. The first notification fixes the compaction's
 /// timeline position. Later updates with the same ID patch that entity in place.
 /// Agents MUST only send this update when the Client advertised
-/// [`ClientSessionCapabilities::compaction`].
+/// the `session.compaction` Client capability.
 /// 
 /// `summary`, `error`, and `_meta` have patch semantics: omission leaves the
 /// stored value unchanged, `null` clears it, and a concrete value replaces it.

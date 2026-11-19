@@ -10,7 +10,7 @@ namespace CodeAlta.Acp;
 /// Status of a plan entry in the execution flow.
 /// 
 /// Tracks the lifecycle of each task from planning through completion.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
+/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v1/draft/agent-plan#plan-entries)
 /// </summary>
 public partial struct PlanEntryStatus
 {

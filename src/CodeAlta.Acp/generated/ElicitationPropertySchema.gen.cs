@@ -10,8 +10,8 @@ namespace CodeAlta.Acp;
 /// Property schema for elicitation form fields.
 /// 
 /// Each variant corresponds to a JSON Schema `"type"` value.
-/// Single-select enums use the `String` variant with `enum` or `oneOf` set.
-/// Multi-select enums use the `Array` variant.
+/// Single-select enums use `type: "string"` with `enum` or `oneOf` set.
+/// Multi-select enums use `type: "array"`.
 /// </summary>
 public partial struct ElicitationPropertySchema
 {

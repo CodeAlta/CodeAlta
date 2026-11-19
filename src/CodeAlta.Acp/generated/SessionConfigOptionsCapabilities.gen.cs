@@ -14,7 +14,7 @@ public sealed partial record SessionConfigOptionsCapabilities
     /// <summary>Whether the client supports boolean session configuration options.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means agents may include `type: "boolean"` entries in `configOptions`, and the client may send `session/set_config_option` requests with `type: "boolean"` and a boolean `value`.</summary>
     [JsonPropertyName("boolean")]
     public BooleanConfigOptionCapabilities? Boolean { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

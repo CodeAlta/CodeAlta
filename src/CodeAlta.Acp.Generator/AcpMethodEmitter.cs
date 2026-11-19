@@ -93,7 +93,7 @@ internal static class AcpMethodEmitter
             .Append(Escape(sourceInfo.SourceKind))
             .AppendLine("\";");
         builder.Append("    public const string CompiledAgainstSchemaSource = \"")
-            .Append(Escape(sourceInfo.SourceDisplayName))
+            .Append(Escape(SourceNameOf(sourceInfo)))
             .AppendLine("\";");
         builder.Append("    public const string CompiledAgainstRepository = \"")
             .Append(Escape(sourceInfo.RepositoryUrl))
@@ -102,7 +102,7 @@ internal static class AcpMethodEmitter
             .Append(surface == AcpSurface.Stable ? "stable" : "unstable")
             .AppendLine("\";");
         builder.Append("    public const string CompiledAgainstSchemaPath = \"")
-            .Append(Escape(sourceInfo.SchemaPath))
+            .Append(Escape(RepositoryPathOf(sourceInfo.SchemaPath)))
             .AppendLine("\";");
         builder.Append("    public const string CompiledAgainstGitRef = \"")
             .Append(Escape(sourceInfo.GitRef ?? string.Empty))
@@ -125,9 +125,11 @@ internal static class AcpMethodEmitter
         var byMethod = new Dictionary<(string Method, string Side), AcpMethodEntry>();
         foreach (var def in defs)
         {
+            // The method of the definition itself comes first: a definition that only extends another one (the request of
+            // `proxy/initialize` is the one of `initialize`) resolves to it, and would take its method.
             var schema = SchemaWalker.Resolve(def.Schema);
-            var methodName = GetExtensionDataString(schema, "x-method");
-            var side = GetExtensionDataString(schema, "x-side");
+            var methodName = GetExtensionDataString(def.Schema, "x-method") ?? GetExtensionDataString(schema, "x-method");
+            var side = GetExtensionDataString(def.Schema, "x-side") ?? GetExtensionDataString(schema, "x-side");
             if (methodName is null || side is null)
             {
                 continue;
@@ -184,6 +186,24 @@ internal static class AcpMethodEmitter
         }
 
         return SchemaWalker.ToPascalCase(methodName.Replace("/", "_", StringComparison.Ordinal));
+    }
+
+    // What the schema was read from, without the folders of this computer: the address of a download, else the name of
+    // the file or folder.
+    private static string SourceNameOf(AcpSchemaSourceInfo sourceInfo)
+        => sourceInfo.SourceDisplayName.StartsWith("https://", StringComparison.Ordinal)
+            ? sourceInfo.SourceDisplayName
+            : Path.GetFileName(sourceInfo.SourceDisplayName.TrimEnd('/', '\\'));
+
+    // The path of the schema in the repository ("schema/v1/schema.unstable.json"), not where this computer keeps it.
+    private static string RepositoryPathOf(string schemaPath)
+    {
+        // The layouts of the repository: schema/<file>, or schema/<protocol version>/<file>. Any other folder is of this computer.
+        var segments = schemaPath.Split('/', '\\');
+        if (segments.Length >= 2 && segments[^2] == "schema") return "schema/" + segments[^1];
+        if (segments.Length >= 3 && segments[^3] == "schema" && segments[^2].Length > 1 && segments[^2][0] == 'v' && segments[^2].AsSpan(1).IndexOfAnyExceptInRange('0', '9') < 0)
+            return string.Join('/', segments[^3..]);
+        return segments[^1];
     }
 
     private static string? GetExtensionDataString(JsonSchema schema, string key)

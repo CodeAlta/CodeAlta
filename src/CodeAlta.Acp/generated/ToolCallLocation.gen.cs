@@ -12,17 +12,17 @@ namespace CodeAlta.Acp;
 /// Enables clients to implement "follow-along" features that track
 /// which files the agent is working with in real-time.
 /// 
-/// See protocol docs: [Following the Agent](https://agentclientprotocol.com/protocol/tool-calls#following-the-agent)
+/// See protocol docs: [Following the Agent](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#following-the-agent)
 /// </summary>
 public sealed partial record ToolCallLocation
 {
     /// <summary>The absolute file path being accessed or modified.</summary>
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
-    /// <summary>Optional line number within the file.</summary>
+    /// <summary>Optional 1-based line number within the file.</summary>
     [JsonPropertyName("line")]
     public uint? Line { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

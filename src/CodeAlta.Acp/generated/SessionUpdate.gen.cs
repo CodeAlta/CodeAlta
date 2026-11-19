@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// These updates provide real-time feedback about the agent's progress.
 /// 
-/// See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/prompt-turn#3-agent-reports-output)
+/// See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#3-agent-reports-output)
 /// </summary>
 public partial struct SessionUpdate
 {

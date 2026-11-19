@@ -13,15 +13,18 @@ namespace CodeAlta.Acp;
 /// 
 /// Optionally, they **MAY** support other session methods and notifications by specifying additional capabilities.
 /// 
-/// Note: `session/load` is still handled by the top-level `load_session` capability. This will be unified in future versions of the protocol.
+/// Note: `session/load` is still handled by the top-level `loadSession` capability. This will be unified in future versions of the protocol.
 /// 
-/// See protocol docs: [Session Capabilities](https://agentclientprotocol.com/protocol/initialization#session-capabilities)
+/// See protocol docs: [Session Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#session-capabilities)
 /// </summary>
 public sealed partial record SessionCapabilities
 {
     /// <summary>Whether the agent supports `additionalDirectories` on supported session lifecycle requests.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports `additionalDirectories` on supported session lifecycle requests.  Agents that also support `session/list` may return `SessionInfo.additionalDirectories` to report the complete ordered additional-root list associated with a listed session.</summary>
     [JsonPropertyName("additionalDirectories")]
     public SessionAdditionalDirectoriesCapabilities? AdditionalDirectories { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/archive` and `session/unarchive`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports both methods, the `archived` filter on `session/list`, and `SessionInfo.archived`. Agents that advertise it MUST also advertise `sessionCapabilities.list`.</summary>
+    [JsonPropertyName("archive")]
+    public SessionArchiveCapabilities? Archive { get; set; }
     /// <summary>Whether the agent supports `session/close`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports closing sessions.</summary>
     [JsonPropertyName("close")]
     public SessionCloseCapabilities? Close { get; set; }
@@ -34,13 +37,22 @@ public sealed partial record SessionCapabilities
     /// <summary>Whether the agent supports `session/list`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports listing sessions.</summary>
     [JsonPropertyName("list")]
     public SessionListCapabilities? List { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/options`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports `session/options` and accepts initial config option values on session setup requests.</summary>
+    [JsonPropertyName("options")]
+    public SessionOptionsCapabilities? Options { get; set; }
     /// <summary>Whether the agent supports `session/resume`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports resuming sessions.</summary>
     [JsonPropertyName("resume")]
     public SessionResumeCapabilities? Resume { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `systemPrompt` on session lifecycle requests.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports `systemPrompt` in `append` mode.</summary>
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/status`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports checking session status.</summary>
+    [JsonPropertyName("status")]
+    public SessionStatusCapabilities? Status { get; set; }
+    /// <summary>Whether the agent supports `systemPrompt` on session lifecycle requests.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports `systemPrompt` in `append` mode.</summary>
     [JsonPropertyName("systemPrompt")]
     public SessionSystemPromptCapabilities? SystemPrompt { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/set_title`.  Agents report titles through `session/list` and `session_info_update` without this capability. It only advertises that Clients can set titles.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports setting session titles.</summary>
+    [JsonPropertyName("title")]
+    public SessionTitleCapabilities? Title { get; set; }
 }

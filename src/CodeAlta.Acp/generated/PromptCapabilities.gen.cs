@@ -9,8 +9,8 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Prompt capabilities supported by the agent in `session/prompt` requests.
 /// 
-/// Baseline agent functionality requires support for [`ContentBlock::Text`]
-/// and [`ContentBlock::ResourceLink`] in prompt requests.
+/// Baseline agent functionality requires support for `text`
+/// and `resource_link` content blocks in prompt requests.
 /// 
 /// Other variants must be explicitly opted in to.
 /// Capabilities for different types of content in prompt requests.
@@ -18,20 +18,20 @@ namespace CodeAlta.Acp;
 /// Indicates which content types beyond the baseline (text and resource links)
 /// the agent can process.
 /// 
-/// See protocol docs: [Prompt Capabilities](https://agentclientprotocol.com/protocol/initialization#prompt-capabilities)
+/// See protocol docs: [Prompt Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#prompt-capabilities)
 /// </summary>
 public sealed partial record PromptCapabilities
 {
-    /// <summary>Agent supports [`ContentBlock::Audio`].</summary>
+    /// <summary>Agent supports `audio` content blocks.</summary>
     [JsonPropertyName("audio")]
     public bool? Audio { get; set; }
-    /// <summary>Agent supports embedded context in `session/prompt` requests.  When enabled, the Client is allowed to include [`ContentBlock::Resource`] in prompt requests for pieces of context that are referenced in the message.</summary>
+    /// <summary>Agent supports embedded context in `session/prompt` requests.  When enabled, the Client is allowed to include `resource` content blocks in prompt requests for pieces of context that are referenced in the message.</summary>
     [JsonPropertyName("embeddedContext")]
     public bool? EmbeddedContext { get; set; }
-    /// <summary>Agent supports [`ContentBlock::Image`].</summary>
+    /// <summary>Agent supports `image` content blocks.</summary>
     [JsonPropertyName("image")]
     public bool? Image { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

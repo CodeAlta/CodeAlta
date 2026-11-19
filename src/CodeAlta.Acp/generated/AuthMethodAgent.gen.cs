@@ -19,10 +19,10 @@ public sealed partial record AuthMethodAgent
     /// <summary>Human-readable name of the authentication method.</summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
-    /// <summary>Optional description providing more details about this authentication method.</summary>
+    /// <summary>Optional human-readable description of this authentication method.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

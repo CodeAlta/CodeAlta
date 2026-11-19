@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Reasons why an agent stops processing a prompt turn.
 /// 
-/// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/prompt-turn#stop-reasons)
+/// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#stop-reasons)
 /// </summary>
 public partial struct StopReason
 {

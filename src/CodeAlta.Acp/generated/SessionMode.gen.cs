@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// A mode the agent can operate in.
 /// 
-/// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+/// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
 /// </summary>
 public sealed partial record SessionMode
 {
@@ -22,7 +22,7 @@ public sealed partial record SessionMode
     /// <summary>Optional human-readable details shown with this protocol object.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

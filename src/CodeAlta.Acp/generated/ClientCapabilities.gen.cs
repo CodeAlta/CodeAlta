@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// Advertised during initialization to inform the agent about
 /// available features and methods.
 /// 
-/// See protocol docs: [Client Capabilities](https://agentclientprotocol.com/protocol/initialization#client-capabilities)
+/// See protocol docs: [Client Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#client-capabilities)
 /// </summary>
 public sealed partial record ClientCapabilities
 {
@@ -25,7 +25,7 @@ public sealed partial record ClientCapabilities
     /// <summary>File system capabilities supported by the client. Determines which file operations the agent can request.</summary>
     [JsonPropertyName("fs")]
     public FileSystemCapabilities Fs { get; set; } = default!;
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the client supports `plan_update` and `plan_removed` session updates.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client can receive both update types.</summary>

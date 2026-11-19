@@ -13,11 +13,11 @@ namespace CodeAlta.Acp;
 /// 
 /// Capability to cancel work in a subagent session without ending that session.
 /// 
-/// Supplying `{}` advertises support; an omitted or `null` `cancel` does not.
+/// Supplying `{}` advertises support. An omitted or `null` `cancel` does not.
 /// </summary>
 public sealed partial record SessionCancelCapabilities
 {
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

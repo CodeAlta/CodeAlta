@@ -9,11 +9,11 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// File system capabilities that a client may support.
 /// 
-/// See protocol docs: [FileSystem](https://agentclientprotocol.com/protocol/initialization#filesystem)
+/// See protocol docs: [FileSystem](https://agentclientprotocol.com/protocol/v1/draft/initialization#filesystem)
 /// </summary>
 public sealed partial record FileSystemCapabilities
 {
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Whether the Client supports `fs/read_text_file` requests.</summary>

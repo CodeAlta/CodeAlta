@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record RequiresActionStateUpdate
 {
-    /// <summary>The _meta property is reserved by ACP for additional metadata. Implementations MUST NOT make assumptions about values at these keys. Optional; omitted and `null` mean no metadata for this state snapshot.</summary>
+    /// <summary>The _meta property is reserved by ACP for additional metadata. Implementations MUST NOT make assumptions about values at these keys. Optional. Omitted and `null` mean no metadata for this state snapshot.</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

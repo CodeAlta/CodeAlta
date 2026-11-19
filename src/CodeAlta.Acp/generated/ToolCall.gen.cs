@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// Tool calls are actions that the agent executes on behalf of the language model,
 /// such as reading files, executing code, or fetching data from external sources.
 /// 
-/// See protocol docs: [Tool Calls](https://agentclientprotocol.com/protocol/tool-calls)
+/// See protocol docs: [Tool Calls](https://agentclientprotocol.com/protocol/v1/draft/tool-calls)
 /// </summary>
 public sealed partial record ToolCall
 {
@@ -31,7 +31,7 @@ public sealed partial record ToolCall
     /// <summary>File locations affected by this tool call. Enables "follow-along" features in clients.</summary>
     [JsonPropertyName("locations")]
     public List<ToolCallLocation>? Locations { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Programmatic name of the tool being invoked.  This field is optional. Omitting it or sending `null` both mean that no tool name is available.</summary>

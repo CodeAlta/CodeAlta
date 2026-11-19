@@ -23,7 +23,7 @@ public sealed partial record MultiSelectPropertySchema
     /// <summary>Maximum number of items to select.  Optional. Omitted and `null` are equivalent and mean there is no maximum selection count.</summary>
     [JsonPropertyName("maxItems")]
     public ulong? MaxItems { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Minimum number of items to select.  Optional. Omitted and `null` are equivalent and mean there is no minimum selection count.</summary>

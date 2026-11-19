@@ -9,14 +9,14 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Notification to cancel an ongoing request.
 /// 
-/// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/cancellation)
+/// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v1/draft/cancellation)
 /// </summary>
 public sealed partial record CancelRequestNotification
 {
     /// <summary>The ID of the request to cancel.</summary>
     [JsonPropertyName("requestId")]
     public RequestId RequestId { get; set; } = default!;
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

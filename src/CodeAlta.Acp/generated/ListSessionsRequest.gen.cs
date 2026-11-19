@@ -13,13 +13,16 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ListSessionsRequest
 {
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Filter sessions by archive state.  Optional. Omitted and `null` are equivalent and mean `exclude`. Only send this when the Agent advertises the `sessionCapabilities.archive` capability. The filter combines with `cwd` and applies before pagination. Clients keep the same value when following `nextCursor`.</summary>
+    [JsonPropertyName("archived")]
+    public SessionArchiveFilter? Archived { get; set; }
     /// <summary>Opaque cursor token from a previous response's nextCursor field for cursor-based pagination</summary>
     [JsonPropertyName("cursor")]
     public string? Cursor { get; set; }
     /// <summary>Filter sessions by working directory. Must be an absolute path.</summary>
     [JsonPropertyName("cwd")]
     public string? Cwd { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

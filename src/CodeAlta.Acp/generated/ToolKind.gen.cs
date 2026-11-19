@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// Tool kinds help clients choose appropriate icons and optimize how they
 /// display tool execution progress.
 /// 
-/// See protocol docs: [Creating](https://agentclientprotocol.com/protocol/tool-calls#creating)
+/// See protocol docs: [Creating](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#creating)
 /// </summary>
 public partial struct ToolKind
 {

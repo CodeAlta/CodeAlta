@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// Notices are live events rather than session history. Agents must not rely on
 /// a notice being received, displayed, or seen by the user.
 /// Agents MUST only send notices when the Client advertised
-/// [`ClientSessionCapabilities::notices`]. Otherwise, Agents may use an agent
+/// the `session.notices` Client capability. Otherwise, Agents may use an agent
 /// message when the information should still be surfaced to the user.
 /// 
 /// See RFD: [Session Notices](https://agentclientprotocol.com/rfds/session-notices)

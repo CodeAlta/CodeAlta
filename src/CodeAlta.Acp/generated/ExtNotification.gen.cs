@@ -7,11 +7,11 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
+/// Allows either side to send an arbitrary notification that is not part of the ACP spec.
 /// Extension notifications provide a way to send one-way messages for custom functionality
 /// while maintaining protocol compatibility.
 /// 
-/// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+/// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
 /// </summary>
 public partial record struct ExtNotification
 {

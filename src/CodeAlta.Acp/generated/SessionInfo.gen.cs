@@ -20,7 +20,10 @@ public sealed partial record SessionInfo
     /// <summary>Additional workspace roots reported for this session. Each path must be absolute.  When present, this is the complete ordered additional-root list reported by the Agent. Omitted and empty values are equivalent: the response reports no additional roots.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the session is archived.  Optional. Omitted and `null` are equivalent and mean the archive state is not reported. Agents that advertise the `sessionCapabilities.archive` capability MUST include it on every listed session.</summary>
+    [JsonPropertyName("archived")]
+    public bool? Archived { get; set; }
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Human-readable title for the session</summary>

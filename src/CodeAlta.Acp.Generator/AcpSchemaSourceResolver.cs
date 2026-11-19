@@ -97,9 +97,10 @@ internal static class AcpSchemaSourceResolver
         var extractedRoot = ExtractZipToTemp(zipPath);
         var schemaPath = ResolveExtractedSchemaPath(extractedRoot, options.Surface);
         var metaPath = ResolveMetaPath(schemaPath, options.Surface);
+        // The archive is in a temporary folder of this computer: the generated metadata names what it was downloaded from.
         return new AcpSchemaSourceInfo(
             "github-archive",
-            zipPath,
+            $"https://github.com/{options.GithubRepo}/tree/{options.GithubRef}",
             $"https://github.com/{options.GithubRepo}",
             options.GithubRef,
             schemaPath,

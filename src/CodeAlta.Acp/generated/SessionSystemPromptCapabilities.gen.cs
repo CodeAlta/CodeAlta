@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Capabilities for client-provided system prompts.
 /// 
 /// Supplying `{}` means the agent supports `systemPrompt` on session lifecycle
@@ -18,7 +14,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record SessionSystemPromptCapabilities
 {
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Delivery modes the agent supports in addition to `append`.  Optional. Omitted or `null` both mean the agent supports only `append`.</summary>

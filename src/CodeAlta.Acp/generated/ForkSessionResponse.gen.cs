@@ -21,10 +21,10 @@ public sealed partial record ForkSessionResponse
     /// <summary>Initial session configuration options if supported by the Agent.</summary>
     [JsonPropertyName("configOptions")]
     public List<SessionConfigOption>? ConfigOptions { get; set; }
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>Initial mode state if supported by the Agent  See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)</summary>
+    /// <summary>Initial mode state if supported by the Agent  See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)</summary>
     [JsonPropertyName("modes")]
     public SessionModeState? Modes { get; set; }
 }

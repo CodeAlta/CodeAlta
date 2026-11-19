@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Session-scoped elicitation, optionally tied to a specific tool call.
 /// 
-/// When `tool_call_id` is set, the elicitation is tied to a specific tool call.
+/// When `toolCallId` is set, the elicitation is tied to a specific tool call.
 /// This is useful when an agent receives an elicitation from an MCP server
 /// during a tool call and needs to redirect it to the user.
 /// </summary>

@@ -9,10 +9,10 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// A unique identifier for a conversation session between a client and agent.
 /// 
-/// Sessions maintain their own context, conversation history, and state,
-/// allowing multiple independent interactions with the same agent.
+/// Each session has its own context, conversation history, and state, so one
+/// agent can run several independent sessions.
 /// 
-/// See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)
+/// See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/v1/draft/session-setup#session-id)
 /// </summary>
 internal sealed class SessionIdJsonConverter : JsonConverter<SessionId>
 {

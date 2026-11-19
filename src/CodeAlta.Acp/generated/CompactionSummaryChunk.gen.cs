@@ -10,7 +10,7 @@ namespace CodeAlta.Acp;
 /// A content block appended to a compaction's summary. A first-seen ID creates
 /// an in-progress compaction. Chunks append in receive order.
 /// Agents MUST only send this update when the Client advertised
-/// [`ClientSessionCapabilities::compaction`].
+/// the `session.compaction` Client capability.
 /// </summary>
 public sealed partial record CompactionSummaryChunk
 {

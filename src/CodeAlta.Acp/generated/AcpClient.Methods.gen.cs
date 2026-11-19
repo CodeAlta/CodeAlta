@@ -6,6 +6,17 @@ namespace CodeAlta.Acp;
 public sealed partial class AcpClient
 {
     /// <summary>
+    /// Sends the ACP `auth/status` call.
+    /// </summary>
+    public Task<AuthStatusResponse> AuthStatusAsync(
+        AuthStatusRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<AuthStatusRequest, AuthStatusResponse>("auth/status", parameters, cancellationToken);
+    }
+
+    /// <summary>
     /// Sends the ACP `authenticate` call.
     /// </summary>
     public Task<AuthenticateResponse> AuthenticateAsync(
@@ -80,6 +91,17 @@ public sealed partial class AcpClient
     {
         ArgumentNullException.ThrowIfNull(parameters);
         return _transport.SendRequestAsync<SetProviderRequest, SetProviderResponse>("providers/set", parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the ACP `session/archive` call.
+    /// </summary>
+    public Task<ArchiveSessionResponse> SessionArchiveAsync(
+        ArchiveSessionRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<ArchiveSessionRequest, ArchiveSessionResponse>("session/archive", parameters, cancellationToken);
     }
 
     /// <summary>
@@ -160,6 +182,17 @@ public sealed partial class AcpClient
     }
 
     /// <summary>
+    /// Sends the ACP `session/options` call.
+    /// </summary>
+    public Task<SessionOptionsResponse> SessionOptionsAsync(
+        SessionOptionsRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<SessionOptionsRequest, SessionOptionsResponse>("session/options", parameters, cancellationToken);
+    }
+
+    /// <summary>
     /// Sends the ACP `session/prompt` call.
     /// </summary>
     public Task<PromptResponse> SessionPromptAsync(
@@ -201,6 +234,39 @@ public sealed partial class AcpClient
     {
         ArgumentNullException.ThrowIfNull(parameters);
         return _transport.SendRequestAsync<SetSessionModeRequest, SetSessionModeResponse>("session/set_mode", parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the ACP `session/set_title` call.
+    /// </summary>
+    public Task<SetSessionTitleResponse> SessionSetTitleAsync(
+        SetSessionTitleRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<SetSessionTitleRequest, SetSessionTitleResponse>("session/set_title", parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the ACP `session/status` call.
+    /// </summary>
+    public Task<SessionStatusResponse> SessionStatusAsync(
+        SessionStatusRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<SessionStatusRequest, SessionStatusResponse>("session/status", parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the ACP `session/unarchive` call.
+    /// </summary>
+    public Task<UnarchiveSessionResponse> SessionUnarchiveAsync(
+        UnarchiveSessionRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<UnarchiveSessionRequest, UnarchiveSessionResponse>("session/unarchive", parameters, cancellationToken);
     }
 
 }

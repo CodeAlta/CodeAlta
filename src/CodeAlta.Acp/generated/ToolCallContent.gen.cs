@@ -12,7 +12,7 @@ namespace CodeAlta.Acp;
 /// Tool calls can produce different types of content including
 /// standard content blocks (text, images) or file diffs.
 /// 
-/// See protocol docs: [Content](https://agentclientprotocol.com/protocol/tool-calls#content)
+/// See protocol docs: [Content](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#content)
 /// </summary>
 public partial struct ToolCallContent
 {

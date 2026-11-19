@@ -11,7 +11,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Represents a task or goal that the assistant intends to accomplish
 /// as part of fulfilling the user's request.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
+/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v1/draft/agent-plan#plan-entries)
 /// </summary>
 public sealed partial record PlanEntry
 {
@@ -24,7 +24,7 @@ public sealed partial record PlanEntry
     /// <summary>Current execution status of this task.</summary>
     [JsonPropertyName("status")]
     public PlanEntryStatus Status { get; set; } = default!;
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }

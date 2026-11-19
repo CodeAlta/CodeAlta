@@ -13,14 +13,14 @@ namespace CodeAlta.Acp;
 /// Agents report plans to clients to provide visibility into their execution strategy.
 /// Plans can evolve during execution as the agent discovers new requirements or completes tasks.
 /// 
-/// See protocol docs: [Agent Plan](https://agentclientprotocol.com/protocol/agent-plan)
+/// See protocol docs: [Agent Plan](https://agentclientprotocol.com/protocol/v1/draft/agent-plan)
 /// </summary>
 public sealed partial record Plan
 {
     /// <summary>The list of tasks to be accomplished.  When updating a plan, the agent must send a complete list of all entries with their current status. The client replaces the entire plan with each update.</summary>
     [JsonPropertyName("entries")]
     public List<PlanEntry> Entries { get; set; } = [];
-    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
 }
