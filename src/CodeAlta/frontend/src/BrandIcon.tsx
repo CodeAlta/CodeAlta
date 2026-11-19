@@ -1,4 +1,4 @@
-import { useId, type CSSProperties } from "react";
+import { useId, useMemo, type CSSProperties } from "react";
 import { brandIcons, type BrandIconData } from "./brandIcons.gen";
 
 /** The id of a brand whose logo the app can draw, as a provider names it with `icon` in the configuration. */
@@ -34,7 +34,10 @@ export function BrandIcon({ name, size = 16, color, title, className }: { name: 
   const tint = color ?? (colored ? undefined : icon.tint);
   const style = tint === undefined ? undefined
     : { "--brand-tint": tint, "--brand-tint-dark": color ?? icon.darkTint ?? tint } as CSSProperties;
+  // The same object while the drawing stays: React puts the markup in the document again for another object, whatever
+  // it holds, and every render of the window would draw every logo of the page again.
+  const markup = useMemo(() => ({ __html: drawing }), [drawing]);
   return <svg className={className ? `brand-icon ${className}` : "brand-icon"} data-brand={name} viewBox="0 0 24 24" width={size} height={size}
     fill="currentColor" fillRule={!colored && icon.evenodd ? "evenodd" : undefined} style={style} focusable="false"
-    role={title ? "img" : undefined} aria-label={title} aria-hidden={title ? undefined : true} dangerouslySetInnerHTML={{ __html: drawing }} />;
+    role={title ? "img" : undefined} aria-label={title} aria-hidden={title ? undefined : true} dangerouslySetInnerHTML={markup} />;
 }
