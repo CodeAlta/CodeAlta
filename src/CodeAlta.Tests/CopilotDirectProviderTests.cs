@@ -623,6 +623,82 @@ public sealed class CopilotDirectProviderTests
         }
     }
 
+    // The skills a prompt names as `/name`: the notes of the host reach Copilot as text parts of the user message, each
+    // before what was typed.
+    [TestMethod]
+    public async Task CopilotDirect_ChatCompletions_SendsTheSkillNotesOfAPrompt_BeforeTheTypedText()
+    {
+        using var temp = TestTempDirectory.Create();
+        string? body = null;
+        var handler = new StubHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    data: {"id":"chatcmpl-skills","model":"gpt-test","choices":[{"delta":{"content":"grill-me, tdd"}}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}
+
+                    data: [DONE]
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream"),
+            };
+        });
+        var providerRuntime = new CopilotDirectModelProviderRuntime(new CopilotDirectModelProviderRuntimeOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new CopilotDirectProviderOptions
+                {
+                    ProviderKey = "github-copilot",
+                    Auth = new CopilotDirectAuthOptions
+                    {
+                        AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                        CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_SKILLS_TOKEN",
+                    },
+                    HttpClient = new HttpClient(handler),
+                },
+            },
+        });
+        const string typed = "/grill-me the plan, then /tdd";
+        const string grilling = "The user activated the CodeAlta skill 'grill-me'.\n\n<skill_content name=\"grill-me\">\nAsk questions.\n</skill_content>";
+        const string tdd = "The user activated the CodeAlta skill 'tdd'.\n\n<skill_content name=\"tdd\">\nWrite the test first.\n</skill_content>";
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_SKILLS_TOKEN", "test-token");
+        try
+        {
+            await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+            {
+                Model = "gpt-test",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+            }).ConfigureAwait(false);
+            _ = await session.SendAsync(new AgentSendOptions
+            {
+                Input = new AgentInput(
+                [
+                    new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, grilling),
+                    new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, tdd),
+                    new AgentInputItem.Text(typed),
+                ]),
+            }, CancellationToken.None).ConfigureAwait(false);
+
+            Assert.IsNotNull(body);
+            var user = JsonNode.Parse(body)!["messages"]!.AsArray().Last(static message => (string?)message!["role"] == "user")!;
+            var texts = user["content"]!.AsArray().Select(static part => (string?)part!["text"]).ToArray();
+            CollectionAssert.AreEqual(new[] { grilling, tdd, typed }, texts,
+                "each skill is a text part of the user message, in the order of the prompt, before what was typed");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_SKILLS_TOKEN", null);
+            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
     [TestMethod]
     public async Task CopilotDirect_AnthropicMessages_UsesNativeStreamingAndKeepsSharedHttpClientUsable()
     {

@@ -4,9 +4,9 @@ import { clampQueueCount, createComposerQueue, queuePreview } from "./composerQu
 import type { SessionReceiptView, SessionSendRequest, SessionSteerRequest } from "#neoastra";
 
 const send = (key: string, text = "queued text"): SessionSendRequest => ({ expectedEpoch: "epoch", sessionId: "session", clientRequestId: key,
-  text, selection: null, references: null, images: null });
+  text, selection: null, references: null, skills: true, images: null });
 const steer = (key: string, text = "steer text"): SessionSteerRequest => ({ expectedEpoch: "epoch", sessionId: "session", clientRequestId: key,
-  expectedRuntimeInstanceId: "runtime", expectedAttachmentGeneration: "1", expectedRunId: "run", text });
+  expectedRuntimeInstanceId: "runtime", expectedAttachmentGeneration: "1", expectedRunId: "run", text, skills: true });
 const receipt = (key: string, kind: string, outcome: string | null = "Completed"): SessionReceiptView => ({ clientRequestId: key, sessionId: "session",
   operationId: "operation", targetOperationId: null, kind, state: outcome ? "terminal" : "pending", outcome, code: null, runId: "run" });
 

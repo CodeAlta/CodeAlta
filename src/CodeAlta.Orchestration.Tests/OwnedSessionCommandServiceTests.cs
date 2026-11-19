@@ -1841,6 +1841,48 @@ public sealed class OwnedSessionCommandServiceTests
     }, reviewPermissions: true);
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public Task SkillSend_GivesEachNamedSkillOnceBeforeTheTypedText_WhenTheComposerAsks(bool skills) => Fixture.RunAsync(async f =>
+    {
+        const string typed = "/fixture-builtin and /unknown-skill, then /FIXTURE-builtin again";
+        var admission = f.AdmitSend(new OwnedTextSendRequest("skill-send", f.SessionId, typed) { Skills = skills });
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "skill send");
+        var items = f.Provider.Input!.Items;
+        var notes = items.OfType<AgentInputItem.HostContext>().Where(static item => item.Kind == AgentInputItem.HostContext.SkillKind).ToArray();
+        Assert.HasCount(skills ? 1 : 0, notes);
+        if (skills)
+        {
+            Assert.AreSame(notes[0], items[0], "The content of a skill goes before the text of the prompt.");
+            StringAssert.Contains(notes[0].Value, "<skill_content name=\"fixture-builtin\"");
+        }
+        Assert.AreEqual(typed, items.OfType<AgentInputItem.Text>().Single().Value);
+        // A retry of the send is the same send only with the same choice.
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(new OwnedTextSendRequest("skill-send", f.SessionId, typed) { Skills = !skills }).Kind);
+        f.Provider.ReleaseAll();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
+    public Task SkillSteer_GivesTheNamedSkillBeforeTheTypedText() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.SteerRequest() with { Text = "/fixture-builtin now", Skills = true };
+        var steer = f.Accept(f.AdmitSteer(request));
+        await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "steer");
+        var items = f.Provider.SteerOptions!.Input.Items;
+        Assert.HasCount(2, items);
+        Assert.AreEqual(AgentInputItem.HostContext.SkillKind, ((AgentInputItem.HostContext)items[0]).Kind);
+        Assert.AreEqual("/fixture-builtin now", ((AgentInputItem.Text)items[1]).Value);
+        f.Provider.ReleaseSteer.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(steer.Completion)).Outcome);
+        f.Provider.ReleaseAll();
+        await f.Observe(send.Completion);
+    });
+
+    [TestMethod]
     public Task OwnedSteer_AlongsideSendPreservesExactReplayAndIndependentSlot() => Fixture.RunAsync(async f =>
     {
         var send = f.Send();

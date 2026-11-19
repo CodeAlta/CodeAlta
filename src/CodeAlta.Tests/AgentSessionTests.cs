@@ -1212,6 +1212,70 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_SendAsync_SkillNotesOfAPrompt_ActivateEachSkill_AndTheMessageIsTheTypedText()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-prompt-skills") with { WorkingDirectory = temp.Path };
+        var state = CreateState("session-prompt-skills");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        string Payload(string name, string body)
+        {
+            var root = Path.Combine(temp.Path, ".alta", "skills", name);
+            Directory.CreateDirectory(root);
+            var file = Path.Combine(root, "SKILL.md");
+            File.WriteAllText(file, "# Skill");
+            return CreateSkillPayload(name, file, body);
+        }
+
+        const string typed = "/grilling then /tdd: the parser";
+        var grilling = Payload("grilling", "Ask questions.");
+        var tdd = Payload("tdd", "Write the test first.");
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor((request, _, _) =>
+            {
+                var texts = request.Conversation[0].Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value).ToArray();
+                Assert.AreEqual(3, texts.Length);
+                StringAssert.Contains(texts[0], "<skill_content name=\"grilling\"");
+                StringAssert.Contains(texts[1], "<skill_content name=\"tdd\"");
+                Assert.AreEqual(typed, texts[2]);
+                return Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Both are active.")]),
+                    Usage = CreateUsageSnapshot(8, 3),
+                });
+            }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput(
+            [
+                new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, grilling),
+                new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, tdd),
+                new AgentInputItem.Text(typed),
+            ]),
+        }).ConfigureAwait(false);
+
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        Assert.AreEqual(typed, history.OfType<AgentContentCompletedEvent>().Single(static evt => evt.Kind == AgentContentKind.User).Content);
+        Assert.AreEqual(2, history.OfType<AgentRawEvent>().Count(static evt => evt.BackendEventType == "local.skillActivation"));
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsNotNull(persistedState);
+        CollectionAssert.AreEquivalent(new[] { "grilling", "tdd" }, persistedState.LoadedSkills.Select(static skill => skill.Name).ToArray());
+        Assert.IsTrue(persistedState.LoadedSkills.All(static skill => skill.ActivationMode == "user"));
+    }
+
+    [TestMethod]
     public async Task AgentSession_ResumeSession_DoesNotPromptPromoteMissingLoadedSkillsBeforeCompaction()
     {
         using var temp = TestTempDirectory.Create();

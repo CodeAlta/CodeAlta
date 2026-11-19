@@ -30,7 +30,14 @@ public abstract record AgentInputItem
     /// </summary>
     /// <param name="Kind">What the note is about, for the window that shows it as a chip, such as <c>review</c>.</param>
     /// <param name="Value">The text the model reads.</param>
-    public sealed record HostContext(string Kind, string Value) : AgentInputItem;
+    public sealed record HostContext(string Kind, string Value) : AgentInputItem
+    {
+        /// <summary>
+        /// The <see cref="Kind"/> of the content of a skill the prompt names as <c>/name</c>: the session records the
+        /// skill as activated by the user.
+        /// </summary>
+        public const string SkillKind = "skill";
+    }
 
     /// <summary>
     /// An image URL input.

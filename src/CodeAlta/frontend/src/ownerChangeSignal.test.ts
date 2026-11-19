@@ -25,7 +25,7 @@ test("throwing subscriber cannot strand Send or Steer before transport starts", 
   const steerStore = createSteeringSubmissions(async () => { steers++; throw new Error("lost"); });
   const send = captureSubmission("epoch", "one", "exact", "send")!;
   const steer = { expectedEpoch: "epoch", sessionId: "one", clientRequestId: "steer",
-    expectedRuntimeInstanceId: "runtime", expectedAttachmentGeneration: "1", expectedRunId: "run", text: "exact" };
+    expectedRuntimeInstanceId: "runtime", expectedAttachmentGeneration: "1", expectedRunId: "run", text: "exact", skills: true };
   const receipt = (kind: "Send" | "Steer", key: string): SessionReceiptPage => ({ status: "ok", epoch: "epoch", next: null,
     rows: [{ kind, clientRequestId: key, sessionId: "one", operationId: "33333333-3333-3333-3333-333333333333",
       targetOperationId: null, state: "pending", outcome: null, code: null, runId: null }] });

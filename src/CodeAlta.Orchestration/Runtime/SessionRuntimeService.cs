@@ -3211,13 +3211,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var input = new AgentInput(
             [
                 new AgentInputItem.Skill(activation.Descriptor.Name, activation.Descriptor.SkillFilePath),
-                new AgentInputItem.Text(
-                    $"""
-                    The user activated the CodeAlta skill '{activation.Descriptor.Name}' for this session.
-                    Treat the following host-provided skill content as active session context.
-
-                    {activation.Payload}
-                    """),
+                new AgentInputItem.Text(SkillActivationText(activation)),
             ]);
 
             // Preserve SendAsync's pre-admission cancellation check without using its waiter.
@@ -3277,6 +3271,61 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 : new KeyNotFoundException($"Skill '{skillName}' was not found or is not activatable for this session.");
         }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Gives the content of each skill a prompt names as <c>/name</c> (<see cref="SkillPromptMentions"/>), as notes of the
+    /// host that go before the text of the prompt. A name that is no skill the composer offers (unknown, disabled, invalid,
+    /// untrusted, shadowed, or whose files cannot be read) stays text.
+    /// </summary>
+    /// <param name="session">Target session.</param>
+    /// <param name="text">The prompt text.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>One <see cref="AgentInputItem.HostContext"/> of kind <see cref="AgentInputItem.HostContext.SkillKind"/> per skill, in the order the prompt names them.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="text"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
+    internal async Task<IReadOnlyList<AgentInputItem>> ResolvePromptSkillsAsync(SessionViewDescriptor session, string text, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(text);
+        var names = SkillPromptMentions.Find(text);
+        if (names.Count == 0) return [];
+        return await AdmitAsync(() => WithRetentionWorkAsync<IReadOnlyList<AgentInputItem>>(async () =>
+        {
+            var project = await AwaitRetentionAwareAsync(ResolveProjectAsync(session, cancellationToken)).ConfigureAwait(false);
+            var space = await AwaitRetentionAwareAsync(GetSpaceFilterAsync(session.SpaceId, project, cancellationToken)).ConfigureAwait(false);
+            // The folders a send of the session reads skills from (SessionExecutionPolicy.CaptureSession).
+            var query = BuildSkillCatalogQuery(project, session.Kind != SessionViewKind.GlobalSession && project is not null ? [project.ProjectPath] : [], space);
+            var notes = new List<AgentInputItem>(names.Count);
+            foreach (var name in names)
+            {
+                SkillActivation? activation;
+                try
+                {
+                    activation = await AwaitRetentionAwareAsync(_skillCatalog.ActivateAsync(query, name, cancellationToken)).ConfigureAwait(false);
+                }
+                // A skill whose files cannot be read is no skill the prompt names: its name stays text, and the prompt is sent.
+                catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    continue;
+                }
+
+                // Only a skill the composer offers: the catalog also finds by name the invalid, untrusted and shadowed ones.
+                if (activation?.Descriptor is { IsValid: true, IsTrusted: true, IsShadowed: false })
+                    notes.Add(new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, SkillActivationText(activation)));
+            }
+
+            return notes;
+        }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // What the model reads of a skill the user activated: its content, as context of the session.
+    private static string SkillActivationText(SkillActivation activation)
+        => $"""
+            The user activated the CodeAlta skill '{activation.Descriptor.Name}' for this session.
+            Treat the following host-provided skill content as active session context.
+
+            {activation.Payload}
+            """;
 
     /// <summary>
     /// Steers the current coordinator run for a session.
@@ -3372,9 +3421,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // Only the command owner supplies execution cancellation; transport cancellation never reaches
     // accepted work. This path cannot acquire a coordinator or substitute a newly observed target.
     internal Task<AgentRunId> SteerOwnedCommandAsync(OwnedTextSteerRequest request, CancellationToken executionCancellationToken)
-        => AdmitAsync(() => SteerOwnedCommandBodyAsync(request, executionCancellationToken), CancellationToken.None);
+        => SteerOwnedCommandAsync(request, [], executionCancellationToken);
 
-    private async Task<AgentRunId> SteerOwnedCommandBodyAsync(OwnedTextSteerRequest request, CancellationToken executionCancellationToken)
+    // The notes of the host (the skills the text names, ResolvePromptSkillsAsync) go before the text.
+    internal Task<AgentRunId> SteerOwnedCommandAsync(OwnedTextSteerRequest request, IReadOnlyList<AgentInputItem> notes, CancellationToken executionCancellationToken)
+        => AdmitAsync(() => SteerOwnedCommandBodyAsync(request, notes, executionCancellationToken), CancellationToken.None);
+
+    private async Task<AgentRunId> SteerOwnedCommandBodyAsync(OwnedTextSteerRequest request, IReadOnlyList<AgentInputItem> notes, CancellationToken executionCancellationToken)
     {
         executionCancellationToken.ThrowIfCancellationRequested();
         if (request.ExpectedRuntimeInstanceId != _runtimeInstanceId || !_sessionActors.TryGet(request.SessionId, out var actor))
@@ -3397,7 +3450,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var expectedRun = new AgentRunId(request.ExpectedRunId);
             var returnedRun = await lifetime.RunAsync(token => SteerCapturedAsync(handle, new AgentSteerOptions
             {
-                Input = AgentInput.Text(request.Text),
+                Input = notes.Count == 0 ? AgentInput.Text(request.Text) : new AgentInput([.. notes, new AgentInputItem.Text(request.Text)]),
                 ExpectedRunId = expectedRun,
             }, token), executionCancellationToken, handleUse!.Attachment.Cancellation.Token).ConfigureAwait(false);
             if (returnedRun != expectedRun)

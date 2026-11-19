@@ -29,7 +29,7 @@ test("an outgoing echo carries the images of its prompt, and only the newest eig
   const capability = createMutationCapability("epoch");
   const store = createOwnedSubmissions(async () => { throw new Error("lost"); }, async () => { throw new Error("unused"); });
   const send = (sessionId: string): SessionSendRequest => ({ expectedEpoch: "epoch", clientRequestId: "key-" + sessionId, sessionId, text: "",
-    selection: { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" }, references: null,
+    selection: { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" }, references: null, skills: true,
     images: [{ title: "Shot", mediaType: "image/png", base64: "AAAA" }] });
   for (let index = 0; index < 9; index++) await store.submit(send("session-" + index), new AbortController().signal, capability, () => {});
   const [newest] = store.outgoing("epoch", "session-8");
@@ -44,7 +44,7 @@ test("an outgoing echo names the files of its prompt and keeps the identity of i
   const capability = createMutationCapability("epoch");
   const store = createOwnedSubmissions(async () => { throw new Error("lost"); }, async () => { throw new Error("unused"); });
   await store.submit({ expectedEpoch: "epoch", clientRequestId: "send-files", sessionId: "session", text: "read",
-    selection: { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" }, references: null,
+    selection: { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" }, references: null, skills: true,
     images: [{ title: "Shot", mediaType: "image/png", base64: "AAAA" }, { title: "report.pdf", mediaType: "application/pdf", base64: "JVBERg==" }] },
   new AbortController().signal, capability, () => {});
   const [echo] = store.outgoing("epoch", "session");
@@ -69,7 +69,7 @@ test("a prompt leaving the queue shows its echo only once the host took it", asy
   let answer: SessionAdmission = { status: "busy", epoch: "epoch", receipt: null };
   const store = createOwnedSubmissions(async () => answer, async () => { throw new Error("unused"); });
   const send = (key: string): SessionSendRequest => ({ expectedEpoch: "epoch", clientRequestId: key, sessionId: "session", text: "queued",
-    selection: null, references: null, images: null });
+    selection: null, references: null, skills: true, images: null });
   const results: string[] = [];
   // The session was busy after all: nothing is shown, and nothing is retained that would block the next try.
   await store.submit(send("first"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
@@ -198,7 +198,7 @@ test("uncertain retry preserves epoch key session exact text and immutable bound
   const store = createOwnedSubmissions(value => { seen.push(value); return f.lost(); }, () => f.lost());
   const captured = request();
   assert.ok(Object.isFrozen(captured));
-  assert.deepEqual(captured, { expectedEpoch: "epoch", sessionId: "session", text: "  exact\ntext  ", clientRequestId: "key", selection: null, references: null, images: null });
+  assert.deepEqual(captured, { expectedEpoch: "epoch", sessionId: "session", text: "  exact\ntext  ", clientRequestId: "key", selection: null, references: null, skills: true, images: null });
   assert.ok(captureSubmission("e".repeat(64), "s".repeat(256), "😀".repeat(16384), "k".repeat(256)));
   for (const text of ["", " \n", "\u0085", "\ud800", "\udc00", "x".repeat(32769)])
     assert.equal(captureSubmission("epoch", "session", text, "key"), null);
@@ -478,7 +478,7 @@ test("the echoes of a session are the same array until one of them changes", asy
   const answer: SessionAdmission = { status: "invalid_request", epoch: "epoch", receipt: null };
   const store = createOwnedSubmissions(async () => answer, async () => { throw new Error("unused"); });
   const send = (key: string, sessionId = "session"): SessionSendRequest => ({ expectedEpoch: "epoch", clientRequestId: key, sessionId, text: key,
-    selection: null, references: null, images: null });
+    selection: null, references: null, skills: true, images: null });
   // Nothing sent: one shared value, whatever the session, so a memoized timeline has nothing to render again.
   assert.equal(store.outgoing("epoch", "session"), noOutgoing);
   assert.equal(store.outgoing("epoch", "other"), noOutgoing);
