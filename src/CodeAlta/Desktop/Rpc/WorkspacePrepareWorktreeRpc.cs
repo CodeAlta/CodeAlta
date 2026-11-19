@@ -129,6 +129,17 @@ internal sealed partial class WorkspaceService
         }
     }
 
+    // Whether a folder is in a worktree made ahead that no session took: one that waits for its session, or that is
+    // being removed.
+    private bool IsUntakenPreparedWorktree(string folder)
+    {
+        lock (_sessionGate)
+        {
+            return _preparedWorktrees.Values.Any(prepared => !prepared.Used && prepared.Created is { Succeeded: true, Root: { } root }
+                && GitWorktreeService.IsWithin(folder, root));
+        }
+    }
+
     // Called under _sessionGate. A worktree that git still makes is removed once it is made (PrepareOwnedAsync).
     private void Discard(PreparedWorktree prepared)
     {

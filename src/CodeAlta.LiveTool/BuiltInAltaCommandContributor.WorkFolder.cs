@@ -148,8 +148,10 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    // Why a session did not change folder, as the error of the command.
-    internal static (int ExitCode, string Code, string Message) DescribeWorkFolderRefusal(string status, string sessionId, string folder, ProjectDescriptor project)
+    // Why a session did not change folder, or was not created in one, as the error of the command. `newOption` is the
+    // option of that command that makes a new worktree.
+    internal static (int ExitCode, string Code, string Message) DescribeWorkFolderRefusal(string status, string sessionId, string folder, ProjectDescriptor project,
+        string newOption = "--new")
         => status switch
         {
             "session_missing" => (AltaExitCodes.NotFound, "session.notFound", $"Session '{sessionId}' was not found in project '{project.Id}'."),
@@ -164,7 +166,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             "not_repository" => (AltaExitCodes.Unsupported, "worktree.notRepository",
                 $"'{folder}' is not in a git checkout, or the folder of project '{project.Id}' is not in a git repository."),
             "other_repository" => (AltaExitCodes.Unsupported, "worktree.otherRepository",
-                $"'{folder}' is not a checkout of the repository of project '{project.Id}': a separate clone is another repository. Make it a worktree of that repository (`git worktree add <folder> <branch>` in '{project.ProjectPath}'), or use --new."),
+                $"'{folder}' is not a checkout of the repository of project '{project.Id}': a separate clone is another repository. Make it a worktree of that repository (`git worktree add <folder> <branch>` in '{project.ProjectPath}'), or use {newOption}."),
             "project_missing" => (AltaExitCodes.Unsupported, "worktree.projectMissing",
                 $"The checkout of '{folder}' has no folder where project '{project.Id}' is in its own checkout."),
             "closed" => (AltaExitCodes.ServiceUnavailable, "service.closed", "CodeAlta is closing: nothing was done."),

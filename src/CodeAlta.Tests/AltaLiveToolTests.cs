@@ -3701,6 +3701,23 @@ public sealed partial class AltaLiveToolTests
             Directory.Move(own.GetProperty("worktreeDirectory").GetString()!, own.GetProperty("worktreeDirectory").GetString() + "-moved");
             Assert.AreEqual(projectPath, await ToolFolderAsync().ConfigureAwait(false));
             Directory.Move(own.GetProperty("worktreeDirectory").GetString() + "-moved", own.GetProperty("worktreeDirectory").GetString()!);
+            // A session beside the calling one, in its worktree: not its child, and no other worktree is made.
+            var beside = Created((await dispatcher.InvokeAsync(["session", "create", "--title", "Beside", "--no-parent", "--provider", ProviderId.Value], caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.AreEqual(worktree, beside.GetProperty("worktreeDirectory").GetString());
+            Assert.IsFalse(beside.TryGetProperty("parentSessionId", out JsonElement _));
+            Assert.IsFalse(beside.TryGetProperty("worktreeBranch", out JsonElement _));
+            // A worktree that exists is named by a folder of it, by a session or by none.
+            var named = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Named", "--worktree-path", own.GetProperty("worktreeDirectory").GetString()!, "--provider", ProviderId.Value],
+                caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.AreEqual(own.GetProperty("worktreeDirectory").GetString(), named.GetProperty("worktreeDirectory").GetString());
+            Assert.AreEqual(own.GetProperty("worktreeDirectory").GetString(), providerRuntime.CreatedOptions[^1].WorktreeDirectory);
+            var joined = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Joined", "--worktree-path", worktree, "--provider", ProviderId.Value],
+                caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout);
+            Assert.AreEqual(worktree, joined.GetProperty("worktreeDirectory").GetString());
+            Assert.IsFalse(joined.TryGetProperty("worktreeBranch", out JsonElement _));
+            // The checkout the project lives in is the folder of the project.
+            var home = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Home", "--worktree-path", projectPath, "--provider", ProviderId.Value], caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.IsFalse(home.TryGetProperty("worktreeDirectory", out JsonElement _));
             // A session of another project does not work in a checkout of this one.
             var elsewhere = Created((await dispatcher.InvokeAsync(["session", "create", "--project", plain.Id, "--title", "Elsewhere", "--provider", ProviderId.Value], caller: caller).ConfigureAwait(false)).Stdout);
             Assert.IsFalse(elsewhere.TryGetProperty("worktreeDirectory", out JsonElement _));
@@ -3716,6 +3733,10 @@ public sealed partial class AltaLiveToolTests
                          (["session", "create", "--project", project.Id, "--base", "main", "--provider", ProviderId.Value], "usage.invalidBase"),
                          (["session", "create", "--project", project.Id, "--worktree", "--base=--force", "--provider", ProviderId.Value], "usage.invalidBase"),
                          (["session", "create", "--project", project.Id, "--worktree", "--no-worktree", "--provider", ProviderId.Value], "usage.worktreeConflict"),
+                         (["session", "create", "--project", project.Id, "--worktree", "--worktree-path", worktree, "--provider", ProviderId.Value], "usage.worktreeConflict"),
+                         (["session", "create", "--project", project.Id, "--worktree-path", worktree, "--base", "main", "--provider", ProviderId.Value], "usage.invalidBase"),
+                         (["session", "create", "--global", "--worktree-path", worktree, "--provider", ProviderId.Value], "usage.worktreeWithoutProject"),
+                         (["session", "create", "--project", project.Id, "--worktree-path", "relative", "--provider", ProviderId.Value], "usage.invalidPath"),
                      })
             {
                 var refused = await dispatcher.InvokeAsync(args, caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
@@ -3729,6 +3750,13 @@ public sealed partial class AltaLiveToolTests
             var missing = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--worktree", "--base", "no-such-branch", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
             Assert.AreEqual(AltaExitCodes.Failure, missing.ExitCode);
             StringAssert.Contains(missing.Stdout + missing.Stderr, "worktree.invalid");
+            // A folder that is no checkout of the repository of the project, or that is not there, is no worktree to work in.
+            var foreign = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--worktree-path", plainPath, "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Unsupported, foreign.ExitCode);
+            StringAssert.Contains(foreign.Stdout + foreign.Stderr, "worktree.notRepository");
+            var gone = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--worktree-path", worktree + "-none", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.NotFound, gone.ExitCode);
+            StringAssert.Contains(gone.Stdout + gone.Stderr, "worktree.notFound");
             Assert.AreEqual(sessions, providerRuntime.CreatedOptions.Count, "A command that was refused created a session.");
 
             // Once the worktree is gone the records no longer name it.

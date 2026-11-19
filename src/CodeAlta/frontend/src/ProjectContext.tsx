@@ -5,8 +5,8 @@ import { inHiddenPane } from "./keptPanes";
 import { projectGitStatus, type ProjectGitView } from "./changes/projectGit";
 import { useShellLanguage } from "./shellLanguage";
 import { BranchSwitcher, type BranchApi } from "./worktrees/BranchSwitcher";
-import { WorkPlaceChoice, type WorkPlaceApi } from "./worktrees/WorkPlaceChoice";
-import type { WorkPlace } from "./worktrees/worktrees";
+import { WorkPlaceChoice, type WorkPlaceApi, type WorkPlaceOpenRequest, type WorkPlaceSession } from "./worktrees/WorkPlaceChoice";
+import type { WorkPlace, Worktree } from "./worktrees/worktrees";
 
 const refreshMilliseconds = 2000;
 /** Reads the git facts of a folder of a project. */
@@ -28,7 +28,13 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
   /** Before a session exists: where it will work, and how that is changed. */
   place?: Readonly<{ value: WorkPlace; onChange: (place: WorkPlace) => void; onOpenSettings?: () => void; api?: WorkPlaceApi;
     /** Whether the session can run in the cloud. */
-    cloud?: boolean }>;
+    cloud?: boolean;
+    /** Opens the choice of the Workspace chip of the prompt; the chip of this row does not follow it. */
+    openRequest?: WorkPlaceOpenRequest | null;
+    /** The branch of the worktree git makes ahead for the session: not one to join. */
+    madeAhead?: string | null;
+    /** The session a worktree is known by, and what shows it. */
+    sessionOf?: (worktree: Worktree) => WorkPlaceSession | null; onOpenSession?: (sessionId: string) => void }>;
   /** The folder of the worktree is not there any more: the sessions are read again. */
   onWorktreeGone?: () => void;
   /** Opens the changes tab of the project; without it the counts are only shown. */
@@ -41,7 +47,9 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
   pullRequest?: React.ReactNode;
 }) {
   const { t, locale } = useShellLanguage();
-  const { folder, view, element, switched: setSwitched } = useProjectGit(epoch, project.id, worktree, read, refreshKey, onWorktreeGone);
+  // Before a session exists, the branch and the changes are those of the worktree it joins, when one that exists was chosen.
+  const joined = place?.value.existing?.folder ?? null;
+  const { folder, view, element, switched: setSwitched } = useProjectGit(epoch, project.id, worktree ?? (joined ? { path: joined, missing: false } : null), read, refreshKey, onWorktreeGone);
   const changes = view?.changes && (view.changes.insertions > 0 || view.changes.deletions > 0 || view.changes.files > 0) ? view.changes : null;
   const counts = changes && <><span data-change="added">+{changes.insertions.toLocaleString(locale)}</span><span data-change="removed">−{changes.deletions.toLocaleString(locale)}</span></>;
   const title = changes ? t("{files} changed file(s) against HEAD", { files: changes.files }) : t("Show changes");
@@ -60,7 +68,7 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
     })()}
     {/* Offered where there is a repository; a worktree that was chosen is never hidden, so that it can be changed. */}
     {place && epoch && (view || place.value.worktree || place.value.cloud) && <WorkPlaceChoice epoch={epoch} projectId={project.id} branch={view?.branch ?? null} place={place.value}
-      onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} cloud={place.cloud} />}
+      onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} cloud={place.cloud} madeAhead={place.madeAhead} sessionOf={place.sessionOf} onOpenSession={place.onOpenSession} />}
     {view && (branches && epoch
       ? <BranchSwitcher epoch={epoch} projectId={project.id} worktree={folder} className="project-context-branch" title={`${branchTitle}\n${t("Switch branch")}`}
         api={branches === true ? undefined : branches} onSwitched={setSwitched}>{branch}</BranchSwitcher>

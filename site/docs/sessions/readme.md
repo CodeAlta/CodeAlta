@@ -27,7 +27,7 @@ To create a session without sending a prompt, click **+** on the row of a projec
 - a title, if you want one;
 - the agent, the model (or a [tier](../model-tiers.md)), the reasoning and the [permissions](../workspace/prompt.md#agent-and-model);
 - **Review before commit** (see [Reviews](../reviews.md#review-before-commit));
-- the project folder or a new [worktree](../worktrees.md).
+- the project folder, or a new or existing [worktree](../worktrees.md).
 
 Click **Create**. The session opens in its own tab, titled **Starting…** until it is ready, and you can keep working meanwhile. For a new worktree, the tab shows each step with its time, and **Retry** or **Close** if a step fails. The form remembers your choices for the next session of that project.
 

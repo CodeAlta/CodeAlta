@@ -89,5 +89,13 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode, denied.Stderr);
         StringAssert.Contains(denied.Stdout + denied.Stderr, "sandbox.folderDenied");
         Assert.IsNull(await runtime.GetSessionWorktreeAsync(sessionId).ConfigureAwait(false));
+        // Nor does it create a session there, and it is told the same of a folder that is not there: nothing outside is looked at.
+        foreach (var outside in new[] { tree, clone, tree + "-none" })
+        {
+            var refused = await sandboxed.InvokeAsync(["session", "create", "--no-parent", "--worktree-path", outside, "--provider", providerId.Value], caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, refused.Stderr);
+            StringAssert.Contains(refused.Stdout + refused.Stderr, "sandbox.folderDenied");
+            Assert.IsFalse((refused.Stdout + refused.Stderr).Contains("worktree.", StringComparison.Ordinal), outside);
+        }
     }
 }

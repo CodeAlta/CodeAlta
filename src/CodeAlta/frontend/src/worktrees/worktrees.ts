@@ -1,11 +1,18 @@
 import type { WorkspaceSession } from "#neoastra";
 import type { MessageKey } from "../localization";
 
+/** A worktree of the repository of a project that exists: the folder of the project in it, and its name. */
+export type ExistingWorktree = Readonly<{ folder: string; name: string }>;
 /**
- * Where the next session of a project works: in the folder of the project, in a new git worktree, or in the cloud,
- * where Claude Code runs it on Anthropic's machines.
+ * Where the next session of a project works: in the folder of the project, in a new git worktree, in a worktree that
+ * exists (`existing`, beside the sessions that already work there), or in the cloud, where Claude Code runs it on
+ * Anthropic's machines.
  */
-export type WorkPlace = Readonly<{ worktree: boolean; base: string | null; cloud?: boolean }>;
+export type WorkPlace = Readonly<{ worktree: boolean; base: string | null; cloud?: boolean; existing?: ExistingWorktree }>;
+/** The place of a session that works in a worktree that exists. */
+export const existingPlace = (folder: string, name: string): WorkPlace => Object.freeze({ worktree: true, base: null, existing: Object.freeze({ folder, name }) });
+/** Whether git makes a worktree for the place: a worktree, and not one that exists. */
+export const makesWorktree = (place: WorkPlace | null | undefined): boolean => !!place?.worktree && !place.existing;
 export const projectFolder: WorkPlace = Object.freeze({ worktree: false, base: null });
 export const cloudPlace: WorkPlace = Object.freeze({ worktree: false, base: null, cloud: true });
 export const workPlacesKey = "codealta.desktop.workPlaces.v1";
@@ -42,9 +49,15 @@ export function restoreWorkPlaces(read: () => string | null): ReadonlyMap<string
     if (!value || typeof value !== "object" || Array.isArray(value)) return places;
     for (const [id, stored] of Object.entries(value as Record<string, unknown>)) {
       if (places.size === workPlaceLimit || !text(id, 256) || !stored || typeof stored !== "object") continue;
-      const { worktree, base, cloud } = stored as { worktree?: unknown; base?: unknown; cloud?: unknown };
+      const { worktree, base, cloud, existing } = stored as { worktree?: unknown; base?: unknown; cloud?: unknown; existing?: unknown };
       if (cloud === true) { places.set(id, cloudPlace); continue; }
       if (worktree !== true) continue; // The folder of the project is the place of a project that stores none.
+      if (existing !== undefined) {
+        // A worktree that exists is kept as it was named, or not at all: never as a new one.
+        const { folder, name } = (existing && typeof existing === "object" ? existing : {}) as { folder?: unknown; name?: unknown };
+        if (text(folder, 4096) && text(name, 256)) places.set(id, existingPlace(folder, name));
+        continue;
+      }
       places.set(id, { worktree: true, base: typeof base === "string" && referenceName(base) ? base : null });
     }
   } catch { /* Nothing stored that can be read. */ }
@@ -56,7 +69,7 @@ export function withWorkPlace(places: ReadonlyMap<string, WorkPlace>, projectId:
   const next = new Map(places);
   next.delete(projectId);
   if (place.cloud) next.set(projectId, cloudPlace);
-  else if (place.worktree) next.set(projectId, { worktree: true, base: place.base });
+  else if (place.worktree) next.set(projectId, place.existing ? existingPlace(place.existing.folder, place.existing.name) : { worktree: true, base: place.base });
   while (next.size > workPlaceLimit) next.delete(next.keys().next().value!);
   return next;
 }
@@ -150,6 +163,20 @@ export function shownCheckout(worktrees: readonly Worktree[], shown: string | nu
 export function worktreeSessions<T extends Pick<WorkspaceSession, "worktreePath" | "worktreeRoot" | "worktreeMissing">>(sessions: readonly T[], worktree: Worktree): readonly T[] {
   return sessions.filter(session => worktree.project ? !session.worktreePath || session.worktreeMissing
     : !!session.worktreePath && !session.worktreeMissing && sameFolder(session.worktreeRoot ?? session.worktreePath, worktree.path));
+}
+
+/**
+ * The session a worktree is known by: of the sessions of this computer that work in it and are not archived, the one
+ * that was created first, which is the one the worktree was made for when it is still there. Null when none works in it.
+ */
+export function worktreeFirstSession<T extends Pick<WorkspaceSession, "worktreePath" | "worktreeRoot" | "worktreeMissing" | "createdAt" | "updatedAt" | "archived" | "machineId">>(
+  sessions: readonly T[], worktree: Worktree): T | null {
+  if (worktree.project) return null;
+  const since = (session: T) => session.createdAt ?? session.updatedAt;
+  let first: T | null = null;
+  for (const session of worktreeSessions(sessions, worktree))
+    if (!session.archived && !session.machineId && (first === null || since(session) < since(first))) first = session;
+  return first;
 }
 
 /** Accepts a well-formed `worktrees.list` answer for the asked project; anything else is its status. */

@@ -209,7 +209,7 @@ test("a new session is created from a form beside the row of its project or of t
     await press(placeChip);
     await until("!!document.querySelector('.work-place-form')", "the places");
     await settled(".work-place-form");
-    const segment = await evaluate("(() => { const node=[...document.querySelectorAll('.work-place-form button')].find(node=>node.textContent==='New worktree'); const box=node.getBoundingClientRect(); return { x: box.left+box.width/2, y: box.top+box.height/2 }; })()") as { x: number; y: number };
+    const segment = await evaluate("(() => { const node=[...document.querySelectorAll('.work-place-form button')].find(node=>node.textContent==='Worktree'); const box=node.getBoundingClientRect(); return { x: box.left+box.width/2, y: box.top+box.height/2 }; })()") as { x: number; y: number };
     await pressAt(segment.x, segment.y);
     await until("[...document.querySelectorAll('.work-place-form select option')].some(node=>node.value==='feature')", "the branches a worktree starts from");
     // A long folder is cut, and the places stay inside the popover.
@@ -217,7 +217,7 @@ test("a new session is created from a form beside the row of its project or of t
     assert.deepEqual(await evaluate(`(() => { const popover=document.querySelector('.work-place-popover').getBoundingClientRect(), code=document.querySelector('.work-place-folder code');
       return { cut: code.scrollWidth > code.clientWidth, outside: [...document.querySelectorAll('.work-place-row, .work-place-row > *, .work-place-folder > *')]
         .filter(node => node.getBoundingClientRect().right > popover.right + 0.5).map(node => node.className || node.tagName) }; })()`), { cut: true, outside: [] });
-    await select(".work-place-form select", "feature");
+    await select(".work-place-form select[id$='-base']", "feature");
     assert.equal(await shown(form), true, "the form stayed open");
     await escape();
     await gone(".work-place-form", "Escape closes the places");

@@ -16,15 +16,15 @@ You create and remove worktrees in CodeAlta Desktop. A session that works in one
 ## Start in a worktree
 
 1. Open a new session in a project that is a git repository.
-2. Above the prompt, click **Project folder** in the **Workspace** chip and choose **New worktree**.
-3. Keep **Current commit**, or choose the branch to start from.
+2. Above the prompt, click **Project folder** in the **Workspace** chip and choose **Worktree**.
+3. Keep **New worktree** and **Current commit**, or choose the branch to start from.
 4. Write your prompt. CodeAlta starts making the worktree as soon as you type.
 5. Send it: the session starts once the worktree is ready.
 
 The form opened by **+** on the row of a project has the same choice: see [Starting and reopening work](sessions/readme.md#starting-and-reopening-work). The third choice, **Cloud**, has Claude Code run the session on Anthropic's machines: see [Run in the cloud](sessions/claude-code.md#run-in-the-cloud).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The Workspace chip above the prompt of a new session, with its choice open: Project folder or New worktree, and the branch to start from" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The Workspace chip above the prompt of a new session, with its choice open: Project folder or Worktree, a new worktree and the branch to start from" loading="lazy">
   <figcaption class="small text-secondary mt-2">The <strong>Workspace</strong> chip of a new session: where it will work.</figcaption>
 </figure>
 
@@ -34,6 +34,23 @@ The form opened by **+** on the row of a project has the same choice: see [Start
 - If git fails, the card says why, with **Retry** and **Close**; after **Close**, sending makes the worktree then. If only a submodule fails, the worktree is ready anyway and the card shows what git said.
 - Choosing **Project folder** again, another branch, or closing the tab removes the prepared worktree and its branch.
 - The choice is kept for the project: the chip shows **New worktree** in turquoise while it is chosen.
+
+## Start in an existing worktree
+
+Several sessions can work in the same worktree, on the same branch: for example one that implements a feature, and another that answers questions about it or fixes something beside it, each with its own conversation.
+
+- From a session that works in a worktree: click the worktree in the **Workspace** chip, then **New session in this worktree**. The menu of the session in the Explorer has the same entry.
+- From the prompt of a new session, or the form opened by **+** on the row of a project: choose **Worktree** in the **Workspace** chip, then the worktree in the **Worktree** list instead of **New worktree**. The list has every other worktree git knows for the repository whose folder is there, each with the title of the first session that works in it. Once one is chosen, click that title beside **Session** to open the session.
+- With the command `/new_worktree_session`: it starts from the worktree of the session in front, or opens the choice when that session has none.
+
+<figure class="alta-figure my-4" style="max-width: 36rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-worktree-existing.webp" alt="The choice of the Workspace chip on Worktree, with an existing worktree chosen in the Worktree list, its session, its branch and its folder" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An existing worktree chosen for the next session.</figcaption>
+</figure>
+
+- The new session is a session of its own, beside the others of the project: not a child of the session it was started from.
+- Nothing keeps the changes of two sessions in one worktree apart: have them work on different files, or one at a time.
+- The chip shows **Worktree** and its name in turquoise while it is chosen, and the choice is kept for the project until you change it.
 
 ## Where a session works
 
@@ -124,7 +141,7 @@ A worktree started on an issue is on the branch named in the [Issues tab](issues
 - The code editor of a project shows the project folder. To edit the files of a worktree, use the code editor button of the **Workspace** chip, **Open editor** in the **Workspace** popover, or the button of its row in the Worktrees window: it opens a tab named after the worktree.
 - A branch with commits that are in no other branch is always kept.
 - A worktree of a sub-project of a [monorepo](monorepos.md) is a checkout of its repository, and the session works in the folder of the sub-project in it. A sub-project that is a git submodule gets worktrees of the submodule.
-- A session started by an agent that works in a worktree works in the same worktree.
+- A session started by an agent that works in a worktree works in the same worktree. Ask for a session "beside this one" to get a session of its own there, not a child: the agent runs `alta session create --no-parent`. `--worktree-path <folder>` names another existing worktree.
 - An agent can start sessions in worktrees. Ask in your own words, for example:
 
 ```text

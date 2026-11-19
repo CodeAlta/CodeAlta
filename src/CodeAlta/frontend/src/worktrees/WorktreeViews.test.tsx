@@ -7,6 +7,7 @@ import { ShellLanguageContext } from "../shellLanguage";
 import { WorktreeList } from "./WorktreeList";
 import { WorktreeSettings } from "./WorktreeSettings";
 import type { Worktree } from "./worktrees";
+import { existingPlace } from "./worktrees";
 
 const never = () => assert.fail("rendering must not act");
 const project = { id: "p", name: "Alpha", path: "C:\\code\\alpha" };
@@ -48,6 +49,10 @@ test("a new session says where it will work once a worktree is chosen, also befo
   assert.match(chosen, /<span>New worktree<\/span>/);
   const based = render(createElement(ProjectContext, { epoch: "e", project, read: silent, place: { value: { worktree: true, base: "release/2" }, onChange: never } }));
   assert.match(based, /<span>New worktree from release\/2<\/span>/);
+  // A worktree that exists is named, with its folder.
+  const joined = render(createElement(ProjectContext, { epoch: "e", project, read: silent, place: { value: existingPlace("C:\\trees\\alpha\\quiet-heron", "quiet-heron"), onChange: never } }));
+  assert.match(joined, /<button type="button" class="project-context-place" data-worktree="true"[^>]*title="The next session works in the worktree quiet-heron\nC:\\trees\\alpha\\quiet-heron"/);
+  assert.match(joined, /<span>Worktree quiet-heron<\/span>/);
   // A window without a host offers nothing.
   assert.equal(render(createElement(ProjectContext, { epoch: null, project, read: silent, place: { value: { worktree: true, base: null }, onChange: never } })).includes("project-context-place"), false);
 });
