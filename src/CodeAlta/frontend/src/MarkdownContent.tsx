@@ -19,6 +19,7 @@ import { TimelineImageViewer } from "./TimelineImageStrip";
 import { inlineImageSource } from "./timelineImages";
 import type { WindowSize } from "./windowGeometry";
 import { dressTaskReferences, taskReferenceAt, taskReferenceAttribute, TaskReferencesContext } from "./workItems/taskReferences";
+import { dressSkillMentions } from "./skillMentions";
 import { charts, vegaLiteAppearance, type ChartData, type ChartFile } from "./vegaLite/vegaLite";
 import { TaskReferenceCard, taskReferenceCardId } from "./workItems/TaskReferenceCard";
 import type { WorkItem } from "./workItems/workItems";
@@ -57,7 +58,7 @@ type ViewedPicture = Readonly<{ address: string; title: string; image: MarkdownI
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
  * a `document` (a file, the instructions of a skill) is wrapped in its source, and its lines follow each other.
  */
-export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, sourceLines = false, onOpenLink, webImages = null }: {
+export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, sourceLines = false, onOpenLink, webImages = null, skillMentions }: {
   source: string; timelineCodeBlocks?: boolean; document?: boolean;
   /**
    * What draws the images of the web the text shows (the text of a tracker, whose host reads them with its sign-in):
@@ -68,6 +69,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   sourceLines?: boolean;
   /** What opens a link, instead of the opener of the window ({@link MarkdownLinksContext}); null leaves every link inert. */
   onOpenLink?: ((address: string) => void) | null;
+  /** The skills the host gave the model with this prompt: their `/name` in the text are shown as skills. */
+  skillMentions?: readonly string[];
 }) {
   const opener = useContext(MarkdownLinksContext);
   const scope = useContext(MarkdownLinkScopeContext);
@@ -164,6 +167,12 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     // A card stays while its chip does: a text written again replaces its chips.
     setTaskCard(current => current && current.anchor.isConnected && current.anchor.hasAttribute(taskReferenceAttribute) ? current : null);
   }, [codeMarkup, tasks, scope, locale]);
+  const shownSkills = skillMentions?.join("\n") ?? "";
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (element && (shownSkills || element.querySelector("[data-skill-mention]")))
+      dressSkillMentions(element, new Set(shownSkills ? shownSkills.toLowerCase().split("\n") : []));
+  }, [codeMarkup, shownSkills]);
   // The links to a session are chips that say what it is doing (`[title](session:<id>)`), and open it, at the message
   // they name. Not in a text whose links are inert.
   const windowSessions = useContext(SessionLinkHostContext);

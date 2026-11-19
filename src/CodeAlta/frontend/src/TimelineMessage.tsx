@@ -338,7 +338,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         <div id={bodyId}>{expanded ? <MarkdownContent source={shownBody ?? body} timelineCodeBlocks onOpenLink={messageLink} />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : reviewSummary && body ? <ReviewPromptCard summary={reviewSummary} text={body} onOpenLink={messageLink} />
-        : shownBody && <MarkdownContent source={shownBody} timelineCodeBlocks onOpenLink={messageLink} />)}
+        : shownBody && <MarkdownContent source={shownBody} timelineCodeBlocks onOpenLink={messageLink} skillMentions={item.category === "user" ? item.skills : undefined} />)}
       {shortened && !compact && <WholeMessageNote state={whole.state} load={whole.load} />}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.attachments && <AttachedFileChips attachments={item.attachments} />}

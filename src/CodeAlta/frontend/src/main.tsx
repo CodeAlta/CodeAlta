@@ -46,7 +46,8 @@ import {
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workflows as workflowsApi, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
-import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
+import { usableSkills, type SkillChoice } from "./search/skillResults";
+import { SkillChoicesContext, type SkillChoices } from "./skillMentions";
 import { archivedSessions, loadWorkspace, omittedSessions, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
@@ -976,8 +977,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function setSearchStart(value: SearchStart | null) { invalidateCreation(true); writeSearchStart(value); }
   const searchOrigin = useRef<HTMLElement | null>(null);
   const searchPending = useRef<SearchChoice | null>(null);
-  // The skills the search offers: those of the project in front, read each time the search opens, by host and project.
+  // The skills of the project in front, by host and project: those the search offers and the prompts name as `/name`. They are
+  // read when the project changes, each time the search opens, and when the `/` picker of a prompt asks (`skillsRequest`).
   const [searchSkills, setSearchSkills] = useState<{ key: string; skills: readonly SkillChoice[] } | null>(null);
+  const [skillsRequest, setSkillsRequest] = useState(0);
   const [pluginContributed, setPluginContributed] = useState<PluginContributionsView>(noPluginContributions);
   // True after Ctrl+G, until the second stroke of the chord.
   const commandChord = useRef(false);
@@ -3640,25 +3643,28 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const skillEpoch = owned ? status?.hostEpoch ?? null : null;
   const skillsKey = `${skillEpoch}:${projectId ?? ""}:${spaceId}`;
   useEffect(() => {
-    if (!searchOpen || !skillEpoch) return;
+    if (!skillEpoch) return;
     const controller = new AbortController();
     void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null, spaceId }, { signal: controller.signal, timeoutMilliseconds: 8000 })
       .then(page => { if (!controller.signal.aborted && page.status === "ok") setSearchSkills({ key: skillsKey, skills: usableSkills(page.skills) }); },
-        () => { /* The search goes on without the skills. */ });
+        () => { /* The search and the prompts go on without the skills. */ });
     return () => controller.abort();
-  }, [searchOpen, skillEpoch, projectId, spaceId]);
+  }, [searchOpen, skillsRequest, skillEpoch, projectId, spaceId]);
+  const skillChoices = useMemo<SkillChoices | null>(() => skillEpoch ? {
+    skills: searchSkills?.key === skillsKey ? searchSkills.skills : null, refresh: () => setSkillsRequest(value => value + 1),
+  } : null, [skillEpoch, skillsKey, searchSkills]);
 
-  // A skill chosen in the search: the session in front is asked to use it, as a prompt it receives like any other.
-  function askToUseSkill(name: string, args: string) {
-    const said = (key: "Open a session to use a skill." | "The session could not be asked to use {name}.") =>
+  // A skill chosen in the search is written at the caret of the prompt of the session in front, with what was typed after
+  // its name: the user goes on writing, and the skill is given to the model when the prompt is sent.
+  function insertSkill(name: string, args: string) {
+    const said = (key: "Open a session to use a skill." | "{name} could not be added to the prompt.") =>
       showToast({ intent: "warning", icon: "info-sign", timeout: 6000, message: translate(shownLocale.current, key, { name }) });
-    // Only the session whose tab is in front: a session behind a file, a canvas or the welcome page is not asked.
-    const front = !fileTabs.active && view === "workspace" ? sessionId : null;
+    // Only the prompt in front, of a session or of the session to start: not one behind a file, a canvas or the welcome page.
+    const front = !fileTabs.active && view === "workspace" ? selectedSession ? sessionId : draftScope : null;
     if (!front) { said("Open a session to use a skill."); return; }
-    const request = askPluginComposer("send", front, skillPrompt(name, args));
-    if (!request.handled) { said("Open a session to use a skill."); return; }
-    if (!request.result) { said("The session could not be asked to use {name}."); return; }
-    void request.completion?.then(sent => { if (sent === false) said("The session could not be asked to use {name}."); });
+    const request = askPluginComposer("insert", front, `/${name}${args ? ` ${args}` : ""}`);
+    if (!request.handled) said("Open a session to use a skill.");
+    else if (!request.result) said("{name} could not be added to the prompt.");
   }
 
   function chooseSearch(choice: SearchChoice) {
@@ -3695,7 +3701,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "session": selectProject(choice.projectId, choice.id); focusPromptSoon(); break;
       case "file": openEditor(choice.project, { path: choice.path, line: null, column: null, explorer: null }); break;
       case "canvas": { const item = canvasCatalog.find(value => value.pluginKey === choice.pluginKey && value.id === choice.id); if (item) openCanvasHere(item); break; }
-      case "skill": askToUseSkill(choice.name, choice.args); break;
+      case "skill": insertSkill(choice.name, choice.args); break;
       case "content": void openContent(choice.hit); break;
       case "claude-code": showClaudeCodeConversation(choice.conversation, choice.providerId); break;
     }
@@ -6172,7 +6178,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><SkillChoicesContext.Provider value={skillChoices}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       data-developer={status?.developerMode ? "" : undefined} data-window-zoom={!secondary && shellPreferences ? "" : undefined}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     <TabSwitcher key={spaceId} ref={tabSwitcher} current={dockReady && !settingsOpen && !searchOpen && !dialog ? frontTab : null} items={switcherItems} show={showRecentDockTab} />
@@ -6727,6 +6733,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 shellSlot={setDraftShellSlot}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
+                {/* The first prompt of a session to start on another machine or in the cloud names no skill: it is not read for them there. */}
+                <SkillChoicesContext.Provider value={draftMachine || draftCloud ? null : skillChoices}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators} folder={selectedProject?.path ?? null}
                   // The commands of a session to start run in the folder of its project, on this computer.
                   shell={{ store: shellCommands, slot: draftShellSlot,
@@ -6766,6 +6774,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                      {creatingScope?.handoff && creatingScope.projectId === projectId && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
                        onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
                   </> }} />
+                </SkillChoicesContext.Provider>
                </NewSessionWorkspace>
             // A listed session whose recorded project or folder is not the one it is listed under has no tab.
             : snapshot && !selectedTab(snapshot, projectId, sessionId)
@@ -7055,7 +7064,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       archived={owned && mutation?.capability.canMutate() ? shownArchived : undefined} archivedProjects={catalog.current?.projects}
       onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
-      skills={searchSkills?.key === skillsKey ? searchSkills.skills : undefined} onSkill={(name, args) => chooseSearch({ kind: "skill", name, args })}
+      skills={skillChoices?.skills ?? undefined} onSkill={(name, args) => chooseSearch({ kind: "skill", name, args })}
       content={contentSearch} onContent={hit => chooseSearch({ kind: "content", hit })}
       onOfferMeaning={owned && meaningNow?.offer ? () => { dismissSearch(); setMeaningDialog(true); } : undefined}
       claudeCode={searchedClaudeCode} onClaudeCode={(conversation, providerId) => chooseSearch({ kind: "claude-code", conversation, providerId })}
@@ -7070,7 +7079,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SkillChoicesContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The way to Fleet at the foot of the Explorer, with how many of the machines it lists are online. */
@@ -7393,6 +7402,8 @@ function SessionWorkspace({ sideQuestions, shellCommands, canAdmit, remoteContro
   const sideQuestionView = useSyncExternalStore(sideQuestions.subscribe, () => sideQuestions.view(session.id));
   // A review of changes an agent asks for is done in the Changes tab of its checkout.
   const showReviewChanges = useContext(ShowChangesContext);
+  // The skills its prompts name: none for a session of another machine, whose prompts are not read for them there.
+  const skillChoices = useContext(SkillChoicesContext);
   const [persistedUsage, setPersistedUsage] = useState<string | null>(null);
   const localInfoTrigger = useRef<HTMLButtonElement>(null), localRemindersTrigger = useRef<HTMLButtonElement>(null), localCompactTrigger = useRef<HTMLButtonElement>(null);
   const infoTrigger = active ? sharedInfoTrigger : localInfoTrigger;
@@ -7617,7 +7628,7 @@ function SessionWorkspace({ sideQuestions, shellCommands, canAdmit, remoteContro
   // It is read when a card shows it, and again when the run of the session starts or ends.
   const resumeHub = useMemo(() => cliEpoch ? createResumeHub(sessionOperations, cliEpoch, session.id) : null, [cliEpoch, session.id]);
   useEffect(() => { resumeHub?.noteRunning(running === true); }, [resumeHub, running]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><SessionResumeContext.Provider value={resumeHub}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate} {...timelineFind.keys}>
+  return <SkillChoicesContext.Provider value={session.machineId ? null : skillChoices}><MarkdownLinkScopeContext.Provider value={linkScope}><SessionResumeContext.Provider value={resumeHub}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate} {...timelineFind.keys}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -7724,7 +7735,7 @@ function SessionWorkspace({ sideQuestions, shellCommands, canAdmit, remoteContro
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></SessionResumeContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></SessionResumeContext.Provider></MarkdownLinkScopeContext.Provider></SkillChoicesContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

@@ -16,6 +16,8 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { ReferencePicker } from "./ReferencePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
+import { SkillPromptPicker } from "./SkillPromptPicker";
+import { caretAfterEdit, skillCallAtCaret, SkillChoicesContext } from "./skillMentions";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionPromptImage, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
@@ -780,6 +782,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     return imageOwner.replace(imageKey, current, attached ? [...current, file] : current.filter(item => !same(item))) ? "done" : "refused";
   }
   // A prompt in shell mode is a command, run at once whatever the session does: it never enters the session or its queue.
+  const skillChoices = useContext(SkillChoicesContext);
   const shell = useShellPrompt({ store: shellCommands, prompt: sessionId, target: shellCommands ? { sessionId } : null, input: promptInput,
     text: () => latestText.current, value: text, clear: () => { inputRevision.current++; clearText(); },
     enabled: !pending && !invalidEpoch && canAdmit(), attach: setShellAttached, attached: entry => holdsShellOutput(images, entry),
@@ -898,6 +901,18 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     window.addEventListener("codealta:composer", run);
     return () => window.removeEventListener("codealta:composer", run);
   });
+  // Writes `/name` and what goes with it at the caret of the prompt, as a skill chosen in the search of the window: the
+  // caret goes after it, where the user goes on typing.
+  function insertAtCaret(value: string): boolean {
+    // Not where the prompt names no skill: a command for a shell, a session whose prompts are not read for skills.
+    if (shell.mode || !skillChoices) return false;
+    const next = skillCallAtCaret(promptInput.current, latestText.current, value);
+    if (!next) return false;
+    editText(next.text);
+    if (latestText.current !== next.text) return false;
+    caretAfterEdit(promptInput, next.caret);
+    return true;
+  }
   // What a plugin asks of this composer: the shell names the session, or none for the focused pane.
   async function submitPlugin(request: PluginComposerRequest): Promise<boolean | null> {
     const lifetime = scope.current?.signal;
@@ -970,6 +985,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         select("agentPromptId", request.agentPromptId);
       }
       if (request.kind === "draft") { editText(value); request.result = true; }
+      else if (request.kind === "insert") request.result = insertAtCaret(value);
       else if (request.kind === "compact" || value.trim()) { request.completion = submitPlugin(request); request.result = true; }
     };
     window.addEventListener(pluginComposerEvent, run);
@@ -1693,6 +1709,7 @@ ${value}` : value);
       {!pending && !expanded && !invalidEpoch && !shell.mode && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && !shell.mode && <ReferencePicker edit={editText} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
       {!pending && !expanded && !invalidEpoch && !shell.mode && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
+      {!pending && !expanded && !invalidEpoch && !shell.mode && <SkillPromptPicker edit={editText} input={promptInput} />}
       <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         data-composer-command={active ? "abort" : undefined}

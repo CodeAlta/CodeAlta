@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { activeIssueReference } from "./issueReferences";
 import { activeProjectReference } from "./projectReferences";
-import { dismissPromptTrigger, isPromptPickerReopenKey, promptTriggerDismissalHolds } from "./promptPicker";
+import { dismissPromptTrigger, isPromptPickerReopenKey, promptTriggerDismissalHolds, typedTrigger } from "./promptPicker";
+import { activeSkillReference } from "./skillMentions";
 
 // What the picker hook does on each key: open for a token at the caret unless that token was dismissed.
 function opens(dismissal: ReturnType<typeof dismissPromptTrigger> | null, text: string) {
@@ -48,4 +49,14 @@ test("only the word right after the trigger can reopen a picker", () => {
   assert.equal(activeProjectReference(text, 9), null);
   assert.deepEqual(activeIssueReference("fix #12 now", 7), { start: 4, end: 7, query: "12" });
   assert.equal(activeIssueReference("fix #12 now", 11), null);
+});
+
+test("a picker that opens only on its typed trigger stays closed when a deletion or a click puts the caret in a token", () => {
+  // `typedAt` is where the trigger was last typed, null after a click, a deletion or a move of the caret.
+  const opens = (typedAt: number | null, value: string) => { const span = activeSkillReference(value, value.length); return !!span && typedTrigger(typedAt, span); };
+  assert.equal(opens(4, "ask /"), true, "the key-up after the `/` typed");
+  assert.equal(opens(4, "ask /t"), true, "a letter typed before the picker opened becomes its query");
+  assert.equal(opens(null, "ask /grilling"), false, "the space after a chosen skill deleted");
+  assert.equal(opens(null, "ask /"), false, "deleted back to the trigger, or a click after it");
+  assert.equal(opens(0, "ask /"), false, "a trigger typed elsewhere");
 });

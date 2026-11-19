@@ -1,4 +1,4 @@
-import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
+import { useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
 import "monaco-editor/languages/definitions/markdown/register.js";
 import { promptEditorMinimum } from "./composerHeight";
 import { equationKey, equationKeybinding, useEquationEditing } from "./equationEditing";
@@ -6,6 +6,7 @@ import { followPageFont, followShellTheme, monaco, pageFontOptions } from "./mon
 import { attachPromptMath } from "./promptMath";
 import { promptTypeEvent } from "./promptTyping";
 import { useShellLanguage } from "./shellLanguage";
+import { SkillChoicesContext, skillMentionSpans, skillNames } from "./skillMentions";
 import { spokenInsertion } from "./speech/spokenText";
 
 export { equationKey } from "./equationEditing";
@@ -49,6 +50,21 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   const equations = useEquationEditing(editor, () => !latest.current.disabled);
   // What a dictation is hearing: a decoration at the caret, which the text of the model never holds.
   const interim = useRef<{ text: string; shown: monaco.editor.IEditorDecorationsCollection | null }>({ text: "", shown: null });
+  // The `/name` of the skills of the project in front are shown as skills: they are given to the model with the prompt.
+  const skillChoices = useContext(SkillChoicesContext);
+  // A command for a shell (`!`) names no skill.
+  const knownSkills = useMemo(() => skillNames(shell ? null : skillChoices?.skills), [shell, skillChoices?.skills]);
+  const skillMarks = useRef<{ known: ReadonlySet<string>; shown: monaco.editor.IEditorDecorationsCollection | null }>({ known: knownSkills, shown: null });
+  skillMarks.current.known = knownSkills;
+  function markSkills() {
+    const instance = editor.current, model = instance?.getModel();
+    if (!instance || !model) return;
+    const decorations = skillMentionSpans(model.getValue(), skillMarks.current.known).map(span => ({
+      range: monaco.Range.fromPositions(model.getPositionAt(span.start), model.getPositionAt(span.end)),
+      options: { description: "skill-mention", inlineClassName: "prompt-skill-mention" } }));
+    if (skillMarks.current.shown) skillMarks.current.shown.set(decorations);
+    else if (decorations.length) skillMarks.current.shown = instance.createDecorationsCollection(decorations);
+  }
   // The character before the caret, a line break at the start of a line, nothing at the start of the prompt.
   function beforeCaret(model: monaco.editor.ITextModel, position: monaco.IPosition) {
     return position.column > 1 ? model.getValueInRange(new monaco.Range(position.lineNumber, position.column - 1, position.lineNumber, position.column))
@@ -96,6 +112,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
         updating = true; instance.trigger("prompt", "undo", null); updating = false; return;
       }
       if (next !== latest.current.value) latest.current.onChange(next);
+      markSkills();
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const selection = instance.onDidChangeCursorSelection(() => {
@@ -131,10 +148,12 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       if (caret) instance.revealPosition(caret);
     };
     node.addEventListener(promptTypeEvent, typed);
+    markSkills();
     return () => { node.removeEventListener("keydown", keepPageSelection, true); node.removeEventListener(promptTypeEvent, typed);
       detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
-      interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
+      interim.current = { text: "", shown: null }; skillMarks.current.shown = null; node.removeAttribute("data-interim"); };
   }, [expanded]);
+  useLayoutEffect(markSkills, [knownSkills]);
   useImperativeHandle(ref, () => ({
     get value() { return editor.current?.getValue() ?? latest.current.value; },
     get disabled() { return latest.current.disabled; },
