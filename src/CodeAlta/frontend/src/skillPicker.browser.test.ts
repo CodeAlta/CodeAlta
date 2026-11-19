@@ -143,6 +143,27 @@ test("typing / opens the skill picker, a choice writes /name, and a deletion, a 
     await evaluate(`${dialog}.querySelector('button[aria-label="Close"]').focus()`);
     await key("Enter", "Enter", 13);
     assert.equal(await until(`!${dialog} && ${prompt} === 'ask /td'`), true, "Enter on Close writes back the text typed, not the skill");
+
+    // A `/` typed in code never opens the picker: the host says where code is. Ctrl+Space still opens it there.
+    await evaluate("{ const p = document.querySelector('#prompt'); p.value = 'run `cd '; p.focus(); p.setSelectionRange(8, 8) }");
+    await slash();
+    await command("Input.insertText", { text: "usr" });
+    await settle();
+    assert.equal(await evaluate(`!${dialog} && ${prompt} === 'run \`cd /usr'`), true, "a / in a code span being typed opens nothing");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", windowsVirtualKeyCode: 32, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32, modifiers: 2 });
+    assert.equal(await until(`!!${dialog} && ${query} === 'usr'`), true, "Ctrl+Space opens the picker in code too");
+    await key("Escape", "Escape", 27);
+    assert.equal(await until(`!${dialog}`), true);
+    // After the code span is closed, a `/` opens the picker again, once the host has answered; what is typed meanwhile is its query.
+    await evaluate("{ const p = document.querySelector('#prompt'); p.value = 'run `ls` then '; p.focus(); p.setSelectionRange(14, 14) }");
+    await down("/", "Slash", 191, "/");
+    await down("t", "KeyT", 84, "t");
+    await up("/", "Slash", 191);
+    await up("t", "KeyT", 84);
+    assert.equal(await until(`!!${dialog} && ${query} === 't'`), true, "the picker opens after the host allows it, with what was typed");
+    await key("Enter", "Enter", 13);
+    assert.equal(await until(`!${dialog} && ${prompt} === 'run \`ls\` then /tdd '`), true);
     await command("Browser.close").catch(() => { });
   } finally {
     socket?.close();

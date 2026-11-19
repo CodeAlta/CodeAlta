@@ -9,11 +9,13 @@ export type SkillMentionSpan = Readonly<{ start: number; end: number; name: stri
  * The skills of the project in front, that a prompt names as `/name` (`skills`: null while they are being read, or
  * where no session runs), what reads them again (`refresh`: the `/` picker does when it opens), and where a prompt names
  * skills as the host reads it when the prompt is sent (`mentions`): the host reads the prompt as Markdown, and code, links
- * and HTML name none.
+ * and HTML name none. `canBegin` says whether the `/` typed at an offset can begin a skill: not in code, also a code span
+ * not closed yet, and not after a backslash.
  */
 export type SkillChoices = Readonly<{
   skills: readonly SkillChoice[] | null; refresh: () => void;
   mentions: (text: string) => Promise<readonly SkillMentionSpan[]>;
+  canBegin: (text: string, at: number) => Promise<boolean>;
 }>;
 export const SkillChoicesContext = createContext<SkillChoices | null>(null);
 
@@ -41,6 +43,15 @@ export function skillMentionSpans(text: string, known: ReadonlySet<string>): Ski
     if (name.length <= maximumNameLength && known.has(name.toLowerCase())) spans.push({ start: match.index, end: match.index + 1 + name.length, name });
   }
   return spans;
+}
+
+/**
+ * Whether the `/` typed at `at` may open the skill picker: the host says so (`SkillChoices.canBegin`), and is not asked
+ * for a text that has nothing of Markdown before the `/` that could make it code, HTML or a link.
+ */
+export function skillTokenAllowed(choices: SkillChoices | null, text: string, at: number): boolean | Promise<boolean> {
+  if (!choices) return false;
+  return /[`~<\\\t]| {4}|\]\($/u.test(text.slice(0, at)) ? choices.canBegin(text, at) : true;
 }
 
 /**

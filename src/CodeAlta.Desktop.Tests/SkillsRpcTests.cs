@@ -43,6 +43,19 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task ASlashCanBeginASkill_InPlainTextOnly()
+    {
+        var service = new SkillsService();
+        Assert.IsTrue((await service.CanBeginAsync(new("ask /", 4), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("```\ncd /", 7), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("run `cd /", 8), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("not \\/", 5), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new(null, 0), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("ask /", 40), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new(new string(' ', 32768) + "/", 32768), default)).Allowed);
+    }
+
+    [TestMethod]
     public async Task TheSkillsOfMcpServers_AreListedReadOnly_WithTheirSwitchTheirApprovalAndTheirContent()
     {
         using var fixture = await Fixture.CreateAsync();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeSkillReference, insertSkillCall, skillCallAtCaret, skillMentionSpans, skillNames, typedSkillQuery } from "./skillMentions";
+import { activeSkillReference, insertSkillCall, skillTokenAllowed, skillCallAtCaret, skillMentionSpans, skillNames, typedSkillQuery } from "./skillMentions";
 
 const known = skillNames([{ name: "grilling", title: "", description: "", source: "UserCommon" }, { name: "code-review", title: "", description: "", source: "Builtin" }]);
 
@@ -54,3 +54,14 @@ test("the /name of known skills are found, as the host gives them to the model",
   assert.deepEqual(skillMentionSpans("\ufeff/tdd /tdd\u00b2 /tdd-", others), []);
 });
 
+
+test("the host is asked whether a / may open the picker only where Markdown could make it code", async () => {
+  const asked: [string, number][] = [];
+  const choices = { skills: [], refresh: () => { }, mentions: async () => [], canBegin: async (text: string, at: number) => { asked.push([text, at]); return false; } };
+  assert.equal(skillTokenAllowed(choices, "ask /", 4), true);
+  assert.equal(skillTokenAllowed(null, "ask /", 4), false);
+  for (const text of ["run `cd /", "~~~\ncd /", "    cd /", "\tcd /", "<div> /", "a \\ /", "[x](/"]) assert.equal(await skillTokenAllowed(choices, text, text.length - 1), false, text);
+  assert.equal(asked.length, 7);
+  // What follows the `/` does not matter: it is not typed yet, or it is what the picker replaces.
+  assert.equal(skillTokenAllowed(choices, "ask / `later`", 4), true);
+});

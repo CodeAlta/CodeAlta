@@ -23,7 +23,7 @@ let setText: (text: string) => void = () => { };
 // that are not between backticks.
 const asked: { text: string; answer: (spans: readonly SkillMentionSpan[]) => void }[] = [];
 const skillChoices: SkillChoices = { skills: ["tdd", "research"].map(name => ({ name, title: name, description: "", source: "Builtin" })), refresh: () => { },
-  mentions: text => new Promise(answer => { asked.push({ text, answer }); }) };
+  mentions: text => new Promise(answer => { asked.push({ text, answer }); }), canBegin: async () => true };
 function Fixture() {
   const [value, setValue] = useState(state.value);
   state.value = value; setText = setValue;

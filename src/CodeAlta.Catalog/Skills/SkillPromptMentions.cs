@@ -105,9 +105,49 @@ public static class SkillPromptMentions
         return char.IsWhiteSpace(next) || next is '.' or ',' or ';' or ':' or '!' or '?' or ')' or ']' or '}' or '"' or '\'' ? length : 0;
     }
 
+    /// <summary>
+    /// Says whether the slash typed at <paramref name="offset"/> can begin the name of a skill, for the picker the composer
+    /// opens on it: it is in the plain text of the prompt as typed up to it. It cannot in code (a fenced or indented block,
+    /// a code span, also one whose closing backtick is not typed yet), in a link, in HTML, or after a backslash.
+    /// </summary>
+    /// <param name="text">The prompt text.</param>
+    /// <param name="offset">The index of the slash in <paramref name="text"/>.</param>
+    /// <returns><see langword="true"/> when a skill can be named there; <see langword="false"/> otherwise, also when no slash is there.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="text"/> is <see langword="null"/>.</exception>
+    public static bool CanBeginAt(string text, int offset)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (offset < 0 || offset >= text.Length || text[offset] != '/' || Escaped(text, offset)) return false;
+        // The address of a link being typed, whose closing parenthesis is not there yet: `[text](/`.
+        if (offset >= 2 && text[offset - 1] == '(' && text[offset - 2] == ']') return false;
+        // What follows the slash is not typed yet, or is what the picker replaces: only the text before it says where it is.
+        var typed = text[..(offset + 1)];
+        var literals = Literals(typed);
+        var block = literals.FirstOrDefault(literal => literal.Span.Start <= offset && offset <= literal.Span.End).Block;
+        if (block is null) return false;
+        // A backtick that is text in the block of the slash opens a code span that is not closed yet.
+        foreach (var (owner, span) in literals)
+        {
+            if (!ReferenceEquals(owner, block)) continue;
+            for (var at = Math.Max(span.Start, 0); at <= Math.Min(span.End, offset); at++)
+            {
+                if (typed[at] == '`' && !Escaped(typed, at)) return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Whether an odd number of backslashes precedes a character: it is escaped.
+    private static bool Escaped(string text, int at)
+    {
+        var slashes = 0;
+        while (at - slashes > 0 && text[at - slashes - 1] == '\\') slashes++;
+        return slashes % 2 == 1;
+    }
+
     // The text with all but its plain text hidden: each character becomes U+0000 unless it is white space or belongs to a
     // literal of the Markdown, so that the offsets stay those of `text` and no mention is found in code, a link or HTML.
-    // What Markdig does not report as a literal is hidden: a syntax this does not know names no skill.
     private static string PlainText(string text)
     {
         var plain = new char[text.Length];
@@ -116,13 +156,21 @@ public static class SkillPromptMentions
             if (char.IsWhiteSpace(text[at])) plain[at] = text[at];
         }
 
-        void Show(SourceSpan span)
+        foreach (var (_, span) in Literals(text))
         {
-            // The span of a literal covers its source, escapes included; an empty one ends before it starts.
+            // An empty span ends before it starts.
             var end = Math.Min(span.End, text.Length - 1);
             for (var at = Math.Max(span.Start, 0); at <= end; at++) plain[at] = text[at];
         }
 
+        return new string(plain);
+    }
+
+    // The literals of the Markdown of a text, each with its block and its place in the text, escapes included. What
+    // Markdig does not report as a literal is not plain text: a syntax this does not know names no skill.
+    private static List<(LeafBlock Block, SourceSpan Span)> Literals(string text)
+    {
+        var literals = new List<(LeafBlock Block, SourceSpan Span)>();
         MarkdownDocument document;
         try
         {
@@ -131,7 +179,7 @@ public static class SkillPromptMentions
         // Markdig refuses a text whose blocks or inlines nest too deep (thousands of `>` or `[`): it names no skill.
         catch (ArgumentException)
         {
-            return new string(plain);
+            return literals;
         }
 
         // Only a leaf block that reads inlines has any (a paragraph, a heading); code and HTML blocks have none.
@@ -147,14 +195,14 @@ public static class SkillPromptMentions
                     switch (inline)
                     {
                         case LiteralInline literal:
-                            Show(literal.Span);
+                            literals.Add((leaf, literal.Span));
                             break;
                         // A link or an image: the timeline shows its text as a link, never as a skill.
                         case LinkInline:
                             break;
                         // A delimiter left without its pair (`[`, `*`) is text, and so is what follows it.
                         case DelimiterInline delimiter:
-                            Show(delimiter.Span);
+                            literals.Add((leaf, delimiter.Span));
                             pending.Push(delimiter);
                             break;
                         case ContainerInline nested:
@@ -165,6 +213,6 @@ public static class SkillPromptMentions
             }
         }
 
-        return new string(plain);
+        return literals;
     }
 }

@@ -3662,7 +3662,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return () => controller.abort();
   }, [searchOpen, skillsRequest, skillEpoch, projectId, spaceId]);
   const skillChoices = useMemo<SkillChoices | null>(() => skillEpoch ? {
-    skills: searchSkills?.key === skillsKey ? searchSkills.skills : null, refresh: () => setSkillsRequest(value => value + 1), mentions: promptSkillMentions,
+    skills: searchSkills?.key === skillsKey ? searchSkills.skills : null, refresh: () => setSkillsRequest(value => value + 1), mentions: promptSkillMentions, canBegin: promptSkillCanBegin,
   } : null, [skillEpoch, skillsKey, searchSkills]);
 
   // A skill chosen in the search is written at the caret of the prompt of the session in front, with what was typed after
@@ -7126,6 +7126,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
 // Where a prompt names skills, as the host reads it when the prompt is sent.
 const promptSkillMentions = (text: string) => skillsApi.mentions({ text }, { timeoutMilliseconds: 8000 }).then(page => page.mentions);
+
+// Whether the `/` typed at an offset of a prompt can begin a skill: the picker of the skills opens only there.
+const promptSkillCanBegin = (text: string, at: number) => skillsApi.canBegin({ text, offset: at }, { timeoutMilliseconds: 8000 }).then(answer => answer.allowed);
 
 /** The way to Fleet at the foot of the Explorer, with how many of the machines it lists are online. */
 function fleetBar(projects: readonly WorkspaceProject[], onOpen: () => void) {

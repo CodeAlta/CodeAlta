@@ -45,11 +45,17 @@ export function isPromptPickerReopenKey(event: Pick<KeyboardEvent, "key" | "ctrl
  * `typedOnly` (its trigger character), only typing that character opens it by itself: the text it inserts is a token
  * again (`/name`), which a deletion or a click must leave as text.
  */
-export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, typedOnly }: {
+export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, typedOnly, allowed }: {
   input: RefObject<PromptInput | null>; edit: (text: string) => void; enabled: boolean; detect: PromptTokenDetector;
   onOpen: (trigger: PromptTrigger) => void; focus: RefObject<HTMLElement | null>; typedOnly?: string;
+  /**
+   * Whether the token that starts at `at` of `text` may open the picker by itself (not in code, for the skills). While
+   * it is being answered the picker stays closed, and what is typed meanwhile becomes its query; a token refused stays
+   * closed as one closed without a choice, until Ctrl+Space.
+   */
+  allowed?: (text: string, at: number) => boolean | Promise<boolean>;
 }) {
-  const latest = useRef({ edit, enabled, detect, onOpen, typedOnly }); latest.current = { edit, enabled, detect, onOpen, typedOnly };
+  const latest = useRef({ edit, enabled, detect, onOpen, typedOnly, allowed }); latest.current = { edit, enabled, detect, onOpen, typedOnly, allowed };
   const dialog = useRef<HTMLDialogElement>(null);
   // The token for which the picker was closed without a choice: it stays closed for that token.
   const dismissed = useRef<PromptTriggerDismissal | null>(null);
@@ -65,6 +71,8 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
     // Where the trigger was just typed (`typedTrigger`): the editor tells of a change before it moves the caret, so the
     // change itself does not say a trigger was typed; the key-up that follows, or the next change, sees the token.
     let typedAt: number | null = null;
+    // The token `allowed` said may open the picker, and the one it is asked about: the text up to their trigger character.
+    let admitted: string | null = null, asked: string | null = null, gone = false;
     // Opens the picker for the token at the caret; `reopen` also opens it for a token closed without a choice.
     const show = (reopen: boolean) => {
       const value = element.value;
@@ -80,6 +88,23 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
       if (!reopen && latest.current.typedOnly && !typedTrigger(typedAt, span)) return false;
       const parent = element.closest("dialog");
       if (Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(node => node !== parent)) return false;
+      const prefix = value.slice(0, span.start + 1);
+      if (!reopen && latest.current.allowed && admitted !== prefix) {
+        if (asked === prefix) return false;
+        const answer = latest.current.allowed(value, span.start);
+        if (answer === false) { dismissed.current = { start: span.start, prefix }; return false; }
+        if (answer !== true) {
+          asked = prefix;
+          // No answer leaves the token closed, as a refusal does: Ctrl+Space still opens it.
+          void answer.catch(() => false).then(may => {
+            if (gone || asked !== prefix) return;
+            asked = null;
+            if (may) { admitted = prefix; show(false); } else if (element.value.startsWith(prefix)) dismissed.current = { start: span.start, prefix };
+          });
+          return false;
+        }
+      }
+      admitted = null;
       const next = { text: value, ...span };
       typedAt = null;
       setTrigger(next);
@@ -107,6 +132,7 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
     element.addEventListener("keydown", pressed, true); element.addEventListener("pointerdown", pressed, true); element.addEventListener("keydown", reopen, true);
     element.addEventListener("compositionstart", begin); element.addEventListener("compositionend", end);
     return () => {
+      gone = true;
       clearTimeout(pasteTimer); pasting.current = false;
       element.removeEventListener("paste", paste, true); element.removeEventListener("drop", paste, true);
       element.removeEventListener("input", inspect); element.removeEventListener("keyup", inspect); element.removeEventListener("click", inspect);

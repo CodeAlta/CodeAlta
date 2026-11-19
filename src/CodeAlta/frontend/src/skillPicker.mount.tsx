@@ -21,7 +21,9 @@ dismissDialogsOnOutsidePress(document);
 function Fixture() {
   const input = useRef<HTMLTextAreaElement>(null);
   const [refreshes, setRefreshes] = useState(0);
-  const choices = useMemo<SkillChoices>(() => ({ skills, refresh: () => setRefreshes(value => value + 1), mentions: async () => [] }), []);
+  const choices = useMemo<SkillChoices>(() => ({ skills, refresh: () => setRefreshes(value => value + 1), mentions: async () => [],
+    // The host of the fixture: a `/` after a backtick left open is in code; it answers after a moment, as a host does.
+    canBegin: (text, at) => new Promise(resolve => setTimeout(() => resolve(text.slice(0, at).split("`").length % 2 === 1), 30)) }), []);
   return <SkillChoicesContext.Provider value={choices}>
     <output id="refreshes">{refreshes}</output>
     <textarea id="prompt" ref={input} />

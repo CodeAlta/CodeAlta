@@ -5,7 +5,7 @@ import { AppIcon } from "./AppIcon";
 import { AppWindowSurface } from "./AppWindow";
 import { usePromptPicker } from "./promptPicker";
 import { searchSkills } from "./search/skillResults";
-import { activeSkillReference, insertSkillCall, SkillChoicesContext, typedSkillQuery } from "./skillMentions";
+import { activeSkillReference, insertSkillCall, SkillChoicesContext, skillTokenAllowed, typedSkillQuery } from "./skillMentions";
 import { skillSourceLabels } from "./skillSources";
 import { useShellLanguage } from "./shellLanguage";
 import type { PromptInput } from "./PromptEditor";
@@ -18,7 +18,8 @@ const pageStep = 8;
  * place of the `/query`, where the user goes on typing; the skill is given to the model when the prompt is sent.
  * Escape, Enter without a match, or a space or a `/` typed in its search, close it with what was typed written back in
  * the prompt (a path such as `/usr/local/bin` stays text); Ctrl+Space opens it again on a `/token`. A `/` in an empty
- * prompt opens the search of the window instead.
+ * prompt opens the search of the window instead. It never opens by itself for a `/` typed in code (a fenced or indented
+ * block, between backticks, also before the closing one is typed) or after a backslash: the host says where code is.
  */
 export function SkillPromptPicker({ edit, input }: { edit: (text: string) => void; input: RefObject<PromptInput | null> }) {
   const { t } = useShellLanguage();
@@ -30,6 +31,7 @@ export function SkillPromptPicker({ edit, input }: { edit: (text: string) => voi
   const [selected, setSelected] = useState(0);
   // Only typing `/` opens it by itself: the `/name` it writes is a token, which a deletion or a click leaves as text.
   const { trigger, dialog, close } = usePromptPicker({ input, edit, enabled: !!choices, focus: search, detect: activeSkillReference, typedOnly: "/",
+    allowed: (text, at) => skillTokenAllowed(choices, text, at),
     onOpen: value => { setQuery(value.query); setSelected(0); choices?.refresh(); } });
   const skills = choices?.skills ?? null;
   const found = useMemo(() => skills ? searchSkills(skills, query) : [], [skills, query]);

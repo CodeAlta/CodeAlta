@@ -106,6 +106,47 @@ public sealed class SkillPromptMentionsTests
     public void Find_ANameAJoinerOrAnotherCharacterEndsIsNoMention(string text)
         => Assert.HasCount(0, SkillPromptMentions.Find(text));
 
+    // The slash is the last character of each text: where the composer asks whether its picker opens.
+    [TestMethod]
+    [DataRow("/")]
+    [DataRow("ask /")]
+    [DataRow("> quote\n> - item (/")]
+    [DataRow("```\ncode\n```\nthen /")]
+    [DataRow("`code` then /")]
+    [DataRow("a \\` tick then /")]
+    [DataRow("one ` tick\n\nanother paragraph /")]
+    [DataRow("a \\\\/")]
+    public void CanBeginAt_ASlashTypedInPlainTextCanNameASkill(string text)
+        => Assert.IsTrue(SkillPromptMentions.CanBeginAt(text, text.Length - 1));
+
+    [TestMethod]
+    [DataRow("```\ncd /")]
+    [DataRow("```sh\nls\n\ncd /")]
+    [DataRow("~~~\ncd /")]
+    [DataRow("> ```\n> cd /")]
+    [DataRow("1. step\n   ```\n   cd /")]
+    [DataRow("text\n\n    cd /")]
+    [DataRow("run `cd /")]
+    [DataRow("run ``cd ` /")]
+    [DataRow("run `a\nb /")]
+    [DataRow("escaped \\/")]
+    [DataRow("<div>\n/")]
+    [DataRow("[text](/")]
+    public void CanBeginAt_ASlashTypedInCodeOrEscapedCannot(string text)
+        => Assert.IsFalse(SkillPromptMentions.CanBeginAt(text, text.Length - 1));
+
+    [TestMethod]
+    public void CanBeginAt_ReadsOnlyTheTextBeforeTheSlash_AndRefusesAPlaceWithoutOne()
+    {
+        // The backtick after the slash closes nothing typed yet; the one before it opens a code span.
+        Assert.IsTrue(SkillPromptMentions.CanBeginAt("ask /tdd ` later", 4));
+        Assert.IsFalse(SkillPromptMentions.CanBeginAt("run `cd /usr` now", 8));
+        Assert.IsFalse(SkillPromptMentions.CanBeginAt("ask /", 0));
+        Assert.IsFalse(SkillPromptMentions.CanBeginAt("ask /", 5));
+        Assert.IsFalse(SkillPromptMentions.CanBeginAt("ask /", -1));
+        Assert.IsFalse(SkillPromptMentions.CanBeginAt(string.Concat(Enumerable.Repeat(">", 20000)) + " /", 20001));
+    }
+
     [TestMethod]
     public void Find_ANameLongerThanTheLimitIsNoMention()
         => Assert.HasCount(0, SkillPromptMentions.Find("/" + new string('a', SkillPromptMentions.MaximumNameLength + 1)));

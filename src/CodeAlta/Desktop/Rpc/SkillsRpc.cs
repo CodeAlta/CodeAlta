@@ -99,6 +99,18 @@ internal sealed partial class SkillsService
         return Task.FromResult(new SkillsMentionsResponse([.. mentions.Take(MaximumMentions).Select(static mention => new SkillsMention(mention.Start, mention.Start + mention.Length, mention.Name))]));
     }
 
+    /// <summary>
+    /// Says whether the slash typed at an offset of a prompt can begin the name of a skill
+    /// (<see cref="SkillPromptMentions.CanBeginAt"/>): the composer opens its skill picker only there, never in code or
+    /// after a backslash.
+    /// </summary>
+    [NeoRpcMethod("canBegin")]
+    public Task<SkillsCanBeginResponse> CanBeginAsync(SkillsCanBeginRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Task.FromResult(new SkillsCanBeginResponse(request.Text is { Length: > 0 and <= MaximumPromptLength } text && SkillPromptMentions.CanBeginAt(text, request.Offset)));
+    }
+
     /// <summary>Lists every discovered skill, including disabled, invalid and shadowed ones.</summary>
     [NeoRpcMethod("list")]
     public async Task<SkillsListResponse> ListAsync(SkillsListRequest request, CancellationToken cancellationToken)
@@ -636,6 +648,11 @@ internal sealed record SkillsMentionsRequest(string? Text);
 internal sealed record SkillsMentionsResponse(IReadOnlyList<SkillsMention> Mentions);
 /// <summary>A <c>/name</c> of a prompt: from <paramref name="Start"/> (the slash) to <paramref name="End"/>, in UTF-16 units.</summary>
 internal sealed record SkillsMention(int Start, int End, string Name);
+
+/// <param name="Text">The text of a prompt.</param>
+/// <param name="Offset">The index of a slash in it, in UTF-16 units.</param>
+internal sealed record SkillsCanBeginRequest(string? Text, int Offset);
+internal sealed record SkillsCanBeginResponse(bool Allowed);
 
 /// <param name="SpaceId">The space the page shows, whose added folders are read too; null for the default space.</param>
 internal sealed record SkillsListRequest(string? ExpectedEpoch, string? ProjectId, string? SpaceId = null);
