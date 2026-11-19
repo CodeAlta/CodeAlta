@@ -6,12 +6,12 @@ export const altaInterfaceVersion = 1;
  * compares them with `package.json`, so an update of a library cannot go by unnoticed here.
  */
 export const lentVersions: Readonly<Record<string, string>> = Object.freeze({
-  "react": "19.2.8",
-  "react-dom": "19.2.8",
-  "@blueprintjs/core": "6.21.0",
-  "@blueprintjs/table": "6.3.0",
-  "flexlayout-react": "0.11.0",
-  "lucide-react": "0.511.0",
-  "@xyflow/react": "12.12.0",
+  "react": "19.3.1",
+  "react-dom": "19.3.1",
+  "@blueprintjs/core": "6.23.2",
+  "@blueprintjs/table": "6.3.4",
+  "flexlayout-react": "0.11.2",
+  "lucide-react": "0.577.0",
+  "@xyflow/react": "12.12.1",
   "@observablehq/plot": "0.6.19",
 });

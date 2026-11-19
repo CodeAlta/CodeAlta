@@ -217,7 +217,7 @@ export function createFindBar(options: FindBarOptions) {
     if (shown) document.addEventListener("pointerdown", outside, true);
     else document.removeEventListener("pointerdown", outside, true);
   };
-  optionsButton.addEventListener("click", () => showMenu(menu.hidden));
+  optionsButton.addEventListener("click", () => showMenu(menu.hidden !== false));
   for (const item of items) item.addEventListener("click", () => {
     const option = item.dataset.option as keyof FindOptions;
     findOptions = { ...findOptions, [option]: !findOptions[option] };

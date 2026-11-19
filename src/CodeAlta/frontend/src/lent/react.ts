@@ -4,7 +4,7 @@
 // is CommonJS; `pluginScript.test.ts` compares them with what the package exports.
 import * as React from "react";
 export {
-  Activity, Children, Component, Fragment, Profiler, PureComponent, StrictMode, Suspense, act, cache, cacheSignal, captureOwnerStack, cloneElement,
+  Activity, Children, Component, Fragment, Profiler, PureComponent, StrictMode, Suspense, ViewTransition, act, addTransitionType, cache, cacheSignal, captureOwnerStack, cloneElement,
   createContext, createElement, createRef, forwardRef, isValidElement, lazy, memo, startTransition, use, useActionState,
   useCallback, useContext, useDebugValue, useDeferredValue, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect,
   useMemo, useOptimistic, useReducer, useRef, useState, useSyncExternalStore, useTransition, version,

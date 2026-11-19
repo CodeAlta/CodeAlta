@@ -8,15 +8,15 @@ Versions below describe this CodeAlta build. In a running script, `alta.versions
 
 | Import | Version | Surface | API / repository / pinned declarations |
 | --- | --- | --- | --- |
-| `react` | 19.2.8 | Named exports below + default React | [API](https://react.dev/reference/react) · [GitHub](https://github.com/react/react) |
-| `react/jsx-runtime` | 19.2.8 | Named exports below; compiled JSX | [JSX transform](https://legacy.reactjs.org/blog/2020/09/22/introducing-the-new-jsx-transform.html) · same repository |
-| `react-dom` | 19.2.8 | Named exports below + default ReactDOM | [API](https://react.dev/reference/react-dom) · same repository |
-| `react-dom/client` | 19.2.8 | Named exports below + default client namespace | [API](https://react.dev/reference/react-dom/client) · same repository |
-| `@blueprintjs/core` | 6.21.0 | All root named runtime exports | [API](https://blueprintjs.com/docs/#core) · [GitHub](https://github.com/palantir/blueprint) · [types](https://unpkg.com/@blueprintjs/core@6.21.0/lib/esm/index.d.ts) |
-| `@blueprintjs/table` | 6.3.0 | All root named runtime exports | [API](https://blueprintjs.com/docs/#table) · same repository · [types](https://unpkg.com/@blueprintjs/table@6.3.0/lib/esm/index.d.ts) |
-| `flexlayout-react` | 0.11.0 | All root named runtime exports | [Guide / GitHub](https://github.com/caplin/FlexLayout#usage) · [types](https://unpkg.com/flexlayout-react@0.11.0/types/index.d.ts) |
-| `lucide-react` | 0.511.0 | All root named runtime exports | [API](https://lucide.dev/guide/packages/lucide-react) · [GitHub](https://github.com/lucide-icons/lucide) · [types / every icon name](https://unpkg.com/lucide-react@0.511.0/dist/lucide-react.d.ts) |
-| `@xyflow/react` | 12.12.0 | All root named runtime exports (React Flow) | [API](https://reactflow.dev/api-reference) · [GitHub](https://github.com/xyflow/xyflow) · [types](https://unpkg.com/@xyflow/react@12.12.0/dist/esm/index.d.ts) |
+| `react` | 19.3.1 | Named exports below + default React | [API](https://react.dev/reference/react) · [GitHub](https://github.com/react/react) |
+| `react/jsx-runtime` | 19.3.1 | Named exports below; compiled JSX | [JSX transform](https://legacy.reactjs.org/blog/2020/09/22/introducing-the-new-jsx-transform.html) · same repository |
+| `react-dom` | 19.3.1 | Named exports below + default ReactDOM | [API](https://react.dev/reference/react-dom) · same repository |
+| `react-dom/client` | 19.3.1 | Named exports below + default client namespace | [API](https://react.dev/reference/react-dom/client) · same repository |
+| `@blueprintjs/core` | 6.23.2 | All root named runtime exports | [API](https://blueprintjs.com/docs/#core) · [GitHub](https://github.com/palantir/blueprint) · [types](https://unpkg.com/@blueprintjs/core@6.23.2/lib/esm/index.d.ts) |
+| `@blueprintjs/table` | 6.3.4 | All root named runtime exports | [API](https://blueprintjs.com/docs/#table) · same repository · [types](https://unpkg.com/@blueprintjs/table@6.3.4/lib/esm/index.d.ts) |
+| `flexlayout-react` | 0.11.2 | All root named runtime exports | [Guide / GitHub](https://github.com/caplin/FlexLayout#usage) · [types](https://unpkg.com/flexlayout-react@0.11.2/types/index.d.ts) |
+| `lucide-react` | 0.577.0 | All root named runtime exports | [API](https://lucide.dev/guide/packages/lucide-react) · [GitHub](https://github.com/lucide-icons/lucide) · [types / every icon name](https://unpkg.com/lucide-react@0.577.0/dist/lucide-react.d.ts) |
+| `@xyflow/react` | 12.12.1 | All root named runtime exports (React Flow) | [API](https://reactflow.dev/api-reference) · [GitHub](https://github.com/xyflow/xyflow) · [types](https://unpkg.com/@xyflow/react@12.12.1/dist/esm/index.d.ts) |
 | `@observablehq/plot` | 0.6.19 | All root named runtime exports (charts as SVG) | [API](https://observablehq.com/plot/api) · [GitHub](https://github.com/observablehq/plot) · [types](https://unpkg.com/@observablehq/plot@0.6.19/dist/index.d.ts) |
 | `codealta` | 1 | CodeAlta interface, not an npm package | [Exports and contracts](script-api.md) · [GitHub](https://github.com/CodeAlta/CodeAlta) |
 
@@ -31,10 +31,10 @@ The default component of a script is already mounted in CodeAlta's React tree. P
 <!-- exports: react -->
 | Use | Named exports |
 | --- | --- |
-| Elements and components | `Activity`, `Children`, `Component`, `Fragment`, `Profiler`, `PureComponent`, `StrictMode`, `Suspense`, `cloneElement`, `createElement`, `isValidElement`, `lazy`, `memo` |
+| Elements and components | `Activity`, `Children`, `Component`, `Fragment`, `Profiler`, `PureComponent`, `StrictMode`, `Suspense`, `ViewTransition`, `cloneElement`, `createElement`, `isValidElement`, `lazy`, `memo` |
 | Context and refs | `createContext`, `createRef`, `forwardRef`, `useContext`, `useId`, `useImperativeHandle`, `useRef` |
 | State and effects | `use`, `useActionState`, `useCallback`, `useDebugValue`, `useDeferredValue`, `useEffect`, `useEffectEvent`, `useInsertionEffect`, `useLayoutEffect`, `useMemo`, `useOptimistic`, `useReducer`, `useState`, `useSyncExternalStore`, `useTransition` |
-| Other | `act`, `cache`, `cacheSignal`, `captureOwnerStack`, `startTransition`, `version` |
+| Other | `act`, `addTransitionType`, `cache`, `cacheSignal`, `captureOwnerStack`, `startTransition`, `version` |
 <!-- /exports -->
 
 React's internal exports and `unstable_useCacheRefresh` are not named exports here. Follow upstream environment restrictions: export presence does not make server-only APIs useful in a client component.
@@ -48,7 +48,7 @@ React's internal exports and `unstable_useCacheRefresh` are not named exports he
 ### react-dom
 
 <!-- exports: react-dom -->
-`createPortal`, `flushSync`, `preconnect`, `prefetchDNS`, `preinit`, `preinitModule`, `preload`, `preloadModule`, `requestFormReset`, `unstable_batchedUpdates`, `useFormState`, `useFormStatus`, `version`.
+`browser`, `createPortal`, `flushSync`, `preconnect`, `prefetchDNS`, `preinit`, `preinitModule`, `preload`, `preloadModule`, `requestFormReset`, `unstable_batchedUpdates`, `useFormState`, `useFormStatus`, `version`.
 <!-- /exports -->
 
 ### react-dom/client
@@ -71,8 +71,8 @@ All root exports, grouped for lookup. For each component's props, follow the API
 | Menus, tabs and trees | `ContextMenu`, `ContextMenuPopover`, `Menu`, `MenuDivider`, `MenuItem`, `PanelStack`, `PanelStack2`, `Tab`, `TabPanel`, `Tabs`, `TabsExpander`, `Tree`, `TreeNode`, `hideContextMenu`, `showContextMenu` |
 | Overlays | `Alert`, `Dialog`, `DialogBody`, `DialogFooter`, `DialogStep`, `Drawer`, `MultistepDialog`, `Overlay`, `Overlay2`, `OverlayToaster`, `Popover`, `PopoverNext`, `Portal`, `Toast`, `Toast2`, `Tooltip` |
 | Keyboard | `Hotkey`, `Hotkeys`, `HotkeysTarget`, `HotkeysTarget2`, `KeyComboTag`, `comboMatches`, `getKeyCombo`, `getKeyComboString`, `parseKeyCombo`, `useHotkeys` |
-| Constants and enums | `Alignment`, `Boundary`, `ButtonVariant`, `Classes`, `Colors`, `DISPLAYNAME_PREFIX`, `DrawerSize`, `Elevation`, `HandleInteractionKind`, `HandleType`, `IconSize`, `Intent`, `Keys`, `NonIdealStateIconSize`, `POPOVER_NEXT_PLACEMENTS`, `PopoverAnimation`, `PopoverInteractionKind`, `PopoverPosition`, `PopperPlacements`, `PopupKind`, `Position`, `Size`, `SpinnerSize`, `TextAlignment` |
-| Providers and infrastructure | `AbstractComponent`, `AbstractPureComponent`, `BlueprintProvider`, `FocusStyleManager`, `HotkeysContext`, `HotkeysProvider`, `OverlaysContext`, `OverlaysProvider`, `PortalContext`, `PortalProvider`, `Utils`, `getRef`, `isRefCallback`, `isRefObject`, `mergeRefs`, `refHandler`, `removeNonHTMLProps`, `setRef`, `useAsyncControllableValue`, `useIsomorphicLayoutEffect`, `useOverlayStack`, `usePrevious` |
+| Constants and enums | `Alignment`, `Boundary`, `ButtonVariant`, `Classes`, `Colors`, `DISPLAYNAME_PREFIX`, `DrawerSize`, `Elevation`, `HandleInteractionKind`, `HandleType`, `IconSize`, `Intent`, `Keys`, `NonIdealStateIconSize`, `POPOVER_NEXT_PLACEMENTS`, `PopoverNextPlacement`, `PopoverAnimation`, `PopoverInteractionKind`, `PopoverPosition`, `PopperPlacements`, `PopupKind`, `Position`, `Size`, `SpinnerSize`, `TextAlignment` |
+| Providers and infrastructure | `AbstractComponent`, `AbstractPureComponent`, `BlueprintProvider`, `ThemeProvider`, `FocusStyleManager`, `HotkeysContext`, `HotkeysProvider`, `OverlaysContext`, `OverlaysProvider`, `PortalContext`, `PortalProvider`, `Utils`, `getRef`, `isRefCallback`, `isRefObject`, `mergeRefs`, `refHandler`, `removeNonHTMLProps`, `setRef`, `useAsyncControllableValue`, `useBlueprintThemeTokens`, `useBlueprintThemeValue`, `useIsomorphicLayoutEffect`, `useOverlayStack`, `usePrevious` |
 | Popover migration | `popoverPlacementToNextPlacement`, `popoverPositionToNextPlacement`, `popoverPropsToNextProps`, `popperBoundaryToNextBoundary`, `popperModifiersToNextMiddleware` |
 <!-- /exports -->
 
@@ -252,16 +252,16 @@ These are **not import-map entries**. Use the helper, not `import ... from "echa
 | Library | Version | Entry available to scripts | Upstream |
 | --- | --- | --- | --- |
 | `echarts` | 6.1.0 | `Chart`, distribution helpers; registered features below | [Option API](https://echarts.apache.org/en/option.html) · [GitHub](https://github.com/apache/echarts) |
-| `markdown-it` | 15.0.2 | `Markdown` | [API / GitHub](https://github.com/markdown-it/markdown-it) |
+| `markdown-it` | 15.0.3 | `Markdown` | [API / GitHub](https://github.com/markdown-it/markdown-it) |
 | `highlight.js` | 11.12.0 | `Code`, Markdown code fences | [Languages / GitHub](https://github.com/highlightjs/highlight.js) |
 | `katex` | 0.19.1 | `Equation`, formulas and `math` fences of `Markdown`, with mhchem (`\ce`, `\pu`) | [Functions](https://katex.org/docs/supported) · [GitHub](https://github.com/KaTeX/KaTeX) |
-| `pele` | 1.12.0 | `Diagram`, Mermaid fences | [Syntax](https://mermaid.js.org/intro/) · [Pele](https://pele.run) · [GitHub](https://github.com/obsidianmd/pele) |
+| `pele` | 1.13.0 | `Diagram`, Mermaid fences | [Syntax](https://mermaid.js.org/intro/) · [Pele](https://pele.run) · [GitHub](https://github.com/obsidianmd/pele) |
 | `vega-lite` | 6.5.0 | `VegaLite`, `vega-lite` fences of `Markdown` (data only: no address of the web, no image, no link) | [Docs](https://vega.github.io/vega-lite/docs/) · [GitHub](https://github.com/vega/vega-lite) |
 | `vega` | 6.4.0 | Draws the charts of `vega-lite` to SVG, in a worker, with its expressions interpreted (`vega-interpreter`) | [Docs](https://vega.github.io/vega/docs/) · [GitHub](https://github.com/vega/vega) |
 | `vega-interpreter` | 2.3.2 | The expressions of a chart, without `eval` | [GitHub](https://github.com/vega/vega/tree/main/packages/vega-interpreter) |
-| `dompurify` | 3.4.14 | `alta.html(text)` with CodeAlta's fragment policy | [API / GitHub](https://github.com/cure53/DOMPurify) |
-| `@lobehub/icons-static-svg` | 1.95.1 | Curated `BrandIcon` assets, not the whole collection | [GitHub](https://github.com/lobehub/lobe-icons) |
-| `simple-icons` | 16.34.0 | Curated `BrandIcon` assets, not the whole collection | [Catalog](https://simpleicons.org) · [GitHub](https://github.com/simple-icons/simple-icons) |
+| `dompurify` | 3.4.18 | `alta.html(text)` with CodeAlta's fragment policy | [API / GitHub](https://github.com/cure53/DOMPurify) |
+| `@lobehub/icons-static-svg` | 1.104.0 | Curated `BrandIcon` assets, not the whole collection | [GitHub](https://github.com/lobehub/lobe-icons) |
+| `simple-icons` | 16.38.0 | Curated `BrandIcon` assets, not the whole collection | [Catalog](https://simpleicons.org) · [GitHub](https://github.com/simple-icons/simple-icons) |
 
 `Chart` registers ECharts **bar, boxplot, custom, heatmap, line, pie, scatter, treemap**; grid, calendar, dataset, transform, data zoom, brush, legend, title, tooltip, visual map, mark area, mark line and ARIA; label layout, universal transition, SVG/canvas renderers. It does not expose the engine, registration APIs, map/geo, or every chart type shown upstream. Script options can contain functions (for example `custom.renderItem`); HTML `alta-chart` JSON cannot. Prefer data-only options when possible. [Chart props and distribution helpers](script-api.md#components) describe CodeAlta's wrapper.
 

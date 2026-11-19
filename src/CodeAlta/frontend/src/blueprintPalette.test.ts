@@ -25,10 +25,9 @@ test("Blueprint's stylesheet keeps its palette and loses its palette literals", 
   const declared = (text: string) => [...text.matchAll(/--bp-palette-[a-z0-9-]+\s*:\s*#[0-9a-fA-F]{6}/g)].map(match => match[0]);
   assert.deepEqual(declared(css), declared(source));
   const literals = (text: string, hex: string) => text.split(hex).length - 1;
+  // Blueprint writes these as literals in its components (its two dark grays below it names by their variable itself).
+  for (const hex of ["#f6f7f9", "#2d72d2", "#1c2127"]) assert.ok(literals(source, hex) > 2, hex);
   // Each of these appears once in the palette and nowhere else afterwards.
-  for (const hex of ["#2f343c", "#383e47", "#f6f7f9", "#2d72d2", "#1c2127"]) {
-    assert.ok(literals(source, hex) > 2, hex);
-    assert.equal(literals(css, hex), 1, hex);
-  }
+  for (const hex of ["#2f343c", "#383e47", "#f6f7f9", "#2d72d2", "#1c2127"]) assert.equal(literals(css, hex), 1, hex);
   assert.ok(!/rgba\(17, 20, 24,/.test(css));
 });

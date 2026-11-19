@@ -7728,7 +7728,7 @@ function SessionWorkspace({ sideQuestions, shellCommands, canAdmit, remoteContro
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={(heldElsewhere ? elsewhereView : null) ?? (ownedSession ? live?.snapshot?.session ?? null : null) ?? elsewhereView} running={running ?? undefined} /></AutomationOriginContext.Provider></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
+          live={(heldElsewhere ? elsewhereView : null) ?? (ownedSession ? live?.snapshot?.session : null) ?? elsewhereView} running={running ?? undefined} /></AutomationOriginContext.Provider></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
