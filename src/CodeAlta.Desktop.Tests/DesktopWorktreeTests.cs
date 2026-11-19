@@ -187,6 +187,70 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task CreateSession_InAWorktreeThatExists_WorksThereBesideItsSessions_AndMakesNone()
+    {
+        using var repository = await Repository.CreateAsync();
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var plain = Directory.CreateDirectory(Path.Combine(repository.Home, "plain")).FullName;
+        var worktrees = new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions));
+        var service = new WorkspaceService(host, Epoch, worktrees);
+        try
+        {
+            var request = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, project.ProjectPath, "First", null, Worktree: true);
+            var first = await service.CreateSessionAsync(request, CancellationToken.None);
+            Assert.AreEqual("ok", first.Status, first.Reason + " " + first.Message);
+            var worktree = first.WorktreePath!;
+            var id = Guid.NewGuid().ToString("D");
+            var beside = request with { Title = "Beside", WorktreeFolder = worktree, RequestId = id };
+            Assert.AreEqual(beside, JsonSerializer.Deserialize(JsonSerializer.Serialize(beside, DesktopJsonContext.Default.WorkspaceCreateSessionRequest),
+                DesktopJsonContext.Default.WorkspaceCreateSessionRequest));
+
+            var second = await service.CreateSessionAsync(beside, CancellationToken.None);
+
+            // Another session of the project, at the same level, in the same checkout: git made no other one.
+            Assert.AreEqual(("ok", worktree, project.ProjectPath), (second.Status, second.WorktreePath, second.WorkspacePath));
+            Assert.AreNotEqual(first.SessionId, second.SessionId);
+            Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
+            var listed = (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == second.SessionId);
+            Assert.AreEqual((worktree, worktree, null), (listed.WorktreePath, listed.WorktreeRoot, listed.ParentSessionId));
+            // No step of a worktree is shown: none is made.
+            CollectionAssert.AreEqual(new[] { SessionCreationSteps.Session, SessionCreationSteps.Ready },
+                service.CreateSessionProgress(new(Epoch, id)).Steps.Select(static step => step.Kind).ToArray());
+
+            // A folder that is no other checkout of the repository of the project is no worktree to work in: nothing is created.
+            var sessions = (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Length;
+            foreach (var (folder, reason) in new[]
+                     {
+                         (worktree + "-none", "existing_not_found"), (plain, "existing_not_repository"), (project.ProjectPath, "existing_invalid"),
+                     })
+            {
+                var refused = await service.CreateSessionAsync(request with { WorktreeFolder = folder }, CancellationToken.None);
+                Assert.AreEqual(("worktree_failed", reason, null), (refused.Status, refused.Reason, refused.SessionId), folder);
+            }
+
+            Assert.HasCount(sessions, (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions);
+            Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
+            Assert.IsTrue(Directory.Exists(worktree));
+            // A worktree that exists has no branch to start from and none made ahead, and is the place of a worktree.
+            foreach (var invalid in new[]
+                     {
+                         beside with { RequestId = null, BaseBranch = "main" },
+                         beside with { RequestId = null, PreparedWorktreeId = Guid.NewGuid().ToString("D") },
+                         beside with { RequestId = null, Worktree = false },
+                         beside with { RequestId = null, WorktreeFolder = " " },
+                     })
+                Assert.AreEqual("invalid_scope", (await service.CreateSessionAsync(invalid, CancellationToken.None)).Status);
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task CreateSession_InANewWorktree_SaysItsStepsByTheIdentifierOfItsRequest()
     {
         using var repository = await Repository.CreateAsync();
@@ -261,10 +325,21 @@ public sealed class DesktopWorktreeTests
                 DesktopJsonContext.Default.WorkspacePreparedWorktreeResponse)! with { Steps = ready.Steps });
             Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
 
+            // A worktree made ahead that no session took yet is not one to join: it goes when its page gives it up.
+            var prepared = Path.Combine(host.CatalogOptions.WorktreesRoot, project.Slug, ready.Branch![GitWorktreeService.BranchPrefix.Length..]);
+            Assert.IsTrue(Directory.Exists(prepared));
+            var join = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, project.ProjectPath, "Joined", null, Worktree: true, WorktreeFolder: prepared);
+            var tooEarly = await service.CreateSessionAsync(join, CancellationToken.None);
+            Assert.AreEqual(("worktree_failed", "existing_not_found", null), (tooEarly.Status, tooEarly.Reason, tooEarly.SessionId));
+
             // The session works in that worktree, and no other one is made.
             var request = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, project.ProjectPath, "Prepared", null, Worktree: true, PreparedWorktreeId: id);
             var created = await service.CreateSessionAsync(request, CancellationToken.None);
             Assert.AreEqual("ok", created.Status, created.Reason + " " + created.Message);
+            // Once a session took it, it is a worktree like another: a second session joins it.
+            Assert.AreEqual(prepared, created.WorktreePath);
+            var joined = await service.CreateSessionAsync(join, CancellationToken.None);
+            Assert.AreEqual(("ok", prepared), (joined.Status, joined.WorktreePath));
             Assert.AreEqual(ready.Branch, GitWorktreeService.BranchPrefix + Path.GetFileName(created.WorktreePath!));
             Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
             Assert.AreEqual("used", service.PreparedWorktreeState(new(Epoch, id)).Status);

@@ -355,7 +355,7 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveLevelOf, adaptiveTierOf, composerAdaptiveEntry, composerTierEntries, readAdaptiveTier, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
-import { cloudPlace, deletedSessionWorktree, folderName, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, worktreesLeft, type DeletedWorktree, type WorkPlace } from "./worktrees/worktrees";
+import { cloudPlace, deletedSessionWorktree, existingPlace, folderName, makesWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, worktreeFirstSession, worktreesLeft, type DeletedWorktree, type WorkPlace, type Worktree } from "./worktrees/worktrees";
 import { createSessionFolderSwitch, type FolderSwitchResult, type FolderTarget } from "./worktrees/sessionFolder";
 import { bringBackCommand, cloudOf, inCloud, pendingCloudStartKey, providerHasCloudSessions, readPendingCloudStart, runCloudStart, type CloudStartState,
   type PendingCloudStart } from "./cloudSessions/cloudSessions";
@@ -364,7 +364,8 @@ import { CloudMark, CloudOriginLine, CloudSessionPane, type CloudContinueRequest
 import { cloudSessions as cloudSessionsApi, type CloudContinueResponse, type CloudStartResponse } from "#neoastra";
 import { typeResumeCommand } from "./claudeCodeOpen/claudeCodeOpen";
 import { shellTakesCliCommand } from "./claudeCli/claudeCli";
-import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
+import { createPreparedWorktrees, preparedBranch } from "./worktrees/preparedWorktrees";
+import type { WorkPlaceOpenRequest } from "./worktrees/WorkPlaceChoice";
 import { WorktreePreparation } from "./worktrees/WorktreePreparation";
 import { checkedWorktrees, editorFailure, inventoryReply, removalReason, removalReply, type Inventory } from "./worktrees/worktreeInventory";
 import type { ComposerChromeValue } from "./composerChrome";
@@ -760,6 +761,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null; worktree?: string | null; review?: "changes" | "branch" | null }>>>(() => new Map());
   // Where the next session of each project works: the folder of the project unless a new worktree was chosen.
   const [workPlaces, setWorkPlaces] = useState(() => restoreWorkPlaces(() => localStorage.getItem(workPlacesKey)));
+  // A command asked where the next session works: the choice of its prompt opens.
+  const [placeOpenAsk, setPlaceOpenAsk] = useState<WorkPlaceOpenRequest | null>(null);
   const [setWorkPlace] = useState(() => (id: string, place: WorkPlace) => setWorkPlaces(current => {
     const next = withWorkPlace(current, id, place);
     persistWorkPlaces(value => localStorage.setItem(workPlacesKey, value), next);
@@ -3391,8 +3394,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setRunOnChoices(current => { const next = new Map(current); if (machineId) next.set(runOnKey, machineId); else next.delete(runOnKey); return next; });
   };
   const draftCloud = !draftMachine && !!draftPlace.cloud && draftProjectId !== null && owned;
-  const draftPlaceControl = useMemo(() => owned && draftProjectId !== null && !draftMachine ? { value: draftPlace, onChange: (place: WorkPlace) => setWorkPlace(draftProjectId, place),
-    onOpenSettings: () => navigate("worktrees"), cloud: cloudOffered } : undefined, [owned, draftProjectId, draftPlace, cloudOffered, draftMachine]);
+  // The worktree git makes ahead for the next session of the project is not one to join: it goes when the place changes.
+  const draftMadeAhead = draftProjectId !== null ? preparedBranch(preparedWorktreeList.get(draftProjectId)) : null;
+  const draftPlaceControl = useMemo(() => owned && draftProjectId !== null && !draftMachine ? { value: draftPlace,
+    // Where the session works is part of what a prompt is handed to: a change stops a transfer under way, as a change of machine does.
+    onChange: (place: WorkPlace) => { invalidateCreation(); setWorkPlace(draftProjectId, place); },
+    onOpenSettings: () => navigate("worktrees"), cloud: cloudOffered, openRequest: placeOpenAsk, madeAhead: draftMadeAhead,
+    // The session a worktree was made for names it in the choice, and is one press away. Read when the choice is drawn.
+    sessionOf: (worktree: Worktree) => worktreeFirstSession((currentSnapshot.current?.sessions ?? []).filter(session => session.projectId === draftProjectId), worktree),
+    onOpenSession: (id: string) => { const session = currentSnapshot.current?.sessions.find(value => value.id === id); if (session) revealSessionLatest.current(session); } } : undefined,
+    [owned, draftProjectId, draftPlace, cloudOffered, draftMachine, placeOpenAsk, draftMadeAhead]);
   // A session of another machine works in a folder of that machine: the chips of the folder of the project here are not shown.
   const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, draftMachine && selectedProject && !scopeMachine ? { ...selectedProject, machineId: draftMachine } : selectedProject,
     null, owned ? showProjectChanges : null, null, draftPlaceControl);
@@ -3585,7 +3596,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const preparedProject = draftProjectId !== null ? selectedProject : undefined;
   useEffect(() => {
     if (!owned || !status?.hostEpoch || !mutation?.capability.canMutate() || !preparedProject || sessionId !== null || creatingBusy) return;
-    if (!draftPlace.worktree) preparedWorktrees.discard(preparedProject.id);
+    if (!makesWorktree(draftPlace)) preparedWorktrees.discard(preparedProject.id);
     else if (draftTyped) preparedWorktrees.ensure(status.hostEpoch, preparedProject, draftPlace.base);
     // The worktrees follow too: one a session took, or that the host forgot, is made again while a prompt is typed.
   }, [owned, status?.hostEpoch, mutation?.capability, preparedProject?.id, preparedProject?.path, draftPlace, draftTyped, sessionId, creatingBusy, preparedWorktreeList]);
@@ -3601,7 +3612,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       showToast({ message: worktreeCreationMessage(worktree.reason, worktree.message), intent: "warning", icon: "warning-sign", timeout: 10_000 });
     }
   }, [preparedWorktreeList]);
-  const draftWorktree = preparedProject && draftPlace.worktree ? preparedWorktreeList.get(preparedProject.id) : undefined;
+  const draftWorktree = preparedProject && makesWorktree(draftPlace) ? preparedWorktreeList.get(preparedProject.id) : undefined;
   const draftWorktreeWaits = !!draftWorktree && draftWorktree.state === "preparing" && draftWorktree.base === draftPlace.base;
   // What is typed in the prompt of a new session keeps its tab, as it does for a session that is looked at. When the
   // prompt of another scope, or a session, takes the place of a prompt that has a text or pictures, that prompt gets
@@ -3870,6 +3881,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
+      case "newWorktreeSession": return !secondary && !!selectedProject && !selectedProject.noRepository && !selectedProject.machineId && scopeCanCreateSession(selectedProject.id);
       case "newCloudSession": case "bringCloudSession": return cloudOffered && !!selectedProject && !selectedProject.archived && scopeCanCreateSession(selectedProject.id);
       case "continueHere": return ownedSession && !!selectedSession && inCloud(selectedSession) && !!mutation?.capability.canMutate();
       case "openOnClaudeAi": return owned && !!selectedSession && !!cloudOf(selectedSession)?.url;
@@ -3992,6 +4004,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "newSession": selectProject(projectId); requestAnimationFrame(() => promptFocusTarget(document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt"))?.focus()); break;
       case "moveSession": if (selectedSession) beginSessionMove(selectedSession); break;
       case "newCloudSession": if (selectedProject) newCloudSession(selectedProject.id); break;
+      case "newWorktreeSession": if (selectedProject) newWorktreeSession(selectedProject.id, selectedSession?.projectId === selectedProject.id ? joinableWorktree(selectedSession) : null); break;
       case "bringCloudSession": if (selectedProject) setCloudBring({ projectId: selectedProject.id, link: "" }); break;
       case "continueHere": if (selectedSession) askCloudContinue(selectedSession); break;
       case "openOnClaudeAi": { const url = selectedSession ? cloudOf(selectedSession)?.url : null; if (url) openCloudLink(url, selectedSession!.id); break; }
@@ -4324,6 +4337,31 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setProjectTree(current => expandScope(current, id));
     focusPromptSoon();
   }
+  // A new session of a project in a git worktree, from a session that works in one, its menu or a command. The worktree
+  // of that session is the place of the next one, which works beside it: a session of its own, not a child. Without
+  // one, the choice of the place opens on the worktrees: a new one, or one that exists.
+  function newWorktreeSession(id: string, worktree: Readonly<{ path: string; name: string }> | null = null) {
+    const project = snapshot?.projects.find(value => value.id === id);
+    if (secondary || !project || project.noRepository || project.machineId || !scopeCanCreateSession(id)) return;
+    // A worktree is a folder of this computer: a machine chosen for the next session of the project gives way.
+    setRunOnChoices(current => { if (!current.has(JSON.stringify(id))) return current; const next = new Map(current); next.delete(JSON.stringify(id)); return next; });
+    if (worktree) setWorkPlace(id, existingPlace(worktree.path, worktree.name));
+    else {
+      if (!workPlaces.get(id)?.worktree) setWorkPlace(id, { worktree: true, base: null });
+      const ask: WorkPlaceOpenRequest = { done: () => setPlaceOpenAsk(current => current === ask ? null : current) };
+      setPlaceOpenAsk(ask);
+    }
+    showScopeDraft(id);
+    setProjectTree(current => expandScope(current, id));
+    if (worktree) focusPromptSoon();
+  }
+  // The worktree a session of this computer works in, while its folder is there: where a session can work beside it.
+  const joinableWorktree = (session: WorkspaceSession | null | undefined) => {
+    const worktree = session && !session.machineId ? sessionWorktree(session) : null;
+    return worktree && !worktree.missing ? worktree : null;
+  };
+  const newWorktreeSessionLatest = useRef(newWorktreeSession); newWorktreeSessionLatest.current = newWorktreeSession;
+  const [newSessionBeside] = useState(() => (projectId: string, worktree: Readonly<{ path: string; name: string }>) => newWorktreeSessionLatest.current(projectId, worktree));
   // The lines of the menu of a session in the cloud, or that started there.
   function sessionCloudEntries(session: WorkspaceSession): SessionMenuEntry[] {
     const cloud = cloudOf(session);
@@ -4776,7 +4814,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const project = owned && session.projectId && !session.archived && !session.machineId && !inCloud(session)
       ? snapshot?.projects.find(value => value.id === session.projectId && !value.archived && !value.machineId) : undefined;
     return project ? [{ key: "code-editor", label: t("Open the code editor"), icon: "code" as const,
-      onSelect: () => void openWorkEditorLatest.current(project, session.worktreeRoot && !session.worktreeMissing ? session.worktreeRoot : null) }] : [];
+      onSelect: () => void openWorkEditorLatest.current(project, session.worktreeRoot && !session.worktreeMissing ? session.worktreeRoot : null) },
+      // Another session in the worktree this one works in, beside it.
+      ...(!secondary && !project.noRepository && joinableWorktree(session) ? [{ key: "new-session-worktree", label: t("New session in this worktree"), icon: "worktree" as const,
+        onSelect: () => { const worktree = joinableWorktree(session); if (worktree) newSessionBeside(project.id, worktree); } }] : [])] : [];
   };
   const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived && !inCloud(session)
     ? [{ key: "review-changes", label: t("Review changes"), icon: "chat" as const, onSelect: () => reviewSessionChanges(session) }] : [];
@@ -5525,8 +5566,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       return;
     }
     // A prompt waits while git makes the worktree its session will work in.
-    const chosenPlace = selectedProject ? workPlaces.get(selectedProject.id) : undefined;
-    if (fromDraft && selectedProject && chosenPlace?.worktree && preparedWorktrees.preparing(selectedProject.id, chosenPlace.base)) return;
+    if (fromDraft && selectedProject && makesWorktree(draftPlace) && preparedWorktrees.preparing(selectedProject.id, draftPlace.base)) return;
     invalidateCreation(); // Deliberate capture fences any outstanding local paste.
     const handoff = fromDraft ? { scope: draftScope, ...typed, imageKey: localImageKey, images: localImages.images,
       imageGeneration: localImageGeneration.current } : null;
@@ -5541,9 +5581,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
     const scope = target.scope === "project" ? target.projectId : null;
     // The place is the one the chip shows, in the form beside the row as in the draft.
-    const place = selectedProject ? workPlaces.get(selectedProject.id) ?? null : null;
+    // A project that left git works in its folder, whatever was chosen before: the place shown is the one asked for.
+    const place = selectedProject ? draftPlace : null;
     // The worktree made while the prompt was typed: a prompt waits until git has made it, and its session works there.
-    const worktreeProject = target.scope === "project" && place?.worktree ? target.projectId : null;
+    const worktreeProject = target.scope === "project" && makesWorktree(place) ? target.projectId : null;
     const preparedWorktreeId = worktreeProject !== null ? preparedWorktrees.ready(worktreeProject, place!.base) : null;
     const title = handoff ? null : creatingTitle.trim() || null;
     // The form closes at once: the New session tab of its scope is shown, and says that the session starts. The
@@ -5711,6 +5752,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         navigate("workspace");
       } else {
         // Where no worktree can ever be made, the next session works in the folder of the project again.
+        // A worktree that exists and is gone stays chosen: its session is never started elsewhere without the user choosing where.
         if (result.code === "worktree_failed" && (result.reason === "not_repository" || result.reason === "git_unavailable") && target.scope === "project")
           setWorkPlace(target.projectId, inProjectFolder);
         const message = result.code === "worktree_failed" ? worktreeCreationMessage(result.reason, result.message) : sessionCreationMessage(result.code);
@@ -6172,7 +6214,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><ReferenceSourcesContext.Provider value={referenceSources}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownChartDataContext.Provider value={markdownChartData}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><NewSessionBesideContext.Provider value={owned && !secondary ? newSessionBeside : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><EditMenu editors={monacoEditTarget} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       data-developer={status?.developerMode ? "" : undefined} data-window-zoom={!secondary && shellPreferences ? "" : undefined}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     <TabSwitcher key={spaceId} ref={tabSwitcher} current={dockReady && !settingsOpen && !searchOpen && !dialog ? frontTab : null} items={switcherItems} show={showRecentDockTab} />
@@ -6351,7 +6393,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             creating={creatingShown ? { id: projectId, form: <NewSessionPopover heading={selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New chat")}
               title={creatingTitle} onTitle={setCreatingTitle} choices={creationProviderChoice(true)}
               place={selectedProject && <ProjectContext epoch={owned ? status?.hostEpoch ?? null : null} project={selectedProject} read={projectGit.status} branches
-                place={draftPlaceControl && { ...draftPlaceControl, onOpenSettings: () => { setCreatingVisible(false); navigate("worktrees"); } }} />}
+                place={draftPlaceControl && { ...draftPlaceControl, openRequest: null, onOpenSettings: () => { setCreatingVisible(false); navigate("worktrees"); } }} />}
               disabled={creatingBusy || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !!selectedProject?.archived}
               error={creatingMessage ? workflowNotice(language.locale, creatingMessage) : null}
               refresh={draftChoices.failed ? { label: t("Refresh composer choices"), run: draftChoices.refresh } : undefined}
@@ -6708,7 +6750,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             ? <NonIdealState className="window-empty" icon={<AppIcon name="window" size={32} />} title={t("Move a tab here")}
               description={t("Drag a tab to this window, or choose Move to window in the menu of a tab.")} />
             : !selectedSession
-            ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree} cloud={draftCloud}
+            ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree} existingWorktree={draftPlaceControl ? draftPlace.existing?.name ?? null : null} cloud={draftCloud}
                 machine={draftMachine ? runOnShown.find(target => target.id === draftMachine)?.name ?? draftMachine : null}
                 machineSetup={draftMachine && offersProviderSetup(remoteChoices.choices)
                   ? () => settingsNavigation.open(machinePageLink(draftMachine)) : undefined}
@@ -7070,7 +7112,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></NewSessionBesideContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The way to Fleet at the foot of the Explorer, with how many of the machines it lists are online. */
@@ -7216,6 +7258,9 @@ const SessionListRefreshContext = createContext<(() => void) | null>(null);
 const SessionFolderSwitchContext = createContext<((epoch: string, project: Readonly<{ id: string; path: string }>, sessionId: string,
   target: FolderTarget) => Promise<FolderSwitchResult>) | null>(null);
 
+/** Shows the prompt of a new session that works beside a session, in the worktree it works in; null where the window has no host or shows no such prompt. */
+const NewSessionBesideContext = createContext<((projectId: string, worktree: Readonly<{ path: string; name: string }>) => void) | null>(null);
+
 /** The mark of a session that works in a git worktree, in the lists of sessions. */
 function WorktreeBadge({ session }: { session: WorkspaceSession }) {
   const { t } = useShellLanguage();
@@ -7255,6 +7300,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const openEditor = useContext(OpenEditorContext);
   const refreshSessions = useContext(SessionListRefreshContext);
   const switchFolder = useContext(SessionFolderSwitchContext);
+  const newSessionBeside = useContext(NewSessionBesideContext);
   const openPullRequestSettings = useContext(PullRequestSettingsContext);
   const worktreePath = session?.worktreePath ?? null, worktreeName = session?.worktreeName ?? null, worktreeMissing = session?.worktreeMissing === true;
   const worktreeRoot = session?.worktreeRoot ?? null;
@@ -7266,12 +7312,16 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     const worktree = sessionWorktree({ worktreePath, worktreeName, worktreeRoot, worktreeMissing });
     // The changes of where the session works: its worktree while the folder is there.
     const shown = worktree && !worktree.missing ? worktree.path : null;
+    // Before a session exists, the changes are those of the worktree it joins, as the chip reads them.
+    const joined = place?.value.existing?.folder ?? null;
     return ({ context: !remote && id !== undefined && name !== undefined && path !== undefined
     ? <WorkspaceChip epoch={epoch} project={{ id, name, path, repositoryName: project?.repositoryName ?? null, subPath: project?.subPath ?? null }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
       // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
       folderSwitch={switchFolder && epoch && sessionId && !place && !archived && !noRepository ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
+      // Another session in the worktree this one works in, beside it.
+      onNewSession={newSessionBeside && sessionId && !place && !archived && !noRepository && worktree && !worktree.missing ? () => newSessionBeside(id, worktree) : undefined}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived && !noRepository}
-      onShowChanges={showChanges && !archived && !noRepository ? () => showChanges({ id, path }, shown) : undefined}
+      onShowChanges={showChanges && !archived && !noRepository ? () => showChanges({ id, path }, shown ?? joined) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
       // The code editor where the session works: the worktree while its folder is there.
       onOpenEditor={openEditor && !archived ? () => openEditor({ id, path }, worktreeRoot && !worktreeMissing && sessionId ? worktreeRoot : null) : undefined}
@@ -7282,7 +7332,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, project?.repositoryName, project?.subPath, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote, noRepository]);
+  }, [epoch, id, name, path, project?.repositoryName, project?.subPath, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, newSessionBeside, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote, noRepository]);
 }
 
 // The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.

@@ -1181,6 +1181,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("no-parent", "The session is not a child of the calling session: its answers are not sent to it; it still records who created it.", value => options.NoParent = value is not null);
         command.Add("worktree", "Create a git worktree for the session: a checkout of its own, on a new branch `alta/<name>`.", value => options.Worktree = value is not null);
         command.Add("base=", "Branch or commit a new worktree starts from. Defaults to the commit the project folder is on.", value => options.WorktreeBase = value);
+        command.Add("worktree-path=", "Work in an existing git worktree of the project's repository: a folder of it, wherever it is.", value => options.WorktreePath = value);
         command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
         command.Add("space=", "The space the session belongs to: id, start of id, or name. A session creates sessions only in its own space.", value => options.Space = value);
         command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
@@ -1197,8 +1198,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "the window shows, or in the one `--space` names.",
             "A project session works in the project folder. With `--worktree` it works in a new git worktree instead,",
             "which starts from a commit: what is not committed in the project folder is not in it.",
+            "With `--worktree-path` it works in a git worktree that exists, with the sessions that already work there:",
+            "nothing keeps their changes apart. A separate clone is another repository and is refused.",
             "A session created by a session that works in a worktree works in that same worktree, unless",
-            "`--worktree` gives it one of its own or `--no-worktree` sends it to the project folder.",
+            "`--worktree` gives it one of its own, `--worktree-path` names another one or `--no-worktree` sends it to",
+            "the project folder. With `--no-parent` it is a session of its own beside the calling one, not its child:",
+            "the way to start another session in the worktree of this one.",
             "The record names the folder as `worktreeDirectory`.",
             "With `--tier` the session runs on the first ready model of that tier of the settings, and falls back",
             "along it when the fallback is on. A session that names no model and inherits none starts on `standard`.",
@@ -1215,6 +1220,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "  `alta session create --project CodeAlta --prompt-id default --reasoning low`",
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
             "  `alta session create --project CodeAlta --worktree --base main`",
+            "  `alta session create --project CodeAlta --worktree-path C:\\code\\CodeAlta-feature`",
+            "  `alta session create --no-parent --title \"Fix the flaky test\"` (beside the calling session, in its worktree)",
             "  `alta session create --project CodeAlta --tier quick --no-sub-sessions`",
             "  `alta session create --global --model-ref codex:gpt-5.5@high`",
             "With `--machine` the session starts on another machine, in the project of the same repository (or the one",
@@ -3124,14 +3131,20 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.parentConflict", "Use either --parent or --no-parent, not both.", "alta session create");
         }
 
-        if (options.Worktree && options.NoWorktree)
+        var worktreePath = NormalizeOptionalText(options.WorktreePath);
+        if ((options.Worktree ? 1 : 0) + (options.NoWorktree ? 1 : 0) + (worktreePath is not null ? 1 : 0) > 1)
         {
-            return UsageError(context, "usage.worktreeConflict", "Use either --worktree or --no-worktree, not both.", "alta session create");
+            return UsageError(context, "usage.worktreeConflict", "Use one of --worktree, --worktree-path or --no-worktree, not several.", "alta session create");
         }
 
-        if (options.Worktree && options.Global)
+        if ((options.Worktree || worktreePath is not null) && options.Global)
         {
-            return UsageError(context, "usage.worktreeWithoutProject", "A worktree is a checkout of a project: use --project with --worktree.", "alta session create");
+            return UsageError(context, "usage.worktreeWithoutProject", "A worktree is a checkout of a project: use --project with --worktree or --worktree-path.", "alta session create");
+        }
+
+        if (worktreePath is not null && !Path.IsPathFullyQualified(worktreePath))
+        {
+            return UsageError(context, "usage.invalidPath", "--worktree-path is an absolute folder.", "alta session create");
         }
 
         var worktreeBase = NormalizeOptionalText(options.WorktreeBase);
@@ -3261,6 +3274,29 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
             worktree = creation.Worktree;
             worktreeDirectory = worktree.Folder;
+        }
+        else if (worktreePath is not null)
+        {
+            // A checkout of the repository of the project that exists: the folder of the project in it. The checkout the
+            // project lives in is the folder of the project.
+            // A sandboxed session writes in the folders of its project: an existing checkout elsewhere is outside them.
+            // The folder is not looked at for it: it learns neither that it exists nor what it is.
+            if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } folderSandbox
+                && !GitWorktreeService.IsWithin(worktreePath, project!.ProjectPath))
+            {
+                return PermissionDenied(context, "sandbox.folderDenied", AltaSandboxGate.Refusal(folderSandbox, $"create a session in the folder '{worktreePath}'"));
+            }
+
+            var (status, resolved) = GitWorktreeService.ResolveSessionCheckout(project!.ProjectPath, worktreePath);
+
+            if (status != GitWorktreeService.Ok)
+            {
+                var (exitCode, code, message) = DescribeWorkFolderRefusal(status, "", worktreePath, project, "--worktree");
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, code, exitCode, message);
+                return exitCode;
+            }
+
+            worktreeDirectory = resolved;
         }
         else if (!options.NoWorktree && project is not null
             && string.Equals(NormalizeOptionalText(context.Caller.SourceProjectId), project.Id, StringComparison.OrdinalIgnoreCase))
@@ -8190,6 +8226,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public bool NoWorktree { get; set; }
 
         public string? WorktreeBase { get; set; }
+
+        public string? WorktreePath { get; set; }
 
         public string? Project { get; set; }
 

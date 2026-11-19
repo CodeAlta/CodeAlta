@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { translate } from "../localization";
-import { type WorktreeList, branchesReply, checkoutFolder, checkoutShown, filterBranches, folderName, newBranchName, persistWorkPlaces, projectFolder, referenceName, restoreWorkPlaces, sameFolder,
-  deletedSessionWorktree, deletedSessionsWorktrees, sessionWorktree, worktreesLeft, shownCheckout, withWorkPlace, worktreeFailure, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
+import { preparedBranch, type PreparedWorktree } from "./preparedWorktrees";
+import { type WorktreeList, branchesReply, checkoutFolder, checkoutShown, existingPlace, filterBranches, folderName, makesWorktree, newBranchName, persistWorkPlaces, projectFolder, referenceName, restoreWorkPlaces, sameFolder,
+  deletedSessionWorktree, deletedSessionsWorktrees, sessionWorktree, worktreesLeft, shownCheckout, withWorkPlace, worktreeFailure, worktreeFirstSession, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
 
 const t = (key: Parameters<typeof translate>[1]) => translate("en", key);
 const worktree = (change: Partial<Worktree> = {}): Worktree => ({ path: "C:\\trees\\app\\quiet-heron", name: "quiet-heron", branch: "alta/quiet-heron", head: "1234567",
@@ -30,7 +31,39 @@ test("the place of a project is its folder unless a new worktree was chosen, and
     assert.equal(restoreWorkPlaces(() => text).size, 0, text.slice(0, 30));
   assert.deepEqual([...restoreWorkPlaces(() => JSON.stringify({ a: { worktree: true, base: "--force" } }))], [["a", { worktree: true, base: null }]]);
   assert.equal(restoreWorkPlaces(() => { throw new Error("no storage"); }).size, 0);
+
+  // A worktree that exists is kept with its folder and its name, and git makes none for it.
+  const joined = withWorkPlace(chosen, "a", existingPlace("C:\\trees\\alpha\\quiet-heron", "quiet-heron"));
+  assert.equal(persistWorkPlaces(value => { stored = value; }, joined), true);
+  const kept = restoreWorkPlaces(() => stored).get("a");
+  assert.deepEqual(kept, { worktree: true, base: null, existing: { folder: "C:\\trees\\alpha\\quiet-heron", name: "quiet-heron" } });
+  assert.deepEqual([makesWorktree(kept), makesWorktree({ worktree: true, base: null }), makesWorktree(projectFolder), makesWorktree(null)], [false, true, false, false]);
+  // One that cannot be read is no place at all: never a new worktree in its stead.
+  for (const existing of [null, "x", {}, { folder: "C:\\trees\\a" }, { folder: "", name: "a" }, { folder: 1, name: "a" }])
+    assert.equal(restoreWorkPlaces(() => JSON.stringify({ a: { worktree: true, base: null, existing } })).size, 0, JSON.stringify(existing));
   assert.equal(persistWorkPlaces(() => { throw new Error("full"); }, chosen), false);
+});
+
+test("a worktree made ahead names its branch as soon as git does", () => {
+  const made: PreparedWorktree = { id: "1", projectId: "p", base: null, state: "preparing", steps: [], branch: null, reason: null, message: null, warning: null };
+  assert.equal(preparedBranch(undefined), null);
+  assert.equal(preparedBranch(made), null);
+  assert.equal(preparedBranch({ ...made, steps: [{ kind: "worktree", state: "running", detail: "alta/quiet-heron", elapsedMilliseconds: 1, message: null }] }), "alta/quiet-heron");
+  assert.equal(preparedBranch({ ...made, state: "ready", branch: "alta/amber-denali", steps: [{ kind: "worktree", state: "done", detail: "alta/quiet-heron", elapsedMilliseconds: 1, message: null }] }), "alta/amber-denali");
+});
+
+test("a worktree is known by the first session that works in it and is still listed", () => {
+  const tree = { path: "C:\\trees\\alpha\\quiet-heron", name: "quiet-heron", branch: "alta/quiet-heron", head: null, main: false, project: false, locked: false, missing: false,
+    folder: "C:\\trees\\alpha\\quiet-heron", busy: false } satisfies Worktree;
+  const row = (id: string, createdAt: string | null, change: object = {}) => ({ id, ...session(tree.path), createdAt, updatedAt: "2026-03-01T00:00:00Z", archived: false, machineId: null, ...change });
+  const rows = [row("later", "2026-02-02T00:00:00Z"), row("first", "2026-02-01T00:00:00Z"), row("archived", "2026-01-01T00:00:00Z", { archived: true }),
+    row("remote", "2026-01-01T00:00:00Z", { machineId: "mac" }), { ...row("elsewhere", "2026-01-01T00:00:00Z"), ...session("C:\\trees\\alpha\\other") }];
+  assert.equal(worktreeFirstSession(rows, tree)?.id, "first");
+  // A session whose creation is not known counts from its last change.
+  assert.equal(worktreeFirstSession([row("undated", null), row("later", "2026-03-02T00:00:00Z")], tree)?.id, "undated");
+  assert.equal(worktreeFirstSession([rows[4]], tree), null);
+  // The folder of the project is no worktree to name.
+  assert.equal(worktreeFirstSession([{ ...row("home", null), ...session(null) }], { ...tree, project: true, main: true }), null);
 });
 
 test("a name handed to git is never an option nor a name git forbids", () => {

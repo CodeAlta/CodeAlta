@@ -14,7 +14,7 @@ export type CommandId =
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
   | "openInVsCode" | "copyResumeCommand" | "runInTerminal"
-  | "newCloudSession" | "bringCloudSession" | "continueHere" | "openOnClaudeAi";
+  | "newWorktreeSession" | "newCloudSession" | "bringCloudSession" | "continueHere" | "openOnClaudeAi";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -64,6 +64,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "spaces", name: "spaces", label: "Spaces", description: "Create the spaces and choose the projects of each.", category: "General", search: "space group projects organize workspaces" },
   { id: "newSpace", name: "new_space", label: "New Space", description: "Create a space: a group of projects shown together.", category: "General", search: "space create group projects workspace" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },
+  { id: "newWorktreeSession", name: "new_worktree_session", label: "New Worktree Session", description: "Start a session of the selected project in a git worktree: the one of this session, a new one or another one.", category: "General",
+    search: "worktree existing same branch checkout beside side chat parallel new_session_with_worktree new_session_in_worktree" },
   { id: "newCloudSession", name: "new_cloud_session", label: "New Cloud Session", description: "Start a session of the selected project that Claude Code runs in the cloud.", category: "General",
     search: "cloud remote anthropic claude code web claude.ai phone background run away sleep" },
   { id: "bringCloudSession", name: "bring_cloud_session", label: "Bring a Cloud Session Here", description: "Continue on this computer a cloud session started on claude.ai or in the Claude app.", category: "General",

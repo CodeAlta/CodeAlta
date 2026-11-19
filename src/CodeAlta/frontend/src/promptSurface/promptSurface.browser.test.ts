@@ -348,11 +348,33 @@ test("the prompt surface keeps one row above and one below the editor at every w
     // It opens the choice of 1.8: Work in, then for a worktree what it starts from and where it is created.
     await evaluate("document.querySelector('.workspace-chip-work-place').click()");
     assert.equal(await wait("!!document.querySelector('.work-place-form')"), true);
-    await evaluate("[...document.querySelectorAll('.work-place-form button')].find(button=>button.textContent.trim()==='New worktree').click()");
+    await evaluate("[...document.querySelectorAll('.work-place-form button')].find(button=>button.textContent.trim()==='Worktree').click()");
     assert.equal(await wait("document.querySelector('.workspace-chip-work-place')?.dataset.worktree==='true' && document.querySelector('.work-place-folder code')?.textContent==='C:\\\\Users\\\\alexa\\\\.alta\\\\worktrees\\\\codealta'"), true);
     const form = await evaluate("document.querySelector('.work-place-form').textContent");
     for (const fact of ["Work in", "Start from", "Current commit (alta/mellow-chisel-pz93)", "Created in"]) assert.ok(form.includes(fact), `the choice says ${fact}: ${form}`);
     await picture("work-place-1600-dark");
+    // The worktree is a new one unless one that exists is chosen: every checkout whose folder is there, but the one of the project.
+    const worktreeSelect = "document.querySelector(\".work-place-form select[id$='-worktree']\")";
+    assert.deepEqual(await evaluate(`[...${worktreeSelect}.options].map(option=>option.textContent)`), ["New worktree", "CodeAlta4 — Pair two machines over the fleet"]);
+    await evaluate(`(()=>{const select=${worktreeSelect};select.value='C:\\\\code\\\\CodeAlta4';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    assert.equal(await wait("document.querySelector('.workspace-chip-work-place .workspace-chip-name')?.textContent==='Worktree CodeAlta4'"), true);
+    const joined = await evaluate("document.querySelector('.work-place-form').textContent");
+    for (const fact of ["Session", "Pair two machines over the fleet", "Branch", "feature/fleet", "Folder", "C:\\code\\CodeAlta4"])
+      assert.ok(joined.includes(fact), `the choice of a worktree that exists says ${fact}: ${joined}`);
+    // The session stays inside the choice, however long its title.
+    assert.equal(await evaluate("(()=>{const form=document.querySelector('.work-place-form').getBoundingClientRect();const link=document.querySelector('button.work-place-session').getBoundingClientRect();return link.width>0&&link.left>=form.left&&link.right<=form.right})()"), true);
+    for (const fact of ["Start from", "Created in"]) assert.ok(!joined.includes(fact), `a worktree that exists is not made: ${joined}`);
+    assert.deepEqual(await evaluate(place), { text: "Worktree CodeAlta4", label: "Where to work: Worktree CodeAlta4", title: "The next session works in the worktree CodeAlta4\nC:\\code\\CodeAlta4",
+      worktree: "true", tinted: true, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place", "workspace-chip-changes"] });
+    await picture("work-place-existing-1600-dark");
+    // The session the worktree was made for is one press away: the choice closes, and the place stays chosen.
+    await evaluate("document.querySelector('button.work-place-session').click()");
+    assert.equal(await wait("!document.querySelector('.work-place-form')"), true);
+    assert.deepEqual(await evaluate("fixture.sessionsOpened()"), ["fleet-session"]);
+    await evaluate("document.querySelector('.workspace-chip-work-place').click()");
+    assert.equal(await wait("!!document.querySelector(\".work-place-form select[id$='-worktree']\")"), true);
+    await evaluate(`(()=>{const select=${worktreeSelect};select.value='';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    assert.equal(await wait("document.querySelector('.workspace-chip-work-place .workspace-chip-name')?.textContent==='New worktree'"), true);
     await evaluate("document.querySelector('.workspace-chip-work-place').click()");
     assert.equal(await wait("!document.querySelector('.work-place-form')"), true);
     assert.deepEqual(await evaluate(place), { text: "New worktree", label: "Where to work: New worktree", title: "The next session works in a new git worktree",

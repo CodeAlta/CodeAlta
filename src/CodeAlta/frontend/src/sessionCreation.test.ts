@@ -63,11 +63,11 @@ test("exact selected project and global requests produce switchable persisted ca
   const fastResult = await create(epoch, project, null, capability, null, null, null, "request-5", null, null, { subSessions: true, fastMode: false });
   assert.equal(fastResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null, options: null },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null, options: null },
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-3", permissionMode: null, preparedWorktreeId: null, options: { subSessions: false } },
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-4", permissionMode: null, preparedWorktreeId: null, options: { subSessions: true, contextSize: 872_000 } },
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-5", permissionMode: null, preparedWorktreeId: null, options: { subSessions: true, fastMode: false } },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null, worktreeFolder: null, options: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null, worktreeFolder: null, options: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-3", permissionMode: null, preparedWorktreeId: null, worktreeFolder: null, options: { subSessions: false } },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-4", permissionMode: null, preparedWorktreeId: null, worktreeFolder: null, options: { subSessions: true, contextSize: 872_000 } },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-5", permissionMode: null, preparedWorktreeId: null, worktreeFolder: null, options: { subSessions: true, fastMode: false } },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
@@ -156,7 +156,7 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: null });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null, options: null }, timeout: 600_000 }]); // not a limit: the timeout of the request
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null, worktreeFolder: null, options: null }, timeout: 600_000 }]); // not a limit: the timeout of the request
   // Submodules git could not check out: the session is created in its worktree, with what git said.
   answer = { ...reply("ok"), worktreePath: worktree, warning: " fatal: clone of 'lib' failed " };
   assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }),
@@ -180,6 +180,30 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
     { kind: "error", code: "worktree_failed", reason: "no_commit", message: "fatal: not a valid object name" });
   assert.match(worktreeCreationMessage("no_commit", null), /no commit yet/);
   assert.match(worktreeCreationMessage("failed", " fatal: boom "), /Git could not create the worktree\. fatal: boom$/);
+
+  // A worktree that exists is named by its folder: the session works there, and git makes none.
+  answer = { ...reply("ok"), worktreePath: worktree };
+  calls.length = 0;
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null, existing: { folder: worktree } }),
+    { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: null });
+  assert.deepEqual(calls[0].request, { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
+    providerId: null, worktree: true, baseBranch: null, spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null, worktreeFolder: worktree, options: null });
+  // It starts from no branch, takes no worktree made ahead, and is an absolute folder: anything else asks nothing of the host.
+  for (const place of [{ worktree: true, base: "main", existing: { folder: worktree } }, { worktree: true, base: null, existing: { folder: "relative" } },
+    { worktree: true, base: null, existing: { folder: "" } }])
+    assert.deepEqual(await create(epoch, project, null, capability, null, place), { kind: "error", code: "invalid_scope" });
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null, existing: { folder: worktree } }, null, undefined, null, "33333333-3333-4333-8333-333333333333"),
+    { kind: "error", code: "invalid_scope" });
+  assert.equal(calls.length, 1);
+  // The folder of the project names no worktree, whatever is kept beside it.
+  assert.equal((await create(epoch, project, null, capability, null, { worktree: false, base: null, existing: { folder: worktree } })).kind, "error");
+  assert.equal((calls[1].request as { worktreeFolder: string | null }).worktreeFolder, null);
+  // A worktree that is gone: no session, and the words say so.
+  answer = { ...reply("worktree_failed", "project", project.projectId, project.projectPath, epoch, null, null), reason: "existing_not_found", message: null };
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null, existing: { folder: worktree } }),
+    { kind: "error", code: "worktree_failed", reason: "existing_not_found", message: null });
+  assert.match(worktreeCreationMessage("existing_not_found", null), /no longer there: no session was created/);
+  assert.match(worktreeCreationMessage("existing_other_repository", null), /no longer a worktree of this project/);
 
   // The worktree made while the prompt was typed is named; only a worktree session names one, and by its GUID.
   const prepared = "33333333-3333-4333-8333-333333333333";

@@ -4,8 +4,11 @@ import { sessionsForProject } from "./workspace";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 export type SessionTarget = { scope: "global" } | { scope: "project"; projectId: string; projectPath: string };
-/** Where a new project session works: null and `worktree: false` are the folder of the project. */
-export type SessionPlace = Readonly<{ worktree: boolean; base: string | null }> | null;
+/**
+ * Where a new project session works: null and `worktree: false` are the folder of the project; `existing` names a
+ * worktree that is already there, which the session works in instead of a new one.
+ */
+export type SessionPlace = Readonly<{ worktree: boolean; base: string | null; existing?: Readonly<{ folder: string }> }> | null;
 /** `warning` is what git said when it could not check the submodules of the new worktree out; the session works there all the same. */
 type Result = { kind: "created"; target: SessionTarget; id: string; path: string; providerId: string | null; worktreePath: string | null; warning: string | null }
   | { kind: "error"; code: string; reason?: string | null; message?: string | null };
@@ -60,11 +63,14 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
     options: SessionOptionsChoice | null = null): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     const worktree = place?.worktree === true, base = worktree ? place.base : null;
+    const worktreeFolder = worktree && place.existing ? place.existing.folder : null;
     if (!["global", "project"].includes(target.scope)
       || target.scope === "project" && (!valid(target.projectId, 256)
       || !valid(target.projectPath, 4096) || !absolute(target.projectPath)) || title !== null && !valid(title, 256)
       || worktree && target.scope !== "project" || base !== null && !valid(base, 200) || spaceId !== null && !validSpaceId(spaceId)
-      || permissionMode !== null && !valid(permissionMode, 64) || preparedWorktreeId !== null && (!worktree || !validRequestId(preparedWorktreeId)))
+      || permissionMode !== null && !valid(permissionMode, 64) || preparedWorktreeId !== null && (!worktree || !validRequestId(preparedWorktreeId))
+      // A worktree that exists is not made: it starts from no branch, and none was made ahead for it.
+      || worktreeFolder !== null && (base !== null || preparedWorktreeId !== null || !valid(worktreeFolder, 4096) || !absolute(worktreeFolder)))
       return { kind: "error", code: "invalid_scope" };
     if (active) return { kind: "error", code: "busy" };
     if (providerId !== null && !valid(providerId, 256)) return { kind: "error", code: "provider_unavailable" };
@@ -74,7 +80,7 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
       projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode,
-      preparedWorktreeId, options: options ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}),
+      preparedWorktreeId, worktreeFolder, options: options ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}),
         ...(options.fastMode != null ? { fastMode: options.fastMode } : {}) } : null });
     try {
       let response: WorkspaceCreateSessionResponse;
@@ -118,7 +124,9 @@ export function createdSessionSelection(snapshot: WorkspaceSnapshot, result: Ext
   }
   const matches = sessionsForProject(snapshot, projectId).filter(session => session.id === result.id);
   if (matches.length !== 1 || matches[0].workspacePath !== result.path
-    || result.providerId !== null && matches[0].providerKey !== result.providerId) return undefined;
+    || result.providerId !== null && matches[0].providerKey !== result.providerId
+    // A session created in a worktree works there: one whose worktree is gone already is not the session that was asked for.
+    || result.worktreePath !== null && (matches[0].worktreePath !== result.worktreePath || matches[0].worktreeMissing === true)) return undefined;
   return { projectId, sessionId: result.id };
 }
 
@@ -130,6 +138,9 @@ export function worktreeCreationMessage(reason: string | null | undefined, messa
     case "invalid": return "The branch the worktree starts from is no longer there. Choose another one and send again.";
     case "git_unavailable": return "Git is not installed: no worktree was created. Send again to work in the project folder.";
     case "timeout": return "Git did not answer in time: no worktree was created.";
+    case "existing_not_found": return "The worktree is no longer there: no session was created. Choose another place and send again.";
+    case "existing_invalid": case "existing_not_repository": case "existing_other_repository": case "existing_project_missing":
+      return "That folder is no longer a worktree of this project: no session was created. Choose another place and send again.";
     default: return `Git could not create the worktree.${message?.trim() ? ` ${message.trim()}` : ""}`;
   }
 }

@@ -186,7 +186,8 @@ internal sealed partial class WorkspaceService
     /// <remarks>
     /// A project session can be asked to work in a new git worktree: the worktree is created first, from the
     /// commit the folder of the project is on or from a named branch, and the answer is <c>worktree_failed</c>
-    /// with the reason when git creates none. The page names the space it shows: the session belongs to it for
+    /// with the reason when git creates none. It can also be asked to work in a worktree that exists, beside the
+    /// sessions that already work there. The page names the space it shows: the session belongs to it for
     /// its whole life, and the answer is <c>space_missing</c> when no such space exists (any more). A permission mode
     /// chosen before the session exists is one its provider offers, else the answer is <c>invalid_permission_mode</c>
     /// and nothing is created; the session is saved in that mode, which its first turn already runs in.
@@ -213,9 +214,12 @@ internal sealed partial class WorkspaceService
             || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId)
             || request.RequestId is not null && !ValidRequestId(request.RequestId)
             || request.PreparedWorktreeId is not null && (!request.Worktree || !ValidRequestId(request.PreparedWorktreeId))
+            // A worktree that exists is not made: it has no branch to start from and none made ahead.
+            || request.WorktreeFolder is not null && (!request.Worktree || request.BaseBranch is not null || request.PreparedWorktreeId is not null
+                || !ValidScopeValue(request.WorktreeFolder, 4096))
             || request.PermissionMode is not null && !ValidScopeValue(request.PermissionMode, 64))
             return Reply("invalid_scope");
-        if (request.Worktree && (_worktrees is null || _createInWorktree is null)) return Reply("unconfigured");
+        if (request.Worktree && (_createInWorktree is null || request.WorktreeFolder is null && _worktrees is null)) return Reply("unconfigured");
         if (request.Scope == "project")
         {
             try { if (!Path.IsPathFullyQualified(request.ProjectPath!)) return Reply("invalid_scope"); }
@@ -381,7 +385,20 @@ internal sealed partial class WorkspaceService
             || !_newSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal)))
             return Reply("invalid_permission_mode");
         GitWorktreeCreation? worktree = null;
-        if (request.Worktree)
+        // The folder the session works in, in a checkout of the repository of its project that is already there.
+        string? existing = null;
+        if (request.WorktreeFolder is { } folder)
+        {
+            // Nothing is made: no step of a worktree is shown.
+            var (status, resolved) = GitWorktreeService.ResolveSessionCheckout(project!.ProjectPath, folder);
+            // The checkout the project lives in is the folder of the project: no worktree to work in.
+            if (status == GitWorktreeService.Ok && resolved is null) status = "invalid";
+            // A worktree made ahead that no session took goes when its page gives it up: it is not one to join.
+            if (status == GitWorktreeService.Ok && IsUntakenPreparedWorktree(resolved!)) status = "not_found";
+            if (status != GitWorktreeService.Ok) return Reply("worktree_failed") with { Reason = "existing_" + status };
+            existing = resolved;
+        }
+        else if (request.Worktree)
         {
             // The worktree made while the prompt was typed, when it is the one asked for: one git still makes is
             // waited for. Without it (unknown, discarded, taken), the worktree is made here.
@@ -404,8 +421,9 @@ internal sealed partial class WorkspaceService
         try
         {
             var options = SessionOptionsChoice.Record(request.Options);
-            session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId, request.PermissionMode, options).ConfigureAwait(false)
-                : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId, request.PermissionMode, options).ConfigureAwait(false);
+            session = (existing ?? worktree?.Folder) is not { } worktreeFolder
+                ? await _createSession!(project, provider, request.Title, request.SpaceId, request.PermissionMode, options).ConfigureAwait(false)
+                : await _createInWorktree!(project!, provider, request.Title, worktreeFolder, request.SpaceId, request.PermissionMode, options).ConfigureAwait(false);
         }
         catch (Exception) when (worktree is not null)
         {
@@ -463,9 +481,14 @@ internal sealed partial class WorkspaceService
 /// another session is replaced by a new one.
 /// </param>
 /// <param name="Options">The options the session is created with, such as whether it can start sessions of its own; null for the defaults.</param>
+/// <param name="WorktreeFolder">
+/// With <paramref name="Worktree"/>: a folder of a worktree of the repository of the project that exists, which the
+/// session works in with the sessions that already do; none is made. Another folder creates nothing:
+/// <c>worktree_failed</c>, with a reason that starts with <c>existing_</c>.
+/// </param>
 internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
     string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null, string? RequestId = null,
-    string? PermissionMode = null, string? PreparedWorktreeId = null, SessionOptionsChoice? Options = null);
+    string? PermissionMode = null, string? PreparedWorktreeId = null, SessionOptionsChoice? Options = null, string? WorktreeFolder = null);
 /// <param name="ExpectedHostEpoch">The host the page reads.</param>
 /// <param name="ProviderId">The provider the composer of the new session names.</param>
 internal sealed record WorkspaceDraftPermissionModesRequest(string ExpectedHostEpoch, string ProviderId);
@@ -477,7 +500,11 @@ internal sealed record WorkspaceDraftPermissionModesResponse(string Status, stri
 /// <param name="RequestId">The identifier the page gave the request of the creation.</param>
 internal sealed record WorkspaceCreateSessionOutcomeRequest(string ExpectedHostEpoch, string RequestId);
 /// <param name="WorktreePath">The folder the session works in, when it is a worktree.</param>
-/// <param name="Reason">With <c>worktree_failed</c>: <c>not_repository</c>, <c>no_commit</c>, <c>git_unavailable</c>, <c>invalid</c>, <c>timeout</c> or <c>failed</c>.</param>
+/// <param name="Reason">
+/// With <c>worktree_failed</c>: <c>not_repository</c>, <c>no_commit</c>, <c>git_unavailable</c>, <c>invalid</c>, <c>timeout</c> or <c>failed</c>; for a
+/// worktree that exists, <c>existing_invalid</c>, <c>existing_not_found</c>, <c>existing_not_repository</c>, <c>existing_other_repository</c> or
+/// <c>existing_project_missing</c>.
+/// </param>
 /// <param name="Message">With <c>worktree_failed</c>: what git said.</param>
 /// <param name="Warning">With <c>ok</c>: what git said when it could not check the submodules of the new worktree out; the session works there all the same.</param>
 internal sealed record WorkspaceCreateSessionResponse(string Status, string? HostEpoch, string? Scope, string? ProjectId, string? ProjectPath,

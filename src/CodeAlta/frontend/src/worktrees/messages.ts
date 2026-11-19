@@ -105,4 +105,16 @@ export const worktreeMessages = {
   "Holds a worktree": ["Contiene un worktree", "Contient un worktree", "Enthält einen Worktree", "ワークツリーを含む", "包含工作树"],
   "Another worktree is inside its folder: remove that one first.": ["Otro worktree está dentro de su carpeta: quita ese primero.", "Un autre worktree se trouve dans son dossier : supprimez-le d’abord.",
     "Ein anderer Worktree liegt in seinem Ordner: entfernen Sie zuerst diesen.", "そのフォルダー内に別のワークツリーがあります。先にそちらを削除してください。", "其文件夹中有另一个工作树：请先移除那个。"],
+  "The next session works in the worktree {name}": ["La próxima sesión trabaja en el worktree {name}", "La prochaine session travaille dans le worktree {name}", "Die nächste Sitzung arbeitet im Worktree {name}",
+    "次のセッションはワークツリー {name} で作業します", "下一会话将在工作树 {name} 中工作"],
+  "Next session will start in {project}, in the worktree {name}.": ["La próxima sesión comenzará en {project}, en el worktree {name}.", "La prochaine session démarrera dans {project}, dans le worktree {name}.",
+    "Die nächste Sitzung startet in {project}, im Worktree {name}.", "次のセッションは {project} のワークツリー {name} で開始します。", "下一会话将在 {project} 的工作树 {name} 中开始。"],
+  "New session in this worktree": ["Nueva sesión en este worktree", "Nouvelle session dans ce worktree", "Neue Sitzung in diesem Worktree", "このワークツリーで新しいセッション", "在此工作树中新建会话"],
+  "New Worktree Session": ["Nueva sesión en un worktree", "Nouvelle session dans un worktree", "Neue Worktree-Sitzung", "ワークツリーで新しいセッション", "新建工作树会话"],
+  "Start a session of the selected project in a git worktree: the one of this session, a new one or another one.": [
+    "Inicia una sesión del proyecto seleccionado en un worktree de git: el de esta sesión, uno nuevo u otro.",
+    "Démarre une session du projet sélectionné dans un worktree git : celui de cette session, un nouveau ou un autre.",
+    "Startet eine Sitzung des ausgewählten Projekts in einem Git-Worktree: dem dieser Sitzung, einem neuen oder einem anderen.",
+    "選択したプロジェクトのセッションを Git ワークツリーで開始します。このセッションのもの、新しいもの、または別のものを選べます。",
+    "在 Git 工作树中启动所选项目的会话：此会话的工作树、新建的工作树或其他工作树。"],
 } satisfies Record<string, Row>;

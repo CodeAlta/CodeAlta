@@ -135,6 +135,14 @@ export function createPreparedWorktrees(api: PreparedWorktreesApi, newId: () => 
 
 export type PreparedWorktrees = ReturnType<typeof createPreparedWorktrees>;
 
+/**
+ * The branch of a worktree made ahead, as soon as git names it: the one of the worktree once it is ready, before that
+ * the one its first step says. Null when none is made, or while none is known.
+ */
+export function preparedBranch(worktree: PreparedWorktree | undefined): string | null {
+  return worktree ? worktree.branch ?? worktree.steps.find(step => step.kind === "worktree")?.detail ?? null : null;
+}
+
 /** How far git is in a progress line it wrote, such as `Updating files:  45% (450/1000)`; null when it says no percentage. */
 export function progressPercent(line: string | null | undefined): number | null {
   const match = line ? /(\d{1,3})%/u.exec(line) : null;

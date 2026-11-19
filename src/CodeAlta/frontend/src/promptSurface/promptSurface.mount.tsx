@@ -76,7 +76,12 @@ const readMcp = async ({ projectId }: { projectId: string | null }) => ({ status
 // What a new worktree can start from and where it goes.
 const placeApi = {
   branches: async () => ({ status: "ok", busy: false, branches: [{ name: "main", current: true, remote: false, worktree: null, worktreeName: null }] }),
-  list: async ({ projectId }: { projectId: string }) => ({ status: "ok", projectId, worktrees: [], newFolder: "C:\\Users\\alexa\\.alta\\worktrees\\codealta" }),
+  list: async ({ projectId }: { projectId: string }) => ({ status: "ok", projectId, newFolder: "C:\\Users\\alexa\\.alta\\worktrees\\codealta", worktrees: [
+    { path: project.path, name: "CodeAlta", branch: "main", head: "abc1234", main: true, project: true, locked: false, missing: false, folder: project.path, busy: false },
+    { path: "C:\\code\\CodeAlta4", name: "CodeAlta4", branch: "feature/fleet", head: "def5678", main: false, project: false, locked: false, missing: false, folder: "C:\\code\\CodeAlta4", busy: true },
+    { path: "C:\\Users\\alexa\\.alta\\worktrees\\codealta\\gone-heron-1abc", name: "gone-heron-1abc", branch: "alta/gone-heron-1abc", head: null, main: false, project: false, locked: false, missing: true,
+      folder: "C:\\Users\\alexa\\.alta\\worktrees\\codealta\\gone-heron-1abc", busy: false },
+  ] }),
 } as unknown as WorkPlaceApi;
 
 // The checkouts of the repository a session that exists can be sent to, and where it was sent.
@@ -89,6 +94,8 @@ const folderApi = {
   ] }),
 } as unknown as WorkPlaceApi;
 const folderSwitches: FolderTarget[] = [];
+// The sessions the choice of the place of a new session was asked to show.
+const sessionsOpened: string[] = [];
 
 // The prompts of the new sessions, kept as the window keeps its local drafts.
 const drafts = new Map<string, string>();
@@ -118,7 +125,10 @@ function Pane({ sessionId }: { sessionId: string }) {
   // A session in a worktree, or with `fixture.draft(true)` the composer of a session that does not exist yet, whose chip chooses where it will work.
   const chrome = { context: state.draft
       ? <WorkspaceChip epoch={epoch} project={project} read={readGit} branches={false} onShowChanges={() => { }}
-        place={{ value: state.place, onChange: place => change({ place }), onOpenSettings: () => { }, api: placeApi }} />
+        place={{ value: state.place, onChange: place => change({ place }), onOpenSettings: () => { }, api: placeApi,
+          // The session the worktree was made for names it in the choice, which leads to it.
+          sessionOf: worktree => worktree.name === "CodeAlta4" ? { id: "fleet-session", title: "Pair two machines over the fleet" } : null,
+          onOpenSession: id => { sessionsOpened.push(id); } }} />
       : <WorkspaceChip epoch={epoch} project={project} sessionId={sessionId} read={readGit} branches={false}
         worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { changesShown++; }} onOpenEditor={() => { editorsOpened++; }}
         onOpenTerminal={() => { }} folderSwitch={{ running: run !== null, api: folderApi,
@@ -174,6 +184,8 @@ const fixture = {
   split(value: boolean) { change({ split: value }); },
   /** Shows the composer of a new session, which works in the folder of the project until a worktree is chosen in its chip. */
   draft(value: boolean) { change({ draft: value, place: { worktree: false, base: null } }); },
+  /** The sessions opened from the choice of the place of a new session. */
+  sessionsOpened: () => [...sessionsOpened],
   /** Speech to prompt: its state, the host (`tell` a download) and the microphone. */
   speech: null as Speech | null, speechHost, speechMicrophone,
   /** How many times the chip opened the changes, the code editor, and what it opened outside. */

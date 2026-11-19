@@ -68,8 +68,8 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static async ValueTask<int> HandleRemoteSessionCreateAsync(AltaCommandContext context, SessionCreateOptions options)
     {
         const string CommandPath = "alta session create";
-        if (options.Worktree || options.NoWorktree || options.WorktreeBase is not null)
-            return UsageError(context, "usage.machineWorktree", "Where a session of another machine works is that machine's: leave out --worktree, --no-worktree and --base with --machine.", CommandPath);
+        if (options.Worktree || options.NoWorktree || options.WorktreeBase is not null || options.WorktreePath is not null)
+            return UsageError(context, "usage.machineWorktree", "Where a session of another machine works is that machine's: leave out --worktree, --worktree-path, --no-worktree and --base with --machine.", CommandPath);
         if (options.NoParent)
             return UsageError(context, "usage.machineParent", "A session of another machine is the child of the calling session: leave out --no-parent.", CommandPath);
         if (options.Global && !string.IsNullOrWhiteSpace(options.Project))
