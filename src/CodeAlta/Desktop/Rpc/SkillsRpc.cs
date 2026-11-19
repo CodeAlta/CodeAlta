@@ -24,6 +24,9 @@ internal sealed partial class SkillsService
     internal const int MaximumSkills = 4096;
 
     private const int MaximumNameLength = 128;
+    // The longest prompt the composer sends, and the most mentions shown in one.
+    private const int MaximumPromptLength = 32768;
+    private const int MaximumMentions = 256;
     private const int MaximumDescriptionLength = 1024;
     private const int MaximumMessageLength = 512;
     private const int MaximumPathLength = 1024;
@@ -81,6 +84,32 @@ internal sealed partial class SkillsService
     /// <summary>The folders the skills of the user and of a project are read from; none without an owned host.</summary>
     /// <param name="projectRoot">The folder of the project whose skill folders are listed too, or null.</param>
     internal IReadOnlyList<SkillRootLocation> Roots(string? projectRoot) => _management?.GetRoots(projectRoot) ?? [];
+
+    /// <summary>
+    /// Finds where a prompt names skills as <c>/name</c>, as the host reads it when the prompt is sent
+    /// (<see cref="SkillPromptMentions"/>): the prompt editor shows them as skills. The names are not checked against the
+    /// catalog; a text longer than a prompt names none.
+    /// </summary>
+    [NeoRpcMethod("mentions")]
+    public Task<SkillsMentionsResponse> MentionsAsync(SkillsMentionsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Text is not { Length: > 0 and <= MaximumPromptLength } text) return Task.FromResult(new SkillsMentionsResponse([]));
+        var mentions = SkillPromptMentions.FindMentions(text);
+        return Task.FromResult(new SkillsMentionsResponse([.. mentions.Take(MaximumMentions).Select(static mention => new SkillsMention(mention.Start, mention.Start + mention.Length, mention.Name))]));
+    }
+
+    /// <summary>
+    /// Says whether the slash typed at an offset of a prompt can begin the name of a skill
+    /// (<see cref="SkillPromptMentions.CanBeginAt"/>): the composer opens its skill picker only there, never in code or
+    /// after a backslash.
+    /// </summary>
+    [NeoRpcMethod("canBegin")]
+    public Task<SkillsCanBeginResponse> CanBeginAsync(SkillsCanBeginRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Task.FromResult(new SkillsCanBeginResponse(request.Text is { Length: > 0 and <= MaximumPromptLength } text && SkillPromptMentions.CanBeginAt(text, request.Offset)));
+    }
 
     /// <summary>Lists every discovered skill, including disabled, invalid and shadowed ones.</summary>
     [NeoRpcMethod("list")]
@@ -613,6 +642,17 @@ internal sealed partial class SkillsService
         return Bound(suffix > 0 ? exception.Message[..suffix] : exception.Message, MaximumMessageLength);
     }
 }
+
+/// <param name="Text">The text of a prompt.</param>
+internal sealed record SkillsMentionsRequest(string? Text);
+internal sealed record SkillsMentionsResponse(IReadOnlyList<SkillsMention> Mentions);
+/// <summary>A <c>/name</c> of a prompt: from <paramref name="Start"/> (the slash) to <paramref name="End"/>, in UTF-16 units.</summary>
+internal sealed record SkillsMention(int Start, int End, string Name);
+
+/// <param name="Text">The text of a prompt.</param>
+/// <param name="Offset">The index of a slash in it, in UTF-16 units.</param>
+internal sealed record SkillsCanBeginRequest(string? Text, int Offset);
+internal sealed record SkillsCanBeginResponse(bool Allowed);
 
 /// <param name="SpaceId">The space the page shows, whose added folders are read too; null for the default space.</param>
 internal sealed record SkillsListRequest(string? ExpectedEpoch, string? ProjectId, string? SpaceId = null);

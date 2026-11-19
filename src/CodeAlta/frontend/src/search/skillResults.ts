@@ -45,12 +45,3 @@ export function searchSkills(skills: readonly SkillChoice[], text: string): Skil
   }
   return results.sort((left, right) => left.score - right.score || left.skill.name.localeCompare(right.skill.name, undefined, { sensitivity: "base" }));
 }
-
-/**
- * The prompt that asks the agent of a session to use a skill: the agent is not run by the skill, it is asked to
- * activate it and to follow it, with what the user typed after its name.
- */
-export function skillPrompt(name: string, args: string): string {
-  const request = `Activate the skill \`${name}\` and follow its instructions.`;
-  return args.trim() ? `${request}\n\n${args.trim()}` : request;
-}

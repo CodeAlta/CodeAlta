@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Orchestration.Runtime.Prompts;
 
@@ -568,7 +569,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (Known(request.ClientRequestId, previous => previous.Send is not null && SameAskContext(previous.Ask, askSubmission) &&
                     string.Equals(previous.Send.SessionId, sent.SessionId, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(previous.Send.Text, sent.Text, StringComparison.Ordinal) && previous.Send.Selection == sent.Selection
-                    && previous.Send.References == sent.References
+                    && previous.Send.References == sent.References && previous.Send.Skills == sent.Skills
                     && (previous.Send.Attachments ?? []).SequenceEqual(sent.Attachments ?? [])
                     && string.Equals(previous.Send.Provenance, sent.Provenance, StringComparison.Ordinal)
                     && (previous.Send.Images ?? []).SequenceEqual(sent.Images ?? [])) is { } known)
@@ -682,6 +683,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
     }
 
+    // The skills a prompt typed in the composer names as `/name`, for the turn it steers.
+    private async Task<IReadOnlyList<AgentInputItem>> SkillNotesAsync(bool skills, string sessionId, string text, CancellationToken cancellationToken)
+    {
+        if (!skills || SkillPromptMentions.Find(text).Count == 0) return [];
+        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return session is null ? [] : await _runtime.ResolvePromptSkillsAsync(session, text, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task RunSteerAsync(SteerOperation operation)
     {
         await operation.Launch.Task.ConfigureAwait(false);
@@ -697,7 +706,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             else
             {
                 var request = prompt.Text == operation.Request.Text ? operation.Request : operation.Request with { Text = prompt.Text };
-                var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(request, operation.Execution.Token)).ConfigureAwait(false);
+                var notes = await SkillNotesAsync(request.Skills, request.SessionId, request.Text, operation.Execution.Token).ConfigureAwait(false);
+                var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(request, notes, operation.Execution.Token)).ConfigureAwait(false);
                 result = new(OwnedSessionCommandOutcome.Completed, runId);
             }
         }
@@ -1123,6 +1133,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             // original receipt/work and never resolve mutable filesystem metadata again.
             if (operation.Request.References is not null)
                 input = _references.Resolve(prompt.Text, WorkFolder(session, project!), operation.Execution.Token);
+            if (operation.Request.Skills && await _runtime.ResolvePromptSkillsAsync(session, prompt.Text, operation.Execution.Token).ConfigureAwait(false) is { Count: > 0 } skills)
+                input = new AgentInput([.. skills, .. input.Items]);
             // Preserve exact empty request identity without inventing a textual provider prompt.
             if (prompt.Text.Length == 0) input = new AgentInput([]);
             if (prompt.Attachments is { Count: > 0 } attached) input = new AgentInput([.. input.Items, .. attached]);
@@ -1159,7 +1171,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options, useExplicitPrompt: true).ConfigureAwait(false);
             return new Prepared(session, options, input);
         }
-        catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Images is { Count: > 0 } || Plugins is not null)
+        catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Skills || operation.Request.Images is { Count: > 0 } || Plugins is not null)
             && operation.Execution.IsCancellationRequested) { throw; }
         // A session another process holds, or that moved to another machine, is refused as such by the send.
         catch (Exception ex) when (SessionRuntimeService.FindSessionInUse(ex) is null)

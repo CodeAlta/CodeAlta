@@ -41,6 +41,12 @@ public sealed record OwnedTextSendRequest(string ClientRequestId, string Session
     public IReadOnlyList<OwnedPromptImage>? Images { get; init; }
     /// <summary>Gets the exact catalog scope whose references should be resolved once by the original worker.</summary>
     public OwnedProjectReferenceScope? References { get; init; }
+    /// <summary>
+    /// Gets whether each skill the text names as <c>/name</c> is given to the model with the prompt, as a prompt of the
+    /// composer of CodeAlta Desktop asks (typed, queued, or sent through it by a plugin); false for a prompt whose
+    /// <c>/name</c> stays text.
+    /// </summary>
+    public bool Skills { get; init; }
     /// <summary>Gets the optional configuration captured for this send, never for an already-running turn.</summary>
     public OwnedSessionSelection? Selection { get; init; }
     /// <summary>
@@ -93,7 +99,11 @@ public sealed record OwnedAbortRequest(string ClientRequestId, Guid TargetOperat
 /// <param name="ExpectedRunId">Real, nonblank provider run identity from the observation.</param>
 /// <param name="Text">Exact text; whitespace is not normalized.</param>
 public sealed record OwnedTextSteerRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId,
-    long ExpectedAttachmentGeneration, string ExpectedRunId, string Text);
+    long ExpectedAttachmentGeneration, string ExpectedRunId, string Text)
+{
+    /// <summary>Gets whether each skill the text names as <c>/name</c> is given to the model, as for <see cref="OwnedTextSendRequest.Skills"/>.</summary>
+    public bool Skills { get; init; }
+}
 
 /// <summary>Immutable request to compact an existing attachment if idle at provider admission; never retargeted.</summary>
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>

@@ -199,6 +199,69 @@ public sealed class ChatClientTurnExecutorTests
         Assert.AreEqual(patch, call.Arguments!["input"]?.ToString());
     }
 
+    // The way of the skills a prompt names as `/name` to Anthropic, Gemini, Mistral and xAI: the session turns the notes of
+    // the host into text parts of the user message, and the chat client receives each of them before the typed text.
+    [TestMethod]
+    public async Task SendAsync_SkillNotesOfAPrompt_ReachTheChatClient_BeforeTheTypedText()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = new ModelProviderRuntimeDescriptor
+        {
+            ProtocolFamily = "anthropic-messages",
+            ProviderKey = "anthropic",
+            DisplayName = "Anthropic",
+            TransportKind = AgentTransportKind.AnthropicMessages,
+        };
+        var summary = new AgentSessionSummary
+        {
+            SessionId = "session-skills",
+            ProviderId = ModelProviderIds.AnthropicMessages,
+            ProtocolFamily = "anthropic-messages",
+            ProviderKey = "anthropic",
+            ModelId = "claude-test",
+            WorkingDirectory = temp.Path,
+            CreatedAt = DateTimeOffset.Parse("2026-11-19T10:00:00+00:00"),
+            UpdatedAt = DateTimeOffset.Parse("2026-11-19T10:00:00+00:00"),
+        };
+        var state = new AgentSessionState { SessionId = "session-skills", ProtocolFamily = "anthropic-messages", ProviderKey = "anthropic", UpdatedAt = summary.UpdatedAt };
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var client = new RecordingChatClient
+        {
+            Updates = [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("grill-me, tdd")]) { MessageId = "message-skills", ResponseId = "response-skills" }],
+        };
+        var executor = new ChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+        const string typed = "/grill-me the plan, then /tdd";
+        const string grilling = "The user activated the CodeAlta skill 'grill-me'.\n\n<skill_content name=\"grill-me\">\nAsk questions.\n</skill_content>";
+        const string tdd = "The user activated the CodeAlta skill 'tdd'.\n\n<skill_content name=\"tdd\">\nWrite the test first.\n</skill_content>";
+        await using var session = new AgentSession(ModelProviderIds.AnthropicMessages, provider, summary, state, [], store, executor,
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = "anthropic",
+                Model = "claude-test",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput(
+            [
+                new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, grilling),
+                new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, tdd),
+                new AgentInputItem.Text(typed),
+            ]),
+        }).ConfigureAwait(false);
+
+        Assert.IsNotNull(client.LastMessages);
+        var user = client.LastMessages.Last(static message => message.Role == ChatRole.User);
+        CollectionAssert.AreEqual(new[] { grilling, tdd, typed }, user.Contents.Select(static content => Assert.IsInstanceOfType<TextContent>(content).Text).ToArray(),
+            "each skill is a text block of the user message, in the order of the prompt, before what was typed");
+    }
+
     [TestMethod]
     public async Task ExecuteTurnAsync_MapsInlineImageDataWithMediaTypeIntoChatClientRequest()
     {

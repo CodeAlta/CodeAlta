@@ -2616,7 +2616,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             string.IsNullOrWhiteSpace(sourceSessionId) ? null : sourceSessionId.Trim(),
             provenance);
         var events = new List<AgentEvent> { rawEvent, userContent };
-        if (TryCreateUserActivatedSkillState(input, out var activatedSkill))
+        var activatedSkills = CreateUserActivatedSkillStates(input);
+        foreach (var activatedSkill in activatedSkills)
         {
             _state = _state with
             {
@@ -2646,7 +2647,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
 
         await AppendEventsAsync(events, cancellationToken).ConfigureAwait(false);
-        if (activatedSkill is not null)
+        if (activatedSkills.Count > 0)
         {
             await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
         }
@@ -5299,26 +5300,35 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return null;
     }
 
-    private static bool TryCreateUserActivatedSkillState(
-        AgentInput input,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out AgentLoadedSkillState? activatedSkill)
+    // The skills the user activated with a prompt: the one of a skill item and the text of its content (the activation
+    // of a skill by its name), and each skill the prompt names as `/name`, whose content the host gave as a note.
+    private static List<AgentLoadedSkillState> CreateUserActivatedSkillStates(AgentInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
 
+        var activated = new List<AgentLoadedSkillState>();
         var skill = input.Items.OfType<AgentInputItem.Skill>().FirstOrDefault();
         var payload = input.Items.OfType<AgentInputItem.Text>()
             .Select(static item => item.Value)
-            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value) &&
-                                            value.Contains("<skill_content", StringComparison.OrdinalIgnoreCase));
-        activatedSkill = payload is null
-            ? null
-            : TryCreateLoadedSkillState(
-                skill?.Name,
-                skill?.Path,
-                payload,
-                "user",
-                $"user-skill:{Guid.CreateVersion7()}");
-        return activatedSkill is not null;
+            .FirstOrDefault(IsSkillPayload);
+        if (payload is not null && TryCreateLoadedSkillState(skill?.Name, skill?.Path, payload, "user", $"user-skill:{Guid.CreateVersion7()}") is { } named)
+        {
+            activated.Add(named);
+        }
+
+        foreach (var context in input.Items.OfType<AgentInputItem.HostContext>())
+        {
+            if (string.Equals(context.Kind, AgentInputItem.HostContext.SkillKind, StringComparison.Ordinal) && IsSkillPayload(context.Value)
+                && TryCreateLoadedSkillState(null, null, context.Value, "user", $"user-skill:{Guid.CreateVersion7()}") is { } mentioned)
+            {
+                activated.Add(mentioned);
+            }
+        }
+
+        return activated;
+
+        static bool IsSkillPayload(string value)
+            => !string.IsNullOrWhiteSpace(value) && value.Contains("<skill_content", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AgentLoadedSkillState? TryCreateLoadedSkillState(

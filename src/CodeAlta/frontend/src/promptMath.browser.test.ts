@@ -127,6 +127,23 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     await evaluate("mathFixture.insert()");
     assert.equal(await wait("mathFixture.editor() === null"), true);
     assert.equal(await evaluate("mathFixture.editorText(1)"), "Energy $\\frac{a}{b}$ here");
+    // The prompt shows as skills the `/name` the host says are some, in the color of a skill over that of the editor's
+    // tokens; a prompt that names no known skill is not asked about, and an answer for a text since changed is dropped.
+    await evaluate("skillFixture.setText('see /usr/bin and /unknown')");
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(await evaluate("skillFixture.asked()"), []);
+    await evaluate("skillFixture.setText('/tdd first')");
+    assert.equal(await wait("skillFixture.asked().length === 1"), true);
+    await evaluate("skillFixture.setText('run `/tdd` then /research and /unknown')");
+    assert.equal(await wait("skillFixture.asked().length === 2"), true);
+    await evaluate("skillFixture.answer()");
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(await evaluate("skillFixture.marks()"), [], "the answer for the earlier text marks nothing");
+    await evaluate("skillFixture.answer()");
+    assert.equal(await wait("skillFixture.marks().length === 1"), true);
+    assert.deepEqual(await evaluate("skillFixture.marks()"), [`/research:${await evaluate<string>("skillFixture.green()")}`]);
+    await evaluate("skillFixture.setText('no skill now')");
+    assert.equal(await wait("skillFixture.marks().length === 0"), true);
     // Aligned rows fit their preview: no scroll bar under them.
     await evaluate("mathFixture.showDocument(3)");
     assert.equal(await wait("document.querySelector('#editor .view-lines')?.textContent.includes('aligned')"), true);

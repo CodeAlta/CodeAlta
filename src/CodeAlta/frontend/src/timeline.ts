@@ -45,6 +45,8 @@ export type TimelineItem = Readonly<{
   images?: ReadonlyArray<TimelineImage>;
   /** The files attached to a user message, by name and media type. */
   attachments?: ReadonlyArray<TimelineAttachment>;
+  /** The skills the host gave the model with a user message (the `/name` it expanded): the message shows them as skills. */
+  skills?: ReadonlyArray<string>;
   /** The identity of the Send of a user message, by which the composer recognizes the prompt it sent. */
   clientRequestId?: string;
   /** What names a tool call: its row, its details and its live output are found by it. */
@@ -754,6 +756,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     fileChanges,
     images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
     attachments: category === "user" ? projectTimelineAttachments(entry.attachments) : undefined,
+    skills: category === "user" && entry.skills?.length ? entry.skills : undefined,
     clientRequestId: category === "user" && typeof entry.clientRequestId === "string" ? entry.clientRequestId : undefined,
     toolCall: entry.eventType === "activity" && entry.activityId && category === "tool" ? { providerId: entry.providerId, runId: entry.runId,
       activityId: entry.activityId, kind, name: entry.name, offset: /^\d+$/.test(entry.offset) ? entry.offset : null, outputOffset: null,

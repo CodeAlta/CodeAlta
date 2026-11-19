@@ -173,6 +173,7 @@ internal sealed class SessionOperationsService
             {
                 Images = request.Images?.Select(image => new OwnedPromptImage(image.Title, image.MediaType, image.Base64)).ToArray(),
                 References = request.References is { } scope ? new(scope.ProjectId, scope.ProjectPath) : null,
+                Skills = request.Skills == true,
                 // The mode is checked against the provider by the host: null keeps the session's, "provider" leaves it to the provider.
                 Selection = request.Selection is { } value ? new(value.ProviderKey, value.AgentPromptId, value.ModelId,
                     value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort)) { PermissionMode = value.PermissionMode } : null,
@@ -695,7 +696,7 @@ internal sealed class SessionOperationsService
                 return new("invalid_request", _epoch, null);
             if (Misrouted(request.SessionId, request.MachineId) is { } refused) return new(refused, _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
-            try { return Retain(_steer!(new(request.ClientRequestId, request.SessionId, runtime, attachment, request.ExpectedRunId, request.Text), cancellationToken)); }
+            try { return Retain(_steer!(new(request.ClientRequestId, request.SessionId, runtime, attachment, request.ExpectedRunId, request.Text) { Skills = request.Skills == true }, cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
             catch (OperationCanceledException) { throw; }
             catch (Exception) { return new("admission_failed", _epoch, null); }
@@ -894,6 +895,8 @@ internal sealed record SessionSendRequest(string ExpectedEpoch, string ClientReq
     public string? MachineId { get; init; }
     public IReadOnlyList<SessionPromptImage>? Images { get; init; }
     public SessionReferenceScope? References { get; init; }
+    // True for a prompt of the composer (typed, queued, or sent through it by a plugin): each skill its text names as `/name` is given to the model.
+    public bool? Skills { get; init; }
     public SessionSelection? Selection { get; init; }
 }
 internal sealed record SessionReferenceScope(string ProjectId, string ProjectPath);
@@ -1022,6 +1025,8 @@ internal sealed record SessionSteerRequest(string ExpectedEpoch, string ClientRe
     // The machine of the session as the page shows it; null for this computer, or when the page does not say.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MachineId { get; init; }
+    // True for a prompt of the composer (typed, queued, or sent through it by a plugin): each skill its text names as `/name` is given to the model.
+    public bool? Skills { get; init; }
 }
 internal sealed record SessionCompactRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration)

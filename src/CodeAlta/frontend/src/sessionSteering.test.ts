@@ -26,7 +26,7 @@ test("steering captures only an explicit available observation with immutable ex
   const captured = request();
   assert.equal(Object.isFrozen(captured), true);
   assert.deepEqual(captured, { expectedEpoch: "epoch", clientRequestId: "key", sessionId: "session", expectedRuntimeInstanceId: "runtime",
-    expectedAttachmentGeneration: "9223372036854775807", expectedRunId: "run", text: "  exact\ntext  " });
+    expectedAttachmentGeneration: "9223372036854775807", expectedRunId: "run", text: "  exact\ntext  ", skills: true });
   for (const unavailable of [undefined, { ...observation, hostEpoch: "old" }, { ...observation, sessionId: "other" },
     { ...observation, coordinatorTransitionInProgress: true }, { ...observation, entry: null },
     { ...observation, entry: { ...observation.entry!, activeRunId: null } },

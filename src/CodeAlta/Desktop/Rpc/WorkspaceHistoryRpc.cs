@@ -124,6 +124,7 @@ internal sealed partial class WorkspaceService
             var type = "";
             string? kind = null, phase = null, contentId = null, activityId = null, parentId = null, interactionId = null;
             string? text = null, name = null, details = null, source = null, provenance = null;
+            string[]? skills = null;
             var omitted = false;
             HistoryImage[]? images = null;
             HistoryAttachment[]? attachments = null;
@@ -148,6 +149,8 @@ internal sealed partial class WorkspaceService
                         // What the host says a prompt it sent is: the page names it instead of the user.
                         provenance = AgentPromptProvenance.Normalize(completed.Provenance);
                         clientRequestId = PromptImageHistory.ReadClientRequestId(completed.Details);
+                        // The skills the host gave the model with the prompt: the page shows them, and only them, as skills.
+                        skills = PromptSkillHistory.ReadSkills(completed.Details) is { Count: > 0 } given ? [.. given] : null;
                     }
                     // A user message and a tool result list their images; their text and details do not name the files.
                     images = HistoryImageProjection.Project(completed, ref text, ref details, out attachments, out imageCost);
@@ -265,12 +268,13 @@ internal sealed partial class WorkspaceService
             details = Preview(details, Math.Min(8 * 1024, detailsBudget / 18), ref detailsShortened);
             var textBudget = Math.Max(0, detailsBudget - 6 * (details?.Length ?? 0));
             text = Preview(text, Math.Min(32 * 1024, textBudget / 6), ref shortened);
-            var cost = 1024 + identityCost + imageCost + promptCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
+            var cost = 1024 + identityCost + imageCost + promptCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0)
+                + (skills?.Sum(static skill => skill.Length + 4) ?? 0));
             if (cost > remaining) return Failure("wire_limit");
             remaining -= cost;
             rows.Add(new(entry.Offset.ToString(CultureInfo.InvariantCulture), type, provider, value.SessionId, run,
                 value.Timestamp, kind, phase, contentId, activityId, parentId, interactionId, name, text, details,
-                shortened, detailsShortened, omitted, files, tool, images, source, promptSummary, attachments, clientRequestId, provenance));
+                shortened, detailsShortened, omitted, files, tool, images, source, promptSummary, attachments, clientRequestId, provenance, skills));
         }
         HistoryCursor? next = null;
         if (page.Next is { } cursor)
@@ -455,7 +459,10 @@ internal sealed record HistoryEntry(string Offset, string EventType, string Prov
     // The provenance of a user message the host sent (AgentPromptProvenance: reminder, background-job, user-review...);
     // absent for a prompt the user typed, and for the records written before it was recorded.
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Provenance = null);
+    string? Provenance = null,
+    // The skills the host gave the model with a user message (the `/name` it expanded); absent when it gave none.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string[]? Skills = null);
 
 /// <summary>What the row of a system prompt record says; the texts of the prompt are read by its window.</summary>
 /// <param name="Changed">Whether the prompt replaced an earlier one of its session.</param>

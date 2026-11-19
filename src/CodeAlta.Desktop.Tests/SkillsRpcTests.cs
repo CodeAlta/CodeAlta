@@ -28,6 +28,34 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task TheMentionsOfAPrompt_AreItsSlashNamesOutsideCode_WithTheirPlaces()
+    {
+        // No host is needed: the prompt editor asks before a session exists.
+        var service = new SkillsService();
+        const string text = "/tdd the parser, see `/usr/bin` then\n```\n/research\n```\n(/Code-Review)";
+        var found = (await service.MentionsAsync(new(text), default)).Mentions;
+        CollectionAssert.AreEqual(new[] { "/tdd:tdd", "/Code-Review:Code-Review" }, found.Select(mention => $"{text[mention.Start..mention.End]}:{mention.Name}").ToArray());
+
+        Assert.IsEmpty((await service.MentionsAsync(new(null), default)).Mentions);
+        Assert.IsEmpty((await service.MentionsAsync(new(""), default)).Mentions);
+        Assert.IsEmpty((await service.MentionsAsync(new("/tdd " + new string('a', 32768)), default)).Mentions, "A text longer than a prompt is not read.");
+        Assert.HasCount(256, (await service.MentionsAsync(new(string.Concat(Enumerable.Repeat("/tdd ", 300))), default)).Mentions);
+    }
+
+    [TestMethod]
+    public async Task ASlashCanBeginASkill_InPlainTextOnly()
+    {
+        var service = new SkillsService();
+        Assert.IsTrue((await service.CanBeginAsync(new("ask /", 4), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("```\ncd /", 7), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("run `cd /", 8), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("not \\/", 5), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new(null, 0), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new("ask /", 40), default)).Allowed);
+        Assert.IsFalse((await service.CanBeginAsync(new(new string(' ', 32768) + "/", 32768), default)).Allowed);
+    }
+
+    [TestMethod]
     public async Task TheSkillsOfMcpServers_AreListedReadOnly_WithTheirSwitchTheirApprovalAndTheirContent()
     {
         using var fixture = await Fixture.CreateAsync();

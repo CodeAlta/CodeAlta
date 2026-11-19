@@ -43,13 +43,14 @@ export const PluginPaneContext = createContext<Partial<PluginPane> | undefined>(
 
 /**
  * A request the shell addresses to the composer of a session, as a `codealta:plugin` window event: to read
- * its draft and state before a plugin command runs (`state`), or to do what a plugin asked (`send`,
- * `enqueue`, `steer`, `compact`, `draft`). `sessionId` null means the composer of the focused pane. The
+ * its draft and state before a plugin command runs (`state`), to do what a plugin asked (`send`,
+ * `enqueue`, `steer`, `compact`, `draft`), or to write `text` at the caret of its prompt, as a skill chosen in the
+ * search of the window is (`insert`). `sessionId` null means the composer of the focused pane. The
  * composer that takes the request sets `handled`, and `result` when it did what was asked. `agentPromptId`
  * names the agent prompt a `send` or an `enqueue` goes with, when it is not the one the composer shows.
  */
 export type PluginComposerRequest = {
-  kind: "state" | "send" | "enqueue" | "steer" | "compact" | "draft";
+  kind: "state" | "send" | "enqueue" | "steer" | "compact" | "draft" | "insert";
   sessionId: string | null; text: string | null; agentPromptId?: string | null;
   handled: boolean; result: boolean;
   /** Downstream owner acknowledgement; null is uncertain and must not release a host handoff claim. */

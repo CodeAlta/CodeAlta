@@ -114,15 +114,17 @@ export function outgoingKey(request: Pick<SessionSendRequest, "expectedEpoch" | 
 export function sendAvailable(epoch: string, sessionId: string, text: string, selection: SessionSelection | null,
   images: SessionSendRequest["images"]): boolean {
   const sent = withLinkAttachments(text, images);
-  return validSend({ expectedEpoch: epoch, clientRequestId: "availability", sessionId, text: sent.text, selection, references: null, images: sent.images }, false);
+  return validSend({ expectedEpoch: epoch, clientRequestId: "availability", sessionId, text: sent.text, selection, references: null, skills: true, images: sent.images }, false);
 }
 export function captureSubmission(epoch: string, sessionId: string, typed: string, key: string, selection: SessionSelection | null = null,
   references: SessionReferenceScope | null = null, attachments: SessionSendRequest["images"] = null): Readonly<SessionSendRequest> | null {
   // The links of the attach menu (issues, folders) become text here: the host gets them as `#` and `@` give them.
   if (attachments != null && !validImages(attachments)) return null;
   const { text, images } = withLinkAttachments(typed, attachments);
-  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection, references, images })) return null;
-  return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection: freezeSelection(selection), references: freezeReferences(references), images: images?.length ? freezeImages(images) : null });
+  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection, references, skills: true, images })) return null;
+  // A prompt of the composer: each skill its text names as `/name` is given to the model with it.
+  return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection: freezeSelection(selection), references: freezeReferences(references),
+    skills: true, images: images?.length ? freezeImages(images) : null });
 }
 
 function freezeReferences(value: SessionReferenceScope | null): Readonly<SessionReferenceScope> | null {
@@ -252,7 +254,8 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       if (!entry) {
         if (sends.size + aborts.size >= 256) { publish({ status: "capacity", epoch: request.expectedEpoch, receipt: null }); return; }
         entry = { request: Object.freeze({ expectedEpoch: request.expectedEpoch, clientRequestId: request.clientRequestId,
-          sessionId: request.sessionId, text: request.text, selection: freezeSelection(request.selection), references: freezeReferences(request.references), images: request.images?.length ? freezeImages(request.images) : null }), inFlight: false };
+          sessionId: request.sessionId, text: request.text, selection: freezeSelection(request.selection), references: freezeReferences(request.references),
+          skills: request.skills, images: request.images?.length ? freezeImages(request.images) : null }), inFlight: false };
         sends.set(key, entry);
       }
       entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.

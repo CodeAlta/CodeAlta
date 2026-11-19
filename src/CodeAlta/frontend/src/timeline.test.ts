@@ -237,6 +237,14 @@ test("file changes inspect supplied paths, count only validated per-file hunks, 
   assert.equal(fenced.copyMarkdown, "- `readme.md` (update)\n\n`````diff\n@@ -1 +1 @@\n-```\n+````\n`````");
 });
 
+test("a user message names the skills the host gave the model with it, and no other record does", () => {
+  const [user, assistant, plain] = buildTimelineItems([entry({ kind: "User", text: "/tdd the parser", skills: ["tdd"] }),
+    entry({ offset: "2", contentId: "other", skills: ["tdd"] }), entry({ offset: "3", contentId: "third", kind: "User", text: "/tdd by hand" })]);
+  assert.deepEqual(user.skills, ["tdd"]);
+  assert.equal(assistant.skills, undefined);
+  assert.equal(plain.skills, undefined, "a /name the host did not expand is no skill of the message");
+});
+
 test("a user message lists its images and no other record does", () => {
   const images = [{ index: 0, title: "Screenshot", mediaType: "image/png" }, { index: 1, title: "Diagram", mediaType: null }];
   const [user, assistant, onlyImages] = buildTimelineItems([entry({ kind: "User", text: "Look", images }),

@@ -14,7 +14,7 @@ export function captureSteering(epoch: string, sessionId: string, observation: S
     || !observation.runtimeInstanceId || observation.coordinatorTransitionInProgress !== false
     || !entry || entry.isRetiring || entry.isTerminated || !entry.activeRunId || !text.trim() || text.length > 32768) return null;
   return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, expectedRuntimeInstanceId: observation.runtimeInstanceId,
-    expectedAttachmentGeneration: entry.attachmentGeneration, expectedRunId: entry.activeRunId, text });
+    expectedAttachmentGeneration: entry.attachmentGeneration, expectedRunId: entry.activeRunId, text, skills: true });
 }
 
 function matches(request: SessionSteerRequest, row: SessionReceiptView): boolean {

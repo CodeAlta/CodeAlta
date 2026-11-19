@@ -34,6 +34,53 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             OpenAIResponsesTurnExecutor.MapReasoningEffortLevel(AgentReasoningEffort.Max));
     }
 
+    // The skills a prompt names as `/name`: the notes of the host reach the Responses API as input text parts of the user
+    // message, each before what was typed.
+    [TestMethod]
+    public async Task OpenAIResponsesModelProviderRuntime_SkillNotesOfAPrompt_AreInputTextPartsBeforeTheTypedText()
+    {
+        using var temp = TestTempDirectory.Create();
+        var responsesClient = new RecordingOpenAIResponseClient(
+            [[CreateAssistantResponseUpdate(responseId: "response-skills", modelId: "gpt-test", text: "grill-me, tdd", reasoningText: "", encryptedReasoning: null)]]);
+        await using var providerRuntime = new OpenAIResponsesModelProviderRuntime(new OpenAIResponsesModelProviderRuntimeOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new OpenAIProviderOptions
+                {
+                    ProviderKey = "openai",
+                    IsDefault = true,
+                    ResponsesClientFactory = _ => responsesClient,
+                    ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>([new AgentModelInfo("gpt-test", DisplayName: "GPT Test")]),
+                },
+            },
+        });
+        await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "gpt-test",
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+        const string typed = "/grill-me the plan, then /tdd";
+        const string grilling = "The user activated the CodeAlta skill 'grill-me'.\n\n<skill_content name=\"grill-me\">\nAsk questions.\n</skill_content>";
+        const string tdd = "The user activated the CodeAlta skill 'tdd'.\n\n<skill_content name=\"tdd\">\nWrite the test first.\n</skill_content>";
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput(
+            [
+                new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, grilling),
+                new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, tdd),
+                new AgentInputItem.Text(typed),
+            ]),
+        }).ConfigureAwait(false);
+
+        var user = responsesClient.Requests.Single().InputItems.OfType<MessageResponseItem>().Last(static item => item.Role == MessageRole.User);
+        CollectionAssert.AreEqual(new[] { grilling, tdd, typed }, user.Content.Select(static part => part.Text).ToArray(),
+            "each skill is an input text part of the user message, in the order of the prompt, before what was typed");
+    }
+
     [TestMethod]
     public async Task OpenAIResponsesModelProviderRuntime_UsesLocalReplayAndDoesNotSetPreviousResponseId()
     {

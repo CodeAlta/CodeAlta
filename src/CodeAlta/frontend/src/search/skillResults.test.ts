@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SkillsEntry } from "#neoastra";
-import { searchSkills, skillCall, skillPrompt, usableSkills } from "./skillResults";
+import { searchSkills, skillCall, usableSkills } from "./skillResults";
 
 const entry = (name: string, values: Partial<SkillsEntry> = {}): SkillsEntry => ({ id: name, name, title: name, description: `The ${name} skill.`, enabled: true,
   enabledGlobal: true, enabledProject: true, folder: null, path: null, scope: "Global", shadowed: false, source: "UserAlta", trusted: true, valid: true, ...values });
@@ -30,9 +30,4 @@ test("what follows the whole name of a skill goes with it to the session", () =>
   assert.deepEqual(skillCall("/handoff"), { name: "handoff", args: "" });
   assert.equal(skillCall("handoff now"), null);
   assert.deepEqual(searchSkills(skills, "/handoff").map(result => [result.skill.name, result.args]), [["handoff", ""], ["handoff-full", ""]]);
-});
-
-test("the prompt asks the agent to activate the skill and follow it, with what the user added", () => {
-  assert.equal(skillPrompt("handoff", ""), "Activate the skill `handoff` and follow its instructions.");
-  assert.equal(skillPrompt("handoff", " for the review "), "Activate the skill `handoff` and follow its instructions.\n\nfor the review");
 });

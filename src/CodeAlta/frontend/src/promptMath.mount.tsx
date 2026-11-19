@@ -4,6 +4,7 @@ import { createElement, createRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorSurface, type EditorSurfaceHandle, type SurfaceDocument } from "./editor/EditorSurface";
 import { PromptEditor, type PromptInput } from "./PromptEditor";
+import { SkillChoicesContext, type SkillChoices, type SkillMentionSpan } from "./skillMentions";
 
 // A Markdown file and a C# file that holds a `$`: only the first one has formulas. The third has aligned rows, which
 // KaTeX stacks in boxes that reach 2 px past their width.
@@ -17,15 +18,33 @@ showDocument(1);
 
 const state = { value: "Area $\\pi r^2$ here" };
 let input: PromptInput | null = null;
+let setText: (text: string) => void = () => { };
+// The host of the skills: it is asked where a prompt names skills, and answers when the test says so, with the `/name`
+// that are not between backticks.
+const asked: { text: string; answer: (spans: readonly SkillMentionSpan[]) => void }[] = [];
+const skillChoices: SkillChoices = { skills: ["tdd", "research"].map(name => ({ name, title: name, description: "", source: "Builtin" })), refresh: () => { },
+  mentions: text => new Promise(answer => { asked.push({ text, answer }); }), canBegin: async () => true };
 function Fixture() {
   const [value, setValue] = useState(state.value);
-  state.value = value;
-  return createElement(PromptEditor, { ref: (instance: PromptInput | null) => { input = instance; }, value, onChange: setValue, label: "Message", id: "session-prompt" });
+  state.value = value; setText = setValue;
+  return createElement(SkillChoicesContext.Provider, { value: skillChoices },
+    createElement(PromptEditor, { ref: (instance: PromptInput | null) => { input = instance; }, value, onChange: setValue, label: "Message", id: "session-prompt" }));
 }
 createRoot(document.getElementById("app")!).render(createElement(Fixture));
 
 type Field = HTMLElement & { value: string };
-Object.assign(window, { mathFixture: {
+Object.assign(window, { skillFixture: {
+  setText: (text: string) => setText(text),
+  // The texts the host was asked about and has not answered yet.
+  asked: () => asked.map(entry => entry.text),
+  // Answers the oldest question.
+  answer() {
+    const entry = asked.shift()!;
+    entry.answer(Array.from(entry.text.matchAll(/(?<!`)\/(\w+)/g), match => ({ start: match.index, end: match.index + match[0].length, name: match[1] })));
+  },
+  marks: () => Array.from(document.querySelectorAll<HTMLElement>("#session-prompt .prompt-skill-mention"), mark => `${mark.textContent}:${getComputedStyle(mark).color}`),
+  green() { const probe = document.body.appendChild(document.createElement("i")); probe.style.color = "var(--green)"; const color = getComputedStyle(probe).color; probe.remove(); return color; },
+}, mathFixture: {
   state,
   ready: () => !!input && !!document.querySelector("#session-prompt .monaco-editor") && !!document.querySelector("#editor .monaco-editor"),
   // The code editor: the document shown, the caret at a column of its first line, its text, and its preview.

@@ -18,6 +18,9 @@ import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { ReferencePicker } from "./ReferencePicker";
+import { SkillPromptPicker } from "./SkillPromptPicker";
+import { caretAfterEdit, skillCallAtCaret, SkillChoicesContext } from "./skillMentions";
+import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { promptKeysHint } from "./promptKeys";
 import { MicButton } from "./speech/MicButton";
 import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
@@ -86,6 +89,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   // A draft in shell mode runs its command on Enter, whatever its Send would do.
   const submitDraft = () => { if (!shellPrompt.take() && localDraft && !localDraft.disabled) localDraft.submit(); };
   const referenceScope = useContext(ProjectReferenceContext);
+  const skillChoices = useContext(SkillChoicesContext);
   const [issueRequest, setIssueRequest] = useState(0);
   // As the composer of a session: a folder of the project is a project reference, any other a link to its full path.
   const addFolders = (paths: readonly string[]) => localImages?.addLinks(paths.flatMap(path => {
@@ -106,6 +110,24 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   }));
   const attachActions = localDraft && localImages ? { onFolder: () => void addFolder(), onIssues: referenceScope ? () => setIssueRequest(value => value + 1) : null } : null;
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
+  // A skill chosen in the search of the window, for the prompt of a session to start: it is written at the caret.
+  useEffect(() => {
+    if (!localDraft || localDraft.busy) return;
+    const run = (event: Event) => {
+      const request = (event as CustomEvent<PluginComposerRequest>).detail;
+      if (request.handled || request.kind !== "insert" || request.sessionId !== sessionId) return;
+      request.handled = true;
+      // Not where the prompt names no skill: a command for a shell, a session to start on another machine or in the cloud.
+      if (shellPrompt.mode || !skillChoices) return;
+      const next = skillCallAtCaret(promptInput.current, localDraft.read(), request.text ?? "");
+      if (!next) return;
+      localDraft.edit(next.text);
+      caretAfterEdit(promptInput, next.caret);
+      request.result = true;
+    };
+    window.addEventListener(pluginComposerEvent, run);
+    return () => window.removeEventListener(pluginComposerEvent, run);
+  });
   useEffect(() => { if (localDraft) return; draftIndicators.persisted(sessionId, draft.editGeneration,
     persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
   }, [sessionId, draft, draftIndicators]);
@@ -155,6 +177,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         {/* The pickers of `@` and `#` insert Markdown for the agent: a shell command takes these characters as they are. */}
         {localDraft && !expanded && !shellPrompt.mode && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         {localDraft && !expanded && !shellPrompt.mode && <ReferencePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
+        {localDraft && !expanded && !shellPrompt.mode && <SkillPromptPicker edit={edit} input={promptInput} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
         {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
           id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => { if (!localDraft.disabled) localDraft.submit(); }} />}
