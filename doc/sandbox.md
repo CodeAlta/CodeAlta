@@ -84,7 +84,8 @@ Bubblewrap on Linux. Invariants:
   refuses the replacement of an entry, but not the move of a folder above it, where the sandbox can change the entry or
   put a new folder in its place. mxc has no rule there that keeps a folder from moving while its content stays
   writable, and a read-only `.git` would refuse the files git names after its process (`index.stash.<pid>`).
-- **No telemetry.** No request enables it.
+- **No telemetry.** No request enables it. On Windows, mxc collects its Required diagnostic data whatever a request
+  says (its `docs/telemetry.md`); the privacy page of the site says so.
 - **The UI stays enabled** (a disabled one stops tools at start); the clipboard stays closed.
 
 ## The worker and the routing

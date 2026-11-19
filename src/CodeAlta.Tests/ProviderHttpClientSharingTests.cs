@@ -95,6 +95,26 @@ public sealed class ProviderHttpClientSharingTests
     }
 
     [TestMethod]
+    public async Task GoogleSdkClient_AsksTheGeminiApiAtItsBetaVersion_WhereThePreviewModelsAre()
+    {
+        Uri? asked = null;
+        var handler = new StubHandler(request =>
+        {
+            asked = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"models":[]}""", System.Text.Encoding.UTF8, "application/json") };
+        });
+        using var client = GoogleGenAIModelProviderRuntime.CreateSdkClient(new GoogleGenAIProviderOptions { ProviderKey = "google", ApiKey = "key", HttpMessageHandler = handler });
+
+        var pager = await client.Models.ListAsync();
+        await foreach (var _ in pager)
+        {
+        }
+
+        // Google.GenAI 2 asks `v1` unless told: the models of `v1beta` would be gone from the list, and their turns refused.
+        StringAssert.Contains(asked!.AbsolutePath, "/v1beta/");
+    }
+
+    [TestMethod]
     public async Task GoogleSdkClients_DisposedByTheSdk_LeaveTheSharedHandlerUsable()
     {
         var requests = 0;

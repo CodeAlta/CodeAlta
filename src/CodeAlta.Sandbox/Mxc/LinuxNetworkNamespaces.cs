@@ -4,7 +4,7 @@ namespace CodeAlta.Sandbox.Mxc;
 
 /// <summary>
 /// Whether a sandbox with a network can start on Linux. Every network of a sandbox goes through the proxy of CodeAlta
-/// (<see cref="SandboxPolicy.ThroughProxy"/>), which mxc 1.0.1 enforces from user and network namespaces made by util-linux
+/// (<see cref="SandboxPolicy.ThroughProxy"/>), which mxc enforces from user and network namespaces made by util-linux
 /// <c>unshare</c>; it checks them first with <see cref="ProbeArguments"/>. Ubuntu 24.04 and later refuse those namespaces
 /// to a program without an AppArmor profile that allows them (<c>kernel.apparmor_restrict_unprivileged_userns</c>), as
 /// they do for <c>bwrap</c>: the sandbox then starts without a network only.

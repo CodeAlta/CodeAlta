@@ -26,7 +26,7 @@ public sealed record CopilotRuntimePackage(string Platform, long Size, string Sh
 public static class CopilotPinnedRuntime
 {
     /// <summary>The version of the Copilot runtime CodeAlta runs.</summary>
-    public const string Version = "1.0.109";
+    public const string Version = "1.0.112";
 
     /// <summary>The name of the file that marks a complete installation in its folder.</summary>
     public const string MarkerFileName = "codealta-copilot-runtime.json";
@@ -35,14 +35,14 @@ public static class CopilotPinnedRuntime
 
     private static readonly FrozenDictionary<string, CopilotRuntimePackage> PackagesByPlatform = new CopilotRuntimePackage[]
     {
-        new("darwin-arm64", 100_847_453, "0e315203a2a90f78dd11def8b44c02083518ac7a94276aa56ca3584a630ff083"),
-        new("darwin-x64", 110_154_801, "622c642422124e362bd95c00dad4a27dcc2c18b3399ceee82af4745597ad4996"),
-        new("linux-arm64", 108_301_533, "8cb2f4fd8e59401ca581de603c7886903940042c0ae5bb49cc568e24477078a8"),
-        new("linux-x64", 104_126_196, "d08b7a68fc0ca1f3167e22794e04d6aecc44ddc9e70f4482ae3b3d28104af03a"),
-        new("linuxmusl-arm64", 95_855_744, "942e7b5fc39aabddf3ea9e9b5ad7f63c2f117a3b18a1eb0cfe71d224fcdb34c0"),
-        new("linuxmusl-x64", 99_694_658, "6c1a297b8baf282e4f536377acb60aa38c3cb26514601e49b1d9ad83862c023a"),
-        new("win32-arm64", 102_256_939, "04b2821e5541f1bc6fca29365385921d3ea72c61f05210ebcb004a207a18aa48"),
-        new("win32-x64", 96_624_417, "5ba9bfc3104d8e37462e9a5214a3cc88e6e2201b972981b6bdf447ee2f8f49bc"),
+        new("darwin-arm64", 104_182_544, "3c924fb18d6b309adc21b592ff32c55916d43448df4107d37e5a9ad0daf9478f"),
+        new("darwin-x64", 113_830_960, "b04105686981bf339dcc3bd8b5e44b83f6b00a36fa588fdd16581902cc2ccd5b"),
+        new("linux-arm64", 113_072_638, "435dcf9907d4ba7aa5b52f5bb274d16b7c8d2143cff75226616cab39d017c7da"),
+        new("linux-x64", 109_157_659, "c9dcab9dd34dd53663cee004e628a799539155850fcd4db6aa94e2615b0ce157"),
+        new("linuxmusl-arm64", 100_642_789, "e3b07d912f2260d0699019b506361f3c2828bbb08c035a4c0acddb0fc9f64e92"),
+        new("linuxmusl-x64", 104_804_518, "8fcd3568e0fde9d86eb704c9b2581f83479ddbf997c039a47d648ecb65af83d9"),
+        new("win32-arm64", 105_555_544, "39b3a1c0b74dc7676b707eff0956aa88bec3517dd32c2045cfc9706442ecf4e5"),
+        new("win32-x64", 100_918_446, "a60f1c1a2d831093f654cf22b56e1bf3ce4f2c4f00afeca699b4824c90abf40b"),
     }.ToFrozenDictionary(static package => package.Platform, StringComparer.Ordinal);
 
     /// <summary>Gets the packages of the pinned release, one per platform.</summary>

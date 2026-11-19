@@ -7,7 +7,7 @@ namespace CodeAlta.Sandbox.Mxc;
 /// the thread that does it.
 /// </summary>
 /// <remarks>
-/// On Linux, mxc 1.0.1 starts <c>bwrap --die-with-parent</c> on the calling thread, and Linux kills the sandbox when that
+/// On Linux, mxc starts <c>bwrap --die-with-parent</c> on the calling thread, and Linux kills the sandbox when that
 /// thread ends, not when the process does (microsoft/mxc#1525). A thread of the thread pool ends after 20 seconds without
 /// work, which killed sandboxes at random (CodeAlta#226). This thread lives as long as the process: its sandboxes still
 /// die with CodeAlta, and only with it.

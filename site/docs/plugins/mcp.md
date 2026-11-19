@@ -152,6 +152,8 @@ For remote servers that follow the MCP authorization flow, prefer browser sign-i
 
 `{ "type": "oauth" }` uses dynamic client registration. Add `clientId`, `clientSecret`, `scopes` and `redirectUri` when the server needs a pre-registered client; set `redirectUri` only when it requires a fixed callback.
 
+The server must publish its OAuth metadata (the discovery documents of the MCP authorization flow) and accept PKCE with `S256`. A sign-in to a server that publishes none is refused: CodeAlta does not guess its endpoints.
+
 - **CodeAlta Desktop**: save and enable the server, then use the **Authorization** block of its form: **Authorize** opens the browser and shows the address to copy, **Cancel** stops a stuck sign-in, **Sign out** removes the tokens.
 - **CodeAlta TUI**: **Authorize/Login** in the MCP Servers dialog, with **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) and **Logout**.
 - **Agents**: `alta mcp auth login <server>`, `alta mcp auth status`, `alta mcp auth logout <server>`.

@@ -8,8 +8,9 @@ namespace CodeAlta.Sandbox.Mxc;
 /// </summary>
 /// <remarks>
 /// A request runs only where the native container serves it: on Windows, the probe of every request must answer
-/// the BaseContainer tier without changing the permissions of folders (mxc 1.0.1 falls back to that elsewhere).
-/// Telemetry is never enabled.
+/// the BaseContainer tier without changing the permissions of folders. No request enables the telemetry of mxc. On
+/// Windows, mxc writes four events of its own to the Windows event tracing (the start and the end of a run, a failure,
+/// the exit of a process), whatever the request says.
 /// </remarks>
 public sealed class MxcSandboxBackend : ISandboxBackend
 {

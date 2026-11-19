@@ -75,9 +75,9 @@ internal static class TinyMcpSkills
 #pragma warning disable MCPEXP002 // The methods of the extension are custom requests.
     public static IList<McpServerRequestHandler> CreateHandlers(TinyMcpServerSettings settings) =>
     [
-        new() { Method = "skills/list", Handler = (request, _) => ValueTask.FromResult<JsonNode?>(List(request, settings)) },
-        new() { Method = "skills/get", Handler = (request, _) => ValueTask.FromResult<JsonNode?>(Get(request, settings)) },
-        new() { Method = "resources/directory/read", Handler = (request, _) => ValueTask.FromResult<JsonNode?>(ReadDirectory(request, settings)) },
+        new() { Method = "skills/list", Handler = (request, _) => ValueTask.FromResult<JsonNode?>(List(request.Params, settings)) },
+        new() { Method = "skills/get", Handler = (request, _) => ValueTask.FromResult<JsonNode?>(Get(request.Params, settings)) },
+        new() { Method = "resources/directory/read", Handler = (request, _) => ValueTask.FromResult<JsonNode?>(ReadDirectory(request.Params, settings)) },
     ];
 #pragma warning restore MCPEXP002
 
@@ -100,9 +100,9 @@ internal static class TinyMcpSkills
         return null;
     }
 
-    private static JsonObject List(JsonRpcRequest request, TinyMcpServerSettings settings)
+    private static JsonObject List(JsonNode? parameters, TinyMcpServerSettings settings)
     {
-        var cursor = (request.Params as JsonObject)?["cursor"]?.GetValue<string>();
+        var cursor = (parameters as JsonObject)?["cursor"]?.GetValue<string>();
         settings.WriteLog("SKILLS_LIST " + (cursor ?? "-"));
         // The last entry is invalid (its name is not the last segment of its path): a client leaves it out.
         JsonNode[] listed =
@@ -128,18 +128,18 @@ internal static class TinyMcpSkills
         return result;
     }
 
-    private static JsonObject Get(JsonRpcRequest request, TinyMcpServerSettings settings)
+    private static JsonObject Get(JsonNode? parameters, TinyMcpServerSettings settings)
     {
-        var uri = (request.Params as JsonObject)?["uri"]?.GetValue<string>();
+        var uri = (parameters as JsonObject)?["uri"]?.GetValue<string>();
         settings.WriteLog("SKILLS_GET " + uri);
         var skill = Skills.FirstOrDefault(skill => string.Equals(skill.Uri, uri, StringComparison.Ordinal))
             ?? throw new McpProtocolException("No skill is served at " + uri, McpErrorCode.InvalidParams);
         return new JsonObject { ["resultType"] = "complete", ["skill"] = Entry(skill), ["ttlMs"] = 300000, ["cacheScope"] = "public" };
     }
 
-    private static JsonObject ReadDirectory(JsonRpcRequest request, TinyMcpServerSettings settings)
+    private static JsonObject ReadDirectory(JsonNode? parameters, TinyMcpServerSettings settings)
     {
-        var uri = (request.Params as JsonObject)?["uri"]?.GetValue<string>() ?? string.Empty;
+        var uri = (parameters as JsonObject)?["uri"]?.GetValue<string>() ?? string.Empty;
         settings.WriteLog("DIR " + uri);
         var prefix = uri + "/";
         var children = new SortedDictionary<string, bool>(StringComparer.Ordinal);

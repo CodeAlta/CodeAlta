@@ -244,11 +244,14 @@ public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
             provider.ModelsIncludeRegex);
     }
 
-    private static Client CreateSdkClient(GoogleGenAIProviderOptions provider)
+    internal static Client CreateSdkClient(GoogleGenAIProviderOptions provider)
     {
         var httpOptions = new HttpOptions
         {
             BaseUrl = provider.BaseUri?.ToString(),
+            // The Gemini API is asked at its beta version, where the preview models and the `-latest` names are: the SDK
+            // asks `v1` by default since its version 2. Vertex AI keeps the version the SDK asks it.
+            ApiVersion = provider.UseVertexAI ? null : "v1beta",
             Headers = provider.ExtraHeaders is null
                 ? null
                 : new Dictionary<string, string>(provider.ExtraHeaders, StringComparer.OrdinalIgnoreCase),

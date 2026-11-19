@@ -4,7 +4,7 @@ title: Privacy statement
 
 # Privacy statement
 
-Last updated: November 4, 2026
+Last updated: November 19, 2026
 
 CodeAlta is an open-source project. CodeAlta Desktop, CodeAlta TUI, CodeAlta Server and CodeAlta Node run on computers you or your organization choose. The CodeAlta project runs no service that receives your data: it has no accounts, no telemetry, no analytics and no crash reports.
 
@@ -19,6 +19,7 @@ CodeAlta only connects to the services that you configure or that it needs to wo
 - **The AI providers you choose** (such as OpenAI, Anthropic, GitHub Copilot or a local model): your prompts, the files and the command results your agents use are sent to the provider of the session, under that provider's terms and privacy policy.
 - **Public catalogs and package feeds**: [NuGet](https://www.nuget.org) to check for and download updates, [models.dev](https://models.dev) to keep the list of models up to date, the [Agent Client Protocol registry](https://agentclientprotocol.com) to list agents, and [Hugging Face](https://huggingface.co) when you download a speech or search model. These services see the address of your computer, as for any download.
 - **Plugins, MCP servers and tools you add**: they work under their own terms.
+- **The sandbox of a session, on Windows**: CodeAlta itself collects nothing, but the sandbox is built on Microsoft's [MXC](https://github.com/microsoft/mxc), which collects Required diagnostic data on Windows when a sandboxed session runs: the start and the end of a run, a failure by its category, and the exit of a process. It goes to Microsoft, under the [Microsoft Privacy Statement](https://privacy.microsoft.com/privacystatement), and MXC has no setting for it: see [MXC diagnostic data](https://github.com/microsoft/mxc/blob/main/docs/telemetry.md). Nothing is collected on macOS and Linux, nor in a session without a sandbox.
 - **Your phone**: CodeAlta reaches it through your own [Tailscale](https://tailscale.com) network. The CodeAlta project runs no relay.
 
 ## Fleet and CodeAlta Server
