@@ -2150,6 +2150,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     openCanvas: request => {
       const declared = canvasHub.getCatalog().find(item => item.pluginKey === request.pluginKey && item.id === request.canvasId);
       if (!declared) return;
+      // A page of Settings (a plugin's settings page) that opens a tab closes Settings, which would otherwise hide that tab.
+      if (canvasPlacement(declared) !== "Settings" && settingsVisible.current) closeSettingsLatest.current();
       openCanvasLatest.current({ ...request, spaceId: shownSpace.current, plugin: declared.package, focus: true, title: declared.title, icon: declared.icon });
     },
     showChanges: projectId => {

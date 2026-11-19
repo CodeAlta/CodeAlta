@@ -34,7 +34,7 @@ const api: MobileSettingsApi = {
 const fixture = {
   state,
   /** Under StrictMode, as in the application. */
-  render() { flushSync(() => root.render(createElement(StrictMode, null, createElement("div", { className: "settings-dialog-content" }, createElement(MobileSettings, { api }))))); },
+  render() { flushSync(() => root.render(createElement(StrictMode, null, createElement("div", { className: "settings-dialog-content" }, createElement(MobileSettings, { api, onOpenMobile: () => { state.calls.push("open-mobile"); } }))))); },
   /** The plugin says its settings changed. */
   change(settings: Partial<MobileSettingsView>) { state.settings = { ...state.settings, ...settings }; for (const listener of [...listeners]) listener(state.settings); },
 };

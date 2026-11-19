@@ -49,10 +49,11 @@ const pageOf = (provider: string, networks: MobileSettingsView["providers"] = []
 };
 
 /**
- * The settings page of the Mobile plugin, in Settings > Extensions > Mobile: the provider phones connect through and its fields, the port
- * of the view on this computer, the address while it is served, and Reset access, which gives the phones a new code to scan.
+ * The settings page of the Mobile plugin, in Settings > Extensions > Mobile: first the way to connect a phone (the button that opens the Mobile
+ * tab, where its QR code is), then the provider phones connect through and its fields, the port of the view on this computer, the address while
+ * it is served, and Reset access, which gives the phones a new code to scan.
  */
-export function MobileSettings({ api }: { api: MobileSettingsApi }) {
+export function MobileSettings({ api, onOpenMobile }: { api: MobileSettingsApi; onOpenMobile?: () => void }) {
   const { t } = useShellLanguage();
   const [settings, setSettings] = useState<MobileSettingsView | null>(null);
   const [unread, setUnread] = useState(false);
@@ -117,8 +118,20 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
   const name = (id: string) => pageOf(id, settings.providers).name;
   // The address card follows the provider chosen on the page; until it is applied, the address of the other provider is not this one.
   const applied = provider === settings.provider.id;
+  const served = !!settings.address;
   return <div className="settings-grid mobile-settings">
     {notice && <Callout className="mobile-settings-notice" intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>{notice.text}</Callout>}
+    {onOpenMobile && <Card className="appearance-settings mobile-settings-pair" aria-labelledby="mobile-settings-pair">
+      <span className="mobile-settings-pair-icon" aria-hidden="true"><AppIcon name="smartphone" size={22} /></span>
+      <div className="mobile-settings-pair-text">
+        <h2 id="mobile-settings-pair">{t("Connect a phone")}</h2>
+        <p className="settings-field-help">{t(served
+          ? "The Mobile tab shows the QR code of the phone page: scan it with the camera of the phone to connect it."
+          : "The Mobile tab shows the QR code a phone scans to connect, or what keeps the page from being served.")}</p>
+      </div>
+      <Button intent="primary" className="mobile-settings-pair-open" endIcon={<AppIcon name="arrowRight" size={15} />}
+        text={t("Open the Mobile tab")} onClick={onOpenMobile} />
+    </Card>}
     <Card className="appearance-settings" aria-labelledby="mobile-settings-ports">
       <h2 id="mobile-settings-ports">{t("Connection")}</h2>
       <Field label={t("Phones connect through")} notice={(page.help || page.description) && <p className="settings-field-help">{page.help ? t(page.help) : page.description}</p>}>

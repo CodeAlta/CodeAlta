@@ -44,5 +44,6 @@ export default function Settings() {
   }, [alta]);
   // A new round makes a new api: the page reads the settings and subscribes again.
   const api = useMemo(() => createMobileSettingsApi(alta.rpc), [alta, round]);
-  return <MobileSettings api={api} />;
+  // The Mobile tab, where the QR code a phone scans is: the window closes Settings to show it.
+  return <MobileSettings api={api} onOpenMobile={() => alta.host.openCanvas("mobile")} />;
 }

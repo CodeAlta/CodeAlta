@@ -1,6 +1,20 @@
 // The words of the settings page of the Mobile plugin, in the five languages after English (es, fr, de, ja, zh-CN), merged into the dictionary
 // of `localization.ts`. English is the key.
 export const mobileSettingsMessages = {
+  "Connect a phone": ["Conectar un teléfono", "Connecter un téléphone", "Telefon verbinden", "スマートフォンを接続", "连接手机"],
+  "Open the Mobile tab": ["Abrir la pestaña Mobile", "Ouvrir l’onglet Mobile", "Mobile-Tab öffnen", "Mobile タブを開く", "打开 Mobile 标签页"],
+  "The Mobile tab shows the QR code of the phone page: scan it with the camera of the phone to connect it.": [
+    "La pestaña Mobile muestra el código QR de la página del teléfono: escanéalo con la cámara del teléfono para conectarlo.",
+    "L’onglet Mobile affiche le code QR de la page du téléphone : scannez-le avec l’appareil photo du téléphone pour le connecter.",
+    "Der Mobile-Tab zeigt den QR-Code der Telefonseite: Scannen Sie ihn mit der Kamera des Telefons, um es zu verbinden.",
+    "Mobile タブにスマートフォン用ページの QR コードが表示されます。スマートフォンのカメラで読み取ると接続されます。",
+    "Mobile 标签页会显示手机页面的二维码：用手机相机扫描即可连接。"],
+  "The Mobile tab shows the QR code a phone scans to connect, or what keeps the page from being served.": [
+    "La pestaña Mobile muestra el código QR que un teléfono escanea para conectarse, o lo que impide servir la página.",
+    "L’onglet Mobile affiche le code QR qu’un téléphone scanne pour se connecter, ou ce qui empêche de servir la page.",
+    "Der Mobile-Tab zeigt den QR-Code, den ein Telefon zum Verbinden scannt, oder was die Bereitstellung der Seite verhindert.",
+    "Mobile タブには、スマートフォンが接続のために読み取る QR コード、またはページを提供できない理由が表示されます。",
+    "Mobile 标签页会显示手机扫描以连接的二维码，或页面无法提供的原因。"],
   "Other machines": ["Otras máquinas", "Autres machines", "Andere Maschinen", "他のマシン", "其他机器"],
   "Show my other machines on the phone": ["Mostrar mis otras máquinas en el teléfono", "Afficher mes autres machines sur le téléphone", "Meine anderen Maschinen auf dem Telefon anzeigen", "他のマシンをスマートフォンに表示", "在手机上显示我的其他机器"],
   "Every connected phone can use the machines this computer reaches, with this computer's permissions.": [

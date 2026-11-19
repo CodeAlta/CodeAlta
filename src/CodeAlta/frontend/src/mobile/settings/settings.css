@@ -8,6 +8,14 @@
 .mobile-settings-address[data-unserved] { color: var(--text); }
 .mobile-settings .settings-field-help { margin-top: 6px; overflow-wrap: anywhere; }
 .mobile-settings-reset { position: relative; display: inline-flex; }
+/* Connect a phone: the first card, a call to the Mobile tab with its QR code. */
+.mobile-settings .mobile-settings-pair { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-left: 3px solid var(--accent); }
+.mobile-settings-pair-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.mobile-settings-pair-text { flex: 1 1 220px; min-width: 0; }
+.mobile-settings-pair-text h2 { margin: 0 0 2px; }
+.mobile-settings .mobile-settings-pair-text .settings-field-help { margin: 0; }
+.mobile-settings-pair-open { flex: none; margin-left: auto; }
 .mobile-settings-loading { display: grid; place-items: center; min-height: 160px; }
 .mobile-settings .mobile-settings-mode { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .mobile-settings .mobile-settings-mode .bp6-control.bp6-inline { margin: 0; }

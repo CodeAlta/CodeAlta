@@ -22,7 +22,7 @@ The built-in Mobile plugin shows the sessions of a computer on a phone. CodeAlta
 The plugin is off until you turn it on: it publishes your computer on your tailnet.
 
 1. Open **Settings > Plugins** and turn on **Mobile**.
-2. Open the **Mobile** tab with the phone button of the title bar, `Ctrl+G M`, or **Mobile: connect a phone** in the search of the window (`Ctrl+P`).
+2. Open the **Mobile** tab with the phone button of the title bar, `Ctrl+G M`, **Mobile: connect a phone** in the search of the window (`Ctrl+P`), or **Open the Mobile tab** in **Settings > Extensions > Mobile**.
 3. Scan the QR code with the camera of the phone.
 
 <figure class="alta-figure my-4" style="max-width: 40rem;">
@@ -171,6 +171,7 @@ With more than the Default space, the **Mobile** card of **Settings > Plugins** 
   <figcaption class="small text-secondary mt-2">The Mobile page of Settings.</figcaption>
 </figure>
 
+- **Connect a phone**: **Open the Mobile tab** closes Settings and shows the QR code to scan.
 - **Phones connect through**: **Tailscale**, or **Dev Tunnels** (see [above](#without-tailscale-dev-tunnels)).
 - **Port on this computer**: the port of the page on `127.0.0.1`, 2584 at first.
 - **Port on the tailnet**: with Tailscale, the HTTPS port Tailscale Serve publishes the page on, 2584 at first.

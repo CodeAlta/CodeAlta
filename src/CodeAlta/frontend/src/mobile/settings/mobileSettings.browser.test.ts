@@ -11,7 +11,7 @@ import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "
 
 const edge = browserExecutable;
 
-test("the settings page of Mobile shows its ports and its address, applies new ports, switches to Dev Tunnels, asks before it resets the access, and fits a narrow Settings", { skip: !edge, timeout: testLimit(180_000) }, async () => {
+test("the settings page of Mobile opens the Mobile tab, shows its ports and its address, applies new ports, switches to Dev Tunnels, asks before it resets the access, and fits a narrow Settings", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-mobile-settings-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -57,6 +57,10 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     assert.equal(await evaluate("document.getElementById('mobile-settings-https-port').value"), "2584");
     assert.equal(await evaluate("document.querySelector('.mobile-settings-address code')?.textContent"), "https://desk.tail1234.ts.net:2584");
     assert.equal(await evaluate(`${button("Apply")}.disabled`), true, "nothing to apply while nothing changed");
+    // The first card leads to the Mobile tab, where the QR code a phone scans is.
+    assert.equal(await evaluate("document.querySelector('.mobile-settings > .bp6-card h2')?.id"), "mobile-settings-pair");
+    await evaluate(`${button("Open the Mobile tab")}.click()`);
+    assert.equal(await wait("mobileSettingsFixture.state.calls.includes('open-mobile')"), true);
     // A narrow Settings: every card fits, nothing scrolls sideways.
     assert.equal(await evaluate("[...document.querySelectorAll('.mobile-settings, .mobile-settings .bp6-card')].every(element => element.scrollWidth <= element.clientWidth)"), true);
     assert.equal(await evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), true);
