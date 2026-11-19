@@ -378,6 +378,9 @@ public sealed class ModelHostUpdateTests
                     try
                     {
                         if (process.MainModule?.FileName is not { } path || !path.StartsWith(_temp.Path, StringComparison.OrdinalIgnoreCase)) continue;
+                        // A server the host just ended can still be listed while Windows takes it down: its exit code is set
+                        // before it is gone, which is all the stop of the host waits for. Only one that still runs was left.
+                        if (process.HasExited) continue;
                         left.Add($"{process.Id} {path}");
                         process.Kill(entireProcessTree: true);
                         await process.WaitForExitAsync().WithinAsync(TestTime.Seconds(10));
