@@ -73,5 +73,6 @@ test("the checkouts offered are those that are there, but the one the session wo
   const gone = worktree("C:\\worktrees\\gone", { missing: true });
   const tree = worktree("C:\\worktrees\\stride\\bold-fox");
   assert.deepEqual(folderTargets([main, four, gone, tree], null), [four, tree], "A session in the folder of the project is offered the worktrees.");
+  assert.deepEqual(folderTargets([main, { ...four, folderMissing: true }, tree], null), [tree], "A checkout without the folder of a sub-project is no place to work in it.");
   assert.deepEqual(folderTargets([main, four, gone, tree], "c:/code/stride4/"), [main, tree], "A session in a worktree is offered the folder of the project and the others.");
 });

@@ -3595,9 +3595,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const draftTyped = !!localDraft.text.trim() || localImages.images.length > 0;
   const preparedProject = draftProjectId !== null ? selectedProject : undefined;
   useEffect(() => {
-    if (!owned || !status?.hostEpoch || !mutation?.capability.canMutate() || !preparedProject || sessionId !== null || creatingBusy) return;
-    if (!makesWorktree(draftPlace)) preparedWorktrees.discard(preparedProject.id);
-    else if (draftTyped) preparedWorktrees.ensure(status.hostEpoch, preparedProject, draftPlace.base);
+    if (!owned || !status?.hostEpoch || !mutation?.capability.canMutate() || !preparedProject || creatingBusy) return;
+    // One that is no longer the one wanted goes whatever the window shows: the place of a project also changes in the
+    // form of its row, while a session is looked at.
+    const made = preparedWorktrees.get(preparedProject.id);
+    if (made && (!makesWorktree(draftPlace) || made.base !== draftPlace.base)) preparedWorktrees.discard(preparedProject.id);
+    if (sessionId === null && makesWorktree(draftPlace) && draftTyped) preparedWorktrees.ensure(status.hostEpoch, preparedProject, draftPlace.base);
     // The worktrees follow too: one a session took, or that the host forgot, is made again while a prompt is typed.
   }, [owned, status?.hostEpoch, mutation?.capability, preparedProject?.id, preparedProject?.path, draftPlace, draftTyped, sessionId, creatingBusy, preparedWorktreeList]);
   useEffect(() => {

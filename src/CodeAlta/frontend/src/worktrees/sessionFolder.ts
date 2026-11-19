@@ -52,11 +52,12 @@ export function createSessionFolderSwitch(invoke: Invoke) {
 }
 
 /**
- * The checkouts of the repository a session can be sent to: every one whose folder is there, but the one it works in.
- * The checkout the project lives in is the folder of the project, offered to a session that works in a worktree.
+ * The checkouts of the repository a session can be sent to: every one whose folder is there with the folder of the
+ * project in it, but the one it works in. The checkout the project lives in is the folder of the project, offered to
+ * a session that works in a worktree.
  */
 export function folderTargets(worktrees: readonly Worktree[], current: string | null): readonly Worktree[] {
-  return worktrees.filter(worktree => !worktree.missing && (worktree.project ? current !== null : !sameFolder(worktree.folder, current)));
+  return worktrees.filter(worktree => !worktree.missing && !worktree.folderMissing && (worktree.project ? current !== null : !sameFolder(worktree.folder, current)));
 }
 
 const messages: Readonly<Record<string, MessageKey>> = {

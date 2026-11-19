@@ -26,7 +26,9 @@ const workPlaceLimit = 256;
 export type Worktree = Readonly<{ path: string; name: string; branch: string | null; head: string | null; main: boolean; project: boolean; locked: boolean; missing: boolean;
   folder: string; busy: boolean;
   /** Another worktree is inside its folder: removing it would delete that one, so it is not removed. */
-  holdsWorktree?: boolean }>;
+  holdsWorktree?: boolean;
+  /** The checkout is there without the folder of the project in it: a session of the project cannot work there. */
+  folderMissing?: boolean }>;
 export type WorktreeList = Readonly<{ worktrees: readonly Worktree[]; newFolder: string | null }>;
 export type Branch = Readonly<{ name: string; current: boolean; remote: boolean; worktree: string | null; worktreeName: string | null }>;
 export type BranchList = Readonly<{ branches: readonly Branch[]; busy: boolean }>;
@@ -192,10 +194,11 @@ export function worktreesReply(reply: unknown, projectId: string): WorktreeList 
     if (!text(row.path, 4096) || !text(row.name, 4096) || !optional(row.branch, 256) || !optional(row.head, 64) || !text(row.folder, 4096)
       || typeof row.main !== "boolean" || typeof row.project !== "boolean" || typeof row.locked !== "boolean" || typeof row.missing !== "boolean" || typeof row.busy !== "boolean"
       || row.holdsWorktree !== undefined && typeof row.holdsWorktree !== "boolean"
+      || row.folderMissing !== undefined && typeof row.folderMissing !== "boolean"
       // The checkout the project lives in is one that is not removed.
       || row.project && !row.main) return "read_failed";
     worktrees.push({ path: row.path, name: row.name, branch: row.branch, head: row.head, main: row.main, project: row.project, locked: row.locked, missing: row.missing,
-      folder: row.folder, busy: row.busy, ...row.holdsWorktree === true ? { holdsWorktree: true } : {} });
+      folder: row.folder, busy: row.busy, ...row.holdsWorktree === true ? { holdsWorktree: true } : {}, ...row.folderMissing === true ? { folderMissing: true } : {} });
   }
   // One checkout at most is where the project lives.
   if (worktrees.filter(worktree => worktree.project).length > 1) return "read_failed";

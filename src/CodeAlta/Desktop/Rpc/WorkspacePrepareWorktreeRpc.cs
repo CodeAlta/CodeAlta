@@ -12,6 +12,10 @@ internal sealed partial class WorkspaceService
     private readonly Dictionary<string, PreparedWorktree> _preparedWorktrees = new(StringComparer.Ordinal);
     private readonly Queue<string> _preparedWorktreeOrder = new();
     private const int KeptPreparedWorktrees = 32;
+    // The worktrees the page gave up before they were registered: a preparation reads the catalog first, and a discard
+    // can come meanwhile. Such a worktree is never made. The oldest are forgotten. Guarded by _sessionGate.
+    private readonly HashSet<string> _discardedEarly = new(StringComparer.Ordinal);
+    private readonly Queue<string> _discardedEarlyOrder = new();
     // Stops git when the window closes while a worktree is still made.
     private readonly CancellationTokenSource _preparationsClosing = new();
     // What git still does for those worktrees (made, removed), forgotten ones included: the window that closes waits
@@ -58,7 +62,7 @@ internal sealed partial class WorkspaceService
         {
             if (_sessionsClosed) return Reply("closed");
             if (_preparedWorktrees.TryGetValue(request.RequestId, out var known)) return ReadPrepared(known);
-            prepared = new PreparedWorktree(project, request.BaseBranch);
+            prepared = new PreparedWorktree(project, request.BaseBranch) { Discarded = _discardedEarly.Remove(request.RequestId) };
             _preparedWorktrees[request.RequestId] = prepared;
             _preparedWorktreeOrder.Enqueue(request.RequestId);
             while (_preparedWorktreeOrder.Count > KeptPreparedWorktrees
@@ -68,6 +72,8 @@ internal sealed partial class WorkspaceService
                 if (!forgotten.Used && !forgotten.Discarded) Discard(forgotten);
             }
 
+            // Given up before it was registered: nothing is made.
+            if (prepared.Discarded) return ReadPrepared(prepared);
             // On the thread pool: git is started there, never under the gate nor on the thread of the caller.
             prepared.Work = Task.Run(() => PrepareOwnedAsync(prepared));
             Track(prepared.Work);
@@ -96,7 +102,8 @@ internal sealed partial class WorkspaceService
 
     /// <summary>
     /// Gives up a worktree the page asked for and no session took: it is removed with its branch once git has made it,
-    /// unless it holds changes. A worktree a session took stays.
+    /// unless it holds changes. A worktree a session took stays. One that is not registered yet (<c>unknown</c>) is
+    /// never made when its preparation comes after.
     /// </summary>
     /// <param name="request">The expected host epoch and the identifier of the worktree.</param>
     /// <returns>The state of the worktree after the request, or a refusal of the request. The removal is not waited for.</returns>
@@ -109,7 +116,14 @@ internal sealed partial class WorkspaceService
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         lock (_sessionGate)
         {
-            if (!_preparedWorktrees.TryGetValue(request.RequestId, out var prepared)) return Reply("unknown");
+            if (!_preparedWorktrees.TryGetValue(request.RequestId, out var prepared))
+            {
+                // Not registered (yet): a preparation with this identifier that still reads the catalog makes nothing.
+                if (_discardedEarly.Add(request.RequestId)) _discardedEarlyOrder.Enqueue(request.RequestId);
+                while (_discardedEarlyOrder.Count > KeptPreparedWorktrees) _discardedEarly.Remove(_discardedEarlyOrder.Dequeue());
+                return Reply("unknown");
+            }
+
             if (!prepared.Used && !prepared.Discarded) Discard(prepared);
             return ReadPrepared(prepared);
         }

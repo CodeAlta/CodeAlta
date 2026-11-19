@@ -121,7 +121,11 @@ internal sealed class WorktreesService
                 below == "." ? worktree.Path : Path.Combine(worktree.Path, below), busy.Contains(worktree.Path),
                 // The two are told apart: a project that lives in a worktree has the main checkout of its repository beside it.
                 worktree.Path.Equals(checkout, PathComparison))
-            { HoldsWorktree = CheckoutSessions.HoldsWorktree(worktree, worktrees) })],
+            {
+                HoldsWorktree = CheckoutSessions.HoldsWorktree(worktree, worktrees),
+                // A checkout on a branch without the folder of a sub-project is there, and no place to work in it.
+                FolderMissing = below != "." && !worktree.Missing && !Directory.Exists(Path.Combine(worktree.Path, below)),
+            })],
             parent);
     }
 
@@ -538,6 +542,12 @@ internal sealed record WorktreeItem(string Path, string Name, string? Branch, st
     /// it, so it is not removed (<c>holds_worktree</c>).
     /// </summary>
     public bool HoldsWorktree { get; init; }
+
+    /// <summary>
+    /// Gets whether the checkout is there without the folder of the project in it: a sub-project whose folder the
+    /// branch of that checkout does not have. A session of the project cannot work there.
+    /// </summary>
+    public bool FolderMissing { get; init; }
 }
 
 /// <summary>Asks to remove a worktree.</summary>

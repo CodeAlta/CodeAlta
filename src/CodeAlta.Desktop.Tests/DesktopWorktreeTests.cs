@@ -366,6 +366,14 @@ public sealed class DesktopWorktreeTests
             Assert.AreEqual("ok", instead.Status, instead.Reason + " " + instead.Message);
             Assert.AreNotEqual(branch, GitWorktreeService.BranchPrefix + Path.GetFileName(instead.WorktreePath!));
 
+            // A discard that comes before its preparation is registered is kept: the worktree is never made.
+            var gaveUp = Guid.NewGuid().ToString("D");
+            var before = (await worktrees.ListAsync(repository.Root))!.Count;
+            Assert.AreEqual("unknown", service.DiscardWorktree(new(Epoch, gaveUp)).Status);
+            Assert.AreEqual("discarded", (await service.PrepareWorktreeAsync(prepare with { RequestId = gaveUp }, CancellationToken.None)).Status);
+            Assert.AreEqual("discarded", service.PreparedWorktreeState(new(Epoch, gaveUp)).Status);
+            Assert.HasCount(before, (await worktrees.ListAsync(repository.Root))!);
+
             // What a worktree is made for is checked as the creation of a session checks it.
             Assert.AreEqual("unknown", service.PreparedWorktreeState(new(Epoch, Guid.NewGuid().ToString("D"))).Status);
             Assert.AreEqual("stale_epoch", (await service.PrepareWorktreeAsync(prepare with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
@@ -530,6 +538,31 @@ public sealed class DesktopWorktreeTests
         var plain = await repository.Projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(repository.Home, "plain")).FullName);
         Assert.AreEqual("not_repository", (await service.ListAsync(new(Epoch, plain.Id), default)).Status);
         Assert.IsTrue(Directory.Exists(repository.Root));
+    }
+
+    [TestMethod]
+    public async Task Worktrees_SayWhenTheFolderOfASubProjectIsNotInThem()
+    {
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var tree = await repository.Worktrees.CreateAsync(project);
+        Assert.AreEqual(GitWorktreeService.Ok, tree.Status);
+        // A folder of the project folder that no commit holds: the worktree, made from a commit, does not have it.
+        var sub = await repository.Projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(repository.Root, "tools")).FullName);
+        var service = repository.Service(static () => []);
+
+        var list = await service.ListAsync(new(Epoch, sub.Id), default);
+
+        Assert.AreEqual("ok", list.Status);
+        var item = list.Worktrees.Single(worktree => worktree.Path == tree.Root);
+        Assert.AreEqual((Path.Combine(tree.Root!, "tools"), true), (item.Folder, item.FolderMissing));
+        Assert.IsFalse(list.Worktrees.Single(static worktree => worktree.Project).FolderMissing);
+        Assert.IsTrue(JsonSerializer.Deserialize(JsonSerializer.Serialize(list, DesktopJsonContext.Default.WorktreesListResponse), DesktopJsonContext.Default.WorktreesListResponse)!
+            .Worktrees.Single(worktree => worktree.Path == tree.Root).FolderMissing);
+        // Once the folder is there, the checkout is a place to work in; for the project of the whole repository it always is.
+        Directory.CreateDirectory(item.Folder);
+        Assert.IsFalse((await service.ListAsync(new(Epoch, sub.Id), default)).Worktrees.Any(static worktree => worktree.FolderMissing));
+        Assert.IsFalse((await service.ListAsync(new(Epoch, project.Id), default)).Worktrees.Any(static worktree => worktree.FolderMissing));
     }
 
     [TestMethod]
