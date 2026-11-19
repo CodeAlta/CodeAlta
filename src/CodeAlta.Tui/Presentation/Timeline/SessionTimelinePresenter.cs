@@ -142,7 +142,7 @@ internal sealed class SessionTimelinePresenter
 
     public DocumentFlowItem CreateTruncatedHistoryItem(int omittedMessageCount, Action onLoad)
     {
-        _truncatedHistory = CreateTruncatedHistoryState(omittedMessageCount, onLoad);
+        _truncatedHistory = CreateTruncatedHistoryState(omittedMessageCount, onLoad, _uiDispatcher);
         return _truncatedHistory.Item;
     }
 
@@ -281,9 +281,10 @@ internal sealed class SessionTimelinePresenter
             headerSecondary: ChatMarkdownFormatter.GetChatContentHeaderSecondary(AgentContentKind.User, prompt),
             localFileRootPath: _localFileRootPath,
             imageAttachments: imageAttachments,
-            getDialogBounds: _getDialogBounds);
+            getDialogBounds: _getDialogBounds,
+            uiDispatcher: _uiDispatcher);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
-        var items = ChatTimelineVisualFactory.BuildUserPromptTimelineItems(entry.Item, _hasSeenUserPrompt).ToArray();
+        var items = ChatTimelineVisualFactory.BuildUserPromptTimelineItems(entry.Item, _hasSeenUserPrompt, _uiDispatcher).ToArray();
         foreach (var item in items)
         {
             AppendTimelineItem(item);
@@ -511,7 +512,8 @@ internal sealed class SessionTimelinePresenter
             tone,
             headerOverride,
             headerSecondary,
-            localFileRootPath: _localFileRootPath);
+            localFileRootPath: _localFileRootPath,
+            uiDispatcher: _uiDispatcher);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         AppendTimelineItem(entry.Item);
     }
@@ -532,7 +534,8 @@ internal sealed class SessionTimelinePresenter
             tone,
             headerOverride,
             headerSecondary,
-            localFileRootPath: _localFileRootPath);
+            localFileRootPath: _localFileRootPath,
+            uiDispatcher: _uiDispatcher);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         AppendTimelineItem(entry.Item);
     }
@@ -589,7 +592,7 @@ internal sealed class SessionTimelinePresenter
             return;
         }
 
-        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(message, ChatTimelineTone.Interaction, headerOverride: SR.T("Error"), localFileRootPath: _localFileRootPath);
+        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(message, ChatTimelineTone.Interaction, headerOverride: SR.T("Error"), localFileRootPath: _localFileRootPath, uiDispatcher: _uiDispatcher);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         UiDispatch.Invoke(
             _uiDispatcher,
@@ -619,7 +622,7 @@ internal sealed class SessionTimelinePresenter
             return;
         }
 
-        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(markdown, ChatTimelineTone.Interaction, headerOverride: SR.T("Error"), localFileRootPath: _localFileRootPath);
+        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(markdown, ChatTimelineTone.Interaction, headerOverride: SR.T("Error"), localFileRootPath: _localFileRootPath, uiDispatcher: _uiDispatcher);
         UiDispatch.Invoke(
             _uiDispatcher,
             static state =>
@@ -715,12 +718,13 @@ internal sealed class SessionTimelinePresenter
             : bufferedContent.ToString();
     }
 
-    internal static TruncatedHistoryState CreateTruncatedHistoryState(int omittedMessageCount, Action onLoad)
+    internal static TruncatedHistoryState CreateTruncatedHistoryState(int omittedMessageCount, Action onLoad, IUiDispatcher? uiDispatcher = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(omittedMessageCount);
         ArgumentNullException.ThrowIfNull(onLoad);
 
-        return UiDispatch.InvokeCurrent(
+        return UiDispatch.InvokeOrInline(
+            uiDispatcher,
             static state => CreateTruncatedHistoryStateCore(state.omittedMessageCount, state.onLoad),
             (omittedMessageCount, onLoad));
     }
@@ -863,14 +867,15 @@ internal sealed class SessionTimelinePresenter
             headerSecondary: ChatMarkdownFormatter.GetChatContentHeaderSecondary(kind, string.Empty),
             localFileRootPath: _localFileRootPath,
             imageAttachments: kind == AgentContentKind.User ? imageAttachments : null,
-            getDialogBounds: _getDialogBounds);
+            getDialogBounds: _getDialogBounds,
+            uiDispatcher: _uiDispatcher);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         var state = new ChatContentState(entry.Item, entry.Markdown, entry.TimestampText, entry.HeaderText, new StringBuilder(), kind, runId);
         _contentStates[key] = state;
         if (kind == AgentContentKind.User)
         {
             TrackNavigableMessage(entry.Item, kind);
-            foreach (var item in ChatTimelineVisualFactory.BuildUserPromptTimelineItems(entry.Item, _hasSeenUserPrompt))
+            foreach (var item in ChatTimelineVisualFactory.BuildUserPromptTimelineItems(entry.Item, _hasSeenUserPrompt, _uiDispatcher))
             {
                 AppendTimelineItem(item);
             }
@@ -925,10 +930,10 @@ internal sealed class SessionTimelinePresenter
         Func<Visual>? visualFactory = null)
     {
         var entry = visualFactory is not null
-            ? ChatTimelineVisualFactory.CreateVisualItem(markdown, visualFactory, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath, copyDetailSections: detailSections)
+            ? ChatTimelineVisualFactory.CreateVisualItem(markdown, visualFactory, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath, copyDetailSections: detailSections, uiDispatcher: _uiDispatcher)
             : detailSections is { Count: > 0 }
-                ? ChatTimelineVisualFactory.CreateCollapsibleMarkdownItem(markdown, detailSections, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath)
-            : ChatTimelineVisualFactory.CreateMarkdownItem(markdown, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath);
+                ? ChatTimelineVisualFactory.CreateCollapsibleMarkdownItem(markdown, detailSections, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath, uiDispatcher: _uiDispatcher)
+            : ChatTimelineVisualFactory.CreateMarkdownItem(markdown, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath, uiDispatcher: _uiDispatcher);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         return new ChatStatusState(entry.Item, entry.Markdown, entry.TimestampText, entry.DetailMarkdownControls, entry.DetailMarkdownSectionIndexes, entry.CopyState)
         {

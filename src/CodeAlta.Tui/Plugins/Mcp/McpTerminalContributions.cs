@@ -101,8 +101,24 @@ internal sealed class McpTerminalContributions
 
     private void IncrementStatusRevision()
     {
-        var dispatcher = _statusRevision.Dispatcher;
-        McpTerminalPresentation.IncrementRevision(dispatcher.CheckAccess, () => _statusRevision.Value++, action => dispatcher.Post(action));
+        // The state belongs to the application that drew the status, from its first drawing on: its thread changes it.
+        // Nobody owns it before, and an application can take it between the check and the change: it is then posted.
+        void Increment() => _statusRevision.Value++;
+        void Post(Action action) => _statusRevision.Dispatcher.Post(action);
+        McpTerminalPresentation.IncrementRevision(
+            _statusRevision.CheckAccess,
+            () =>
+            {
+                try
+                {
+                    Increment();
+                }
+                catch (InvalidOperationException) when (!_statusRevision.CheckAccess())
+                {
+                    McpTerminalPresentation.IncrementRevision(static () => false, Increment, Post);
+                }
+            },
+            Post);
     }
 
     private static McpStatusVisualState CreateStatusVisualState(

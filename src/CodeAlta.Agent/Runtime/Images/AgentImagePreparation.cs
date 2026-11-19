@@ -208,7 +208,8 @@ internal static class AgentImagePreparation
         using (var canvas = new SKCanvas(flat))
         {
             canvas.Clear(SKColors.White);
-            canvas.DrawBitmap(bitmap, 0, 0);
+            // Pixel for pixel: nothing is scaled, so nothing is sampled between pixels.
+            canvas.DrawBitmap(bitmap, 0, 0, SKSamplingOptions.Default);
         }
 
         using var data = flat.Encode(format, quality);
@@ -236,7 +237,8 @@ internal static class AgentImagePreparation
         using var canvas = new SKCanvas(result);
         canvas.Clear(SKColors.Transparent);
         canvas.SetMatrix(transform);
-        canvas.DrawBitmap(source, 0, 0);
+        // Quarter turns and mirrors put each pixel on a pixel: nothing is sampled between pixels.
+        canvas.DrawBitmap(source, 0, 0, SKSamplingOptions.Default);
         return result;
     }
 }

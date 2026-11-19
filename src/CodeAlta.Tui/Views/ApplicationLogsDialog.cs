@@ -18,6 +18,8 @@ internal sealed class ApplicationLogsDialog
     private readonly LogControl _logControl;
     private readonly Dialog _dialog;
     private IDisposable? _subscription;
+    // The dispatcher of the application the dialog is shown in: the log control has one of its own only once it is attached.
+    private XenoAtom.Terminal.UI.Threading.Dispatcher? _dispatcher;
 
     public ApplicationLogsDialog(
         CodeAltaUiLogBuffer buffer,
@@ -107,6 +109,9 @@ internal sealed class ApplicationLogsDialog
 
     public void Show()
     {
+        // Shown from the UI thread: the loggers of the other threads reach the control through its dispatcher from
+        // their first entry on, which can come before the dialog is attached.
+        _dispatcher = XenoAtom.Terminal.UI.Threading.Dispatcher.Current;
         _logControl.Clear();
         _subscription = _buffer.Subscribe(HandleBufferEvent, out var snapshot);
         foreach (var entry in snapshot)
@@ -136,39 +141,27 @@ internal sealed class ApplicationLogsDialog
     }
 
     private void AppendEntry(CodeAltaUiLogEntry entry)
-    {
-        if (_logControl.Dispatcher.CheckAccess())
-        {
-            AppendEntryCore(entry);
-            return;
-        }
-
-        var app = _logControl.App;
-        if (app is not null)
-        {
-            app.Post(() => AppendEntryCore(entry));
-            return;
-        }
-
-        _logControl.Dispatcher.Post(() => AppendEntryCore(entry));
-    }
+        => RunOnUi(() => AppendEntryCore(entry));
 
     private void ClearEntries()
+        => RunOnUi(_logControl.Clear);
+
+    private void RunOnUi(Action action)
     {
-        if (_logControl.Dispatcher.CheckAccess())
+        if (_dispatcher is not { } dispatcher || dispatcher.CheckAccess())
         {
-            _logControl.Clear();
+            action();
             return;
         }
 
-        var app = _logControl.App;
-        if (app is not null)
+        try
         {
-            app.Post(_logControl.Clear);
-            return;
+            dispatcher.Post(action);
         }
-
-        _logControl.Dispatcher.Post(_logControl.Clear);
+        catch (InvalidOperationException)
+        {
+            // The application has stopped: its dialog shows nothing any more.
+        }
     }
 
     private void AppendEntryCore(CodeAltaUiLogEntry entry)

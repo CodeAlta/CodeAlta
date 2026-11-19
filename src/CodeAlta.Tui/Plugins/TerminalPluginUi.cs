@@ -265,11 +265,19 @@ internal sealed class TerminalPluginUi : IPluginUiService, IPluginSessionService
             }
         }).ConfigureAwait(false);
 
-        await using var registration = cancellationToken.Register(() => host.Dispatcher.Post(() =>
+        await using var registration = cancellationToken.Register(() =>
         {
-            dialog?.Close();
+            // The one who waits is told first, whatever becomes of the application: its dialog is closed while it runs.
             answer.TrySetCanceled(cancellationToken);
-        })).ConfigureAwait(false);
+            try
+            {
+                host.Dispatcher.Post(() => dialog?.Close());
+            }
+            catch (InvalidOperationException)
+            {
+                // No application is running any more: its dialog went with it.
+            }
+        }).ConfigureAwait(false);
         return await answer.Task.ConfigureAwait(false);
     }
 

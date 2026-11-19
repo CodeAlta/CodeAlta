@@ -35,10 +35,10 @@ internal static class ChatTimelineVisualFactory
         return new PendingChatMessage(userItem, assistantItem, streamingMarkdown, timestampText);
     }
 
-    public static IReadOnlyList<DocumentFlowItem> BuildUserPromptTimelineItems(DocumentFlowItem userItem, bool hasSeenUserPrompt)
+    public static IReadOnlyList<DocumentFlowItem> BuildUserPromptTimelineItems(DocumentFlowItem userItem, bool hasSeenUserPrompt, IUiDispatcher? uiDispatcher = null)
     {
         return hasSeenUserPrompt
-            ? [CreateUserPromptSeparatorItem(), userItem]
+            ? [CreateUserPromptSeparatorItem(uiDispatcher), userItem]
             : [userItem];
     }
 
@@ -59,12 +59,9 @@ internal static class ChatTimelineVisualFactory
     {
         ArgumentNullException.ThrowIfNull(timestampText);
 
-        UiDispatch.InvokeCurrent(
-            static state =>
-            {
-                state.timestampText.Text = $"[dim]{FormatTimestamp(state.timestamp)}[/]";
-                return 0;
-            },
+        UiDispatch.InvokeOnOwner(
+            timestampText,
+            static state => state.timestampText.Text = $"[dim]{FormatTimestamp(state.timestamp)}[/]",
             (timestampText, timestamp));
     }
 
@@ -72,12 +69,9 @@ internal static class ChatTimelineVisualFactory
     {
         ArgumentNullException.ThrowIfNull(headerText);
 
-        UiDispatch.InvokeCurrent(
-            static state =>
-            {
-                state.headerText.Text = CreateChatCardHeader(state.tone, state.headerOverride, state.headerSecondary).Text;
-                return 0;
-            },
+        UiDispatch.InvokeOnOwner(
+            headerText,
+            static state => state.headerText.Text = CreateChatCardHeader(state.tone, state.headerOverride, state.headerSecondary).Text,
             (headerText, tone, headerOverride, headerSecondary));
     }
 
@@ -89,8 +83,10 @@ internal static class ChatTimelineVisualFactory
         int maxCodeBlockHeight = 14,
         string? localFileRootPath = null,
         IReadOnlyList<PromptImageAttachmentReference>? imageAttachments = null,
-        Func<Rectangle?>? getDialogBounds = null)
-        => UiDispatch.InvokeCurrent(
+        Func<Rectangle?>? getDialogBounds = null,
+        IUiDispatcher? uiDispatcher = null)
+        => UiDispatch.InvokeOrInline(
+            uiDispatcher,
             static state => CreateChatMarkdownItemCore(state.markdown, state.tone, state.headerOverride, state.headerSecondary, state.maxCodeBlockHeight, state.localFileRootPath, imageAttachments: state.imageAttachments, getDialogBounds: state.getDialogBounds),
             (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight, localFileRootPath, imageAttachments, getDialogBounds));
 
@@ -102,7 +98,8 @@ internal static class ChatTimelineVisualFactory
         string? headerOverride = null,
         string? headerSecondary = null,
         int maxCodeBlockHeight = 14,
-        string? localFileRootPath = null)
+        string? localFileRootPath = null,
+        IUiDispatcher? uiDispatcher = null)
         => CreateCollapsibleMarkdownItem(
             markdown,
             [new ChatCollapsibleMarkdownSection(collapsibleHeader, collapsibleMarkdown)],
@@ -110,7 +107,8 @@ internal static class ChatTimelineVisualFactory
             headerOverride,
             headerSecondary,
             maxCodeBlockHeight,
-            localFileRootPath);
+            localFileRootPath,
+            uiDispatcher);
 
     public static ChatMarkdownEntry CreateCollapsibleMarkdownItem(
         string markdown,
@@ -119,8 +117,10 @@ internal static class ChatTimelineVisualFactory
         string? headerOverride = null,
         string? headerSecondary = null,
         int maxCodeBlockHeight = 14,
-        string? localFileRootPath = null)
-        => UiDispatch.InvokeCurrent(
+        string? localFileRootPath = null,
+        IUiDispatcher? uiDispatcher = null)
+        => UiDispatch.InvokeOrInline(
+            uiDispatcher,
             static state => CreateChatMarkdownItemCore(
                 state.markdown,
                 state.tone,
@@ -139,10 +139,12 @@ internal static class ChatTimelineVisualFactory
         string? headerSecondary = null,
         int maxCodeBlockHeight = 14,
         string? localFileRootPath = null,
-        IReadOnlyList<ChatCollapsibleMarkdownSection>? copyDetailSections = null)
+        IReadOnlyList<ChatCollapsibleMarkdownSection>? copyDetailSections = null,
+        IUiDispatcher? uiDispatcher = null)
     {
         ArgumentNullException.ThrowIfNull(contentVisualFactory);
-        return UiDispatch.InvokeCurrent(
+        return UiDispatch.InvokeOrInline(
+            uiDispatcher,
             static state => CreateChatMarkdownItemCore(
                 state.markdown,
                 state.tone,
@@ -274,14 +276,16 @@ internal static class ChatTimelineVisualFactory
             maxCodeBlockHeight: 10,
             localFileRootPath: localFileRootPath).Item;
 
-    private static DocumentFlowItem CreateUserPromptSeparatorItem()
-        => UiDispatch.InvokeCurrent(
-            static () => new DocumentFlowItem
+    private static DocumentFlowItem CreateUserPromptSeparatorItem(IUiDispatcher? uiDispatcher)
+        => UiDispatch.InvokeOrInline(
+            uiDispatcher,
+            static _ => new DocumentFlowItem
             {
                 Content = new FlowDocument().Add(new Rule()),
                 Alignment = DocumentFlowAlignment.Stretch,
                 Padding = new Thickness(0, 1, 0, 0),
-            });
+            },
+            0);
 
     private static DocumentFlowItem CreateAssistantStreamingChatItem(out MarkdownControl markdownControl, out Markup timestampText, string? localFileRootPath)
     {

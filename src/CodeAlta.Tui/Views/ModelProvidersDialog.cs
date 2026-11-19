@@ -1732,6 +1732,13 @@ internal sealed class ModelProvidersDialog
     {
         ArgumentNullException.ThrowIfNull(action);
 
+        if (_dialog.App is null)
+        {
+            // The application stopped while the operation ran: nothing shows its result, and it is over.
+            EndDialogOperation();
+            return Task.CompletedTask;
+        }
+
         return _dialog.Dispatcher.InvokeAsync(
             () =>
             {

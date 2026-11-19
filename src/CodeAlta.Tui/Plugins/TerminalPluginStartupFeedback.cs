@@ -133,6 +133,7 @@ public sealed class TerminalPluginStartupFeedback : IPluginStartupFeedback
                         liveStatus.ApplyPendingUpdates();
                         var result = operationTask.GetAwaiter().GetResult();
                         liveStatus.MarkCompleted(summaryFactory(result, stopwatch.Elapsed));
+                        liveStatus.ApplyPendingUpdates();
                         completionApplied = true;
                     }
 
@@ -153,6 +154,7 @@ public sealed class TerminalPluginStartupFeedback : IPluginStartupFeedback
         private readonly State<bool> _spinnerActive = new(true);
         private readonly State<string?> _summaryMarkup = new(null);
         private bool _continueRequested;
+        private bool _hasVisual;
 
         public PluginBuildLiveStatus(IReadOnlyList<PluginBuildRequest> requests)
         {
@@ -169,6 +171,7 @@ public sealed class TerminalPluginStartupFeedback : IPluginStartupFeedback
 
         public Visual CreateVisual(bool waitForEnterAfterCompletion)
         {
+            Volatile.Write(ref _hasVisual, true);
             var spinner = new Spinner().Style(SpinnerStyles.Dots);
             spinner.IsActive(_spinnerActive);
             spinner.IsVisible(_spinnerActive);
@@ -327,13 +330,15 @@ public sealed class TerminalPluginStartupFeedback : IPluginStartupFeedback
 
         private void ApplyOrQueueStateUpdate(Action update)
         {
-            if (XenoAtom.Terminal.UI.Threading.Dispatcher.Current.CheckAccess())
+            // A live region owns each state from the first time it draws it, one state at a time: its thread alone
+            // changes them, so every change waits for its next update. Without a live region nobody owns the states.
+            if (Volatile.Read(ref _hasVisual))
             {
-                update();
+                EnqueueStateUpdate(update);
                 return;
             }
 
-            EnqueueStateUpdate(update);
+            update();
         }
 
         private void EnqueueStateUpdate(Action update)

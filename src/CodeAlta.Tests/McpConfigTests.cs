@@ -1225,7 +1225,30 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "docs": { "url": "https://example.test/mcp" } } }
             """);
-        var plugin = new McpPlugin(McpTerminalContributions.CreatePresentation, _home.Path);
+        var changedCount = 0;
+        var listened = new List<BindingManager>();
+        void OnValueChanged(Binding binding)
+        {
+            if (binding.Owner.GetType().IsGenericType && binding.Owner.GetType().GetGenericTypeDefinition() == typeof(State<>))
+            {
+                Interlocked.Increment(ref changedCount);
+            }
+        }
+
+        var plugin = new McpPlugin(
+            (management, activation) =>
+            {
+                // A binding manager tells of the changes made on its own thread, and the activation changes the state on the
+                // thread its command ends on: the test listens there, before the presentation hears of the activation.
+                activation.Changed += _ =>
+                {
+                    var manager = BindingManager.Current;
+                    manager.ValueChanged += OnValueChanged;
+                    lock (listened) listened.Add(manager);
+                };
+                return McpTerminalContributions.CreatePresentation(management, activation);
+            },
+            _home.Path);
         var statusContribution = plugin.GetUiContributions().OfType<PluginVisualContribution>().Single();
         var visual = statusContribution.CreateVisual!(CreateVisualContext(project.Path, "session-a"));
         Assert.IsNotNull(visual);
@@ -1237,15 +1260,6 @@ public sealed class McpConfigTests
         StringAssert.Contains(markup.Text!, "MCP[/]");
         Assert.AreEqual("MCP 1/1 · tools not loaded", ReadStatusPlainText(visual));
 
-        var changedCount = 0;
-        void OnValueChanged(Binding binding)
-        {
-            if (binding.Owner.GetType().IsGenericType && binding.Owner.GetType().GetGenericTypeDefinition() == typeof(State<>))
-            {
-                changedCount++;
-            }
-        }
-
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
         var app = new CommandApp("alta", "test")
@@ -1253,7 +1267,6 @@ public sealed class McpConfigTests
             plugin.GetAltaCommands().Single().CreateCommandNode(CreateAltaContext(stdout, stderr, project.Path, sourceSessionId: "session-a")),
         };
 
-        BindingManager.Current.ValueChanged += OnValueChanged;
         try
         {
             var exitCode = await app.RunAsync(["mcp", "activate", "docs"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr });
@@ -1261,10 +1274,13 @@ public sealed class McpConfigTests
         }
         finally
         {
-            BindingManager.Current.ValueChanged -= OnValueChanged;
+            lock (listened)
+            {
+                foreach (var manager in listened) manager.ValueChanged -= OnValueChanged;
+            }
         }
 
-        Assert.IsTrue(changedCount > 0, "MCP activation should invalidate bindable UI state.");
+        Assert.IsTrue(Volatile.Read(ref changedCount) > 0, "MCP activation should invalidate bindable UI state.");
         Assert.AreEqual("MCP 1/1 · active tools 0", ReadStatusPlainText(statusContribution.CreateVisual!(CreateVisualContext(project.Path, "session-a"))!));
     }
 

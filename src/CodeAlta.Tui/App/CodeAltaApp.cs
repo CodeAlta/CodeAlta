@@ -83,6 +83,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private SessionWorkspaceView? _sessionWorkspaceView;
     private SessionUsagePresenter? _sessionUsagePresenter;
     private SessionInfoPresenter? _sessionInfoPresenter;
+    // The dispatcher of the thread that builds the application, which is the thread of its terminal loop: the loop
+    // builds it from within its run (DeferredCodeAltaApp), or starts its run on this thread (ShellFrontendHost). A
+    // dispatcher serves one run of one thread: the other threads reach the UI through this one, never their own.
     private readonly IUiDispatcher _uiDispatcher = new TerminalUiDispatcher(Dispatcher.Current);
     private bool _disableTerminalLoopCallback;
     private bool _commandBarMultiLine;
