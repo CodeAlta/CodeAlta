@@ -128,50 +128,54 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   // The cards of plugins are the same items until the plugins answer again: their rows are not rendered on a live update.
   const firstTimestamp = entries[0]?.timestamp;
   const pluginItems = useMemo(() => pluginEvents ? pluginEventItems(pluginEvents, firstTimestamp) : [], [pluginEvents, firstTimestamp]);
-  const items = rows.slice();
-  // Match each echo to at most one new source message. Never deduplicate repeated
-  // prompts against old history or use this display match to settle a Send intent.
-  let runs: Map<string, string | null> | undefined;
-  const runOf = (offset: string) => (runs ??= new Map(entries.map(entry => [entry.offset, entry.runId]))).get(offset);
-  const availableUsers = !outgoing.length ? [] : items.filter(row => row.source === "history" ? row.item.category === "user" : row.source === "liveText" && row.row.kind.toLowerCase() === "user");
-  const acknowledged: string[] = [];
-  const echoes = outgoing.filter(echo => {
-    if (echo.state === "failed") return true;
-    const identity = (row: typeof availableUsers[number]) => row.source === "history" ? row.item.clientRequestId : row.source === "liveText" ? row.row.clientRequestId : null;
-    // The message that carries the identity of the Send is the one, whenever it was recorded: an echo shown again by a
-    // retry is newer than its message. Only then a message without identity, newer than the echo, by its text.
-    let index = availableUsers.findIndex(row => identity(row) === echo.clientRequestId);
-    if (index < 0) index = availableUsers.findIndex(row => {
-      const timestamp = row.source === "history" ? row.item.timestamp : row.row.timestamp;
-      const text = row.source === "history" ? row.item.markdown : row.source === "liveText" ? row.row.text : null;
-      const runId = row.source === "history" ? runOf(row.item.key) : row.row.runId;
-      return matchesOutgoing(echo, { clientRequestId: identity(row), text, runId })
-        && Date.parse(timestamp ?? "") >= Date.parse(echo.timestamp);
-    });
-    if (index < 0) return true;
-    const [matched] = availableUsers.splice(index, 1);
-    // The live copy of a prompt has no images or files: the card that holds them stays until the persisted message arrives.
-    if (matched.source === "liveText" && (echo.images?.length || echo.attachments?.length)) { items.splice(items.indexOf(matched), 1); return true; }
-    acknowledged.push(echo.key); return false;
-  });
-  useEffect(() => { if (acknowledged.length) onAcknowledgeOutgoing?.(acknowledged); }, [JSON.stringify(acknowledged), onAcknowledgeOutgoing]);
-  const echoImages = new Map<string, TimelineImageSource>();
-  for (const echo of showEchoes ? echoes : []) {
-    const images = echo.images?.length ? echo.images : undefined;
-    const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount && !images && !echo.attachments?.length ? t("{count} image attached", { count: echo.imageCount }) : ""),
-      timestamp: echo.timestamp, sequence: null, isComplete: true, isTruncated: false, startedWithDelta: false });
-    if (images) echoImages.set(`outgoing:${echo.key}`, inlineImageSource(`outgoing:${echo.key}`, images));
-    items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
-      images: images?.map((image, index) => ({ index, title: image.title, mediaType: image.mediaType })),
-      attachments: echo.attachments?.length ? echo.attachments : undefined,
-      subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
-  }
-  for (const item of pluginItems) items.push({ source: "history", key: item.key, item });
-  orderTimelineRows(items);
-  const groups = groupTimelineTools(items, entries);
   const backgroundCalls = useContext(BackgroundCallsContext);
-  const entryTypes = groupEntryTypes(groups, backgroundCalls);
-  const blocks = foldTimeline(groups, entryTypes);
+  // The rows in order, grouped and folded. They are worked out when what they are made of changes, not with each render:
+  // a timeline of thousands of rows is rendered for less (the run of its session becomes known, a row is shown).
+  const { items, acknowledged, echoImages, entryTypes, blocks } = useMemo(() => {
+    const items = rows.slice();
+    // Match each echo to at most one new source message. Never deduplicate repeated
+    // prompts against old history or use this display match to settle a Send intent.
+    let runs: Map<string, string | null> | undefined;
+    const runOf = (offset: string) => (runs ??= new Map(entries.map(entry => [entry.offset, entry.runId]))).get(offset);
+    const availableUsers = !outgoing.length ? [] : items.filter(row => row.source === "history" ? row.item.category === "user" : row.source === "liveText" && row.row.kind.toLowerCase() === "user");
+    const acknowledged: string[] = [];
+    const echoes = outgoing.filter(echo => {
+      if (echo.state === "failed") return true;
+      const identity = (row: typeof availableUsers[number]) => row.source === "history" ? row.item.clientRequestId : row.source === "liveText" ? row.row.clientRequestId : null;
+      // The message that carries the identity of the Send is the one, whenever it was recorded: an echo shown again by a
+      // retry is newer than its message. Only then a message without identity, newer than the echo, by its text.
+      let index = availableUsers.findIndex(row => identity(row) === echo.clientRequestId);
+      if (index < 0) index = availableUsers.findIndex(row => {
+        const timestamp = row.source === "history" ? row.item.timestamp : row.row.timestamp;
+        const text = row.source === "history" ? row.item.markdown : row.source === "liveText" ? row.row.text : null;
+        const runId = row.source === "history" ? runOf(row.item.key) : row.row.runId;
+        return matchesOutgoing(echo, { clientRequestId: identity(row), text, runId })
+          && Date.parse(timestamp ?? "") >= Date.parse(echo.timestamp);
+      });
+      if (index < 0) return true;
+      const [matched] = availableUsers.splice(index, 1);
+      // The live copy of a prompt has no images or files: the card that holds them stays until the persisted message arrives.
+      if (matched.source === "liveText" && (echo.images?.length || echo.attachments?.length)) { items.splice(items.indexOf(matched), 1); return true; }
+      acknowledged.push(echo.key); return false;
+    });
+    const echoImages = new Map<string, TimelineImageSource>();
+    for (const echo of showEchoes ? echoes : []) {
+      const images = echo.images?.length ? echo.images : undefined;
+      const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount && !images && !echo.attachments?.length ? t("{count} image attached", { count: echo.imageCount }) : ""),
+        timestamp: echo.timestamp, sequence: null, isComplete: true, isTruncated: false, startedWithDelta: false });
+      if (images) echoImages.set(`outgoing:${echo.key}`, inlineImageSource(`outgoing:${echo.key}`, images));
+      items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
+        images: images?.map((image, index) => ({ index, title: image.title, mediaType: image.mediaType })),
+        attachments: echo.attachments?.length ? echo.attachments : undefined,
+        subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
+    }
+    for (const item of pluginItems) items.push({ source: "history", key: item.key, item });
+    orderTimelineRows(items);
+    const groups = groupTimelineTools(items, entries);
+    const entryTypes = groupEntryTypes(groups, backgroundCalls);
+    return { items, acknowledged, echoImages, entryTypes, blocks: foldTimeline(groups, entryTypes) };
+  }, [rows, entries, outgoing, showEchoes, pluginItems, backgroundCalls, t]);
+  useEffect(() => { if (acknowledged.length) onAcknowledgeOutgoing?.(acknowledged); }, [JSON.stringify(acknowledged), onAcknowledgeOutgoing]);
   // A message asked for in a closed activity opens it, and it stays open once the timeline has gone there.
   useLayoutEffect(() => {
     if (!shown) return;
@@ -179,11 +183,22 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
     if (holder?.kind === "activity" && !activityExpanded(holder.groups, chosen, focused)) toggleActivity(holder.groups, true);
   });
   // The rows far from the view rest (restingRows.tsx); a search reads the text of every row.
-  const resting = useRestingRows(blocks.map(block => block.key), !!find);
+  const blockKeys = useMemo(() => blocks.map(block => block.key), [blocks]);
+  const resting = useRestingRows(blockKeys, !!find);
   const last = blocks.at(-1);
   const liveActivity = last?.kind === "activity" && (running ?? activitySummary(last.groups, backgroundCalls).running > 0) ? last.key : null;
-  const context: TimelineGroupContext = { sessionId, revision, sources, echoImages, readImages, toolOutputs, canInspect, onOpenSource,
-    onOpenTool: openToolWindow, promptKeys, onBranch };
+  // The rows as they are drawn: the same ones while nothing they show changed, so a render of the timeline for
+  // something else compares none of them.
+  const foldedImages = emphasis.foldedImages, restingRows = resting.rows;
+  const drawn = useMemo(() => {
+    const context: TimelineGroupContext = { sessionId, revision, sources, echoImages, readImages, toolOutputs, canInspect, onOpenSource,
+      onOpenTool: openToolWindow, promptKeys, onBranch };
+    return blocks.map(block => <RestingRow key={`${sessionId}:${block.key}`} rows={restingRows} rowKey={block.key}>{block.kind === "row"
+      ? <TimelineGroupView {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
+      : <TimelineActivity {...context} groups={block.groups} entryTypes={entryTypes}
+        expanded={activityExpanded(block.groups, chosen, focused, shown, opening)} live={block.key === liveActivity} images={foldedImages} onToggle={toggleActivity} />}</RestingRow>);
+  }, [blocks, entryTypes, restingRows, sessionId, revision, sources, echoImages, readImages, toolOutputs, canInspect, onOpenSource, openToolWindow, promptKeys, onBranch,
+    chosen, focused, shown, opening, liveActivity, foldedImages, toggleActivity]);
   const opened = openTool?.sessionId === sessionId ? items.find(row => row.key === openTool.key) : undefined;
   if (opened) openedItem.current = opened.source === "history" ? opened.item : opened.source === "liveTool" ? liveToolItem(opened.row) : openedItem.current;
   // A row that left the window (older history slid away) keeps its details open on what it last was.
@@ -192,10 +207,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   return <SystemPromptReaderContext.Provider value={readPrompt ?? null}>
     {items.length === 0 && empty && <div className="empty-history">{emptyText ?? t("No visible events in this history.")}</div>}
     <div className={`messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`} style={emphasisStyle} ref={resting.messages}>
-      {blocks.map(block => <RestingRow key={`${sessionId}:${block.key}`} rows={resting.rows} rowKey={block.key}>{block.kind === "row"
-        ? <TimelineGroupView {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
-        : <TimelineActivity {...context} groups={block.groups} entryTypes={entryTypes}
-          expanded={activityExpanded(block.groups, chosen, focused, shown, opening)} live={block.key === liveActivity} images={emphasis.foldedImages} onToggle={toggleActivity} />}</RestingRow>)}
+      {drawn}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </SystemPromptReaderContext.Provider>;
@@ -370,7 +382,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     const load = (attempt: number) => void readPluginEvents(pluginFrom, abort.signal).then(events => {
       if (abort.signal.aborted) return;
       if (events === "retry") { if (attempt < 2) retry = setTimeout(() => load(attempt + 1), 1000); }
-      else if (events) setPluginCards({ sessionId, events });
+      // A tab shown again reads its cards again: the same ones stay the ones shown, and the timeline is not worked out again.
+      else if (events) setPluginCards(current => current?.sessionId === sessionId && JSON.stringify(current.events) === JSON.stringify(events) ? current : { sessionId, events });
     }, () => { /* The timeline stays as it is without the cards. */ });
     load(0);
     return () => { abort.abort(); clearTimeout(retry); };
