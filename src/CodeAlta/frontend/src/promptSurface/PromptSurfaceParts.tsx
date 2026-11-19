@@ -94,15 +94,18 @@ export function SignInEnd({ expiresAt, provider }: { expiresAt: string | null | 
  */
 export function CacheCountdown({ expiresAt }: { expiresAt: string | null | undefined }) {
   const { t } = useShellLanguage();
-  const [now, setNow] = useState(() => Date.now());
+  const [read, setRead] = useState(() => ({ expiresAt, now: Date.now() }));
+  // A new expiry is counted from the clock of now: the time of the last tick, up to half a minute old, would show a
+  // minute too many until the next one.
+  const now = read.expiresAt === expiresAt ? read.now : Date.now();
   const view = cacheCountdown(expiresAt, now);
   const tick = cacheCountdownTick(view);
-  useEffect(() => { setNow(Date.now()); }, [expiresAt]);
+  useEffect(() => { setRead({ expiresAt, now: Date.now() }); }, [expiresAt]);
   useEffect(() => {
     if (tick === null) return;
-    const timer = setTimeout(() => setNow(Date.now()), tick);
+    const timer = setTimeout(() => setRead({ expiresAt, now: Date.now() }), tick);
     return () => clearTimeout(timer);
-  }, [tick, now]);
+  }, [tick, now, expiresAt]);
   if (!view) return null;
   const time = expiresAt ? new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   const title = view.state === "expired"
