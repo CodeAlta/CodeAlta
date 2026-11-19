@@ -74,6 +74,20 @@ public sealed class ClaudeCodeLiveCliTests
     }
 
     [TestMethod]
+    public async Task Turn_AsksBeforeACommandOfMonitor_AsBeforeOneOfBash()
+    {
+        using var live = await LiveSession.StartAsync();
+
+        await live.SendAsync("Run exactly this shell command with the Monitor tool, in one call, then say in one sentence what happened: echo codealta-monitor-$((6*7)) > monitored.txt && cat monitored.txt");
+
+        // The command itself is what the user is asked about, not the call of a tool.
+        var permission = live.Permissions.OfType<AgentCommandPermissionRequest>().First();
+        Console.WriteLine($"asked: {permission.Command} | {permission.Reason}");
+        StringAssert.Contains(permission.Command, "codealta-monitor");
+        Assert.IsFalse(permission.Command!.StartsWith("Monitor ", StringComparison.Ordinal), permission.Command);
+    }
+
+    [TestMethod]
     [DataRow("Bash")]
     [DataRow("Monitor")]
     public async Task Turn_ACommitTheHostRefuses_IsDeniedEvenInBypassMode(string tool)

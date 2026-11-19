@@ -98,14 +98,18 @@ internal sealed partial class ClaudeCodeSession
                 return Deny(refusal, interrupt: false);
             }
 
+            if (withoutShell && !IsFileTool(toolName) && !ToolsAllowedWithoutShell.Contains(toolName))
+            {
+                // A CLI without its shell runs only the tools known to change nothing outside it: one that a newer CLI
+                // or a setting adds is not one.
+                return Deny($"`shell_command` is turned off for this session in CodeAlta, and {toolName} is not among the tools it runs without it. Use the other tools of the session, or ask the user.", interrupt: false);
+            }
+
             var permission = CreatePermissionRequest(toolName, input, request, interactionId);
             if (permission is null)
             {
-                // CodeAlta gates commands and file changes, as it does for its own tools. A CLI without its shell
-                // runs only the tools known to change nothing outside it: one that a newer CLI or a setting adds is not one.
-                return withoutShell && !ToolsAllowedWithoutShell.Contains(toolName)
-                    ? Deny($"`shell_command` is turned off for this session in CodeAlta, and {toolName} is not among the tools it runs without it. Use the other tools of the session, or ask the user.", interrupt: false)
-                    : Allow(input, default);
+                // A tool CodeAlta knows and gates no more than its own: reads, searches, its lists, its sub-agents.
+                return Allow(input, default);
             }
 
             if (run is null)
@@ -129,10 +133,16 @@ internal sealed partial class ClaudeCodeSession
                 }
             }
 
+            var suggestions = request.TryGetProperty("permission_suggestions", out var proposed) && proposed.ValueKind == JsonValueKind.Array && proposed.GetArrayLength() > 0
+                ? proposed
+                : default;
+            // "For the session" is the rule the CLI proposes. It proposes none where no rule would cover the request again
+            // (a command it cannot name by a pattern, a tool with a confirmation of its own): the answer is then for this
+            // call, since nothing here says what else the same words would act on (another folder, another worktree).
             return decision.Kind switch
             {
                 AgentPermissionDecisionKind.AllowOnce => Allow(input, default),
-                AgentPermissionDecisionKind.AllowForSession => Allow(input, request.TryGetProperty("permission_suggestions", out var suggestions) ? suggestions : default),
+                AgentPermissionDecisionKind.AllowForSession => Allow(input, suggestions),
                 AgentPermissionDecisionKind.Cancel => Deny("The user cancelled this action in CodeAlta.", interrupt: true),
                 _ => Deny(decision.DescribeDenial(), interrupt: false),
             };
@@ -153,17 +163,32 @@ internal sealed partial class ClaudeCodeSession
         }
     }
 
-    // What a CLI without its shell runs when it asks: reads, searches of the web, its lists and its questions.
-    // The file tools are gated by the write guard and the permission policy, the tools of CodeAlta by themselves.
+    // What a CLI without its shell runs when it asks: reads, searches of the web, its lists and its questions, and the
+    // way out of a worktree, which the user is asked about. The file tools are gated by the write guard and the
+    // permission policy, the tools of CodeAlta by themselves.
     private static readonly System.Collections.Frozen.FrozenSet<string> ToolsAllowedWithoutShell = System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal,
         "Read", "Glob", "Grep", "LS", "NotebookRead", "WebSearch", "WebFetch", "TodoWrite", "TodoRead", "ToolSearch",
         "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskStop", "ListAgents", "PushNotification", "ReportFindings",
         "CronList", "CronDelete", "CronCreate", "ScheduleWakeup", "ExitWorktree");
 
+    // The tools CodeAlta lets run without asking the user when the CLI asks about them: the ones above but the way out
+    // of a worktree, which can remove work, and its sub-agents and plans. A command and a file change are asked as
+    // such. Any other tool is asked by its name: the CLI asks about it for a reason (a confirmation of its own, as for
+    // a worktree on an existing folder or a skill that brings its tools, or a tool of an MCP server the user did not
+    // allow), and a tool a newer CLI adds is not known to be harmless.
+    private static readonly System.Collections.Frozen.FrozenSet<string> ToolsAllowedWithoutAsking = System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal,
+    [
+        .. ToolsAllowedWithoutShell.Where(static tool => tool != "ExitWorktree"),
+        "Agent", "Task", "EnterPlanMode", "ExitPlanMode",
+    ]);
+
+    private static bool IsFileTool(string toolName) => toolName is "Edit" or "MultiEdit" or "Write" or "NotebookEdit";
+
+
     // Why a file tool of a CLI without its shell may not write where it asks, or null when it may.
     private static string? WriteRefusal(string toolName, JsonElement input, CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? guard)
     {
-        if (toolName is not ("Edit" or "MultiEdit" or "Write" or "NotebookEdit"))
+        if (!IsFileTool(toolName))
         {
             return null;
         }
@@ -187,6 +212,8 @@ internal sealed partial class ClaudeCodeSession
         {
             case "Bash":
             case "PowerShell":
+            // Monitor runs a shell command too, and watches what it writes.
+            case "Monitor" when !string.IsNullOrWhiteSpace(ClaudeCodeJson.GetString(input, "command")):
                 var reason = ClaudeCodeJson.GetString(input, "description")
                              ?? ClaudeCodeJson.GetString(request, "description")
                              ?? ClaudeCodeJson.GetString(request, "title")
@@ -221,7 +248,33 @@ internal sealed partial class ClaudeCodeSession
                         ? $"Claude Code requested filesystem edits via {toolName}."
                         : $"Claude Code requested filesystem edits via {toolName} affecting '{path}'.");
             default:
-                return null;
+                if (ToolsAllowedWithoutAsking.Contains(toolName))
+                {
+                    return null;
+                }
+
+                // The call as the user reads it, as the approval of a tool call of an automation shows one: the tool
+                // and its arguments. What the CLI says of its question comes with it.
+                var asked = new[] { "description", "decision_reason", "title" }
+                    .Select(name => ClaudeCodeJson.GetString(request, name))
+                    .FirstOrDefault(static text => !string.IsNullOrWhiteSpace(text));
+                var why = asked is null
+                    ? $"Claude Code asks before it runs its {toolName} tool."
+                    : $"Claude Code asks before it runs its {toolName} tool: {asked.Trim()}";
+                return new AgentCommandPermissionRequest(
+                    _providerId,
+                    _sessionId,
+                    DateTimeOffset.UtcNow,
+                    RunId: null,
+                    InteractionId: interactionId,
+                    ApprovalId: null,
+                    Command: toolName + " " + input.GetRawText(),
+                    WorkingDirectory: workingDirectory,
+                    Actions: null,
+                    Reason: why.Length > PermissionReasonLimit ? why[..PermissionReasonLimit] : why,
+                    Network: null,
+                    ProposedExecPolicyAmendment: null,
+                    ProposedNetworkPolicyAmendments: null);
         }
     }
 

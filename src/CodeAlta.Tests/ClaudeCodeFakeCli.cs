@@ -471,17 +471,27 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         return (requestId, completion.Task);
     }
 
-    /// <summary>Asks the host whether a tool may run and returns its decision.</summary>
-    public async Task<JsonElement> AskPermissionAsync(string toolName, JsonObject input, string toolUseId)
-        => (await RequestAsync(new JsonObject
+    /// <summary>
+    /// Asks the host whether a tool may run and returns its decision. <paramref name="proposesRule"/> is false for a
+    /// request the CLI proposes no rule for, as Claude Code 2.1.325 does when no rule would cover the request again.
+    /// </summary>
+    public async Task<JsonElement> AskPermissionAsync(string toolName, JsonObject input, string toolUseId, bool proposesRule = true)
+    {
+        var request = new JsonObject
         {
             ["subtype"] = "can_use_tool",
             ["tool_name"] = toolName,
             ["input"] = input.DeepClone(),
             ["tool_use_id"] = toolUseId,
             ["title"] = $"Claude wants to use {toolName}",
-            ["permission_suggestions"] = new JsonArray(new JsonObject { ["type"] = "addRules", ["behavior"] = "allow" }),
-        }).ConfigureAwait(false)).GetProperty("response");
+        };
+        if (proposesRule)
+        {
+            request["permission_suggestions"] = new JsonArray(new JsonObject { ["type"] = "addRules", ["behavior"] = "allow" });
+        }
+
+        return (await RequestAsync(request).ConfigureAwait(false)).GetProperty("response");
+    }
 
     /// <summary>Calls a tool of the MCP server of the host and returns the JSON-RPC result.</summary>
     public async Task<JsonElement> CallMcpToolAsync(string name, JsonObject arguments, string? toolUseId = null)

@@ -296,6 +296,125 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task CliTool_OtherThanACommandOrAnEdit_IsAskedWhenCodeAltaDoesNotKnowItHarmless()
+    {
+        using var directory = TestTempDirectory.Create();
+        var decisions = new List<JsonElement>();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            foreach (var (id, tool, input) in new (string, string, JsonObject)[]
+                     {
+                         // A shell command, as Bash runs one.
+                         ("toolu_1", "Monitor", new JsonObject { ["command"] = "tail -f build.log", ["description"] = "Watch the build" }),
+                         // Claude Code 2.1.327 asks before it removes a worktree that may hold unsaved work.
+                         ("toolu_2", "ExitWorktree", new JsonObject { ["action"] = "remove", ["discard_changes"] = true }),
+                         // A tool a newer CLI adds, and a tool of an MCP server of the user.
+                         ("toolu_3", "SomeNewTool", new JsonObject()),
+                         ("toolu_4", "mcp__docs__publish", new JsonObject { ["page"] = "home" }),
+                         // The CLI asks before a skill that brings tools or hooks, and before a worktree on an existing folder.
+                         ("toolu_5", "Skill", new JsonObject { ["skill"] = "review" }),
+                         ("toolu_6", "EnterWorktree", new JsonObject { ["path"] = "C:/elsewhere" }),
+                         // What CodeAlta knows: a read, a sub-agent, a tool of its own.
+                         ("toolu_7", "Read", new JsonObject { ["file_path"] = "C:/elsewhere/a.txt" }),
+                         ("toolu_8", "Agent", new JsonObject { ["prompt"] = "look" }),
+                         ("toolu_9", "mcp__codealta__alta", new JsonObject()),
+                     })
+            {
+                process.EmitAssistant("msg_" + id, new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock(id, tool, input)));
+                decisions.Add(await process.AskPermissionAsync(tool, input, id));
+                process.EmitToolResult(id, "Done.", isError: false);
+            }
+
+            process.EmitResult("Done.", user);
+        };
+        var asked = new List<AgentPermissionRequest>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory, onPermission: (request, _) =>
+        {
+            lock (asked)
+            {
+                asked.Add(request);
+            }
+
+            // The user keeps the worktree, and allows the rest.
+            return Task.FromResult(request is AgentCommandPermissionRequest { Command: var command } && command!.StartsWith("ExitWorktree", StringComparison.Ordinal)
+                ? AgentPermissionDecision.DeniedByUser()
+                : new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go") }).WithinAsync(Timeout);
+
+        CollectionAssert.AreEqual(
+            new[] { "allow", "deny", "allow", "allow", "allow", "allow", "allow", "allow", "allow" },
+            decisions.Select(static decision => decision.GetProperty("behavior").GetString()).ToArray());
+        Assert.AreEqual("The user denied this action in CodeAlta.", decisions[1].GetProperty("message").GetString());
+
+        var requests = asked.Cast<AgentCommandPermissionRequest>().ToArray();
+        CollectionAssert.AreEqual(new[] { "toolu_1", "toolu_2", "toolu_3", "toolu_4", "toolu_5", "toolu_6" }, requests.Select(static request => request.InteractionId).ToArray());
+        Assert.AreEqual("tail -f build.log", requests[0].Command);
+        Assert.AreEqual("Watch the build", requests[0].Reason);
+        // The other tools are shown as their call, with what the CLI says of its question.
+        Assert.AreEqual("""ExitWorktree {"action":"remove","discard_changes":true}""", requests[1].Command);
+        Assert.AreEqual("Claude Code asks before it runs its ExitWorktree tool: Claude wants to use ExitWorktree", requests[1].Reason);
+        Assert.AreEqual("SomeNewTool {}", requests[2].Command);
+        Assert.AreEqual("""mcp__docs__publish {"page":"home"}""", requests[3].Command);
+        Assert.IsTrue(requests.All(request => request.WorkingDirectory == directory.Path));
+    }
+
+    [TestMethod]
+    public async Task AllowedForTheSession_IsTheRuleTheCliProposes_AndThisCallAloneWithoutOne()
+    {
+        using var directory = TestTempDirectory.Create();
+        var decisions = new List<JsonElement>();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            foreach (var (id, tool, input, proposesRule) in new (string, string, JsonObject, bool)[]
+                     {
+                         // Claude Code 2.1.325 proposes a rule only when one would cover the command again.
+                         ("toolu_1", "Bash", new JsonObject { ["command"] = "make test && make pack" }, false),
+                         ("toolu_2", "Bash", new JsonObject { ["command"] = "make test && make pack" }, false),
+                         ("toolu_3", "Bash", new JsonObject { ["command"] = "make publish" }, false),
+                         // The same arguments can act on another worktree.
+                         ("toolu_4", "ExitWorktree", new JsonObject { ["action"] = "remove" }, false),
+                         ("toolu_5", "ExitWorktree", new JsonObject { ["action"] = "remove" }, false),
+                         ("toolu_6", "Bash", new JsonObject { ["command"] = "git status" }, true),
+                     })
+            {
+                process.EmitAssistant("msg_" + id, new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock(id, tool, input)));
+                decisions.Add(await process.AskPermissionAsync(tool, input, id, proposesRule));
+                process.EmitToolResult(id, "Done.", isError: false);
+            }
+
+            process.EmitResult("Done.", user);
+        };
+        var asked = new List<string>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory, onPermission: (request, _) =>
+        {
+            lock (asked)
+            {
+                asked.Add(request.InteractionId);
+            }
+
+            return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowForSession));
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go") }).WithinAsync(Timeout);
+
+        Assert.IsTrue(decisions.All(static decision => decision.GetProperty("behavior").GetString() == "allow"));
+        // Without a rule of the CLI the answer is for one call: the same words are asked again, since nothing says that
+        // they act on the same folder or worktree.
+        CollectionAssert.AreEqual(new[] { "toolu_1", "toolu_2", "toolu_3", "toolu_4", "toolu_5", "toolu_6" }, asked);
+        // A rule the CLI proposed is the answer for the session; nothing is made up where it proposed none.
+        Assert.IsTrue(decisions[5].TryGetProperty("updatedPermissions", out var rules) && rules.GetArrayLength() == 1);
+        Assert.IsFalse(decisions[..5].Any(static decision => decision.TryGetProperty("updatedPermissions", out _)));
+    }
+
+    [TestMethod]
     public async Task DeniedPermission_IsAnsweredAsADenial()
     {
         using var directory = TestTempDirectory.Create();
