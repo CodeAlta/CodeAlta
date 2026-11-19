@@ -337,8 +337,9 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         return results;
     }
 
-    // The models Mistral Vibe offers, with the reasoning efforts each takes. Vibe calls only models that chat and call
-    // tools; the others are left out.
+    // The models Mistral Vibe offers, with the reasoning efforts each takes. Vibe runs only models that call tools, that
+    // Mistral serves and that the plan of the account has: an entry with a requirement ("requires", such as a higher
+    // plan) or of another provider is left out, since a turn on it fails.
     private static IReadOnlyList<AgentModelInfo> ParseVibeModelCatalog(
         JsonElement root,
         ModelProviderRuntimeDescriptor providerDescriptor)
@@ -355,11 +356,14 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
             if (item.ValueKind is not JsonValueKind.Object ||
                 !TryGetString(item, "id", out var id) ||
                 string.IsNullOrWhiteSpace(id) ||
-                !seenModelIds.Add(id.Trim()) ||
                 !TryGetProperty(item, out var flags, "capabilities") ||
                 flags.ValueKind is not JsonValueKind.Object ||
-                TryGetScalar(flags, "completion_chat") is not true ||
-                TryGetScalar(flags, "function_calling") is not true)
+                TryGetScalar(flags, "function_calling") is not true ||
+                (item.TryGetProperty("requires", out var requires) && requires.ValueKind is not JsonValueKind.Null) ||
+                (item.TryGetProperty("provider", out var servedBy) && servedBy.ValueKind is not JsonValueKind.Null &&
+                 !(servedBy.ValueKind is JsonValueKind.String && servedBy.ValueEquals("mistral"))) ||
+                // Last: an entry left out does not hide a later one of the same model that can run.
+                !seenModelIds.Add(id.Trim()))
             {
                 continue;
             }

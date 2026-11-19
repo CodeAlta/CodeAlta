@@ -196,11 +196,14 @@ public sealed class MistralResponsesTests
     {
         using var handler = new RecordingHandler("""
             {"models":[
+              {"id":"mistral-medium-latest","label":"Locked entry of the same model","requires":{"kind":"higher_plan"},"capabilities":{"function_calling":true}},
               {"id":"mistral-medium-latest","label":"Mistral Medium 3.5","aliases":["mistral-medium-3.5"],"max_context_length":262144,
                "parameters":{"temperature":1,"reasoning":["none","high"]},"capabilities":{"completion_chat":true,"function_calling":true,"vision":true}},
               {"id":"zai-glm-5-3","label":"GLM 5.3","publisher":"zai","parameters":{"reasoning":["low","high","max"]},"capabilities":{"completion_chat":true,"function_calling":true}},
-              {"id":"devstral-small","label":"Devstral Small","capabilities":{"completion_chat":true,"function_calling":true}},
-              {"id":"no-tools","label":"No tools","capabilities":{"completion_chat":true,"function_calling":false}}
+              {"id":"devstral-small","label":"Devstral Small","provider":"mistral","requires":null,"capabilities":{"function_calling":true}},
+              {"id":"no-tools","label":"No tools","capabilities":{"completion_chat":true,"function_calling":false}},
+              {"id":"locked","label":"Locked","requires":{"kind":"higher_plan"},"capabilities":{"completion_chat":true,"function_calling":true}},
+              {"id":"elsewhere","label":"Elsewhere","provider":"other","capabilities":{"completion_chat":true,"function_calling":true}}
             ]}
             """);
         using var httpClient = new HttpClient(handler);
@@ -221,6 +224,7 @@ public sealed class MistralResponsesTests
 
         var models = await runtime.ModelCatalog!.ListModelsAsync(runtime.RuntimeDescriptor, TestContext.CancellationToken);
 
+        // Left out, as Vibe does: a model without tool calls, one the plan of the account does not have, one of another provider.
         CollectionAssert.AreEqual(new[] { "mistral-medium-latest", "zai-glm-5-3", "devstral-small" }, models.Select(static model => model.Id).ToArray());
         Assert.AreEqual("Mistral Medium 3.5", models[0].DisplayName);
         CollectionAssert.AreEqual(new[] { AgentReasoningEffort.None, AgentReasoningEffort.High }, models[0].SupportedReasoningEfforts!.ToArray());
