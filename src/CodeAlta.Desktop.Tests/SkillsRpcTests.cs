@@ -28,6 +28,35 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task TheSkillsAPromptCanName_AreTheOnesTheRuntimeLists_ForTheProjectAndTheSpaceAsked()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        Assert.AreEqual("unavailable", (await fixture.Service.OfferedAsync(new(Epoch, null), default)).Status, "No runtime lists them.");
+
+        var catalog = new SkillCatalog([new ProjectCodeAltaSkillRootProvider(), new UserCodeAltaSkillRootProvider()]);
+        var asked = new List<(string? Project, string? Space)>();
+        var service = new SkillsService(fixture.Projects, catalog, null, Epoch)
+        {
+            PromptSkills = async (project, space, cancellation) =>
+            {
+                asked.Add((project?.Id, space));
+                return await catalog.ListAsync(SkillCatalogQuery.ForProject(null, fixture.GlobalRoot, null, project, null, null), cancellation);
+            },
+        };
+
+        var ofProject = await service.OfferedAsync(new(Epoch, fixture.Project.Id, "work"), default);
+        Assert.AreEqual("ok", ofProject.Status);
+        CollectionAssert.AreEquivalent(new[] { "alpha:Alpha workflow", "beta:Beta workflow" }, ofProject.Skills.Select(static skill => $"{skill.Name}:{skill.Description}").ToArray());
+        Assert.IsTrue(ofProject.Skills.All(static skill => skill.Title.Length > 0 && Enum.TryParse<SkillSourceKind>(skill.Source, out _)));
+        CollectionAssert.AreEqual(new[] { "alpha" }, (await service.OfferedAsync(new(Epoch, null), default)).Skills.Select(static skill => skill.Name).ToArray());
+        CollectionAssert.AreEqual(new (string?, string?)[] { (fixture.Project.Id, "work"), (null, null) }, asked);
+
+        Assert.AreEqual("stale_epoch", (await service.OfferedAsync(new("another", null), default)).Status);
+        Assert.AreNotEqual("ok", (await service.OfferedAsync(new(Epoch, "no-such-project"), default)).Status);
+        Assert.HasCount(2, asked, "A refused request lists nothing.");
+    }
+
+    [TestMethod]
     public async Task TheMentionsOfAPrompt_AreItsSlashNamesOutsideCode_WithTheirPlaces()
     {
         // No host is needed: the prompt editor asks before a session exists.

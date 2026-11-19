@@ -46,7 +46,7 @@ import {
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workflows as workflowsApi, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
-import { usableSkills, type SkillChoice } from "./search/skillResults";
+import type { SkillChoice } from "./search/skillResults";
 import { SkillChoicesContext, type SkillChoices } from "./skillMentions";
 import { archivedSessions, loadWorkspace, omittedSessions, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -3659,8 +3659,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (!skillEpoch) return;
     const controller = new AbortController();
-    void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null, spaceId }, { signal: controller.signal, timeoutMilliseconds: 8000 })
-      .then(page => { if (!controller.signal.aborted && page.status === "ok") setSearchSkills({ key: skillsKey, skills: usableSkills(page.skills) }); },
+    // As a send of a session of this project and space reads them: what is offered and shown as a skill is what is given.
+    void skillsApi.offered({ expectedEpoch: skillEpoch, projectId: projectId ?? null, spaceId }, { signal: controller.signal, timeoutMilliseconds: 8000 })
+      .then(page => { if (!controller.signal.aborted && page.status === "ok") setSearchSkills({ key: skillsKey, skills: page.skills }); },
         () => { /* The search and the prompts go on without the skills. */ });
     return () => controller.abort();
   }, [searchOpen, skillsRequest, skillEpoch, projectId, spaceId]);

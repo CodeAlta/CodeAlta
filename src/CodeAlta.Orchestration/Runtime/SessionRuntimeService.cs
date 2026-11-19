@@ -3293,11 +3293,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             var project = await AwaitRetentionAwareAsync(ResolveProjectAsync(session, cancellationToken)).ConfigureAwait(false);
             var space = await AwaitRetentionAwareAsync(GetSpaceFilterAsync(session.SpaceId, project, cancellationToken)).ConfigureAwait(false);
-            // The folders a send of the session reads skills from (SessionExecutionPolicy.CaptureSession).
-            var query = BuildSkillCatalogQuery(project, session.Kind != SessionViewKind.GlobalSession && project is not null ? [project.ProjectPath] : [], space);
-            // The catalog is read once, whatever the number of names: a pasted text can hold thousands of `/word`. Only the
-            // skills the composer offers are in it (enabled, valid, trusted, not shadowed).
-            var offered = await AwaitRetentionAwareAsync(_skillCatalog.ListAsync(query, cancellationToken)).ConfigureAwait(false);
+            // The catalog is read once, whatever the number of names: a pasted text can hold thousands of `/word`.
+            var (query, offered) = await AwaitRetentionAwareAsync(OfferedPromptSkillsAsync(project, space, cancellationToken)).ConfigureAwait(false);
             var notes = new List<AgentInputItem>();
             var given = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var name in names)
@@ -3306,7 +3303,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 if (notes.Count == PromptSkillHistory.MaximumSkills) break;
                 var descriptor = offered.FirstOrDefault(skill => string.Equals(skill.Name, name, StringComparison.OrdinalIgnoreCase))
                     ?? offered.FirstOrDefault(skill => string.Equals(skill.NormalizedName, name, StringComparison.OrdinalIgnoreCase));
-                if (descriptor is not { IsEnabled: true, IsValid: true, IsTrusted: true, IsShadowed: false } || !given.Add(descriptor.Name)) continue;
+                if (descriptor is null || !given.Add(descriptor.Name)) continue;
                 SkillActivation? activation;
                 try
                 {
@@ -3325,6 +3322,38 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             return notes;
         }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Lists the skills a prompt of a session can name as <c>/name</c>: the ones a send gives the model
+    /// (<see cref="ResolvePromptSkillsAsync"/>), which the composer offers and shows as skills. They are the skills of the
+    /// space of the session, of its project and of the folders the project inherits from, that are enabled, valid, trusted
+    /// and not shadowed.
+    /// </summary>
+    /// <param name="project">The project of the session; <see langword="null"/> for a chat.</param>
+    /// <param name="spaceId">The space the session records, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The skills, each name once, by name.</returns>
+    /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">A configuration file cannot be read.</exception>
+    public async Task<IReadOnlyList<SkillDescriptor>> ListPromptSkillsAsync(ProjectDescriptor? project, string? spaceId, CancellationToken cancellationToken = default)
+    {
+        var space = await GetSpaceFilterAsync(spaceId, project, cancellationToken).ConfigureAwait(false);
+        return (await OfferedPromptSkillsAsync(project, space, cancellationToken).ConfigureAwait(false)).Offered;
+    }
+
+    // The skills a prompt can name, with the query that reads them: the one place that says which they are, for the send
+    // and for the composer.
+    private async Task<(SkillCatalogQuery Query, IReadOnlyList<SkillDescriptor> Offered)> OfferedPromptSkillsAsync(
+        ProjectDescriptor? project, SpaceFilter space, CancellationToken cancellationToken)
+    {
+        // The folders a send of the session reads skills from (SessionExecutionPolicy.CaptureSession).
+        var query = BuildSkillCatalogQuery(project, project is not null ? [project.ProjectPath] : [], space);
+        var listed = await _skillCatalog.ListAsync(query, cancellationToken).ConfigureAwait(false);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The catalog also lists the invalid, untrusted and shadowed ones for a session.
+        return (query, [.. listed.Where(skill => skill is { IsEnabled: true, IsValid: true, IsTrusted: true, IsShadowed: false } && names.Add(skill.Name))
+            .OrderBy(static skill => skill.Name, StringComparer.OrdinalIgnoreCase)]);
     }
 
     // What the model reads of a skill the user activated: its content, as context of the session.

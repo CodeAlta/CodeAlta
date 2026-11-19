@@ -382,6 +382,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(AgentPromptComposeRequest))]
 [JsonSerializable(typeof(AgentPromptComposeResponse))]
 [JsonSerializable(typeof(SkillsListRequest))]
+[JsonSerializable(typeof(SkillsOfferedResponse))]
 [JsonSerializable(typeof(SkillsMentionsRequest))]
 [JsonSerializable(typeof(SkillsCanBeginRequest))]
 [JsonSerializable(typeof(SkillsCanBeginResponse))]

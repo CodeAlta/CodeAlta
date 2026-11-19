@@ -78,6 +78,12 @@ internal sealed partial class SkillsService
     /// </summary>
     internal SpaceCatalog? Spaces { get; init; }
 
+    /// <summary>
+    /// Gets what lists the skills a prompt of a session of a project and a space can name, as a send of the session reads
+    /// them; null where no session runs, where none is listed.
+    /// </summary>
+    internal Func<ProjectDescriptor?, string?, CancellationToken, Task<IReadOnlyList<SkillDescriptor>>>? PromptSkills { get; init; }
+
     /// <summary>Finds the folders of the skills this service lists; null without an owned host.</summary>
     internal SkillFolders? Folders => _folders;
 
@@ -109,6 +115,33 @@ internal sealed partial class SkillsService
     {
         ArgumentNullException.ThrowIfNull(request);
         return Task.FromResult(new SkillsCanBeginResponse(request.Text is { Length: > 0 and <= MaximumPromptLength } text && SkillPromptMentions.CanBeginAt(text, request.Offset)));
+    }
+
+    /// <summary>
+    /// Lists the skills a prompt of a session of a project and a space can name as <c>/name</c>: the ones a send gives
+    /// the model, read as the send reads them. The composer offers them and shows them as skills.
+    /// </summary>
+    [NeoRpcMethod("offered")]
+    public async Task<SkillsOfferedResponse> OfferedAsync(SkillsListRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        static SkillsOfferedResponse Failed(string status) => new(status, []);
+        if (_projects is null || PromptSkills is null) return Failed("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Failed("stale_epoch");
+        var scope = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (scope.Status != "ok") return Failed(scope.Status);
+        try
+        {
+            var project = string.IsNullOrWhiteSpace(request.ProjectId) ? null : await _projects.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+            var skills = await PromptSkills(project, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            return new("ok", [.. skills.Take(MaximumSkills).Select(static skill => new SkillsOffered(
+                Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength), skill.SourceKind.ToString()))]);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Log(exception, "The skills of a prompt could not be listed.");
+            return Failed("read_failed");
+        }
     }
 
     /// <summary>Lists every discovered skill, including disabled, invalid and shadowed ones.</summary>
@@ -642,6 +675,11 @@ internal sealed partial class SkillsService
         return Bound(suffix > 0 ? exception.Message[..suffix] : exception.Message, MaximumMessageLength);
     }
 }
+
+/// <summary>The skills a prompt can name: <c>ok</c>, or why they could not be listed.</summary>
+internal sealed record SkillsOfferedResponse(string Status, IReadOnlyList<SkillsOffered> Skills);
+/// <summary>A skill a prompt can name as <c>/name</c>, with where it comes from (<see cref="SkillSourceKind"/>).</summary>
+internal sealed record SkillsOffered(string Name, string Title, string Description, string Source);
 
 /// <param name="Text">The text of a prompt.</param>
 internal sealed record SkillsMentionsRequest(string? Text);

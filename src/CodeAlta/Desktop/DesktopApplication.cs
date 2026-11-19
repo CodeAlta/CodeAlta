@@ -1343,6 +1343,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Mcp = () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(),
                         McpHome = options.McpHome,
                         Spaces = host.SpaceCatalog,
+                        // The skills a prompt names, as the runtime that sends it reads them.
+                        PromptSkills = host.RuntimeService.ListPromptSkillsAsync,
                     };
                     builder.AddSkillsService(skills);
                     builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime)

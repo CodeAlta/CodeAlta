@@ -1,24 +1,10 @@
-import type { SkillsEntry } from "#neoastra";
 import { fieldsScore, readQuery } from "./searchResults";
 
-/** A skill the search offers: one the model of a session of the project in front is given. */
+/** A skill the search offers: one a prompt of a session of the project in front can name, as the host lists them (`skills.offered`). */
 export type SkillChoice = Readonly<{ name: string; title: string; description: string; source: string }>;
 
 /** A skill the search found, with the text typed after its name, which goes with it to the session. */
 export type SkillResult = Readonly<{ kind: "skill"; key: string; score: number; skill: SkillChoice; args: string }>;
-
-/**
- * The skills the search offers, by name: the enabled, valid and trusted ones, without those that another skill of
- * the same name overrides. They are the skills a session of the project is given.
- */
-export function usableSkills(entries: readonly SkillsEntry[]): SkillChoice[] {
-  const byName = new Map<string, SkillChoice>();
-  for (const entry of entries) {
-    if (!entry.enabled || !entry.valid || !entry.trusted || entry.shadowed || !entry.name.trim() || byName.has(entry.name.toLowerCase())) continue;
-    byName.set(entry.name.toLowerCase(), { name: entry.name, title: entry.title, description: entry.description, source: entry.source });
-  }
-  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
-}
 
 /** A text typed as `/name what to do`: the name and what follows it, as it was typed. Null for any other text. */
 export function skillCall(text: string): Readonly<{ name: string; args: string }> | null {

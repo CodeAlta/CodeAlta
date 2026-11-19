@@ -1867,6 +1867,34 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task SkillSend_GivesTheSkillsTheComposerIsOffered_AndNoOther() => Fixture.RunAsync(async f =>
+    {
+        // Beside the skill of the fixture: one of another space, one turned off, and one of the project of the session.
+        var builtin = Path.Combine(Path.GetDirectoryName(f.GlobalRoot)!, "builtin");
+        foreach (var (folder, name) in new[] { (builtin, "elsewhere"), (builtin, "turned-off"), (Path.Combine(f.ProjectRoot, ".alta", "skills"), "of-project") })
+        {
+            Directory.CreateDirectory(Path.Combine(folder, name));
+            File.WriteAllText(Path.Combine(folder, name, "SKILL.md"), $"---\nname: {name}\ndescription: The {name} skill.\n---\nText of {name}.\n");
+        }
+        File.WriteAllText(Path.Combine(f.GlobalRoot, "config.toml"), "[skills]\ndisabled = [\"turned-off\"]\n\n[skills.spaces]\nelsewhere = [\"business\"]\n");
+
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot, CancellationToken.None));
+        var offered = (await f.Observe(f.Host.RuntimeService.ListPromptSkillsAsync(project, null))).Select(static skill => skill.Name).ToArray();
+        CollectionAssert.AreEqual(new[] { "fixture-builtin", "of-project" }, offered);
+        // A chat has no project: it is not offered the skills of one.
+        CollectionAssert.AreEqual(new[] { "fixture-builtin" }, (await f.Observe(f.Host.RuntimeService.ListPromptSkillsAsync(null, null))).Select(static skill => skill.Name).ToArray());
+
+        var admission = f.AdmitSend(new OwnedTextSendRequest("offered-send", f.SessionId, "/elsewhere /turned-off /of-project /fixture-builtin") { Skills = true });
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "offered send");
+        var given = f.Provider.Input!.Items.OfType<AgentInputItem.HostContext>().Where(static item => item.Kind == AgentInputItem.HostContext.SkillKind)
+            .Select(static item => System.Text.RegularExpressions.Regex.Match(item.Value, "<skill_content name=\"([^\"]+)\"").Groups[1].Value).ToArray();
+        CollectionAssert.AreEquivalent(offered, given, "A send gives what the composer is offered, and nothing else.");
+        f.Provider.ReleaseAll();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
     public Task SkillSteer_GivesTheNamedSkillBeforeTheTypedText() => Fixture.RunAsync(async f =>
     {
         var send = f.Send();
