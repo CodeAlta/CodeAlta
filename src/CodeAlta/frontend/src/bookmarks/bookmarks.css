@@ -76,7 +76,7 @@
 .bookmarks-session-open:hover:not(:disabled), .bookmarks-session-open:focus-visible { outline: none; background: var(--panel-3); }
 .bookmarks-session-open:disabled { cursor: default; }
 .bookmarks-session-title { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.bookmarks-session-heading:has(.bookmarks-session-tag) .bookmarks-session-open > svg { color: var(--bookmark-tone); fill: currentColor; }
+.bookmarks-session-heading .bookmarks-session-open[data-bookmarked] > svg { color: var(--bookmark-tone); fill: currentColor; }
 .bookmarks-session-heading > .bp6-tag { flex: none; }
 .bookmarks-session-heading > .bookmark-actions { margin-left: auto; }
 .bookmarks-messages { margin: 0; padding: 0; list-style: none; }

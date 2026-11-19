@@ -43,7 +43,7 @@ function Fixture() {
   const run = (command: WindowZoomCommand) => { ran.push(command); void zoomWindow(command, zoom, setShell); };
   Object.assign(window, { windowZoom: { ran, run, setShell: (shown: boolean) => setShell(shown ? preferences() : null),
     setTheme: (theme: string) => { document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle("bp6-dark", theme === "dark"); } } });
-  return <div className="ide-shell" style={{ position: "relative", height: 300 }}>
+  return <div className="ide-shell" data-window-zoom={shell ? "" : undefined} style={{ position: "relative", height: 300 }}>
     <SessionTabStrip layout={layout} state={sessions} snapshot={snapshot} files={files} capture={() => () => true}
       select={() => { }} close={() => { }} reopen={() => { }} renderFile={tab => <div>{tab.name ?? tab.projectId}</div>}>New session</SessionTabStrip>
     <div className="window-actions">

@@ -75,7 +75,7 @@ export function BookmarksPanel({ hub, projects, onGo, onOpenSession, onActivate,
     return <article key={session.sessionId} className="bookmarks-session" data-session-id={session.sessionId} data-missing={session.missing ? "true" : undefined}>
       <header className="bookmarks-session-heading">
         {whole && renaming?.id === whole.id ? editor(whole) : <>
-          <button type="button" className="bookmarks-session-open" disabled={session.missing} onClick={() => whole ? onGo(whole) : onOpenSession(session.sessionId)}
+          <button type="button" className="bookmarks-session-open" data-bookmarked={whole ? "" : undefined} disabled={session.missing} onClick={() => whole ? onGo(whole) : onOpenSession(session.sessionId)}
             title={session.missing ? undefined : t("Open session")}>
             <AppIcon name={whole ? "bookmark" : "chat"} size={15} /><strong>{whole?.label?.trim() || session.title}</strong>
             {whole?.label?.trim() && <span className="bookmarks-session-title">{session.title}</span>}

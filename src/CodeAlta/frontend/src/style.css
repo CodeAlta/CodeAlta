@@ -385,7 +385,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .task-reference-card strong { font-weight: 600; overflow-wrap: anywhere; }
 .task-reference-card-item[data-closed] strong { text-decoration: line-through; color: var(--muted); }
 .task-reference-card p { margin: 0; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
-.task-reference-card-item + .task-reference-card-item p, .task-reference-card-item:has(+ .task-reference-card-item) p { -webkit-line-clamp: 2; }
+.task-reference-card-item:not(:only-of-type) p { -webkit-line-clamp: 2; }
 .task-reference-card small { color: var(--muted); font-size: 11px; }
 .markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: var(--code-font); font-size: 12px; white-space: pre; }
 .markdown-content pre code { padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; }
@@ -400,7 +400,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content img.markdown-local-image:not([src]),
 .markdown-content a:has(> img.markdown-local-image[src]) > .markdown-local-image-alt { display: none; }
 .markdown-content a:has(> img.markdown-local-image[src]) { display: inline-block; max-width: 100%; vertical-align: top; }
-.markdown-content a:has(> img.markdown-local-image[src]):hover > img, .markdown-content a:has(> img.markdown-local-image[src]):focus-visible > img { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.markdown-content a:hover > img.markdown-local-image[src], .markdown-content a:focus-visible > img.markdown-local-image[src] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .markdown-content a:has(> img.markdown-local-image[src]):focus-visible { outline: none; }
 .markdown-content hr { border: 0; border-top: 1px solid var(--line); }
 /* The front matter of a document: its entries, as names and values. */
@@ -1525,22 +1525,25 @@ dialog.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dv
    (react-rnd) is the visible window, so the dialog's own box, padding and scrolling are dropped. */
 dialog:is(.app-dialog, .session-browser):has(> .app-window) { position: fixed; inset: 0; display: block; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden; color: var(--text); background: transparent; box-shadow: none; text-align: start; }
 dialog:is(.app-dialog, .session-browser):has(> .app-window):not([open]) { display: none; }
-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 10px; padding: 14px 16px; overflow: auto; }
-dialog:has(> .app-window) > .app-window > .app-window-body > * { flex-shrink: 0; min-width: 0; }
-dialog:has(> .app-window) > .app-window > .app-window-body > :is(p, h3, dl, pre, section) { margin: 0; }
-dialog:has(> .app-window) > .app-window > .app-window-body > footer { position: sticky; bottom: -14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: auto -16px -14px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 12px; }
-dialog:has(> .app-window) > .app-window > .app-window-body > footer > span:last-child { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
-dialog:has(> .app-window) > .app-window > .app-window-body > pre,
-dialog:has(> .app-window) > .app-window > .app-window-body > .detail-pane { flex: 1 1 auto; min-height: 80px; max-height: none; overflow: auto; }
-dialog:has(> .app-window) .app-window-body pre { max-height: none; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
-dialog:has(> .app-window) .app-window-body h3 { margin: 4px 0 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
-dialog.session-info-dialog:has(> .app-window) .app-window-body > section { display: grid; gap: 6px; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields { margin: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields > div { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr); gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields > div:last-child { border-bottom: 0; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields dt { color: var(--muted); }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { display: block; color: var(--muted); }
+/* What is in such a window is named from the dialog down, without a `:has()`: behind one, each of these rules would have
+   every change of the page compute again the style of what it can style (styleInvalidation.ts). A window is drawn in an
+   open dialog only, and `[open]` gives the rules of its body the weight of one more class. */
+dialog[open] > .app-window > .app-window-body { gap: 10px; padding: 14px 16px; overflow: auto; }
+dialog[open] > .app-window > .app-window-body > * { flex-shrink: 0; min-width: 0; }
+dialog[open] > .app-window > .app-window-body > :is(p, h3, dl, pre, section) { margin: 0; }
+dialog[open] > .app-window > .app-window-body > footer { position: sticky; bottom: -14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: auto -16px -14px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 12px; }
+dialog[open] > .app-window > .app-window-body > footer > span:last-child { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
+dialog[open] > .app-window > .app-window-body > pre,
+dialog[open] > .app-window > .app-window-body > .detail-pane { flex: 1 1 auto; min-height: 80px; max-height: none; overflow: auto; }
+dialog > .app-window .app-window-body pre { max-height: none; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+dialog > .app-window .app-window-body h3 { margin: 4px 0 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+dialog.session-info-dialog > .app-window .app-window-body > section { display: grid; gap: 6px; }
+dialog.session-info-dialog > .app-window .session-info-fields { margin: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+dialog.session-info-dialog > .app-window .session-info-fields > div { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr); gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+dialog.session-info-dialog > .app-window .session-info-fields > div:last-child { border-bottom: 0; }
+dialog.session-info-dialog > .app-window .session-info-fields dt { color: var(--muted); }
+dialog.session-info-dialog > .app-window .session-info-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+dialog.session-info-dialog > .app-window .session-info-fields dd small { display: block; color: var(--muted); }
 
 /* Composer: compact context-usage ring and its details window. */
 .context-usage.bp6-button { gap: 6px; min-height: 26px; padding: 2px 8px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -1588,7 +1591,7 @@ dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { di
 .session-reference:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .session-reference-id { margin-inline-start: 6px; font-family: var(--code-font); }
 /* Reminders window: toolbar, schedule list and a create/edit pane. */
-dialog.reminders-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 0; }
+dialog.reminders-dialog[open] > .app-window > .app-window-body { padding: 0; }
 .reminder-page { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 16px; overflow: auto; }
 .reminder-page > * { flex-shrink: 0; }
 .reminder-toolbar { display: flex; align-items: center; gap: 8px; }
@@ -1609,7 +1612,7 @@ dialog.reminders-dialog:has(> .app-window) > .app-window > .app-window-body { pa
 .reminder-confirm { margin: 8px; }
 .reminder-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 12px 14px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
 .reminder-editor > * { flex-shrink: 0; }
-dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recovery) h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
+dialog > .app-window .app-window-body :is(.reminder-editor, .reminder-recovery) h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
 .reminder-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .reminder-editor label { color: var(--muted); font-size: 11.5px; font-weight: 600; }
 .reminder-editor textarea.reminder-message { flex: 1 1 96px; width: 100%; min-height: 96px; padding: 8px 10px; resize: none; font-size: 13px; line-height: 1.5; }
@@ -1717,18 +1720,18 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .usage-card .context-usage-grid > div { background: var(--panel); }
 
 /* Session info window: field tables without the legacy inner padding, and a quiet provenance note. */
-dialog.session-info-dialog:has(> .app-window) .session-info-fields { display: block; padding: 0; overflow: visible; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields dt { margin: 0; font-size: 12px; }
-dialog.session-info-dialog:has(> .app-window) .session-info-fields dd { font-size: 12.5px; white-space: normal; }
-dialog.session-info-dialog:has(> .app-window) .app-window-body > section > p, .session-info-note { margin: 0; color: var(--muted); font-size: 11.5px; }
+dialog.session-info-dialog > .app-window .session-info-fields { display: block; padding: 0; overflow: visible; }
+dialog.session-info-dialog > .app-window .session-info-fields dt { margin: 0; font-size: 12px; }
+dialog.session-info-dialog > .app-window .session-info-fields dd { font-size: 12.5px; white-space: normal; }
+dialog.session-info-dialog > .app-window .app-window-body > section > p, .session-info-note { margin: 0; color: var(--muted); font-size: 11.5px; }
 /* Timeline inspection windows (details, file change, tool record, raw source): panes fill the window and scroll together. */
-dialog:has(> .app-window) > .app-window > .app-window-body > .dialog-panes { flex: 1 1 auto; min-height: 0; gap: 10px; overflow: auto; }
-dialog:has(> .app-window) .dialog-panes .detail-pane { max-height: none; overflow: visible; }
-dialog:has(> .app-window) .dialog-panes .detail-pane > h3 { margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 12px; }
-dialog:has(> .app-window) .dialog-panes .detail-pane:only-child { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-dialog:has(> .app-window) .dialog-panes .detail-pane:only-child > :is(pre, .code-preview) { flex: 1 1 auto; min-height: 0; overflow: auto; }
-dialog:has(> .app-window) .file-dialog-summary { gap: 8px; }
-dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-transform: capitalize; }
+dialog[open] > .app-window > .app-window-body > .dialog-panes { flex: 1 1 auto; min-height: 0; gap: 10px; overflow: auto; }
+dialog > .app-window .dialog-panes .detail-pane { max-height: none; overflow: visible; }
+dialog > .app-window .dialog-panes .detail-pane > h3 { margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 12px; }
+dialog > .app-window .dialog-panes .detail-pane:only-child { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+dialog > .app-window .dialog-panes .detail-pane:only-child > :is(pre, .code-preview) { flex: 1 1 auto; min-height: 0; overflow: auto; }
+dialog > .app-window .file-dialog-summary { gap: 8px; }
+dialog > .app-window .file-dialog-summary > span:first-child { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-transform: capitalize; }
 
 .app-window-titlebar h2 > svg { vertical-align: -2px; margin-inline-end: 4px; color: var(--muted); }
 
@@ -1910,14 +1913,14 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .ide-shell .project-root-list > li > button.project-actions-trigger { flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; justify-content: center; }
 
 /* Prompt pickers (project files, issues): a search field over one keyboard-driven list. */
-dialog.reference-palette:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.reference-palette[open] > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .reference-project { color: var(--muted); font-weight: 400; }
 .reference-status { display: inline-flex; align-items: center; gap: 6px; margin-inline-end: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .reference-search.bp6-input-group { margin: 10px 12px 8px; }
 .reference-search .bp6-icon, .command-help-filter .bp6-icon { top: 50%; margin-block: 0; color: var(--muted); transform: translateY(-50%); }
 .reference-list { min-height: 0; overflow-y: auto; padding: 0 6px 6px; }
 /* Window bodies do not shrink their children by default; the scrolling list of a picker must. */
-dialog:has(> .app-window) > .app-window > .app-window-body > .reference-list, dialog:has(> .app-window) > .app-window > .app-window-body > .command-help { flex: 1 1 0; }
+dialog[open] > .app-window > .app-window-body > .reference-list, dialog[open] > .app-window > .app-window-body > .command-help { flex: 1 1 0; }
 .reference-row { display: grid; grid-template-columns: 20px auto auto minmax(0, 1fr); align-items: center; gap: 8px; min-height: 28px; padding: 3px 10px; border-radius: 5px; cursor: default; font-size: 13px; }
 .reference-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
 .reference-icon { display: inline-flex; color: var(--muted); }
@@ -1925,7 +1928,7 @@ dialog:has(> .app-window) > .app-window > .app-window-body > .reference-list, di
 .reference-recent { display: inline-flex; color: var(--muted); }
 .reference-parent { grid-column: 4; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
 .reference-empty { margin: 0; padding: 28px 12px; color: var(--muted); text-align: center; }
-dialog:has(> .app-window) > .app-window > .app-window-body > footer.reference-hint { position: static; justify-content: flex-start; gap: 16px; margin: 0; padding: 6px 14px; }
+dialog[open] > .app-window > .app-window-body > footer.reference-hint { position: static; justify-content: flex-start; gap: 16px; margin: 0; padding: 6px 14px; }
 .reference-hint .reference-actions { display: flex; gap: 8px; align-items: center; margin-inline-start: auto; }
 .reference-hint .reference-actions kbd { margin: 0 0 0 4px; }
 .reference-hint .bp6-intent-primary kbd { border-color: rgb(255 255 255 / .45); background: transparent; color: inherit; }
@@ -2040,7 +2043,7 @@ dialog.global-search > .app-window > .app-window-body > .global-search-results {
 .key-stroke { display: inline-flex; align-items: center; gap: 2px; }
 .key-gesture kbd { min-width: 20px; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); color: var(--text); font: 11px/1.7 "Segoe UI", system-ui, sans-serif; text-align: center; }
 /* Help window: every command with its shortcuts, in columns per category. */
-dialog.command-help-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.command-help-dialog[open] > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .command-help { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .command-help-filter.bp6-input-group { flex: none; margin: 10px 14px 4px; }
 .command-help-groups { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 14px 14px; columns: 2 380px; column-gap: 28px; }
@@ -2098,10 +2101,10 @@ dialog.command-help-dialog:has(> .app-window) > .app-window > .app-window-body {
 .reference-empty.reference-note { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 12px; font-size: 12px; }
 
 /* Open project: saved projects as a picker list, with the add-folder controls underneath. */
-dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.open-project-dialog[open] > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .open-project-dialog .reference-row[aria-disabled="true"] { opacity: .5; }
 /* What a move does, above the list of the windows of a move to a project or to a space. */
-dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body > .move-session-hint { margin: 10px 14px 8px; font-size: 12px; }
+dialog.open-project-dialog[open] > .app-window > .app-window-body > .move-session-hint { margin: 10px 14px 8px; font-size: 12px; }
 .open-project-dialog .project-import { display: grid; justify-items: stretch; gap: 6px; margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); overflow: visible; }
 .open-project-dialog .project-import p { margin: 0; font-size: 12px; }
 .project-import-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -2119,7 +2122,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-room: calc(298px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 100px; }
 /* Without the Explorer the mark has the room of the whole rail: 11px and 6px of padding, the 22px mark and its 9px gap, and
    nine 26px buttons 2px apart. The developer instance says so beside the mark: its navigation needs that much more room. */
-.ide-shell:has(.window-brand-tag) { --brand-room: calc(344px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
+.ide-shell[data-developer] { --brand-room: calc(344px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
 /* In a very narrow window the mark ends where the actions of the title bar start: its buttons that have no room fold into its menu. */
 .ide-shell .workspace-shell { --brand-width: min(var(--brand-room), calc(100vw - var(--titlebar-inset-end) - var(--window-actions-width) - var(--space-switch-width, 0px) - var(--plugin-buttons-width, 0px) - var(--fleet-stop-width, 0px))); }
@@ -2141,7 +2144,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .window-actions > .bp6-button:hover { color: var(--text); }
 /* Home, Documentation and theme take 28px each, plus their gaps; zoom adds 40px and another gap. Both reservations
    keep 12px before the controls so the last tab strip's buttons do not touch them. */
-.ide-shell:has(.window-zoom) { --window-actions-width: 142px; }
+.ide-shell[data-window-zoom] { --window-actions-width: 142px; }
 /* The padding leaves four characters ("100%") inside the 40px with the font of every system: a wider one would
    move the button, and Home and Documentation with it, as the zoom changes. */
 .window-zoom.bp6-button { min-width: 40px; min-height: 28px; padding: 0 3px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
@@ -2156,7 +2159,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 @media (max-width: 875px) {
   /* The tabs keep the room they had with eight buttons: one more folds into the menu rather than push the first tab under the mark. */
   .ide-shell { --brand-room: calc(270px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
-  .ide-shell:has(.window-brand-tag) { --brand-room: calc(316px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
+  .ide-shell[data-developer] { --brand-room: calc(316px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
   .ide-shell .workspace-shell .window-brand { grid-area: auto; position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }
   .ide-shell .workspace-shell .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
 }
@@ -2229,7 +2232,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .ide-shell .project-rail .project-action-row > button:first-child:focus-visible, .ide-shell .project-rail .session-row > button:first-child:focus-visible { outline: 0; }
 
 /* Detail lists: a copy button at the end of a row that has a value worth copying. */
-dialog.session-info-dialog:has(> .app-window) .project-details-fields > div { grid-template-columns: minmax(120px, 30%) minmax(0, 1fr) 26px; align-items: center; padding: 8px 6px 8px 12px; }
+dialog.session-info-dialog > .app-window .project-details-fields > div { grid-template-columns: minmax(120px, 30%) minmax(0, 1fr) 26px; align-items: center; padding: 8px 6px 8px 12px; }
 dialog .copy-value, .copy-value { display: grid; place-items: center; width: 26px; height: 26px; min-width: 0; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
 .copy-value > svg { width: 14px; height: 14px; }
 .copy-value:hover { color: var(--text); background: var(--panel-3); }
@@ -2591,8 +2594,8 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .message-image .timeline-image-thumbnail.bp6-button[data-state="failed"] { width: 162px; }
 .message-image .timeline-image-thumbnail img { max-width: min(420px, 100%); height: 160px; object-fit: contain; }
 .message-image .timeline-image-placeholder { width: 240px; height: 160px; }
-dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 12px; overflow: hidden; }
-dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body > .timeline-image-view { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+dialog.timeline-image-dialog[open] > .app-window > .app-window-body { padding: 12px; overflow: hidden; }
+dialog.timeline-image-dialog[open] > .app-window > .app-window-body > .timeline-image-view { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .timeline-image-view img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: scale-down; }
 /* A picture of the disk names its file under it. */
 .timeline-image-file { flex: none; display: flex; align-items: center; min-width: 0; font-size: 12.5px; }
@@ -2714,7 +2717,7 @@ svg.pele {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M9 21H3v-6'/%3E%3Cpath d='M21 3l-7 7'/%3E%3Cpath d='M3 21l7-7'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M9 21H3v-6'/%3E%3Cpath d='M21 3l-7 7'/%3E%3Cpath d='M3 21l7-7'/%3E%3C/svg%3E") center / contain no-repeat; }
 .markdown-rendered[data-source] > .markdown-block-tools > .markdown-diagram-expand { display: none; }
-dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.diagram-viewer-dialog[open] > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .diagram-viewer { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
 .diagram-viewer > .editor-image { flex: 1 1 auto; min-width: 0; min-height: 0; }
 .diagram-viewer .editor-image-view { background: var(--panel-2); }
@@ -3120,7 +3123,7 @@ dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body
 .dialog-panes .detail-pane.detail-pane-diff { max-height: 60dvh; }
 
 /* The window of a tool call: a line of facts, then tabs. The view of the first tab fills the window. */
-dialog.tool-call-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 8px; padding: 10px 14px 12px; overflow: hidden; }
+dialog.tool-call-dialog[open] > .app-window > .app-window-body { gap: 8px; padding: 10px 14px 12px; overflow: hidden; }
 .tool-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; vertical-align: middle; }
 .app-window-titlebar h2 > .tool-title > svg { flex: none; margin: 0; color: var(--accent); }
 .tool-title-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--bp-typography-family-mono); font-size: 13px; }
@@ -3140,7 +3143,7 @@ dialog.tool-call-dialog:has(> .app-window) > .app-window > .app-window-body { ga
 .tool-tabs.bp6-tabs { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 /* The tabs take the height that is left, whatever they hold: a long result scrolls in its view. The parts of
    a window body do not shrink by default, which would let them grow past the window. */
-dialog.tool-call-dialog:has(> .app-window) > .app-window > .app-window-body > .tool-tabs { flex-shrink: 1; }
+dialog.tool-call-dialog[open] > .app-window > .app-window-body > .tool-tabs { flex-shrink: 1; }
 .tool-tabs > .bp6-tab-list { flex: none; border-bottom: 1px solid var(--line); }
 .tool-tabs > .bp6-tab-list > .bp6-tab { font-size: 13px; line-height: 28px; }
 .tool-tabs > .bp6-tab-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-top: 10px; }
@@ -3234,8 +3237,8 @@ dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; co
 
 /* The window of a system prompt: a line of facts, then what changed and the prompt as it was sent. */
 dialog.system-prompt-dialog { cursor: auto; }
-dialog.system-prompt-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 8px; padding: 10px 14px 12px; overflow: hidden; }
-dialog.system-prompt-dialog:has(> .app-window) > .app-window > .app-window-body > :is(.tool-tabs, .prompt-view) { flex-shrink: 1; }
+dialog.system-prompt-dialog[open] > .app-window > .app-window-body { gap: 8px; padding: 10px 14px 12px; overflow: hidden; }
+dialog.system-prompt-dialog[open] > .app-window > .app-window-body > :is(.tool-tabs, .prompt-view) { flex-shrink: 1; }
 .prompt-title-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .prompt-facts .prompt-agent > strong { color: var(--text); font-weight: 600; }
 /* The path takes what the other facts leave of the line, and loses its start when that is too little. */
@@ -3393,7 +3396,7 @@ span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-it
 .composer-plugin-status-item[data-tone="muted"] .composer-plugin-status-dot { background: var(--muted); }
 .composer-plugin-status-item[data-tone="error"] strong { color: var(--red); }
 /* The MCP window of a session: a summary, a filter, then each server with its tools. Green is what the session has. */
-dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 0; }
+dialog.mcp-session-dialog[open] > .app-window > .app-window-body { padding: 0; }
 .mcp-session-page { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .mcp-session-page > * { flex-shrink: 0; }
 .mcp-session-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; padding: 14px 16px 4px; }

@@ -95,9 +95,9 @@ button.changes-branch:hover, button.changes-branch:focus-visible, button.changes
 /* The window of the worktrees of a project: every checkout git lists, what protects it, when it was last used. */
 .worktree-manager-project { margin-left: 10px; color: var(--muted); font-weight: 400; }
 /* The window fills its surface: the list scrolls inside it, and the buttons stay at its foot. */
-dialog.worktree-manager-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
-dialog.worktree-manager-dialog:has(> .app-window) > .app-window > .app-window-body > .worktree-manager { flex: 1 1 auto; }
-dialog.worktree-manager-dialog:has(> .app-window) .app-window-body :is(.worktree-review, .worktree-results) h3 { margin: 0 16px; color: var(--text); font-size: 15px; font-weight: 600;
+dialog.worktree-manager-dialog[open] > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.worktree-manager-dialog[open] > .app-window > .app-window-body > .worktree-manager { flex: 1 1 auto; }
+dialog.worktree-manager-dialog > .app-window .app-window-body :is(.worktree-review, .worktree-results) h3 { margin: 0 16px; color: var(--text); font-size: 15px; font-weight: 600;
   letter-spacing: 0; text-transform: none; }
 .worktree-manager { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }
 .worktree-manager-bar { display: flex; align-items: center; flex: none; gap: 8px; min-height: 36px; padding: 4px 10px 4px 16px; border-bottom: 1px solid var(--line); }
@@ -162,7 +162,7 @@ dialog.worktree-manager-dialog:has(> .app-window) .app-window-body :is(.worktree
 .worktree-review-rows li:last-child, .worktree-results-rows li:last-child { border-bottom: 0; }
 .worktree-review-rows .worktree-checkout, .worktree-results-rows .worktree-checkout { flex: 1 1 50%; }
 .worktree-review-use { flex: none; color: var(--muted); font-size: 12px; }
-dialog.worktree-manager-dialog:has(> .app-window) .app-window-body .worktree-review[data-discard] h3 { color: var(--red); }
+dialog.worktree-manager-dialog > .app-window .app-window-body .worktree-review[data-discard] h3 { color: var(--red); }
 .worktree-result-mark { display: inline-flex; flex: none; color: var(--muted); }
 .worktree-results-rows li[data-status="ok"] .worktree-result-mark { color: var(--green); }
 .worktree-results-rows li[data-status="dirty"] .worktree-result-mark { color: var(--worktree-missing); }

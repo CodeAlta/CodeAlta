@@ -52,7 +52,7 @@ function host(): PluginButtonsHost {
 
 /** The title bar and the rail as the shell lays them out, with the controls of the application that the buttons sit beside. */
 function Shell({ context, menu }: { context: { projectId: string | null; sessionId: string | null }; menu: boolean }) {
-  return <div className="ide-shell" style={{ ["--titlebar-height" as string]: "38px" }}>
+  return <div className="ide-shell" data-window-zoom="" style={{ ["--titlebar-height" as string]: "38px" }}>
     <div className="workspace-shell" style={{ position: "relative", height: 120 }}>
       <div className="window-brand"><nav className="activity-rail" aria-label="Workspace navigation">
         <Button variant="minimal" size="small" className="activity-issues" icon={<AppIcon name="issueOpen" size={16} />} aria-label="Issues" />
