@@ -15,7 +15,8 @@ public enum CommandExecutionApprovalKind
     /// <summary>A value this version of the protocol does not know.</summary>
     UnrecognizedValue = -1,
     Command,
-    WriteStdin
+    WriteStdin,
+    HumanCommand
 }
 
 internal sealed class CommandExecutionApprovalKindJsonConverter : JsonConverter<CommandExecutionApprovalKind>
@@ -36,6 +37,7 @@ internal sealed class CommandExecutionApprovalKindJsonConverter : JsonConverter<
     {
         "command" => CommandExecutionApprovalKind.Command,
         "writeStdin" => CommandExecutionApprovalKind.WriteStdin,
+        "humanCommand" => CommandExecutionApprovalKind.HumanCommand,
         _ => CommandExecutionApprovalKind.UnrecognizedValue,
     };
 
@@ -43,6 +45,7 @@ internal sealed class CommandExecutionApprovalKindJsonConverter : JsonConverter<
     {
         CommandExecutionApprovalKind.Command => "command",
         CommandExecutionApprovalKind.WriteStdin => "writeStdin",
+        CommandExecutionApprovalKind.HumanCommand => "humanCommand",
         _ => throw new JsonException($"CommandExecutionApprovalKind.{value} cannot be written."),
     };
 }

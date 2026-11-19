@@ -156,7 +156,7 @@ internal static class CodexCliStandaloneTurn
                     Cwd = workingDirectory,
                     Model = string.IsNullOrWhiteSpace(request.ModelId) ? null : request.ModelId,
                     Effort = CodexCliModels.FromEffort(request.ReasoningEffort) is { } effort ? (ReasoningEffort?)new ReasoningEffort { Value = effort } : null,
-                    Summary = request.OmitReasoningSummaries ? new ReasoningSummary.None() : null,
+                    Summary = request.OmitReasoningSummaries ? ReasoningSummary.None : null,
                 },
                 cancellationToken)
             .ConfigureAwait(false);

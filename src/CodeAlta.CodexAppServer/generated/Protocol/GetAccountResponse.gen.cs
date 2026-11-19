@@ -12,4 +12,7 @@ public sealed partial record GetAccountResponse
     public bool RequiresOpenaiAuth { get; set; }
     [JsonPropertyName("account")]
     public Account? Account { get; set; }
+    /// <summary>ChatGPT user ID belonging to this account response, when available.</summary>
+    [JsonPropertyName("userId")]
+    public string? UserId { get; set; }
 }

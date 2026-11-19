@@ -7,8 +7,8 @@ namespace CodeAlta.CodexAppServer;
 public static partial class CodexAppServerProtocol
 {
     /// <summary>The tag of the Codex repository whose schema the types come from, or <see langword="null"/>.</summary>
-    public const string? SourceRef = "rust-v0.166.0";
+    public const string? SourceRef = "rust-v0.170.0";
 
     /// <summary>The commit of that tag, or <see langword="null"/>.</summary>
-    public const string? SourceCommit = "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856";
+    public const string? SourceCommit = "29eb79e9866b3262a777fdf8195c1b9e63684c91";
 }

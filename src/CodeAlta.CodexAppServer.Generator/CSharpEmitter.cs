@@ -103,11 +103,12 @@ public class CSharpEmitter
     {
         if (schema.Type == JsonObjectType.String && schema.Enumeration?.Count > 0)
             return true;
-        // oneOf where every variant is a string with single enum (schemars split enums)
+        // oneOf where every variant is a string enum: schemars splits an enum where a value has its own description,
+        // and keeps the values without one together.
         if (schema.OneOf.Count >= 2 && schema.OneOf.All(v =>
             {
                 var r = SchemaWalker.Resolve(v);
-                return r.Type == JsonObjectType.String && r.Enumeration?.Count == 1;
+                return r.Type == JsonObjectType.String && r.Enumeration?.Count >= 1;
             }))
             return true;
         return false;
@@ -361,6 +362,27 @@ public class CSharpEmitter
             if (ownerTypeName != null && csType.Contains("JsonElement"))
                 WarnJsonElementProperty(ownerTypeName, contextNs, name, csType, propSchema);
         }
+
+        // A variant can take one of several sets of properties beside its tag (an audio input by "url" or by
+        // "fileId"): each is a property of the variant that may be absent.
+        foreach (var alternative in variant.AnyOf.Concat(variant.OneOf).Select(SchemaWalker.Resolve))
+        {
+            foreach (var (name, propSchema) in alternative.Properties)
+            {
+                if (name == discriminatorProp) continue;
+                var csType = MapPropertyType(propSchema, false, alternative, contextNs);
+                if (props.FirstOrDefault(p => p.JsonName == name) is { } declared)
+                {
+                    // The first type is kept: a value of the other one would not be read, so the generation says it.
+                    if (declared.CsType.TrimEnd('?') != csType.TrimEnd('?'))
+                        _warnings.Add($"variant property with two types: {contextNs}.{ownerTypeName}.{name} ({declared.CsType} and {csType}) - emitted as {declared.CsType}");
+                    continue;
+                }
+
+                props.Add(new PropertyInfo(name, ToCsPropertyName(name), csType, false, propSchema.Description));
+            }
+        }
+
         return props;
     }
 

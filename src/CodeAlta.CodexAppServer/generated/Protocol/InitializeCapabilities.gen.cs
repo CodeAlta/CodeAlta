@@ -29,4 +29,7 @@ public sealed partial record InitializeCapabilities
     /// <summary>Opt into `attestation/generate` requests for upstream `x-oai-attestation`.</summary>
     [JsonPropertyName("requestAttestation")]
     public bool? RequestAttestation { get; set; }
+    /// <summary>Present `humanCommand` approvals to a person and return only a one-time decision. Requires `experimentalApi`. Pending requests can be replayed to compatible clients.</summary>
+    [JsonPropertyName("requiredHumanApproval")]
+    public bool? RequiredHumanApproval { get; set; }
 }

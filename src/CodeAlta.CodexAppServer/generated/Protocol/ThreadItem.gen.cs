@@ -64,6 +64,8 @@ public partial record ThreadItem
         public string Id { get; set; } = string.Empty;
         [JsonPropertyName("memoryCitation")]
         public MemoryCitation? MemoryCitation { get; set; }
+        [JsonPropertyName("moderation")]
+        public AgentMessageModeration? Moderation { get; set; }
         [JsonPropertyName("phase")]
         public MessagePhase? Phase { get; set; }
         [JsonPropertyName("questions")]
@@ -312,6 +314,10 @@ public partial record ThreadItem
         public string Status { get; set; } = string.Empty;
         [JsonPropertyName("transparentBackground")]
         public bool? TransparentBackground { get; set; }
+        [JsonPropertyName("fileId")]
+        public string? FileId { get; set; }
+        [JsonPropertyName("result")]
+        public string? Result { get; set; }
     }
 
     public sealed partial record EnteredReviewModeThreadItem : ThreadItem

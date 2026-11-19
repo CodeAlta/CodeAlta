@@ -17,4 +17,7 @@ public sealed partial record ItemCompletedNotification
     public string ThreadId { get; set; } = string.Empty;
     [JsonPropertyName("turnId")]
     public string TurnId { get; set; } = string.Empty;
+    /// <summary>Native content tokens for the completed assistant message, including a sampled footer. Null when unavailable. Completion telemetry is not part of the stored thread item.</summary>
+    [JsonPropertyName("contentTokenCount")]
+    public ulong? ContentTokenCount { get; set; }
 }

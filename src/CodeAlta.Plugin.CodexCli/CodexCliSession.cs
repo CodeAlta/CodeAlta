@@ -584,7 +584,7 @@ internal sealed partial class CodexCliSession : IAsyncDisposable
             Cwd = connection.WorkingDirectory,
             Model = string.IsNullOrWhiteSpace(request.ModelId) ? null : request.ModelId,
             Effort = CodexCliModels.FromEffort(request.ReasoningEffort) is { } effort ? (ReasoningEffort?)new ReasoningEffort { Value = effort } : null,
-            Summary = request.OmitReasoningSummaries ? new ReasoningSummary.None() : null,
+            Summary = request.OmitReasoningSummaries ? ReasoningSummary.None : null,
         };
         connection.CurrentModel = parameters.Model ?? connection.CurrentModel;
         connection.BeginTurn(null);

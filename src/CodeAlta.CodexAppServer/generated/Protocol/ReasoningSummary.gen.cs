@@ -9,65 +9,46 @@ namespace CodeAlta.CodexAppServer.Protocol;
 /// <summary>
 /// A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries
 /// </summary>
+[JsonConverter(typeof(ReasoningSummaryJsonConverter))]
+public enum ReasoningSummary
+{
+    /// <summary>A value this version of the protocol does not know.</summary>
+    UnrecognizedValue = -1,
+    Auto,
+    Concise,
+    Detailed,
+    None
+}
+
 internal sealed class ReasoningSummaryJsonConverter : JsonConverter<ReasoningSummary>
 {
     public override ReasoningSummary Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        if (reader.TokenType == JsonTokenType.String)
-        {
-            var s = reader.GetString();
-            return s switch
-            {
-                "auto" => new ReasoningSummary.Auto(),
-                "concise" => new ReasoningSummary.Concise(),
-                "detailed" => new ReasoningSummary.Detailed(),
-                "none" => new ReasoningSummary.None(),
-                _ => throw new JsonException($"Unknown ReasoningSummary string variant: '{s}'.")
-            };
-        }
-
-        if (reader.TokenType == JsonTokenType.StartObject)
-        {
-            using var doc = JsonDocument.ParseValue(ref reader);
-            var obj = doc.RootElement;
-            throw new JsonException($"Unknown ReasoningSummary object variant. Properties: {string.Join(", ", EnumeratePropertyNames(obj))}");
-        }
-
-        throw new JsonException($"Unexpected token {reader.TokenType} for ReasoningSummary.");
-    }
-
-    private static IEnumerable<string> EnumeratePropertyNames(JsonElement element)
-    {
-        foreach (var p in element.EnumerateObject()) yield return p.Name;
-    }
+        => reader.TokenType == JsonTokenType.String ? Parse(reader.GetString()) : throw new JsonException($"Expected a string for ReasoningSummary.");
 
     public override void Write(Utf8JsonWriter writer, ReasoningSummary value, JsonSerializerOptions options)
-    {
-        switch (value)
-        {
-            case ReasoningSummary.Auto:
-                writer.WriteStringValue("auto");
-                break;
-            case ReasoningSummary.Concise:
-                writer.WriteStringValue("concise");
-                break;
-            case ReasoningSummary.Detailed:
-                writer.WriteStringValue("detailed");
-                break;
-            case ReasoningSummary.None:
-                writer.WriteStringValue("none");
-                break;
-            default:
-                throw new JsonException($"Unknown ReasoningSummary variant: {value.GetType().Name}");
-        }
-    }
-}
+        => writer.WriteStringValue(Format(value));
 
-[JsonConverter(typeof(ReasoningSummaryJsonConverter))]
-public abstract partial record ReasoningSummary
-{
-    public sealed partial record Auto : ReasoningSummary;
-    public sealed partial record Concise : ReasoningSummary;
-    public sealed partial record Detailed : ReasoningSummary;
-    public sealed partial record None : ReasoningSummary;
+    public override ReasoningSummary ReadAsPropertyName(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => Parse(reader.GetString());
+
+    public override void WriteAsPropertyName(Utf8JsonWriter writer, ReasoningSummary value, JsonSerializerOptions options)
+        => writer.WritePropertyName(Format(value));
+
+    private static ReasoningSummary Parse(string? value) => value switch
+    {
+        "auto" => ReasoningSummary.Auto,
+        "concise" => ReasoningSummary.Concise,
+        "detailed" => ReasoningSummary.Detailed,
+        "none" => ReasoningSummary.None,
+        _ => ReasoningSummary.UnrecognizedValue,
+    };
+
+    private static string Format(ReasoningSummary value) => value switch
+    {
+        ReasoningSummary.Auto => "auto",
+        ReasoningSummary.Concise => "concise",
+        ReasoningSummary.Detailed => "detailed",
+        ReasoningSummary.None => "none",
+        _ => throw new JsonException($"ReasoningSummary.{value} cannot be written."),
+    };
 }

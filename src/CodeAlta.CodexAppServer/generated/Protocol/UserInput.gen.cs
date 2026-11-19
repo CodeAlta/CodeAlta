@@ -29,6 +29,10 @@ public partial record UserInput
     {
         [JsonPropertyName("detail")]
         public ImageDetail? Detail { get; set; }
+        [JsonPropertyName("url")]
+        public string? Url { get; set; }
+        [JsonPropertyName("fileId")]
+        public string? FileId { get; set; }
     }
 
     public sealed partial record LocalImageUserInput : UserInput
@@ -42,7 +46,9 @@ public partial record UserInput
     public sealed partial record AudioUserInput : UserInput
     {
         [JsonPropertyName("url")]
-        public string Url { get; set; } = string.Empty;
+        public string? Url { get; set; }
+        [JsonPropertyName("fileId")]
+        public string? FileId { get; set; }
     }
 
     public sealed partial record LocalAudioUserInput : UserInput

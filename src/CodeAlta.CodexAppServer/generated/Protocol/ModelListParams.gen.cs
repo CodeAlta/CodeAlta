@@ -17,4 +17,7 @@ public sealed partial record ModelListParams
     /// <summary>Optional page size; defaults to a reasonable server-side value.</summary>
     [JsonPropertyName("limit")]
     public uint? Limit { get; set; }
+    /// <summary>List models for this configured provider instead of the app-server default.</summary>
+    [JsonPropertyName("modelProvider")]
+    public string? ModelProvider { get; set; }
 }

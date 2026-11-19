@@ -26,12 +26,21 @@ public partial record FunctionCallOutputContentItem
     {
         [JsonPropertyName("detail")]
         public ImageDetail? Detail { get; set; }
+        [JsonPropertyName("image_url")]
+        public string? ImageUrl { get; set; }
+        [JsonPropertyName("file_id")]
+        public string? FileId { get; set; }
     }
 
+    /// <summary>
+    /// Inline audio data or an uploaded file loaded by the Responses API.
+    /// </summary>
     public sealed partial record InputAudioFunctionCallOutputContentItem : FunctionCallOutputContentItem
     {
         [JsonPropertyName("audio_url")]
-        public string AudioUrl { get; set; } = string.Empty;
+        public string? AudioUrl { get; set; }
+        [JsonPropertyName("file_id")]
+        public string? FileId { get; set; }
     }
 
     public sealed partial record EncryptedContentFunctionCallOutputContentItem : FunctionCallOutputContentItem
