@@ -167,7 +167,7 @@ With more than the Default space, the **Mobile** card of **Settings > Plugins** 
 **Settings > Extensions > Mobile** is there while the plugin is on. The gear button of the **Mobile** card of **Settings > Plugins** goes to it too.
 
 <figure class="alta-figure my-4" style="max-width: 44rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-mobile-settings.webp" alt="Settings, Mobile page of CodeAlta Desktop: the two ports, the address on the tailnet (blurred) and Reset access" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile-settings.webp" alt="Settings, Mobile page of CodeAlta Desktop: Connect a phone with its Open the Mobile tab button, how phones connect and the two ports, the address on the tailnet (blurred) and Reset access" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Mobile page of Settings.</figcaption>
 </figure>
 
