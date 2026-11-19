@@ -6,7 +6,7 @@ import { followPageFont, followShellTheme, monaco, pageFontOptions } from "./mon
 import { attachPromptMath } from "./promptMath";
 import { promptTypeEvent } from "./promptTyping";
 import { useShellLanguage } from "./shellLanguage";
-import { SkillChoicesContext, skillMentionSpans, skillNames } from "./skillMentions";
+import { SkillChoicesContext, skillMentionSpans, skillNames, type SkillChoices, type SkillMentionSpan } from "./skillMentions";
 import { spokenInsertion } from "./speech/spokenText";
 
 export { equationKey } from "./equationEditing";
@@ -54,16 +54,27 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   const skillChoices = useContext(SkillChoicesContext);
   // A command for a shell (`!`) names no skill.
   const knownSkills = useMemo(() => skillNames(shell ? null : skillChoices?.skills), [shell, skillChoices?.skills]);
-  const skillMarks = useRef<{ known: ReadonlySet<string>; shown: monaco.editor.IEditorDecorationsCollection | null }>({ known: knownSkills, shown: null });
-  skillMarks.current.known = knownSkills;
+  const skillMarks = useRef<{ known: ReadonlySet<string>; mentions: SkillChoices["mentions"] | null; asked: number; shown: monaco.editor.IEditorDecorationsCollection | null }>(
+    { known: knownSkills, mentions: null, asked: 0, shown: null });
+  skillMarks.current.known = knownSkills; skillMarks.current.mentions = skillChoices?.mentions ?? null;
   function markSkills() {
-    const instance = editor.current, model = instance?.getModel();
+    const instance = editor.current, model = instance?.getModel(), marks = skillMarks.current;
     if (!instance || !model) return;
-    const decorations = skillMentionSpans(model.getValue(), skillMarks.current.known).map(span => ({
-      range: monaco.Range.fromPositions(model.getPositionAt(span.start), model.getPositionAt(span.end)),
-      options: { description: "skill-mention", inlineClassName: "prompt-skill-mention" } }));
-    if (skillMarks.current.shown) skillMarks.current.shown.set(decorations);
-    else if (decorations.length) skillMarks.current.shown = instance.createDecorationsCollection(decorations);
+    const text = model.getValue(), known = marks.known, asked = ++marks.asked;
+    const show = (spans: readonly SkillMentionSpan[]) => {
+      // A mark does not grow with what is typed at its end: `/tdd` followed by a letter is no longer that skill.
+      const decorations = spans.map(span => ({ range: monaco.Range.fromPositions(model.getPositionAt(span.start), model.getPositionAt(span.end)),
+        options: { description: "skill-mention", inlineClassName: "prompt-skill-mention", stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges } }));
+      if (marks.shown) marks.shown.set(decorations);
+      else if (decorations.length) marks.shown = instance.createDecorationsCollection(decorations);
+    };
+    // The host is asked only for a prompt that may name a skill: it says which `/name` are outside code, as it reads the
+    // prompt when it is sent. Until it answers, the marks shown follow the text.
+    if (!marks.mentions || skillMentionSpans(text, known).length === 0) { show([]); return; }
+    void marks.mentions(text).then(spans => {
+      if (asked === marks.asked && editor.current === instance && !model.isDisposed() && model.getValue() === text)
+        show(spans.filter(span => known.has(span.name.toLowerCase())));
+    }, () => { /* The prompt stays without marks; it is sent as written. */ });
   }
   // The character before the caret, a line break at the start of a line, nothing at the start of the prompt.
   function beforeCaret(model: monaco.editor.ITextModel, position: monaco.IPosition) {
@@ -151,9 +162,9 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     markSkills();
     return () => { node.removeEventListener("keydown", keepPageSelection, true); node.removeEventListener(promptTypeEvent, typed);
       detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
-      interim.current = { text: "", shown: null }; skillMarks.current.shown = null; node.removeAttribute("data-interim"); };
+      interim.current = { text: "", shown: null }; skillMarks.current.shown = null; skillMarks.current.asked++; node.removeAttribute("data-interim"); };
   }, [expanded]);
-  useLayoutEffect(markSkills, [knownSkills]);
+  useLayoutEffect(markSkills, [knownSkills, skillChoices?.mentions]);
   useImperativeHandle(ref, () => ({
     get value() { return editor.current?.getValue() ?? latest.current.value; },
     get disabled() { return latest.current.disabled; },

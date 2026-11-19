@@ -125,6 +125,24 @@ test("typing / opens the skill picker, a choice writes /name, and a deletion, a 
     assert.equal(await until(`!!${dialog} && ${query} === 'g'`), true, "fast typing opens the picker with what was typed");
     await key("Escape", "Escape", 27);
     assert.equal(await until(`!${dialog} && ${prompt}.endsWith(' /g')`), true, "and closing it keeps that text");
+
+    // Ctrl+Space opens the picker again in a token that a period follows: the chosen skill keeps the period.
+    await evaluate("{ const p = document.querySelector('#prompt'); p.value = 'ask /td. Then'; p.focus(); p.setSelectionRange(7, 7) }");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", windowsVirtualKeyCode: 32, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32, modifiers: 2 });
+    assert.equal(await until(`!!${dialog} && ${query} === 'td'`), true, "Ctrl+Space opens the picker on the token");
+    await key("Enter", "Enter", 13);
+    assert.equal(await until(`!${dialog} && ${prompt} === 'ask /tdd. Then'`), true, "the period after the token stays");
+
+    // Enter on the Close button of the picker closes it: it does not choose the selected skill.
+    await evaluate("{ const p = document.querySelector('#prompt'); p.value = 'ask '; p.focus(); p.setSelectionRange(4, 4) }");
+    await slash();
+    assert.equal(await until(`!!${dialog}`), true);
+    await command("Input.insertText", { text: "td" });
+    assert.equal(await until(`${dialog}?.querySelector('[aria-selected="true"]')?.textContent.includes('/tdd')`), true);
+    await evaluate(`${dialog}.querySelector('button[aria-label="Close"]').focus()`);
+    await key("Enter", "Enter", 13);
+    assert.equal(await until(`!${dialog} && ${prompt} === 'ask /td'`), true, "Enter on Close writes back the text typed, not the skill");
     await command("Browser.close").catch(() => { });
   } finally {
     socket?.close();

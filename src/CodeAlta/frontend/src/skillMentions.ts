@@ -2,71 +2,41 @@ import { createContext, type RefObject } from "react";
 import type { PromptInput } from "./PromptEditor";
 import type { SkillChoice } from "./search/skillResults";
 
+/** A `/name` in a text: from `start` (the slash) to `end`. */
+export type SkillMentionSpan = Readonly<{ start: number; end: number; name: string }>;
+
 /**
  * The skills of the project in front, that a prompt names as `/name` (`skills`: null while they are being read, or
- * where no session runs), and what reads them again (`refresh`): the `/` picker does when it opens.
+ * where no session runs), what reads them again (`refresh`: the `/` picker does when it opens), and where a prompt names
+ * skills as the host reads it when the prompt is sent (`mentions`): the host reads the prompt as Markdown, and code, links
+ * and HTML name none.
  */
-export type SkillChoices = Readonly<{ skills: readonly SkillChoice[] | null; refresh: () => void }>;
+export type SkillChoices = Readonly<{
+  skills: readonly SkillChoice[] | null; refresh: () => void;
+  mentions: (text: string) => Promise<readonly SkillMentionSpan[]>;
+}>;
 export const SkillChoicesContext = createContext<SkillChoices | null>(null);
 
-// A `/name` that names a skill, as the host reads it (SkillPromptMentions): a slash at the start of the prompt, after white
-// space or an opening bracket, then a name that starts and ends with a letter or a digit, then white space, a punctuation
-// mark or the end of the text. Code (a fenced block, a `code span`) names no skill.
-const mention = /(?<=^|[\s(\[{])\/([\p{L}\p{N}](?:[\p{L}\p{N}_.:-]*[\p{L}\p{N}])?)(?=$|[\s.,;:!?)\]}"'])/gu;
+// A `/name` in plain text, as the host reads one (SkillPromptMentions): a slash at the start of the text, after white space
+// or an opening bracket, then a name that starts and ends with a letter or a decimal digit, then white space, a
+// punctuation mark or the end of the text. White space is what .NET takes for some (`char.IsWhiteSpace`), not `\s`.
+const space = "\\t-\\r\\u0085\\p{Z}";
+const mention = new RegExp(`(?<=^|[${space}(\\[{])/([\\p{L}\\p{Nd}](?:[\\p{L}\\p{Nd}_.:-]*[\\p{L}\\p{Nd}])?)(?=$|[${space}.,;:!?)\\]}"'])`, "gu");
 const maximumNameLength = 128;
-
-/**
- * The text with its code hidden, as the host hides it (SkillPromptMentions): each character of a fenced block or of a
- * `code span` becomes U+0000, line breaks kept, so that no `/name` is found there and the offsets stay those of `text`.
- */
-export function codeMasked(text: string): string {
-  if (!text.includes("`") && !text.includes("~")) return text;
-  const masked = text.split("");
-  const hide = (from: number, to: number) => { for (let at = from; at < to; at++) if (masked[at] !== "\n") masked[at] = "\0"; };
-  let fence: { char: string; length: number } | null = null;
-  for (let start = 0; start <= text.length;) {
-    const end = text.indexOf("\n", start) < 0 ? text.length : text.indexOf("\n", start);
-    const line = text.slice(start, end);
-    const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
-    if (fence) {
-      hide(start, end);
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = null;
-    } else if (marker && !(marker[1][0] === "`" && line.slice(marker[0].length).includes("`"))) {
-      fence = { char: marker[1][0], length: marker[1].length };
-      hide(start, end);
-    }
-    start = end + 1;
-  }
-  // A code span: a run of backticks to the next run of as many, outside the fenced blocks.
-  for (let at = 0; at < masked.length;) {
-    if (masked[at] !== "`") { at++; continue; }
-    let run = at;
-    while (masked[run] === "`") run++;
-    const ticks = run - at;
-    let close = run;
-    for (;;) {
-      close = masked.indexOf("`", close);
-      if (close < 0) break;
-      let after = close;
-      while (masked[after] === "`") after++;
-      if (after - close === ticks) { hide(at, after); break; }
-      close = after;
-    }
-    at = close < 0 ? run : close + ticks;
-  }
-  return masked.join("");
-}
 
 /** The names of skills, lowercase, as `skillMentionSpans` and `dressSkillMentions` compare them. */
 export function skillNames(skills: readonly SkillChoice[] | null | undefined): ReadonlySet<string> {
   return new Set((skills ?? []).map(skill => skill.name.toLowerCase()));
 }
 
-/** Where a text names one of the skills `known` (lowercase names), in order: the `/` and the name. */
-export function skillMentionSpans(text: string, known: ReadonlySet<string>): { start: number; end: number; name: string }[] {
+/**
+ * Where a plain text names one of the skills `known` (lowercase names), in order. The text is not read as Markdown: it is
+ * a text of a rendered message, or a prompt before the host says which of these are outside code (`SkillChoices.mentions`).
+ */
+export function skillMentionSpans(text: string, known: ReadonlySet<string>): SkillMentionSpan[] {
   if (known.size === 0 || !text.includes("/")) return [];
-  const spans: { start: number; end: number; name: string }[] = [];
-  for (const match of codeMasked(text).matchAll(mention)) {
+  const spans: SkillMentionSpan[] = [];
+  for (const match of text.matchAll(mention)) {
     const name = match[1];
     if (name.length <= maximumNameLength && known.has(name.toLowerCase())) spans.push({ start: match.index, end: match.index + 1 + name.length, name });
   }
@@ -83,7 +53,9 @@ export function activeSkillReference(text: string, caret: number) {
   if (!match || match[1].length > maximumNameLength || text[caret] === "/") return null;
   // A `/` typed before a word starts a token of its own: the word stays.
   let end = caret;
-  while (match[1] && end < text.length && !/[\s/,;!?()\[\]{}]/u.test(text[end])) end++;
+  while (match[1] && end < text.length && !/[\s/,;!?()\[\]{}"']/u.test(text[end])) end++;
+  // The punctuation that ends a sentence is not of the token (`/tdd.`): a skill written in its place keeps it.
+  while (end > caret && /[._:-]/u.test(text[end - 1])) end--;
   return { start: caret - match[1].length - 1, end, query: match[1] };
 }
 
@@ -99,16 +71,18 @@ export function typedSkillQuery(text: string, start: number, end: number, typed:
 
 /**
  * Writes `/name` in place of the text from `start` to `end`, with what goes with the skill (`args`): separated by a space
- * from the word before it, and followed by a space where the user goes on typing. The caret goes after it.
+ * from the word before it, and followed by a space where the user goes on typing, unless punctuation follows it.
  */
 export function insertSkillCall(text: string, start: number, end: number, name: string, args = "") {
   if (!name || /\s/u.test(name) || start < 0 || end < start || end > text.length) return null;
   const before = start > 0 && !/[\s(\[{]/u.test(text[start - 1]) ? " " : "";
   const call = `${before}/${name}${args.trim() ? ` ${args.trim()}` : ""}`;
-  const after = text[end] === undefined || !/\s/u.test(text[end]) ? " " : "";
+  // No space before the punctuation that follows the call (`/tdd.`): it ends the name as white space does.
+  const closed = text[end] !== undefined && /[.,;:!?)\]}"']/u.test(text[end]);
+  const after = closed || text[end] !== undefined && /\s/u.test(text[end]) ? "" : " ";
   const value = text.slice(0, start) + call + after + text.slice(end);
-  // The caret goes after the space that follows the call, the one it adds or the one that was there.
-  return value.length <= 32768 ? { text: value, caret: start + call.length + 1 } : null;
+  // The caret goes after the space that follows the call, the one it adds or the one that was there; else after the call.
+  return value.length <= 32768 ? { text: value, caret: start + call.length + (closed ? 0 : 1) } : null;
 }
 
 /**

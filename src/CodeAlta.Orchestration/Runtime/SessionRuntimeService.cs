@@ -3295,13 +3295,22 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var space = await AwaitRetentionAwareAsync(GetSpaceFilterAsync(session.SpaceId, project, cancellationToken)).ConfigureAwait(false);
             // The folders a send of the session reads skills from (SessionExecutionPolicy.CaptureSession).
             var query = BuildSkillCatalogQuery(project, session.Kind != SessionViewKind.GlobalSession && project is not null ? [project.ProjectPath] : [], space);
-            var notes = new List<AgentInputItem>(names.Count);
+            // The catalog is read once, whatever the number of names: a pasted text can hold thousands of `/word`. Only the
+            // skills the composer offers are in it (enabled, valid, trusted, not shadowed).
+            var offered = await AwaitRetentionAwareAsync(_skillCatalog.ListAsync(query, cancellationToken)).ConfigureAwait(false);
+            var notes = new List<AgentInputItem>();
+            var given = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var name in names)
             {
+                // More skills than a message shows (PromptSkillHistory) are not given: their names stay text.
+                if (notes.Count == PromptSkillHistory.MaximumSkills) break;
+                var descriptor = offered.FirstOrDefault(skill => string.Equals(skill.Name, name, StringComparison.OrdinalIgnoreCase))
+                    ?? offered.FirstOrDefault(skill => string.Equals(skill.NormalizedName, name, StringComparison.OrdinalIgnoreCase));
+                if (descriptor is not { IsEnabled: true, IsValid: true, IsTrusted: true, IsShadowed: false } || !given.Add(descriptor.Name)) continue;
                 SkillActivation? activation;
                 try
                 {
-                    activation = await AwaitRetentionAwareAsync(_skillCatalog.ActivateAsync(query, name, cancellationToken)).ConfigureAwait(false);
+                    activation = await AwaitRetentionAwareAsync(_skillCatalog.ActivateAsync(query, descriptor.Name, cancellationToken)).ConfigureAwait(false);
                 }
                 // A skill whose files cannot be read is no skill the prompt names: its name stays text, and the prompt is sent.
                 catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -3309,7 +3318,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     continue;
                 }
 
-                // Only a skill the composer offers: the catalog also finds by name the invalid, untrusted and shadowed ones.
+                // The skill may have changed since the listing: only one that is still offered is given.
                 if (activation?.Descriptor is { IsValid: true, IsTrusted: true, IsShadowed: false })
                     notes.Add(new AgentInputItem.HostContext(AgentInputItem.HostContext.SkillKind, SkillActivationText(activation)));
             }

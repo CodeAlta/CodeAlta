@@ -3651,7 +3651,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return () => controller.abort();
   }, [searchOpen, skillsRequest, skillEpoch, projectId, spaceId]);
   const skillChoices = useMemo<SkillChoices | null>(() => skillEpoch ? {
-    skills: searchSkills?.key === skillsKey ? searchSkills.skills : null, refresh: () => setSkillsRequest(value => value + 1),
+    skills: searchSkills?.key === skillsKey ? searchSkills.skills : null, refresh: () => setSkillsRequest(value => value + 1), mentions: promptSkillMentions,
   } : null, [skillEpoch, skillsKey, searchSkills]);
 
   // A skill chosen in the search is written at the caret of the prompt of the session in front, with what was typed after
@@ -7081,6 +7081,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
   </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SkillChoicesContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
 }
+
+// Where a prompt names skills, as the host reads it when the prompt is sent.
+const promptSkillMentions = (text: string) => skillsApi.mentions({ text }, { timeoutMilliseconds: 8000 }).then(page => page.mentions);
 
 /** The way to Fleet at the foot of the Explorer, with how many of the machines it lists are online. */
 function fleetBar(projects: readonly WorkspaceProject[], onOpen: () => void) {

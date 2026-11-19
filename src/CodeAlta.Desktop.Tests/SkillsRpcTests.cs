@@ -28,6 +28,21 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task TheMentionsOfAPrompt_AreItsSlashNamesOutsideCode_WithTheirPlaces()
+    {
+        // No host is needed: the prompt editor asks before a session exists.
+        var service = new SkillsService();
+        const string text = "/tdd the parser, see `/usr/bin` then\n```\n/research\n```\n(/Code-Review)";
+        var found = (await service.MentionsAsync(new(text), default)).Mentions;
+        CollectionAssert.AreEqual(new[] { "/tdd:tdd", "/Code-Review:Code-Review" }, found.Select(mention => $"{text[mention.Start..mention.End]}:{mention.Name}").ToArray());
+
+        Assert.IsEmpty((await service.MentionsAsync(new(null), default)).Mentions);
+        Assert.IsEmpty((await service.MentionsAsync(new(""), default)).Mentions);
+        Assert.IsEmpty((await service.MentionsAsync(new("/tdd " + new string('a', 32768)), default)).Mentions, "A text longer than a prompt is not read.");
+        Assert.HasCount(256, (await service.MentionsAsync(new(string.Concat(Enumerable.Repeat("/tdd ", 300))), default)).Mentions);
+    }
+
+    [TestMethod]
     public async Task TheSkillsOfMcpServers_AreListedReadOnly_WithTheirSwitchTheirApprovalAndTheirContent()
     {
         using var fixture = await Fixture.CreateAsync();

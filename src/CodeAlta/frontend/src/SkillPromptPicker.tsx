@@ -56,6 +56,8 @@ export function SkillPromptPicker({ edit, input }: { edit: (text: string) => voi
     onKeyDown={event => {
       event.stopPropagation();
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.metaKey || event.ctrlKey || event.altKey) return;
+      // A button of the window (Close, its size) keeps its keys: Enter presses it, Tab leaves it.
+      if (event.target instanceof HTMLButtonElement && event.key !== "Escape") return;
       const handled = event.key === "ArrowDown" ? (move(1), true) : event.key === "ArrowUp" ? (move(-1), true)
         : event.key === "PageDown" ? (move(pageStep), true) : event.key === "PageUp" ? (move(-pageStep), true)
         : event.key === "Enter" || event.key === "Tab" && !event.shiftKey ? (count ? choose(index) : keepTyped(query), true)

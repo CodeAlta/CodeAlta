@@ -89,7 +89,7 @@ Press `Ctrl+P` to search and run any command. In CodeAlta Desktop, `Ctrl+P` or t
 
 Type `/` in the empty prompt of a session and choose a [skill](settings.md#skills-management): `/handoff ` is written in the prompt, and you go on writing your request, on as many lines as you need. In a prompt that already has text, `/` at the start of a word opens the list of the skills, and `Enter` or `Tab` writes the selected one.
 
-A prompt can name several skills anywhere in its text, such as `/grilling the plan below, then /tdd`. When you send it, the agent receives the content of each skill with your text, and the timeline shows your prompt as you wrote it. A skill is offered when it is enabled, valid and trusted for the project; a `/name` that is no skill stays text.
+A prompt can name several skills anywhere in its text, such as `/grilling the plan below, then /tdd`. When you send it, the agent receives the content of each skill with your text, and the timeline shows your prompt as you wrote it. A skill is offered when it is enabled, valid and trusted for the project; a `/name` that is no skill, or that is in code or in a link, stays text.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-skill-search.webp" alt="The search window of CodeAlta Desktop after a slash: the first commands, then the skills of the project, each with its slash name, its description and where it comes from" loading="lazy">

@@ -1845,7 +1845,9 @@ public sealed class OwnedSessionCommandServiceTests
     [DataRow(false)]
     public Task SkillSend_GivesEachNamedSkillOnceBeforeTheTypedText_WhenTheComposerAsks(bool skills) => Fixture.RunAsync(async f =>
     {
-        const string typed = "/fixture-builtin and /unknown-skill, then /FIXTURE-builtin again";
+        // The skill is named twice, and once more in code and in a link; the two thousand other names are no skills.
+        var typed = "/fixture-builtin and /unknown-skill, then /FIXTURE-builtin again, `/fixture-builtin` [x](/fixture-builtin)"
+            + string.Concat(Enumerable.Range(0, 2000).Select(static index => $" /u{index}"));
         var admission = f.AdmitSend(new OwnedTextSendRequest("skill-send", f.SessionId, typed) { Skills = skills });
         Assert.IsNotNull(admission.Receipt);
         await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "skill send");

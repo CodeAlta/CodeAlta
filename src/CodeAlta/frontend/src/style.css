@@ -2430,7 +2430,9 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-picker-description { color: var(--muted); font-size: 12px; text-align: right; }
 .skill-picker-row { grid-template-columns: auto minmax(0, 1fr) auto; }
 /* A skill a prompt names as `/name`, in the prompt and in the message sent: it is given to the model with the prompt. */
-.prompt-skill-mention, .skill-mention { color: var(--green); font-weight: 550; }
+.skill-mention { color: var(--green); font-weight: 550; }
+/* In the editor, over the color its tokens give the text. */
+.monaco-editor .prompt-skill-mention { color: var(--green); font-weight: 550; }
 .plugin-settings .settings-editor-name .plugin-canvas { color: var(--muted); }
 .plugin-settings .settings-editor-name .plugin-failure, .plugin-problems .plugin-failure { color: var(--red); white-space: normal; overflow-wrap: anywhere; }
 .plugin-problems { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; font-size: 12px; }

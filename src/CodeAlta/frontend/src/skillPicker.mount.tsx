@@ -21,7 +21,7 @@ dismissDialogsOnOutsidePress(document);
 function Fixture() {
   const input = useRef<HTMLTextAreaElement>(null);
   const [refreshes, setRefreshes] = useState(0);
-  const choices = useMemo<SkillChoices>(() => ({ skills, refresh: () => setRefreshes(value => value + 1) }), []);
+  const choices = useMemo<SkillChoices>(() => ({ skills, refresh: () => setRefreshes(value => value + 1), mentions: async () => [] }), []);
   return <SkillChoicesContext.Provider value={choices}>
     <output id="refreshes">{refreshes}</output>
     <textarea id="prompt" ref={input} />

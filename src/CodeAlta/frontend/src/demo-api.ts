@@ -393,6 +393,7 @@ export const agentPrompts = Object.freeze({
 });
 export const skills = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, skills: [], omitted: 0 }),
+  mentions: async () => ({ mentions: [] }),
   setEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),
   setAllEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),
   setMatchingEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeSkillReference, codeMasked, insertSkillCall, skillCallAtCaret, skillMentionSpans, skillNames, typedSkillQuery } from "./skillMentions";
+import { activeSkillReference, insertSkillCall, skillCallAtCaret, skillMentionSpans, skillNames, typedSkillQuery } from "./skillMentions";
 
 const known = skillNames([{ name: "grilling", title: "", description: "", source: "UserCommon" }, { name: "code-review", title: "", description: "", source: "Builtin" }]);
 
@@ -13,6 +13,9 @@ test("/ opens the skill picker at a word start and carries the typed query", () 
   assert.equal(activeSkillReference("src/app", 7), null);
   assert.equal(activeSkillReference("a //", 4), null);
   assert.equal(activeSkillReference("/usr/bin", 8), null);
+  // The punctuation after a token is not of it: a skill chosen in its place keeps the period.
+  assert.deepEqual(activeSkillReference("ask /tdd. Then", 6), { start: 4, end: 8, query: "t" });
+  assert.deepEqual(activeSkillReference("(/tdd: \"x\")", 3), { start: 1, end: 5, query: "t" });
   // A `/` typed before a word starts a token of its own: choosing a skill keeps the word.
   assert.deepEqual(activeSkillReference("please review /this", 15), { start: 14, end: 15, query: "" });
 });
@@ -34,6 +37,8 @@ test("a chosen skill is written as /name, apart from the word before it, with a 
   assert.deepEqual(insertSkillCall("/gri then", 0, 4, "grilling"), { text: "/grilling then", caret: 10 });
   assert.deepEqual(insertSkillCall("data", 4, 4, "grilling"), { text: "data /grilling ", caret: 15 });
   assert.deepEqual(insertSkillCall("", 0, 0, "grilling", " my question "), { text: "/grilling my question ", caret: 22 });
+  assert.deepEqual(insertSkillCall("ask /td. Then", 4, 7, "tdd"), { text: "ask /tdd. Then", caret: 8 });
+  assert.deepEqual(insertSkillCall("(/gr)", 1, 4, "grilling"), { text: "(/grilling)", caret: 10 });
   assert.equal(insertSkillCall("", 0, 0, ""), null);
   assert.equal(insertSkillCall("", 0, 0, "two words"), null);
 });
@@ -43,17 +48,9 @@ test("the /name of known skills are found, as the host gives them to the model",
     [{ start: 0, end: 9, name: "grilling" }, { start: 25, end: 37, name: "Code-Review" }]);
   assert.deepEqual(skillMentionSpans("src/grilling and /grilling/x and https://a/grilling", known), []);
   assert.deepEqual(skillMentionSpans("/grilling", new Set()), []);
+  // As the host: names of any script, beyond the first plane too, and the white space of .NET.
+  const others = new Set(["\u{10428}\u{10429}", "tdd"]);
+  assert.deepEqual(skillMentionSpans("/\u{10428}\u{10429} ask\u0085/tdd and\u00a0/tdd", others).map(span => span.name), ["\u{10428}\u{10429}", "tdd", "tdd"]);
+  assert.deepEqual(skillMentionSpans("\ufeff/tdd /tdd\u00b2 /tdd-", others), []);
 });
 
-// The same cases as SkillPromptMentionsTests.Find_CodeNamesNoSkill: the host and the page read code alike.
-test("code names no skill: a fenced block, a code span", () => {
-  const names = (text: string) => skillMentionSpans(text, skillNames([{ name: "tdd", title: "", description: "", source: "" }, { name: "research", title: "", description: "", source: "" }])).map(span => span.name);
-  assert.deepEqual(names("```\nGET /research 200\n```\n/tdd"), ["tdd"]);
-  assert.deepEqual(names("~~~~\n/research\n~~~\n/tdd\n~~~~\n/tdd"), ["tdd"]);
-  assert.deepEqual(names("run `cd /research` then /tdd"), ["tdd"]);
-  assert.deepEqual(names("``a ` /research`` /tdd"), ["tdd"]);
-  assert.deepEqual(names("```\n/research"), [], "a block left open runs to the end");
-  assert.deepEqual(names("` /tdd"), ["tdd"], "a backtick left open is text");
-  assert.deepEqual(names("```js /x\n/research\n```"), [], "an info string after the fence");
-  assert.equal(codeMasked("a `b` c\n"), "a \0\0\0 c\n");
-});
