@@ -1089,10 +1089,12 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         await f.Ready(self.SendFinished.Task);
         var parent = f.NewSession();
         parent.ParentSessionId = f.Session.SessionId;
+        // A session has one writer: while attached, its runtime still writes its state after the send, with the parent it
+        // had. The session is detached before its new parent is written.
+        await f.Wait(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
         f.Session.ParentSessionId = parent.SessionId;
         await f.Persist(parent);
         await f.Persist(f.Session);
-        await f.Wait(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
         var source = f.Provider.Latest;
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(parent, f.Options));

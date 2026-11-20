@@ -194,6 +194,8 @@ public sealed class ApplicationDatabaseTests
         {
             DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
             TimeProvider = clock,
+            // How long the recovery waits for the backup it is held behind, from before the backup is released: a limit.
+            BusyTimeout = TestTime.Seconds(10),
         });
         await database.WriteAsync("setup", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_kept (id INTEGER);", token));
         var copying = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
