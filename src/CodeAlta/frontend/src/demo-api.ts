@@ -152,6 +152,8 @@ export const appUpdate = Object.freeze({
   check: async () => ({ status: "unavailable", packageId: "CodeAlta", currentVersion: "demo", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null }),
   openReleaseNotes: async () => ({ status: "unavailable" }), install: async () => ({ status: "unavailable" }), cancelInstallation: async () => ({ status: "unavailable" }),
   runtimeStatus: async () => ({ status: "current", version: "demo", minimumVersion: "demo" }), openRuntimeDownload: async () => ({ status: "unavailable" }),
+  nextRuntimeStatus: async () => ({ status: "unavailable", scope: null, version: "11", detail: null }),
+  installNextRuntime: async () => ({ status: "unavailable", scope: null, version: "11", detail: null }), openNextRuntimeDownload: async () => ({ status: "unavailable" }),
 });
 export const desktopShell = Object.freeze({
   preferences: async () => ({ status: "unavailable", onClose: "ask", canKeepRunning: false, platform: "windows", entryAdded: false }),

@@ -794,6 +794,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         return true;
                     },
                     CancelInstall = () => DesktopUpdateInstaller.Cancel(options.DataRoot),
+                    NextRuntime = new NextDotnet(),
                 };
                 service.Start();
                 return service;

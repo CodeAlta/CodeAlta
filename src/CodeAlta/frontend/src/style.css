@@ -2984,6 +2984,17 @@ dialog.diagram-viewer-dialog[open] > .app-window > .app-window-body { gap: 0; pa
 .entry-added-place { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 4 3; }
 .close-window-dialog .bp6-dialog-body > .bp6-checkbox { margin-bottom: 0; }
 .running-exit-dialog .bp6-dialog-header > svg { flex: none; margin-right: 8px; color: var(--red); }
+/* The .NET of the next major version: the toast that proposes it and the reminder at the exit. */
+.next-runtime-exit-dialog { width: min(460px, calc(100vw - 32px)); }
+.next-runtime-exit-dialog .bp6-dialog-header > svg { flex: none; margin-right: 8px; color: var(--accent); }
+.next-runtime-exit-dialog .bp6-dialog-body > p { margin: 0 0 10px; }
+.next-runtime-exit-dialog .bp6-dialog-body > p:last-child { margin-bottom: 0; }
+.next-runtime-exit-progress { display: flex; align-items: center; gap: 10px; }
+.next-runtime-exit-progress .bp6-spinner { flex: none; }
+.next-runtime-exit-failure { color: var(--red); overflow-wrap: anywhere; }
+.next-runtime-notice { display: grid; gap: 4px; min-width: 0; }
+.next-runtime-notice-hint { font-size: 12px; opacity: .82; overflow-wrap: anywhere; }
+.bp6-toast.next-runtime-toast > .bp6-spinner { margin: 12px 0 12px 12px; }
 
 /* The update notice: the new version, the command that installs it and the way to its release notes. */
 .update-notice { display: grid; gap: 6px; min-width: 0; }

@@ -244,6 +244,17 @@ The desktop app checks for new versions at startup and every ten minutes, also f
 
 On macOS, the desktop app warns at startup when it runs on a .NET runtime older than 10.0.13, which can make it crash hours later. **Download .NET** opens the [.NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0): install the latest .NET 10 runtime, then start CodeAlta again.
 
+### Prepare for the next major version
+
+The next major version of CodeAlta runs on .NET 11. When the .NET that CodeAlta runs on has no .NET 11 SDK, the desktop app proposes to install it, so that the update to that version starts at once:
+
+- A notice at startup, with **Install now**. Close it to decide later: it comes back at the next start.
+- When you exit, once a run, a question with **Install and exit**: CodeAlta exits once .NET 11 is installed. **Exit CodeAlta** exits without it.
+- A .NET of your account, such as `%LOCALAPPDATA%\Microsoft\dotnet` or `~/.dotnet`, gets the SDK from Microsoft's install script, without a question.
+- A .NET of the system gets Microsoft's installer: Windows asks for your permission, macOS for the password of an administrator. On Linux, install the .NET 11 SDK with the package manager of your system; **Download .NET 11** opens its download page.
+
+With .NET 11 already there, nothing is shown.
+
 ## Same feature, another name
 
 | | Desktop | TUI |

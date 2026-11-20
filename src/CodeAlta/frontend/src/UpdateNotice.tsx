@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, OverlayToaster, type ToastProps } from "@blueprintjs/core";
-import type { AppRuntimeResponse, AppUpdateResponse } from "#neoastra";
+import { Button, Callout, OverlayToaster, Spinner, type ToastProps } from "@blueprintjs/core";
+import type { AppNextRuntimeResponse, AppRuntimeResponse, AppUpdateResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { translate, type Locale, type MessageKey } from "./localization";
 
@@ -59,6 +59,43 @@ export function runtimeNotification(runtime: Pick<AppRuntimeResponse, "status" |
   return { intent: "warning", icon: "warning-sign", timeout: 0,
     message: translate(locale, "CodeAlta runs on .NET {version}, which can make it crash. Update .NET 10 to {minimum} or later.", { version: runtime.version, minimum: runtime.minimumVersion }),
     action: { text: translate(locale, "Download .NET"), onClick: onDownload } };
+}
+
+/** What the page knows of the .NET the next major version runs on (#209). */
+export type NextRuntime = Pick<AppNextRuntimeResponse, "status" | "scope" | "version" | "detail">;
+
+/** Whether the .NET of the next major version is still to be installed where CodeAlta can install it. */
+export function nextRuntimeToInstall(runtime: NextRuntime | null | undefined): boolean {
+  return runtime?.status === "missing" || runtime?.status === "failed";
+}
+
+/**
+ * The toast that proposes to install the .NET the next major version runs on, and then says how it goes: kept until it is
+ * closed while it asks or works, short once it is installed. Null when there is nothing to say (installed from the start,
+ * a build without .NET of its own, an installation the user declined at the question of the system).
+ */
+export function nextRuntimeNotification(runtime: NextRuntime | null | undefined, locale: Locale, actions: Readonly<{ onInstall: () => void; onDownload: () => void }>): ToastProps | null {
+  if (!runtime) return null;
+  const t = (key: MessageKey, parameters?: Readonly<Record<string, string>>) => translate(locale, key, parameters);
+  const version = { version: runtime.version };
+  switch (runtime.status) {
+    case "missing": return { intent: "primary", icon: "cloud-download", timeout: 0, className: "next-runtime-toast",
+      message: <span className="next-runtime-notice"><strong>{t("Prepare for the next version of CodeAlta")}</strong>
+        <span>{t("The next major version of CodeAlta runs on .NET {version}. Install it now, and the update to that version starts at once.", version)}</span>
+        {runtime.scope === "system" && <span className="next-runtime-notice-hint">{t("The system asks for your permission.")}</span>}</span>,
+      action: { text: t("Install now"), onClick: actions.onInstall } };
+    case "installing": return { intent: "primary", icon: <Spinner size={16} />, timeout: 0, className: "next-runtime-toast", message: t("Installing .NET {version}…", version) };
+    case "installed": return { intent: "success", icon: "tick", timeout: 10_000, message: t(".NET {version} is installed: CodeAlta is ready for its next major version.", version) };
+    case "failed": return { intent: "danger", icon: "error", timeout: 0,
+      message: <span className="next-runtime-notice"><strong>{t("The installation of .NET {version} failed.", version)}</strong>
+        {runtime.detail && <span className="next-runtime-notice-hint">{runtime.detail}</span>}</span>,
+      action: { text: t("Try again"), onClick: actions.onInstall } };
+    case "manual": return { intent: "primary", icon: "cloud-download", timeout: 0,
+      message: <span className="next-runtime-notice"><strong>{t("Prepare for the next version of CodeAlta")}</strong>
+        <span>{t("Install the .NET {version} SDK with the package manager of your system.", version)}</span></span>,
+      action: { text: t("Download .NET {version}", version), onClick: actions.onDownload } };
+    default: return null;
+  }
 }
 
 /** What the About page says about updates; null when the check says nothing worth a line. */

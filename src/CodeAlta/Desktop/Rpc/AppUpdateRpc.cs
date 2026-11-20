@@ -85,6 +85,12 @@ internal sealed class AppUpdateService : IAsyncDisposable
     /// <summary>Where the .NET runtime is downloaded.</summary>
     internal const string RuntimeDownload = "https://dotnet.microsoft.com/en-us/download/dotnet/10.0";
 
+    /// <summary>Where the .NET of the next major version is downloaded, for a system whose package manager installs it.</summary>
+    internal const string NextRuntimeDownload = "https://dotnet.microsoft.com/en-us/download/dotnet/11.0";
+
+    /// <summary>Prepares the installation of .NET for the next major version (.NET 11); null where the application stays off the network.</summary>
+    internal NextDotnet? NextRuntime { get; init; }
+
     /// <summary>The version of the .NET runtime the application runs on; its tests choose it.</summary>
     internal Version Runtime { get; init; } = Environment.Version;
 
@@ -185,6 +191,41 @@ internal sealed class AppUpdateService : IAsyncDisposable
         // The address is the host's own: the page cannot make the host open anything else.
         return new(_open(RuntimeDownload) ? "ok" : "unavailable");
     }
+
+    /// <summary>
+    /// Whether the .NET the next major version runs on is ready where CodeAlta's .NET is (see <see cref="NextDotnet.State"/>):
+    /// <c>installed</c> asks nothing of the user, <c>missing</c> says whether its installation asks the system for permission
+    /// (<c>system</c>) or not (<c>local</c>).
+    /// </summary>
+    [NeoRpcMethod("nextRuntimeStatus")]
+    public AppNextRuntimeResponse NextRuntimeStatus(AppUpdateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Next(NextRuntime?.State() ?? new("unavailable", null));
+    }
+
+    /// <summary>
+    /// Installs the .NET 11 SDK where CodeAlta's .NET is, and ends with the state after it: <c>installed</c>, <c>failed</c>,
+    /// <c>canceled</c> (the user declined the question of the system), or the state that had nothing to install. A call while
+    /// it runs joins it.
+    /// </summary>
+    [NeoRpcMethod("installNextRuntime")]
+    public async Task<AppNextRuntimeResponse> InstallNextRuntimeAsync(AppUpdateRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (NextRuntime is null) return Next(new("unavailable", null));
+        return Next(await NextRuntime.InstallAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Opens the download page of .NET 11 in the user's browser, for a system whose package manager installs it.</summary>
+    [NeoRpcMethod("openNextRuntimeDownload")]
+    public AppUpdateOpenResponse OpenNextRuntimeDownload(AppUpdateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new(_open(NextRuntimeDownload) ? "ok" : "unavailable");
+    }
+
+    private static AppNextRuntimeResponse Next(NextDotnetState state) => new(state.Status, state.Scope, NextDotnet.Major.ToString(System.Globalization.CultureInfo.InvariantCulture), state.Detail);
 
     /// <summary>Stops admission, cancels the request, and joins it and the timer before releasing the token source.</summary>
     public ValueTask DisposeAsync()
@@ -305,3 +346,9 @@ internal sealed record AppUpdateOpenResponse(string Status);
 /// <param name="Version">The version of the .NET runtime the application runs on.</param>
 /// <param name="MinimumVersion">The oldest version that is safe.</param>
 internal sealed record AppRuntimeResponse(string Status, string Version, string MinimumVersion);
+
+/// <param name="Status"><c>installed</c>, <c>missing</c>, <c>installing</c>, <c>failed</c>, <c>canceled</c>, <c>manual</c> or <c>unavailable</c>.</param>
+/// <param name="Scope"><c>local</c> when it installs without asking, <c>system</c> when the system asks for permission; null when unavailable.</param>
+/// <param name="Version">The major version of .NET it is about.</param>
+/// <param name="Detail">What the installer said when it failed.</param>
+internal sealed record AppNextRuntimeResponse(string Status, string? Scope, string Version, string? Detail);

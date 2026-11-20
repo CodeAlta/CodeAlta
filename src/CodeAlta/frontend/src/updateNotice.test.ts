@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, translate } from "./localization";
-import { availableUpdate, installedNotice, RecoveryUpdateNotice, runtimeNotification, updateCheckInterval, updateNotification, updateStatus, updateToAnnounce } from "./UpdateNotice";
+import { availableUpdate, installedNotice, nextRuntimeNotification, nextRuntimeToInstall, RecoveryUpdateNotice, runtimeNotification, updateCheckInterval, updateNotification, updateStatus, updateToAnnounce, type NextRuntime } from "./UpdateNotice";
 
 const available = { status: "available", latestVersion: "1.3.0", command: "dotnet tool update -g CodeAlta", releaseNotes: "https://github.com/CodeAlta/CodeAlta/releases/tag/1.3.0", canInstall: false };
 
@@ -99,4 +99,42 @@ test("a .NET runtime that can crash the application is to be updated, from a war
   assert.equal(downloads, 1);
   assert.equal(runtimeNotification({ ...outdated, status: "current" }, "en", () => assert.fail("nothing to download")), null);
   assert.equal(runtimeNotification(null, "en", () => assert.fail("nothing to download")), null);
+});
+
+test("the .NET of the next major version is proposed until it is installed, then said once", () => {
+  const missing: NextRuntime = { status: "missing", scope: "local", version: "11", detail: null };
+  let installs = 0, downloads = 0;
+  const actions = { onInstall: () => installs++, onDownload: () => downloads++ };
+  for (const locale of locales) {
+    const toast = nextRuntimeNotification(missing, locale, actions)!;
+    assert.equal(toast.timeout, 0, "kept until closed: closing it is a not now");
+    assert.equal(toast.action?.text, translate(locale, "Install now"));
+    const html = renderToStaticMarkup(createElement("div", null, toast.message));
+    assert.ok(html.includes(".NET 11"), html);
+    assert.ok(!html.includes(translate(locale, "The system asks for your permission.")), "a folder of the user's own asks nothing");
+  }
+  (nextRuntimeNotification(missing, "en", actions)!.action!.onClick as () => void)();
+  assert.equal(installs, 1);
+  assert.ok(renderToStaticMarkup(createElement("div", null, nextRuntimeNotification({ ...missing, scope: "system" }, "en", actions)!.message)).includes("The system asks for your permission."));
+
+  const installing = nextRuntimeNotification({ ...missing, status: "installing" }, "en", actions)!;
+  assert.equal(installing.action, undefined, "nothing to click while it installs");
+  assert.equal(installing.message, "Installing .NET 11…");
+  const installed = nextRuntimeNotification({ ...missing, status: "installed" }, "en", actions)!;
+  assert.equal(installed.intent, "success");
+  assert.ok(installed.timeout! > 0, "the outcome goes by itself");
+  const failed = nextRuntimeNotification({ ...missing, status: "failed", detail: "powershell.exe ended with 1" }, "en", actions)!;
+  assert.equal(failed.intent, "danger");
+  assert.equal(failed.action?.text, "Try again");
+  assert.ok(renderToStaticMarkup(createElement("div", null, failed.message)).includes("powershell.exe ended with 1"));
+  const manual = nextRuntimeNotification({ ...missing, status: "manual", scope: "system" }, "en", actions)!;
+  assert.equal(manual.action?.text, "Download .NET 11");
+  (manual.action!.onClick as () => void)();
+  assert.equal(downloads, 1);
+
+  for (const status of ["canceled", "unavailable"]) assert.equal(nextRuntimeNotification({ ...missing, status }, "en", actions), null, status);
+  assert.equal(nextRuntimeNotification(null, "en", actions), null);
+  // What the exit asks about again.
+  assert.deepEqual(["missing", "failed", "installing", "installed", "canceled", "manual", "unavailable"].map(status => nextRuntimeToInstall({ ...missing, status })),
+    [true, true, false, false, false, false, false]);
 });

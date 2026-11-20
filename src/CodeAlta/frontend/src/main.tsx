@@ -25,17 +25,18 @@ import { ShellAppearance } from "./ShellAppearance";
 import { EditMenu } from "./EditMenu";
 import { monacoEditTarget } from "./monaco/monacoEditMenu";
 import { RunningExitDialog } from "./RunningExitDialog";
+import { NextRuntimeExitDialog } from "./NextRuntimeExitDialog";
 import { NewSessionPopover } from "./NewSessionPopover";
 import { SessionStartProgress, type SessionStartStep } from "./SessionStartProgress";
 import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, turnAlertMode, type CloseBehavior, type TurnAlertMode } from "./desktopShell";
 import { deliverHostDrop, readHostDrop } from "./hostDrops";
 import { EntryAddedDialog } from "./EntryAddedDialog";
-import { showToast } from "./appToaster";
+import { dismissToast, showToast } from "./appToaster";
 import { findWithPatience } from "./sessionLookup";
 import { ReleaseNotesDialog } from "./releaseNotes/ReleaseNotesDialog";
 import { readReleaseNotesPage, readReleaseNotesPreferences, startupReleaseNotes, writeReleaseNotesPreferences, type ReleaseNotesPreferences } from "./releaseNotes/releaseNotes";
-import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
+import { availableUpdate, installedNotice, nextRuntimeNotification, nextRuntimeToInstall, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate, type NextRuntime } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, subProjects as subProjectsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sideQuestion as sideQuestionApi, shellCommands as shellCommandsApi, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, conversationHeld, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
@@ -2357,6 +2358,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function exitApplication() {
     // An exit asked for anywhere answers the question about the closed window.
     setCloseQuestion(false);
+    if (remindNextRuntime()) return;
     const unsaved = fileTabs.open.filter(tab => fileEditors.dirty(fileTabKey(tab)));
     if (unsaved.length === 0) { quitApplication(); return; }
     setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
@@ -2466,6 +2468,66 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!signal.aborted && !updateChecked.current) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null });
     });
   }
+  // The .NET the next major version runs on (#209): a toast proposes to install it once a run, and the first exit of a
+  // visible window asks again, unless an update is on its way. Closing the toast is a "not now": it comes back at the next start.
+  const [nextRuntime, setNextRuntimeState] = useState<NextRuntime | null>(null);
+  const nextRuntimeNow = useRef<NextRuntime | null>(null);
+  const nextRuntimeInstall = useRef<Promise<NextRuntime> | null>(null);
+  const nextRuntimeReminded = useRef(false);
+  // The exit waits on the reminder: the toast says nothing meanwhile, the dialog does.
+  const [nextRuntimeAtExit, setNextRuntimeAtExitState] = useState(false);
+  const nextRuntimeExiting = useRef(false);
+  function setNextRuntime(value: NextRuntime) { nextRuntimeNow.current = value; setNextRuntimeState(value); }
+  function setNextRuntimeAtExit(value: boolean) { nextRuntimeExiting.current = value; setNextRuntimeAtExitState(value); }
+  function showNextRuntime(value: NextRuntime) {
+    const toast = nextRuntimeNotification(value, shownLocale.current, { onInstall: () => void installNextRuntime(),
+      onDownload: () => void appUpdate.openNextRuntimeDownload({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The toast names what to install. */ }) });
+    if (toast) showToast(toast, "next-runtime");
+    else dismissToast("next-runtime");
+  }
+  // One installation at a time, which the toast and the dialog of the exit share; the host joins a second one too.
+  function installNextRuntime(): Promise<NextRuntime> {
+    const before = nextRuntimeNow.current;
+    if (nextRuntimeInstall.current || !before) return nextRuntimeInstall.current ?? Promise.resolve(before!);
+    const installing: NextRuntime = { ...before, status: "installing", detail: null };
+    setNextRuntime(installing);
+    if (!nextRuntimeExiting.current) showNextRuntime(installing);
+    // A download and an installer: minutes on a slow connection.
+    const done = appUpdate.installNextRuntime({}, { timeoutMilliseconds: 60 * 60_000 }).then(value => value as NextRuntime,
+      () => ({ ...before, status: "failed", detail: null } satisfies NextRuntime)).then(result => {
+      nextRuntimeInstall.current = null;
+      setNextRuntime(result);
+      if (!nextRuntimeExiting.current) showNextRuntime(result);
+      return result;
+    });
+    return nextRuntimeInstall.current = done;
+  }
+  // The reminder of an exit, once a run: only a window the user sees can ask, and the exit of an update has its own way.
+  function remindNextRuntime(): boolean {
+    const runtime = nextRuntimeNow.current;
+    if (nextRuntimeReminded.current || updatePending.current || document.visibilityState !== "visible") return false;
+    if (!runtime || !(nextRuntimeToInstall(runtime) || runtime.status === "installing")) return false;
+    nextRuntimeReminded.current = true;
+    dismissToast("next-runtime");
+    setNextRuntimeAtExit(true);
+    return true;
+  }
+  // Installed (or declined at the question of the system) while the exit waits: the exit goes on.
+  useEffect(() => {
+    if (!nextRuntimeAtExit || !nextRuntime || nextRuntime.status === "installing" || nextRuntimeToInstall(nextRuntime)) return;
+    setNextRuntimeAtExit(false);
+    exitApplication();
+  });
+  const nextRuntimeChecked = useRef(false);
+  useEffect(() => {
+    if (!status?.hostEpoch || nextRuntimeChecked.current) return;
+    nextRuntimeChecked.current = true;
+    void appUpdate.nextRuntimeStatus({}, { timeoutMilliseconds: 15_000 }).then(runtime => {
+      setNextRuntime(runtime);
+      // Already there: nothing to say.
+      if (runtime.status !== "installed") showNextRuntime(runtime);
+    }, () => { /* A host that does not answer proposes nothing. */ });
+  }, [status?.hostEpoch]);
   // A .NET runtime that can crash the application is said once a window, with the way to the download page.
   const runtimeChecked = useRef(false);
   useEffect(() => {
@@ -7174,6 +7236,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {owned && status?.hostEpoch && <SecretUsePrompt epoch={status.hostEpoch} sessionTitle={sessionTitleOf} />}
     {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} trayIcon={shellPreferences?.trayIcon} onKeepRunning={keepRunning} onExit={exitOnClose}
       onCancel={() => setCloseQuestion(false)} />}
+    {nextRuntimeAtExit && nextRuntime && <NextRuntimeExitDialog runtime={nextRuntime} onInstall={() => void installNextRuntime()}
+      onExit={() => { setNextRuntimeAtExit(false); exitApplication(); }}
+      onCancel={() => { setNextRuntimeAtExit(false); exitCanceled(); if (nextRuntimeNow.current?.status === "installing") showNextRuntime(nextRuntimeNow.current); }} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
       onCancel={() => { cancelSaveFollowUp(); setExiting(null); exitCanceled(); }} />}
