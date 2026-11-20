@@ -114,6 +114,9 @@ test("typing / opens the skill picker, a choice writes /name, and a deletion, a 
     await command("Input.insertText", { text: "grilling" });
     await key("Enter", "Enter", 13);
     assert.equal(await until(`!${dialog} && ${prompt} === 'please review /grilling this'`), true, "the word after the caret stays");
+    // The picker puts the caret back in the next frame: moved before it, the caret would be moved back after the skill.
+    assert.equal(await until("document.activeElement === document.querySelector('#prompt') && document.querySelector('#prompt').selectionStart === 24"), true,
+      "the caret is back after the skill");
 
     // A letter typed right after the `/`, before its key-up, becomes the query of the picker.
     await evaluate("{ const p = document.querySelector('#prompt'); p.setSelectionRange(p.value.length, p.value.length) }");
