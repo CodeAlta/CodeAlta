@@ -16,7 +16,7 @@ public sealed class VaultCommandRunnerTests
         var watch = Stopwatch.StartNew();
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await new VaultCommandRunner().RunAsync(vault.ProgramPath, ["sleep", "60"],
             new VaultCommandOptions { Input = LargeInput, Timeout = TimeSpan.FromMinutes(2) }, stop.Token));
-        Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed, "the program is ended while its input is written");
+        Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed, "the program is ended while its input is written"); // not a limit: under its sleep of 60 s
         AssertEnded(vault);
     }
 
@@ -45,7 +45,7 @@ public sealed class VaultCommandRunnerTests
         var watch = Stopwatch.StartNew();
         var result = await new VaultCommandRunner().RunAsync(vault.ProgramPath, ["sleep", "60"], new VaultCommandOptions { Input = LargeInput, Timeout = TimeSpan.FromSeconds(1) }, CancellationToken.None);
         Assert.IsTrue(result.TimedOut);
-        Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed);
+        Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed); // not a limit: under its sleep of 60 s
         AssertEnded(vault);
     }
 

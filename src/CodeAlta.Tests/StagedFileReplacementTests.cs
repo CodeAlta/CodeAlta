@@ -101,7 +101,7 @@ public sealed class StagedFileReplacementTests
             {
                 var started = System.Diagnostics.Stopwatch.StartNew();
                 Assert.ThrowsExactly<UnauthorizedAccessException>(() => StagedFileReplacement.MoveOver(staged, path, renameWithPosixSemantics: false));
-                Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed, "A read-only file is refused at once: no reader lets it go.");
+                Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed, "A read-only file is refused at once: no reader lets it go."); // not a limit: under the 2 s of retries
                 Assert.AreEqual("after", File.ReadAllText(path));
             }
             finally
@@ -187,7 +187,7 @@ public sealed class StagedFileReplacementTests
             File.SetLastWriteTimeUtc(staged, DateTime.UtcNow.AddHours(-1));
             Assert.IsNull(await StagedFileReplacement.OpenReplacedFileAsync(path, CancellationToken.None));
             Assert.IsNull(await StagedFileReplacement.OpenReplacedFileAsync(Path.Combine(root, "missing", "credential.json"), CancellationToken.None));
-            Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed);
+            Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed); // not a limit: under the 2 s of retries
         }
         finally
         {
@@ -213,7 +213,7 @@ public sealed class StagedFileReplacementTests
             var async = await Assert.ThrowsAsync<Exception>(async () => await StagedFileReplacement.MoveOverAsync(staged, path));
             Assert.IsInstanceOfType(sync, typeof(IOException).IsInstanceOfType(sync) ? typeof(IOException) : typeof(UnauthorizedAccessException));
             Assert.IsInstanceOfType(async, typeof(IOException).IsInstanceOfType(async) ? typeof(IOException) : typeof(UnauthorizedAccessException));
-            Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed);
+            Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed); // not a limit: under the 2 s of retries
             Assert.IsTrue(Directory.Exists(path));
         }
         finally

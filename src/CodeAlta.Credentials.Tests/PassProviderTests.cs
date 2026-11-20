@@ -72,7 +72,7 @@ public sealed class PassProviderTests
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var failure = await ProviderHarness.ReadFailsAsync(provider, "web/github", interactive: false);
         Assert.AreEqual(CredentialFailure.Locked, failure.Failure);
-        Assert.IsLessThan(TimeSpan.FromSeconds(15), watch.Elapsed, "gpg fails instead of waiting for pinentry");
+        Assert.IsLessThan(TimeSpan.FromSeconds(15), watch.Elapsed, "gpg fails instead of waiting for pinentry"); // not a limit: under the 30 s it may wait
         StringAssert.Contains(failure.Message, "passphrase");
         StringAssert.Contains(failure.Detail, "No pinentry");
 

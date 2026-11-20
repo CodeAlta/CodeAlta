@@ -1607,7 +1607,7 @@ public sealed class CodeModeToolTests
             """, new FakeTools());
 
         Assert.IsTrue(result.Success, Text(result));
-        Assert.IsLessThan(TimeSpan.FromSeconds(30), clock.Elapsed, "the turn does not wait for the sleep");
+        Assert.IsLessThan(TestTime.Seconds(30), clock.Elapsed, "the turn does not wait for the sleep");
         var run = runs.FindAny(runs.List("session-1").Single().Id)!;
         Assert.IsTrue(run.Running);
         Assert.IsTrue(run.Backgrounded, "a sleeping script goes on in the background");

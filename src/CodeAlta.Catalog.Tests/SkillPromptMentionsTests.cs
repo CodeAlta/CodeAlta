@@ -89,7 +89,7 @@ public sealed class SkillPromptMentionsTests
         var text = string.Concat(Enumerable.Repeat(unit, 32768 / unit.Length)) + " /tdd";
         var watch = System.Diagnostics.Stopwatch.StartNew();
         Assert.IsNotNull(SkillPromptMentions.Find(text));
-        Assert.IsLessThan(TimeSpan.FromSeconds(5), watch.Elapsed);
+        Assert.IsLessThan(TestTime.Seconds(5), watch.Elapsed);
     }
 
     // Letters and decimal digits of any script, beyond the first plane too; a joiner never ends a name.

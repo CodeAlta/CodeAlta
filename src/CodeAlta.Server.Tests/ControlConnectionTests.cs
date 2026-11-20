@@ -347,7 +347,7 @@ public sealed class ControlConnectionTests
             // to abort the connection: the node is told at once, and reconnects to the next version.
             var stopping = System.Diagnostics.Stopwatch.StartNew();
             await server.Server.DisposeAsync().AsTask().WithinAsync(Waits.Hang);
-            Assert.IsLessThan(TimeSpan.FromSeconds(15), stopping.Elapsed, $"The stop took {stopping.Elapsed}.");
+            Assert.IsLessThan(TimeSpan.FromSeconds(15), stopping.Elapsed, $"The stop took {stopping.Elapsed}."); // not a limit: under the 30 s of the host
             var error = await closing.Task.WithinAsync(Waits.Hang);
             Assert.AreEqual((FleetErrorCodes.ConnectionClosed, FleetErrorHints.Reconnect), (error.Code, error.Hint));
             await connection.Completion.WithinAsync(Waits.Hang);

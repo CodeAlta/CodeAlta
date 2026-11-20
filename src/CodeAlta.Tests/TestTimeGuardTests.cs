@@ -67,6 +67,8 @@ public sealed partial class TestTimeGuardTests
             "await WaitUntilAsync(() => done, \"done\", TimeSpan.FromSeconds(3));",
             "private readonly CancellationTokenSource _deadline = new(TimeSpan.FromSeconds(30));",
             "if (watch.Elapsed >= TimeSpan.FromSeconds(5)) throw new TimeoutException();",
+            "Assert.IsLessThan(TimeSpan.FromSeconds(5), watch.Elapsed);",
+            "Assert.IsLessThanOrEqualTo(TimeSpan.FromMilliseconds(500), stopwatch.Elapsed, \"fast\");",
         })
             Assert.IsTrue(BareLimit().IsMatch(bare), bare);
 
@@ -115,6 +117,7 @@ public sealed partial class TestTimeGuardTests
         |SpinUntil\([^;]*,\s*TimeSpan\.From(?:Seconds|Milliseconds|Minutes)\(
         |UtcNow\s*\+\s*\(?(?:\w+\s*\?\?\s*)?TimeSpan\.From(?:Seconds|Milliseconds|Minutes)\(
         |Elapsed\s*<=?\s*TimeSpan\.From(?:Seconds|Milliseconds|Minutes)\(
+        |Assert\.IsLessThan(?:OrEqualTo)?\(\s*TimeSpan\.From(?:Seconds|Milliseconds|Minutes)\([^)]*\)\s*,[^;]*Elapsed
         |(?:WaitForAsync|WaitUntilAsync|PumpTerminalUntil\w*|WaitForCondition)\([^;]*,\s*TimeSpan\.From(?:Seconds|Milliseconds|Minutes)\(
         |(?i:(?:TimeSpan\??|var)\s+_?\w*(?:timeout|patience|deadline|hang|wait|limit|grace|within)\w*\s*=\s*TimeSpan\.From(?:Seconds|Milliseconds|Minutes)\()
         """, RegexOptions.IgnorePatternWhitespace)]

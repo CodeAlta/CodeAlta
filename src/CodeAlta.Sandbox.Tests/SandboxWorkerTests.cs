@@ -80,7 +80,7 @@ public sealed class SandboxWorkerTests
         var canceled = await worker.Client.InvokeAsync(Call("shell_command", new { command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60" }), allow, cancel.Token).WithinAsync(Deadline);
 
         Assert.IsFalse(canceled.Success);
-        Assert.IsLessThan(TimeSpan.FromSeconds(30), watch.Elapsed, "the command was stopped, not waited for");
+        Assert.IsLessThan(TimeSpan.FromSeconds(30), watch.Elapsed, "the command was stopped, not waited for"); // not a limit: under its sleep of 60 s
 
         var pending = worker.Client.InvokeAsync(Call("shell_command", new { command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60" }), allow, CancellationToken.None);
         await Task.Delay(500);
