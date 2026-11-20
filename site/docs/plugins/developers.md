@@ -247,7 +247,7 @@ The `automation-trigger` [sample](#samples) is a complete one.
 
 ### Credential providers
 
-`GetCredentialProviders()` adds a kind of [vault](../secrets/vaults.md) that secrets can be kept in. A `PluginCredentialProviderContribution` has a type with the plugin's own prefix (`acme.vault/secrets`, written `type = "acme.vault/secrets"` in a `[credentials.<id>]` table), its name, an icon (a brand or Lucide name in `Icon`, or an SVG in `IconSvg`), the settings the form of **Settings > Secrets** draws (text, a path, a list, a switch, or a `${secret:NAME}` of this computer for a token), the form of a reference in `ReferenceHint`, and `Create`, called for each provider of that type the user adds.
+`GetCredentialProviders()` adds a kind of [vault](../secrets/vaults.md) that secrets can be kept in. A `PluginCredentialProviderContribution` has a type with the plugin's own prefix (`acme.vault/secrets`, written `type = "acme.vault/secrets"` in a `[credentials.<id>]` table), its name, an icon (a brand or Lucide name in `Icon`, or an SVG in `IconSvg`), the settings the form of **Settings > Secrets and environment** draws (text, a path, a list, a switch, or a `${secret:NAME}` of this computer for a token), the form of a reference in `ReferenceHint`, and `Create`, called for each provider of that type the user adds.
 
 The `ICredentialProvider` it creates only says whether it can answer and reads:
 

@@ -14,6 +14,11 @@ The value of a secret is kept on this computer, or in an item of a vault such as
 
 In CodeAlta Desktop, open **Settings > Secrets and environment** under **Agent & models**. **Overview** shows what is set on this computer and what needs attention. The other tabs take you directly to what you want to change:
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-overview.webp" alt="Settings, Secrets and environment, Overview tab: the tabs Overview, Secrets, Variables, Environment, Vaults, Sign-ins and Activity with their counts, and a card for each of Secrets, Variables, Environment, Vaults and Sign-ins with what it is, its count, what needs attention such as a secret that is not set or a vault that is not installed, and its first action" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Overview: one card per kind of value, with what needs your attention.</figcaption>
+</figure>
+
 - **Secrets** lists each name, where it is kept and any problem reading it. Copy the reference beside the name, or select a row to see what names it and change **Projects** or **Ask before use**. Use **Add a secret…** for a value on this computer, or **Add from a vault…** for an item in a vault. **Rotate** gives a local secret a new value and version. Deleting a secret does not change its vault item.
 - **Variables** lists non-secret values of this computer. Use **Add a variable…**, or edit a value in the table and choose **Save** or press Enter. A variable supplies a `${var:NAME}` reference; it does not set an environment variable on its own.
 - **Environment** lists the projects that give variables to their sessions, and the spaces and projects that set CLI profiles. See [Project environment](#project-environment).
@@ -22,7 +27,14 @@ In CodeAlta Desktop, open **Settings > Secrets and environment** under **Agent &
 
 ## Project environment
 
-In the **Environment** tab, select a project or choose **Set the environment of a project…**. Set a variable to text, a home-relative path such as `~/.config/tool`, or a reference to the application's environment (`${env:NAME}`), a variable of this computer (`${var:NAME}`), or a secret of this computer (`${secret:NAME}`). A name such as `GH_TOKEN` or `OPENAI_API_KEY` must use a single secret or environment reference, not the credential itself.
+In the **Environment** tab, select a project or choose **Set the environment of a project…**. The tab lists only the projects that set variables, each with what is missing on this computer; **Set it…** beside a secret or a variable that is not set adds it.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-environment.webp" alt="Settings, Secrets and environment, Environment tab: the projects acme-api and acme-web all set, and contoso-portal open with GH_TOKEN from the secret CONTOSO_GH_TOKEN, NPM_TOKEN whose secret is not set with Set it, and ACME_TOKEN whose secret is limited to other projects, then the form that adds a variable and the file they are saved in" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The environment of contoso-portal: one secret is not set on this computer, another is limited to the acme projects.</figcaption>
+</figure>
+
+Set a variable to text, a home-relative path such as `~/.config/tool`, or a reference to the application's environment (`${env:NAME}`), a variable of this computer (`${var:NAME}`), or a secret of this computer (`${secret:NAME}`). A name such as `GH_TOKEN` or `OPENAI_API_KEY` must use a single secret or environment reference, not the credential itself.
 
 The project stores these expressions in `.alta/config.toml`, so the team can commit them without committing secret values:
 
@@ -37,9 +49,14 @@ In a monorepo, sub-projects inherit these settings and can override them. `[env]
 
 ## Limit a secret to projects
 
-In **Secrets**, select the secret and edit **Projects**. **All projects** allows the same uses as an unrestricted secret. A project restriction also covers its declared sub-projects and sessions in its worktrees. Other projects and uses without a project, like a model provider key, cannot use that secret.
+In **Secrets**, select the secret and edit **Projects**. **All projects** allows the same uses as an unrestricted secret. A project restriction also covers its declared sub-projects and sessions in its worktrees. Other projects and uses without a project, like a model provider key, cannot use that secret: the session starts without it, and **Activity** shows the refusal.
 
-To use a separate GitHub token in each repository ([#482](https://github.com/CodeAlta/CodeAlta/issues/482)):
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-secrets.webp" alt="Settings, Secrets and environment, Secrets tab: a table of the secrets with their name, the vault item or this computer they are kept in, their projects and the date they were set, and the details of ACME_GH_TOKEN open under its row with its reference, Ask before use, Projects limited to acme-api and acme-web, and Used by acme-api, acme-web and contoso-portal" loading="lazy">
+  <figcaption class="small text-secondary mt-2">ACME_GH_TOKEN, kept in 1Password, limited to the two acme projects.</figcaption>
+</figure>
+
+To use a separate GitHub token in each repository:
 
 1. Commit a `[env]` entry for `GH_TOKEN` in each repository, as above, with a different secret name for each repository.
 2. On each machine that runs sessions for a repository, add the matching secret with that repository's token, or bind its name to a vault item. Limit **Projects** to that repository before using the secret. On a CodeAlta Node you can set both together with `altanode secrets set ACME_GH_TOKEN --project acme-web`, where `acme-web` is the catalog slug.

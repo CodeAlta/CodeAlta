@@ -119,7 +119,7 @@ are providers whose key is a secret of the organization.
 
 ## In the desktop
 
-**Settings > Secrets** for this machine and the machines its owner manages; with a server, the **Providers and
+**Settings > Secrets and environment** for this machine and the machines its owner manages; with a server, the **Providers and
 secrets** canvas for the secrets, variables and environments of each scope, with who may use them, the machines that
 hold them, the approvals that wait, and **Rotate**. Each row says where its value comes from (this machine, a space, the
 organization) and what uses it.

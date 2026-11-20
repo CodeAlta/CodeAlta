@@ -9,8 +9,8 @@ A secret can keep its value in a vault you already use, such as 1Password, Bitwa
 Each vault is a *credential provider*. Add as many as you need, several of one kind too: a personal 1Password account for the keys of your providers, a KeePassXC database for a client, a secret manager of your company for deployments.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-secrets-vaults.webp" alt="Settings, Secrets: the secrets with the vault item each one is kept in, with Add from a vault and Add a secret beside their heading, then the vaults This computer, Personal (1Password, ready), Clients (KeePassXC, locked, with Unlock) and Team (Bitwarden, not installed, with its install command)" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Settings > Secrets with three vaults: 1Password unlocked, KeePassXC locked, Bitwarden not installed yet.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-secrets-vaults.webp" alt="Settings, Secrets and environment, Vaults tab: a table of the vaults This computer (Windows data protection, ready), 1Password (its account, 5 secrets, ready, with Lock) and Team (Bitwarden, not installed, with its install command, Run in a terminal and How to install it), each with its account, its number of secrets and its state" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Vaults tab: 1Password unlocked, Bitwarden not installed yet.</figcaption>
 </figure>
 
 ## Add a vault
