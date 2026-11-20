@@ -132,6 +132,13 @@ In CodeAlta Desktop, a session you click opens in one tab whose title is in *ita
 
 A session you create is kept from the start. Closing a tab never deletes a session. `Ctrl+W` (`Cmd+W` on macOS) or a middle click closes a tab: `Ctrl+W` closes the tab of the pane you last clicked in, such as a pane docked on the right. `Ctrl+Shift+T` reopens the last closed one. A pane at the top too narrow for its tabs beside the buttons of the title bar shows them below it.
 
+`Ctrl+Tab` goes back to the tab you used last in the pane. Keep holding `Ctrl` to see the tabs in the order you used them, press `Tab` again to go further back, and release `Ctrl` to switch.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-tab-switcher.webp" alt="Ctrl+Tab held over a session of CodeAlta: the list of the four tabs of the pane in the order they were used, the scriban session highlighted below the current one" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Hold Ctrl and press Tab: the tabs of the pane, the last used first.</figcaption>
+</figure>
+
 Right-click a tab, or press `Shift+F10` on it, for **Close**, **Close others**, **Close to the right** and **Close all** (in the same pane), **Keep open** on an italic tab, and **Move to window** (see [Windows](#windows)). The `…` menu of a pane has **Close others**, **Close all** and **Reopen closed tab**. A code editor with unsaved changes asks before it closes.
 
 ### Single tab for sessions
