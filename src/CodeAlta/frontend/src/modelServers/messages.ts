@@ -93,7 +93,7 @@ export const modelServersMessages = {
     "Noch kein Modell auf diesen Maschinen: Laden Sie eines herunter oder entdecken Sie Modelle auf Hugging Face.",
     "これらのマシンにはまだモデルがありません。ダウンロードするか、Hugging Face でモデルを探してください。", "这些机器上还没有模型：下载一个，或在 Hugging Face 上发现模型。"],
   "Use": ["Uso", "Usage", "Verwendung", "用途", "用途"],
-  "Used by": ["Usado por", "Utilisé par", "Verwendet von", "使用中のサーバー", "使用者"],
+  "Used by": ["Usado por", "Utilisé par", "Verwendet von", "利用元", "使用者"],
   "Used by a server": ["Usado por un servidor", "Utilisé par un serveur", "Von einem Server verwendet", "サーバーで使用中", "被服务器使用"],
   "Used by no server": ["No lo usa ningún servidor", "Utilisé par aucun serveur", "Von keinem Server verwendet", "どのサーバーも使っていない", "未被任何服务器使用"],
   "No server": ["Ningún servidor", "Aucun serveur", "Kein Server", "サーバーなし", "无服务器"],

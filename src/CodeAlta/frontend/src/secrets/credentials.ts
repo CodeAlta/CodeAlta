@@ -132,11 +132,11 @@ export function providerOf(secret: SecretView, providers: readonly CredentialPro
 }
 
 /** What a listing without vaults holds of them: a machine of the fleet, a host without a broker. */
-export const noCredentials = { providers: [], types: [], pending: [], uses: [], verification: null, canPrompt: false, developerInstance: false, developerUnlock: false, configurationProblems: [], signIns: [] } as const;
+export const noCredentials = { providers: [], types: [], pending: [], uses: [], verification: null, canPrompt: false, developerInstance: false, developerUnlock: false, configurationProblems: [], signIns: [], projects: [] } as const;
 
-/** A secret of this computer as a listing gives it, from what every secret has. */
+/** A secret of this computer as a listing gives it, from what every secret has: given to every project, named by nothing. */
 export function localSecret(secret: Pick<SecretView, "name" | "version" | "setBy" | "setAt">): SecretView {
-  return { ...secret, provider: null, providerName: null, icon: null, label: null, askBeforeUse: null, state: "ready", stateMessage: null };
+  return { ...secret, provider: null, providerName: null, icon: null, label: null, askBeforeUse: null, state: "ready", stateMessage: null, projectIds: [], usedBy: [] };
 }
 
 /** A sign-in as its dialog edits it: references of the vault, never a value. */

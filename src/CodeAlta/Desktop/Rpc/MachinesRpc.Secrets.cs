@@ -25,9 +25,18 @@ internal sealed partial class MachinesService
             var list = await host.ManageAsync((client, token) => client.ListSecretsAsync(token), changes: false, cancellationToken).ConfigureAwait(false);
             return new("ok", list.Protection,
                 [.. list.Secrets.OrderBy(static secret => secret.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(static secret => new SecretView(secret.Name, secret.Version, secret.SetBy, Format(secret.SetAt)))],
+                    .Select(static secret => new SecretView(secret.Name, secret.Version, secret.SetBy, Format(secret.SetAt))
+                    {
+                        ProjectIds = [.. secret.Projects.Select(static project => project.Id)],
+                        Provider = secret.Provider,
+                        ProviderName = secret.Provider,
+                    })],
                 [.. list.Variables.OrderBy(static variable => variable.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(static variable => new VariableView(variable.Name, variable.Value ?? "", variable.Version, variable.SetBy, Format(variable.SetAt)))]);
+                    .Select(static variable => new VariableView(variable.Name, variable.Value ?? "", variable.Version, variable.SetBy, Format(variable.SetAt)))])
+            {
+                Projects = [.. list.Secrets.SelectMany(static secret => secret.Projects).DistinctBy(static project => project.Id, StringComparer.OrdinalIgnoreCase)
+                    .Select(static project => new SecretProjectView(project.Id, project.Name, null))],
+            };
         }
         catch (ObjectDisposedException) { return new(RemoteSessionHost.Describe(host.State), null, [], []); }
         catch (FleetException exception) { return new(Code(exception), null, [], []); }

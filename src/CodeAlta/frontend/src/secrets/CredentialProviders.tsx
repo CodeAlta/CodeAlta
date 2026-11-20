@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Button, Card, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
+import { Button, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import type { CredentialProviderRpcView, SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
+import { DataTable, type DataColumn } from "../fleet/console/DataTable";
+import type { TableSort } from "../fleet/console/tableRows";
 import { useShellLanguage } from "../shellLanguage";
 import { CredentialIcon } from "./CredentialIcon";
 import { commandLine, stateLabel } from "./credentials";
@@ -21,34 +23,47 @@ export type CredentialProviderActions = Readonly<{
   setDeveloperUnlock?: (enabled: boolean) => Result;
 }>;
 
+/** A row of the table of the vaults: this computer, or a vault. */
+type VaultRow = Readonly<{ id: string; provider: CredentialProviderRpcView | null }>;
+
 /**
- * The credential providers of the user: this computer first, then each vault with its logo, its account and its state, and
- * what it needs (unlock, sign in, install). A value is never shown.
+ * The credential providers of the user as a table: this computer first, then each vault with its logo, its account and its
+ * state, and what it needs (unlock, sign in, install). A value is never shown.
  */
 export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
   listing: SecretsList; busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: CredentialProviderActions; onAdd: () => void;
 }) {
   const { t } = useShellLanguage();
+  // This computer first, then the vaults as the configuration lists them, until a column is chosen to sort by.
+  const [sort, setSort] = useState<TableSort | null>(null);
   const local = listing.secrets.filter(secret => !secret.provider).length;
-  return <Card className="appearance-settings credential-providers" aria-labelledby="credential-providers-title">
-    <div className="credential-providers-heading">
-      <h2 id="credential-providers-title">{t("Vaults")}</h2>
-      <Button size="small" icon={<AppIcon name="plus" size={14} />} text={t("Add a vault…")} disabled={busy} onClick={onAdd} />
-    </div>
-    <p className="credential-providers-intro">{t("Where the values of the secrets are kept: this computer, or a vault CodeAlta reads through its program and never writes into.")}</p>
+  const rows: VaultRow[] = [{ id: "this-computer", provider: null }, ...listing.providers.map(provider => ({ id: provider.id, provider }))];
+  const columns: DataColumn<VaultRow>[] = [
+    { id: "vault", label: "Vault", sort: row => row.provider?.displayName ?? t("This computer"), cell: row => row.provider
+      ? <ProviderName provider={row.provider} runInTerminal={actions.runInTerminal} />
+      : <span className="credential-provider-cell"><span className="credential-provider-icon"><AppIcon name="computer" size={16} /></span>
+        <span className="credential-provider-name"><strong>{t("This computer")}</strong></span></span> },
+    { id: "account", label: "Account", secondary: true, sort: row => providerDetail(row.provider, listing.protection, t),
+      cell: row => <span title={row.provider?.programPath ?? undefined}>{providerDetail(row.provider, listing.protection, t)}</span> },
+    { id: "secrets", label: "Secrets", width: "6.5rem", align: "end", secondary: true, sort: row => row.provider?.secrets ?? local, cell: row => row.provider?.secrets ?? local },
+    { id: "state", label: "State", width: "9rem", sort: row => t(stateLabel(row.provider?.state ?? "ready").label), cell: row => {
+      const state = stateLabel(row.provider?.state ?? "ready");
+      return <Tag minimal intent={state.intent}>{t(state.label)}</Tag>;
+    } },
+    { id: "actions", label: "Actions", hiddenLabel: true, align: "end", cell: row => row.provider
+      ? <ProviderActions provider={row.provider} busy={busy} run={run} actions={actions} canPrompt={listing.canPrompt} /> : null },
+  ];
+  return <div className="credential-providers">
     {listing.configurationProblems.length > 0 && <ul className="credential-problems" role="alert">
       {listing.configurationProblems.map(problem => <li key={problem}>{problem}</li>)}
     </ul>}
-    <ul className="credential-provider-list" aria-label={t("Vaults")}>
-      <li className="credential-provider-row" data-provider="this-computer">
-        <span className="credential-provider-icon"><AppIcon name="computer" size={18} /></span>
-        <span className="credential-provider-name"><strong>{t("This computer")}</strong>
-          <span className="credential-provider-detail">{protectionName(listing.protection, t)}{" · "}{secretCount(local, t)}</span></span>
-        <Tag minimal intent="success">{t("Ready")}</Tag>
-        <span className="credential-provider-actions" />
-      </li>
-      {listing.providers.map(provider => <ProviderRow key={provider.id} provider={provider} busy={busy} run={run} actions={actions} canPrompt={listing.canPrompt} />)}
-    </ul>
+    <section className="fleet-table-section secrets-table" aria-label={t("Vaults")}>
+      <div className="secrets-toolbar"><span className="secrets-toolbar-actions">
+        <Button size="small" intent="primary" icon={<AppIcon name="plus" size={14} />} text={t("Add a vault…")} disabled={busy} onClick={onAdd} />
+      </span></div>
+      <DataTable label={t("Vaults")} rows={rows} columns={columns} rowKey={row => row.id} sort={sort} onSort={setSort} selected={null} onSelect={() => { }}
+        rowProps={row => ({ data: { provider: row.id } })} rowState={row => row.provider?.state ?? "ready"} empty={null} />
+    </section>
     {listing.providers.length === 0 && <NonIdealState className="credential-providers-empty" icon={<AppIcon name="secret" size={24} />}
       description={t("Add 1Password, Bitwarden, KeePassXC or another vault to keep the values of your secrets there.")} />}
     {/* A setting of the user that both instances read: off, the developer instance reads only what a vault gives without asking. */}
@@ -57,12 +72,12 @@ export function CredentialProviders({ listing, busy, run, actions, onAdd }: {
         onChange={event => { const enabled = event.currentTarget.checked; void run(() => actions.setDeveloperUnlock!(enabled)); }} />
       <p>{t("It then asks your vault for its own run when you click Unlock in its window, as 1Password asks Windows Hello. Off, it reads only what a vault gives without asking.")}</p>
     </div>}
-  </Card>;
+  </div>;
 }
 
-/** A number of secrets, in the singular for one. */
-function secretCount(count: number, t: ReturnType<typeof useShellLanguage>["t"]): string {
-  return count === 1 ? t("1 secret") : t("{count} secrets", { count: String(count) });
+/** What a row says of its vault beside its name: its type and its account; for this computer, how it protects the values. */
+function providerDetail(provider: CredentialProviderRpcView | null, protection: string | null, t: ReturnType<typeof useShellLanguage>["t"]): string {
+  return provider ? [provider.typeName ?? provider.type, provider.account].filter(Boolean).join(" · ") : protectionName(protection, t);
 }
 
 function protectionName(protection: string | null, t: ReturnType<typeof useShellLanguage>["t"]): string {
@@ -75,28 +90,29 @@ function protectionName(protection: string | null, t: ReturnType<typeof useShell
   }
 }
 
-/** One vault: its logo, name, type and account, its state, and the action its state needs. */
-function ProviderRow({ provider, busy, run, actions, canPrompt }: {
-  provider: CredentialProviderRpcView; busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: CredentialProviderActions; canPrompt: boolean;
-}) {
+/** A vault in its row: its logo and its name, and, when it needs the user, what it waits for or how to install its program. */
+function ProviderName({ provider, runInTerminal }: { provider: CredentialProviderRpcView; runInTerminal?: (command: string) => void }) {
   const { t } = useShellLanguage();
-  const [removing, setRemoving] = useState(false);
-  const state = stateLabel(provider.state);
-  const detail = [provider.typeName ?? provider.type, provider.account].filter(Boolean).join(" · ");
-  return <li className="credential-provider-row" data-provider={provider.id} data-state={provider.state}>
-    <span className="credential-provider-icon"><CredentialIcon icon={provider.icon} size={18} /></span>
+  return <span className="credential-provider-cell">
+    <span className="credential-provider-icon"><CredentialIcon icon={provider.icon} size={16} /></span>
     <span className="credential-provider-name">
       <strong title={provider.id}>{provider.displayName}</strong>
-      <span className="credential-provider-detail" title={provider.programPath ?? undefined}>{detail}
-        {provider.secrets > 0 && <>{" · "}{secretCount(provider.secrets, t)}</>}</span>
       {/* A vault that is being asked shows its own prompt, which can be behind this window. */}
       {provider.unlocking && !provider.unlockAsksPassword
         ? <span className="credential-provider-message">{t("Waiting for {name}: answer its prompt.", { name: provider.typeName ?? provider.displayName })}</span>
         : provider.message && provider.state !== "ready" && <span className="credential-provider-message">{provider.message}</span>}
-      {provider.state === "not_installed" && <InstallHint provider={provider} runInTerminal={actions.runInTerminal} />}
+      {provider.state === "not_installed" && <InstallHint provider={provider} runInTerminal={runInTerminal} />}
     </span>
-    <Tag minimal intent={state.intent}>{t(state.label)}</Tag>
-    <span className="credential-provider-actions">
+  </span>;
+}
+
+/** The actions of a vault at the end of its row: what its state needs (Unlock, Sign in), Lock, Check, Edit and Remove. */
+function ProviderActions({ provider, busy, run, actions, canPrompt }: {
+  provider: CredentialProviderRpcView; busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: CredentialProviderActions; canPrompt: boolean;
+}) {
+  const { t } = useShellLanguage();
+  const [removing, setRemoving] = useState(false);
+  return <span className="credential-provider-actions">
       {provider.state === "locked" && (canPrompt
         ? <UnlockButton provider={provider} busy={busy} onUnlock={password => run(() => actions.unlock(provider.id, password))} />
         : <Tag minimal title={t("The developer instance asks no vault to unlock: unlock it in the normal instance, or turn on Let the developer instance unlock the vaults, below.")}>{t("Unlock in the normal instance")}</Tag>)}
@@ -117,8 +133,7 @@ function ProviderRow({ provider, busy, run, actions, canPrompt }: {
             : provider.secrets === 1 ? t("Its secret is removed with it. Nothing changes in the vault.") : t("Nothing changes in the vault.")}
           confirmLabel={t("Remove")} onConfirm={() => { setRemoving(false); void run(() => actions.remove(provider.id)); }} onCancel={() => setRemoving(false)} />}
       </span>
-    </span>
-  </li>;
+    </span>;
 }
 
 /** Unlock: the vault shows its own prompt, or, for a vault that takes its master password, a field that is never kept. */

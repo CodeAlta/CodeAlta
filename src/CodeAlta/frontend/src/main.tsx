@@ -320,7 +320,8 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { NetworkSettings } from "./network/NetworkSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
-import { SecretsSettings } from "./secrets/SecretsSettings";
+import { SecretsSettings, type SecretsTabFocus } from "./secrets/SecretsSettings";
+import { projectRelativePath, readSecretsPageLink } from "./secrets/secretsTabs";
 import { SecretUsePrompt } from "./secrets/SecretUsePrompt";
 import { secretsPendingEvent } from "./secrets/secretPrompt";
 import { isMachineProject, machinePageLink, machineRowState, readMachinePageLink } from "./machines/machines";
@@ -344,7 +345,7 @@ import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { SpaceActivityBar, SpaceIcon, SpaceSwitch } from "./spaces/SpaceViews";
-import { readSpacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
+import { readSpacePageLink, spacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
 import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
@@ -846,6 +847,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The paired machine whose page Settings > Fleet > Machines opens on, from its name in the Fleet canvas; each request is a new ticket.
   const [machineFocus, setMachineFocus] = useState<Readonly<{ id: string; ticket: number }> | null>(null);
   const machineTicket = useRef(0);
+  // The tab Settings > Secrets and environment opens on, from a link or `alta settings open`; each request is a new ticket.
+  const [secretsFocus, setSecretsFocus] = useState<SecretsTabFocus | null>(null);
+  const secretsTicket = useRef(0);
   const currentSettingsSection = useRef<SettingsSection>(settingsSection);
   currentSettingsSection.current = settingsSection;
   const settingsOrigin = useRef<HTMLElement | null>(null);
@@ -869,6 +873,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     focusRestoration.cancel();
     setProviderFocus(null);
     setMachineFocus(null);
+    setSecretsFocus(null);
     if (next === "workspace") {
       settingsVisible.current = false;
       setSettingsOpen(false);
@@ -903,7 +908,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (notesVersion !== undefined) { setReleaseNotesShown({ version: notesVersion }); return; }
     // The page asked for is shown, not the results of a search typed before.
     setSettingsQuery("");
-    if (settingsPageOf(page)) navigate(page as SettingsSection);
+    // `secrets/<tab>`, or `secrets` with the setting of a tab, opens Secrets and environment on that tab.
+    const secretsTab = readSecretsPageLink(page, setting);
+    if (secretsTab !== undefined) {
+      navigate("secrets");
+      if (secretsTab) setSecretsFocus({ tab: secretsTab, ticket: ++secretsTicket.current });
+    } else if (settingsPageOf(page)) navigate(page as SettingsSection);
     else if (page.startsWith("plugin/")) {
       // `plugin/<key>/<canvas>` opens the settings page of a plugin, while the plugin runs in the space the window shows.
       const found = (owned ? allPluginPages : []).find(candidate => pluginPageId(candidate) === page);
@@ -6967,7 +6977,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "network" ? <NetworkSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined} />
-      : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} runInTerminal={command => void (async () => {
+      : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} focus={secretsFocus}
+        onOpenSpace={id => settingsNavigation.open(spacePageLink(id, "identity"))}
+        onOpenFile={owned ? (id, file) => {
+          // The editor may be for a project that isn't in the current workspace snapshot.
+          const project = snapshot?.projects.find(candidate => candidate.id === id)
+            ?? { id, path: file.replace(/[\\/]\.alta[\\/]config\.toml$/i, "") };
+          if (project.path === file) return;
+          closeSettings();
+          openEditor(project, { path: projectRelativePath(project.path, file), line: null, column: null, explorer: null });
+        } : undefined}
+        runInTerminal={command => void (async () => {
         const reply = await terminalWorkspace.hub.create(null, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
         if (reply?.status !== "ok" || !reply.terminal) { showToast({ intent: "danger", icon: "error", timeout: 8000, message: t("The terminal could not be started.") }); return; }
         closeSettings();

@@ -55,6 +55,124 @@ public sealed class SecretsRpcTests
     }
 
     [TestMethod]
+    public async Task EnvironmentListsLocalStatusAndUsageWithoutReadingAnySecret()
+    {
+        using var root = new TempRoot();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var catalog = new ProjectCatalog(options);
+        var spaces = new SpaceCatalog(catalog);
+        var project = await catalog.GetOrAddTransientAsync(Directory.CreateDirectory(Path.Combine(root.Path, "acme")).FullName);
+        var other = await catalog.GetOrAddTransientAsync(Directory.CreateDirectory(Path.Combine(root.Path, "other")).FullName);
+        var config = new CodeAltaConfigStore(options);
+        var store = FileStore(root.Path);
+        var service = new SecretsService(store, Epoch) { Spaces = spaces, Config = config };
+        var space = (await spaces.CreateAsync("Work")).Space!;
+        Assert.IsTrue((await spaces.UpdateSettingsAsync(space.Id, _ => new SpaceSettings(Identity: new SpaceIdentity(Cli:
+            [new("gh", [new("GH_TOKEN", "${secret:ACME_TOKEN}")])])))).Succeeded);
+        File.WriteAllText(options.ConfigPath, """
+            [providers.work]
+            type = "openai-responses"
+            api_key_secret = "ACME_TOKEN"
+            """);
+
+        Assert.AreEqual("ok", service.SetSecret(new(Epoch, "ACME_TOKEN", Value)).Status);
+        Assert.AreEqual("ok", (await service.SetSecretProjectsAsync(new(Epoch, "ACME_TOKEN", [project.Id]), default)).Status);
+        Assert.AreEqual("invalid", (await service.SetSecretProjectsAsync(new(Epoch, "ACME_TOKEN", [Guid.NewGuid().ToString()]), default)).Status);
+        Assert.AreEqual("invalid", (await service.SetSecretProjectsAsync(new(Epoch, "ACME_TOKEN", null!), default)).Status,
+            "An omitted list does not remove the restriction.");
+        Assert.AreEqual("ok", (await service.SetProjectEnvironmentAsync(new(Epoch, project.Id, "GH_TOKEN", "${secret:ACME_TOKEN}"), default)).Status);
+        Assert.AreEqual("ok", (await service.SetProjectEnvironmentAsync(new(Epoch, other.Id, "GH_TOKEN", "${secret:ACME_TOKEN}"), default)).Status);
+        Assert.AreEqual("ok", (await service.SetProjectEnvironmentAsync(new(Epoch, other.Id, "AWS_TOKEN", "${secret:TEST_ABSENT}"), default)).Status);
+        var projectConfig = Path.Combine(project.ProjectPath, ".alta", "config.toml");
+        await File.AppendAllTextAsync(projectConfig, "\n[identity.cli.azure.env]\nAZURE_CONFIG_DIR = \"~/.azure-acme\"\n");
+
+        var listing = await service.ListEnvironmentAsync(new(Epoch), default);
+        Assert.AreEqual("ok", listing.Status);
+        var acme = listing.Projects.Single(item => item.Id == project.Id);
+        Assert.AreEqual(projectConfig, acme.Path);
+        Assert.IsTrue(acme.Variables.Single().Local);
+        Assert.AreEqual("${secret:ACME_TOKEN}", acme.Variables.Single().Value);
+        Assert.IsEmpty(acme.Issues);
+        CollectionAssert.AreEqual(new[] { "AZURE_CONFIG_DIR" }, acme.Profiles.Single().Variables);
+        var unfamiliar = listing.Projects.Single(item => item.Id == other.Id);
+        Assert.AreEqual("restricted", unfamiliar.Variables.Single(item => item.Name == "GH_TOKEN").Issues.Single().State);
+        Assert.AreEqual("not_set", unfamiliar.Variables.Single(item => item.Name == "AWS_TOKEN").Issues.Single().State);
+        Assert.AreEqual("gh", listing.Spaces.Single().Profiles.Single().Name);
+
+        var secrets = await service.ListAsync(new(Epoch), default);
+        CollectionAssert.AreEqual(new[] { project.Id }, secrets.Secrets.Single().ProjectIds);
+        CollectionAssert.AreEquivalent(new[]
+        {
+            new SecretUsageView("provider", "work"),
+            new SecretUsageView("space", "Work"),
+            new SecretUsageView("project", project.DisplayName),
+            new SecretUsageView("project", other.DisplayName),
+        }, secrets.Secrets.Single().UsedBy);
+        Assert.DoesNotContain(Value, System.Text.Json.JsonSerializer.Serialize(listing) + System.Text.Json.JsonSerializer.Serialize(secrets));
+    }
+
+    [TestMethod]
+    public async Task ProjectEnvironmentWritesValidateTheCatalogAndPreserveOtherSettings()
+    {
+        using var root = new TempRoot();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var catalog = new ProjectCatalog(options);
+        var project = await catalog.GetOrAddTransientAsync(Directory.CreateDirectory(Path.Combine(root.Path, "project")).FullName);
+        var directory = Directory.CreateDirectory(Path.Combine(project.ProjectPath, ".alta")).FullName;
+        var path = Path.Combine(directory, "config.toml");
+        const string original = "# Keep this comment\n[unknown]\nquery = [ 1, 2 ]\n";
+        await File.WriteAllTextAsync(path, original);
+        var service = new SecretsService(FileStore(root.Path), Epoch) { Spaces = new SpaceCatalog(catalog), Config = new CodeAltaConfigStore(options) };
+
+        Assert.AreEqual("stale_epoch", (await service.SetProjectEnvironmentAsync(new("stale", project.Id, "NODE_ENV", "test"), default)).Status);
+        Assert.AreEqual("not_found", (await service.SetProjectEnvironmentAsync(new(Epoch, Guid.NewGuid().ToString(), "NODE_ENV", "test"), default)).Status);
+        var invalid = await service.SetProjectEnvironmentAsync(new(Epoch, project.Id, "GH_TOKEN", Value), default);
+        Assert.AreEqual("invalid", invalid.Status);
+        StringAssert.Contains(invalid.Message, "GH_TOKEN holds a secret");
+        Assert.AreEqual(original, await File.ReadAllTextAsync(path));
+
+        Assert.AreEqual("ok", (await service.SetProjectEnvironmentAsync(new(Epoch, project.Id, "NODE_ENV", "test"), default)).Status);
+        StringAssert.StartsWith(await File.ReadAllTextAsync(path), original);
+        Assert.AreEqual("ok", (await service.DeleteProjectEnvironmentAsync(new(Epoch, project.Id, "NODE_ENV"), default)).Status);
+        Assert.AreEqual("not_found", (await service.DeleteProjectEnvironmentAsync(new(Epoch, project.Id, "NODE_ENV"), default)).Status);
+        StringAssert.StartsWith(await File.ReadAllTextAsync(path), original);
+    }
+
+    [TestMethod]
+    public async Task TheEnvironmentEditorListsInheritedVariablesAndCanOverrideThemLocally()
+    {
+        using var root = new TempRoot();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var catalog = new ProjectCatalog(options);
+        options.InheritedProjectRoots = catalog.GetInheritedRootsOfFolder;
+        var folder = Directory.CreateDirectory(Path.Combine(root.Path, "monorepo")).FullName;
+        Directory.CreateDirectory(Path.Combine(folder, "app"));
+        Directory.CreateDirectory(Path.Combine(folder, ".alta"));
+        await File.WriteAllTextAsync(ProjectManifest.PathOf(folder), """
+            [projects.app]
+            path = "app"
+            """);
+        await catalog.GetOrAddTransientAsync(folder);
+        var project = (await catalog.LoadAsync()).Single(project => project.DeclaredKey == "app");
+        var config = new CodeAltaConfigStore(options);
+        config.SaveProjectEnvironmentVariable(folder, "NODE_ENV", "production");
+        var service = new SecretsService(FileStore(root.Path), Epoch) { Spaces = new SpaceCatalog(catalog), Config = config };
+
+        async Task<ProjectEnvironmentVariableView> Variable() => (await service.ListEnvironmentAsync(new(Epoch), default))
+            .Projects.Single(item => item.Id == project.Id).Variables.Single();
+
+        var inherited = await Variable();
+        Assert.AreEqual(("production", false), (inherited.Value, inherited.Local));
+        Assert.AreEqual("ok", (await service.SetProjectEnvironmentAsync(new(Epoch, project.Id, "NODE_ENV", "test"), default)).Status);
+        var changed = await Variable();
+        Assert.AreEqual(("test", true), (changed.Value, changed.Local));
+        Assert.AreEqual("ok", (await service.DeleteProjectEnvironmentAsync(new(Epoch, project.Id, "NODE_ENV"), default)).Status);
+        var restored = await Variable();
+        Assert.AreEqual(("production", false), (restored.Value, restored.Local));
+        Assert.AreEqual("production", config.LoadProjectEnvironment(folder).Single().Value);
+    }
+
+    [TestMethod]
     public async Task TheKeyOfAProvider_MovesIntoASecret_ThatTheConfigurationNames()
     {
         using var root = new TempRoot();

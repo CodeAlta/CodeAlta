@@ -41,6 +41,21 @@ test("pages are found by their name and their words; the results group by page i
   assert.ok((counts.get("models") ?? 0) >= 5);
 });
 
+test("Secrets and environment is found by what it holds, and each of its tabs by its own words", () => {
+  for (const query of ["secret", "vault", "variable", "environment variable", "env"])
+    assert.ok(searchSettings(builtInSettings, query, "en").pages.some(match => match.page.id === "secrets"), `the page, by "${query}"`);
+  assert.equal(searchSettings(builtInSettings, "secrets and environment", "en").pages[0]?.page.id, "secrets");
+  assert.ok(ids("environment variable").includes("secrets.environment"));
+  assert.ok(ids("vault").includes("secrets.vaults"));
+  assert.ok(ids("variables").includes("secrets.variables"));
+  assert.ok(ids("gh_token").includes("secrets.environment"), "the variable people look for");
+  const opened: string[] = [];
+  const results = settingResults(builtInSettings, "environment variables of projects", "en", (page, setting) => opened.push(`${page}/${setting ?? ""}`));
+  assert.equal(results[0].path, "Agent & models › Secrets and environment");
+  results[0].run();
+  assert.deepEqual(opened, ["secrets/secrets.environment"], "which opens the page on its Environment tab");
+});
+
 test("a setting that is not here is not found", () => {
   const entries = builtInSettings.map(entry => entry.id === "general.keep_awake" ? { ...entry, available: false } : entry);
   assert.ok(!searchSettings(entries, "keep awake", "en").settings.some(match => match.entry.id === "general.keep_awake"));

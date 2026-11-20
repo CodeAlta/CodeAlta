@@ -141,7 +141,10 @@ internal sealed class SpaceIdentityService : IDisposable
                 identity.ProjectProfiles.Contains(profile.Name, StringComparer.OrdinalIgnoreCase) ? "project" : "space",
                 [.. profile.Environment.Select(static variable => new SpaceCliVariableItem(variable.Key, variable.Value))],
                 // A variable that refers to one that is not set is left out of the processes of the session.
-                [.. profile.Environment.Where(variable => identity.Environment.Get(variable.Key) is null).Select(static variable => variable.Key)]))]);
+                [.. profile.Environment.Where(variable => identity.Environment.Get(variable.Key) is null).Select(static variable => variable.Key)]))])
+        {
+            ProjectEnvironmentNames = identity.ProjectEnvironmentNames.Count == 0 ? [] : identity.ProjectEnvironmentNames,
+        };
     }
 
     private const string PartProblem = "The part of an identity is git, github, jira or cli.";
@@ -284,7 +287,11 @@ internal sealed record SessionIdentityRequest(string ExpectedEpoch, string? Sess
 /// <param name="JiraEmail">The email of the Jira account of its space.</param>
 /// <param name="Cli">The CLI profiles it works under, in their order.</param>
 internal sealed record SessionIdentityResponse(string Status, string? SpaceId, string? GitAuthor, string? Signing, bool SignOff, string? GitHubProfile, string? JiraSite,
-    string? JiraEmail, IReadOnlyList<SessionCliProfileItem> Cli);
+    string? JiraEmail, IReadOnlyList<SessionCliProfileItem> Cli)
+{
+    /// <summary>The names, never values, of the variables assigned in project configuration.</summary>
+    public IReadOnlyList<string> ProjectEnvironmentNames { get; init; } = [];
+}
 
 /// <summary>A CLI profile a session works under.</summary>
 /// <param name="Name">The name of the profile.</param>

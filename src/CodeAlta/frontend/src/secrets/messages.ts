@@ -6,12 +6,6 @@ export const secretMessages = {
   "Secrets": ["Secretos", "Secrets", "Geheimnisse", "シークレット", "机密"],
   "Add a secret…": ["Añadir un secreto…", "Ajouter un secret…", "Geheimnis hinzufügen…", "シークレットを追加…", "添加机密…"],
   "Secrets unavailable": ["Secretos no disponibles", "Secrets indisponibles", "Geheimnisse nicht verfügbar", "シークレットを利用できません", "机密不可用"],
-  "Named values of this machine. The configuration refers to them as ${secret:NAME} and ${var:NAME}.": [
-    "Valores con nombre de esta máquina. La configuración se refiere a ellos como ${secret:NAME} y ${var:NAME}.",
-    "Valeurs nommées de cette machine. La configuration y renvoie par ${secret:NAME} et ${var:NAME}.",
-    "Benannte Werte dieser Maschine. Die Konfiguration verweist mit ${secret:NAME} und ${var:NAME} darauf.",
-    "このマシンの名前付きの値。設定からは ${secret:NAME} と ${var:NAME} で参照します。",
-    "本机的命名值。配置以 ${secret:NAME} 和 ${var:NAME} 引用它们。"],
   "No secret on this machine.": ["Ningún secreto en esta máquina.", "Aucun secret sur cette machine.", "Kein Geheimnis auf dieser Maschine.", "このマシンにシークレットはありません。", "本机没有机密。"],
   "Set {date} by {who}": ["Definido el {date} por {who}", "Défini le {date} par {who}", "Gesetzt am {date} von {who}", "{date} に {who} が設定", "{who} 于 {date} 设置"],
   "New value of {name}": ["Nuevo valor de {name}", "Nouvelle valeur de {name}", "Neuer Wert von {name}", "{name} の新しい値", "{name} 的新值"],

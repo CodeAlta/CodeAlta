@@ -15,7 +15,7 @@ Each vault is a *credential provider*. Add as many as you need, several of one k
 
 ## Add a vault
 
-In CodeAlta Desktop, open **Settings > Secrets** and click **Add a vault…** under **Vaults**.
+In CodeAlta Desktop, open **Settings > Secrets and environment > Vaults** and click **Add a vault…**.
 
 1. Choose the vault. The common ones come first, with their logo, then the secret managers of clouds and a command of your own.
 2. Give it an **Id**, which the secrets kept in it name (`personal` for a 1Password account), and fill the settings of its kind. A setting that is a token, such as the token of a service account, names a [secret of this computer](readme.md), never a value.
@@ -76,7 +76,7 @@ The row of the secret then shows its vault and its item, and the state of that v
 ## When a vault is asked
 
 - **At start**, CodeAlta reads, without a prompt, what each vault gives as it is. Then CodeAlta Desktop asks each locked vault that has its own prompt, such as 1Password, to unlock, once, after the window shows. When the application of the vault is not running yet, as when both start with your computer, CodeAlta waits for it for up to five minutes and asks then. A prompt you dismiss is not shown again until you click **Unlock**.
-- **While a vault is asked**, its row in **Settings > Secrets** says that it waits for the vault: answer the prompt of the vault, which can be behind the window. A click on **Unlock**, or a session that needs the vault, waits for that same prompt.
+- **While a vault is asked**, its row in **Vaults** says that it waits for the vault: answer the prompt of the vault, which can be behind the window. A click on **Unlock**, or a session that needs the vault, waits for that same prompt.
 - **While CodeAlta runs**, a value read stays in memory for the time its provider keeps it. Nothing prompts again, and an automation that runs at night still has its values.
 - **`altanode` never asks a vault to unlock, and `altacli` and the developer instance do not by default.** What is locked stays locked, and what needs it says which vault to unlock. `altacli --interactive-vault` lets a run ask its vault: see [Vault secrets](../command-line.md#vault-secrets). To test a vault in the developer instance, turn on **Let the developer instance unlock the vaults** under **Vaults**, in either instance: the developer instance then shows **Unlock**, and its click asks your vault for that run, as 1Password asks Windows Hello. It never asks at start, so a developer instance an agent starts shows no prompt by itself.
 
@@ -183,7 +183,7 @@ Plugins add other kinds of vaults: see [Credential providers](../plugins/develop
 
 ## Sign-ins of websites
 
-A sign-in is the user name, the password and the one-time code of an item, with the sites they are typed on. The browser of a session types them on those sites after you allow it, and the agent never sees them: see [Sign in with a vault item](../browser.md#sign-in-with-a-vault-item). **Sign-ins of websites**, in **Settings > Secrets**, adds, changes and removes them, and lists under each one the sites you allowed for 30 days.
+A sign-in is the user name, the password and the one-time code of an item, with the sites they are typed on. The browser of a session types them on those sites after you allow it, and the agent never sees them: see [Sign in with a vault item](../browser.md#sign-in-with-a-vault-item).
 
 ## Agents and vaults
 

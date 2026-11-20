@@ -270,8 +270,13 @@ public sealed class SpaceIdentityRpcTests
                 new("kubectl", [new("KUBECONFIG", "~/.kube/contoso")]),
             ])),
         };
-        fixture.Sessions["session-1"] = new SessionIdentityResolver(null, identity => SpaceIdentityEnvironment.Create(identity, static _ => null, "/home/alex", windows: false))
+        var identity = new SessionIdentityResolver(null, value => SpaceIdentityEnvironment.Create(value, static _ => null, "/home/alex", windows: false))
             .Of(business, [new("kubectl", [new("KUBECONFIG", "${env:PROD_KUBECONFIG}")])]);
+        fixture.Sessions["session-1"] = identity with
+        {
+            ProjectEnvironmentNames = ["GH_TOKEN"],
+            Environment = new AgentProcessEnvironment([.. identity.Environment.Variables, new("GH_TOKEN", "never-send-this-value")]),
+        };
 
         var shown = await fixture.Service.SessionAsync(new(Epoch, "session-1"), default);
 
@@ -279,6 +284,8 @@ public sealed class SpaceIdentityRpcTests
         Assert.AreEqual(("azure", "space", "AZURE_CONFIG_DIR", "~/.azure-contoso", 0), (shown.Cli[0].Name, shown.Cli[0].Source, shown.Cli[0].Env.Single().Name, shown.Cli[0].Env.Single().Value, shown.Cli[0].Unset.Count));
         Assert.AreEqual(("kubectl", "project", "${env:PROD_KUBECONFIG}"), (shown.Cli[1].Name, shown.Cli[1].Source, shown.Cli[1].Env.Single().Value));
         CollectionAssert.AreEqual(new[] { "KUBECONFIG" }, shown.Cli[1].Unset.ToArray(), "A variable whose reference is not set is said to be left out.");
+        CollectionAssert.AreEqual(new[] { "GH_TOKEN" }, shown.ProjectEnvironmentNames.ToArray());
+        Assert.DoesNotContain("never-send-this-value", System.Text.Json.JsonSerializer.Serialize(shown));
     }
 
     private sealed class Fixture : IDisposable

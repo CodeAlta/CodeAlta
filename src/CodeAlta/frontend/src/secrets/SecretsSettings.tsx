@@ -1,58 +1,82 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Button, Card, InputGroup, NonIdealState, PopoverNext, Tag } from "@blueprintjs/core";
-import { secrets, type CredentialProviderRpcView, type SecretsList, type SecretView, type VariableView } from "#neoastra";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Button, Card, Tag } from "@blueprintjs/core";
+import { secrets, type CredentialProviderRpcView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
-import { ConfirmPopover } from "../ConfirmPopover";
+import { DataTable, type DataColumn } from "../fleet/console/DataTable";
+import type { TableSort } from "../fleet/console/tableRows";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import { CredentialIcon } from "./CredentialIcon";
 import { CredentialProviders } from "./CredentialProviders";
-import { askDurations, stateLabel } from "./credentials";
+import { EnvironmentTab } from "./EnvironmentTab";
 import { ProviderDialog } from "./ProviderDialog";
-import { SignInsCard } from "./SignIns";
+import { SecretsOverview } from "./SecretsOverview";
+import { SecretsTable, VariablesTable, type SecretsActions, type SecretsResult, type SecretVaultActions } from "./SecretsTable";
+import { keepLastSecretsTab, offeredSecretsTabs, readLastSecretsTab, secretProjectIds, secretsTabSetting, secretsTabStatus, secretsTabTitles, type EnvironmentList, type SecretsTab } from "./secretsTabs";
+import { SignInsTable } from "./SignIns";
 import { VaultBindingDialog } from "./VaultPicker";
-import { isSecretName, referenceOf, secretNameProblem } from "./secrets";
+
+export { CopyReference, type SecretsActions, type SecretVaultActions } from "./SecretsTable";
 
 type SecretsApi = Pick<typeof secrets, "list" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable" | "saveProvider" | "removeProvider"
-  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "setDeveloperUnlock" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant">;
-type Result = Promise<{ status: string; message?: string | null }>;
+  | "unlockProvider" | "lockProvider" | "testProvider" | "browse" | "bindSecret" | "setAskBeforeUse" | "confirmUse" | "declineUse" | "setDeveloperUnlock" | "saveSignIn" | "removeSignIn" | "revokeSiteGrant"
+  | "setSecretProjects" | "listEnvironment" | "setProjectEnvironment" | "deleteProjectEnvironment">;
 
-/** What the body of the page does: each call writes one change and says how it went. */
-export type SecretsActions = Readonly<{
-  setSecret: (name: string, value: string) => Result;
-  rotateSecret: (name: string, value: string) => Result;
-  deleteSecret: (name: string) => Result;
-  setVariable: (name: string, value: string) => Result;
-  deleteVariable: (name: string) => Result;
-}>;
-
-/** What the rows of the secrets do with the vaults; absent on the page of a machine, which has none. */
-export type SecretVaultActions = Readonly<{
-  keepInVault: (name: string) => void;
-  /** The logo of the first vault, on the button that gives a secret of this computer an item of a vault. */
-  icon?: string | null;
-  setAskBeforeUse: (name: string, duration: string | null) => Result;
-  verification: { available: boolean; reason: string | null } | null;
-}>;
+/** The tab the page is asked to open on; each request is a new ticket, so that the same tab can be asked for twice. */
+export type SecretsTabFocus = Readonly<{ tab: SecretsTab; ticket: number }>;
 
 /**
- * Settings > Secrets: the credential providers (this computer and the vaults), the secrets of this machine listed by name
- * with where each is kept (Add, Rotate, Delete, Add from a vault, Ask before use; a value is sent and never shown back), the
- * uses that wait for a confirmation, and the variables, which are read and edited.
+ * Settings > Secrets and environment: the uses that wait for a confirmation, then tabs. Overview (a card per concept),
+ * Secrets (named values of this computer, kept here or read from a vault, never shown back, each for every project or
+ * limited to some), Variables (named values that are read and edited), Environment (what the sessions of each project get
+ * as environment variables), Vaults, Sign-ins of websites, and Activity (the last uses of the secrets).
  */
-export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch: string | null; api?: SecretsApi; runInTerminal?: (command: string) => void }) {
+export function SecretsSettings({ epoch, api = secrets, runInTerminal, focus = null, onOpenFile, onOpenSpace }: {
+  epoch: string | null; api?: SecretsApi; runInTerminal?: (command: string) => void;
+  /** The tab a link or `alta settings open` asks for; without one, the page opens on the tab it was left on. */
+  focus?: SecretsTabFocus | null;
+  /** Opens the configuration file of a project in the editor. */
+  onOpenFile?: (projectId: string, path: string) => void;
+  /** Opens the page of a space on its Identity. */
+  onOpenSpace?: (spaceId: string) => void;
+}) {
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, refresh, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
-  const [adding, setAdding] = useState(false);
+  const [tab, setTab] = useState<SecretsTab>(() => focus?.tab ?? readLastSecretsTab());
+  const [environment, setEnvironment] = useState<EnvironmentList | null>(null);
+  const [environmentGeneration, setEnvironmentGeneration] = useState(0);
+  // What each tab is adding: opened from its own toolbar, or from the card of the overview.
+  const [addingSecret, setAddingSecret] = useState<Readonly<{ name?: string }> | null>(null);
+  const [addingVariable, setAddingVariable] = useState(false);
+  const [addingSignIn, setAddingSignIn] = useState(false);
+  const [pickingProject, setPickingProject] = useState(false);
   const [providerDialog, setProviderDialog] = useState<{ editing: CredentialProviderRpcView | null } | null>(null);
   const [binding, setBinding] = useState<{ name?: string; provider?: string } | null>(null);
+  const tabs = useRef<HTMLDivElement>(null);
   const expectedEpoch = epoch ?? "";
+  useEffect(() => { if (focus) setTab(focus.tab); }, [focus?.tab, focus?.ticket]);
+  useEffect(() => keepLastSecretsTab(tab), [tab]);
   // A vault unlocked elsewhere, a use that waits: the page reads again by itself while it is shown.
   useEffect(() => {
     if (!epoch) return;
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 4000);
     return () => window.clearInterval(timer);
   }, [epoch, refresh]);
+  // The environment of the projects is read again when a secret or a variable it may name changed, not at each look at the vaults.
+  const named = useMemo(() => listing ? [...listing.secrets.map(secret => `${secret.name}:${secret.state}:${secretProjectIds(secret).join(",")}`),
+    ...listing.variables.map(variable => variable.name)].join("|") : "", [listing]);
+  useEffect(() => {
+    if (!epoch) return;
+    const abort = new AbortController();
+    api.listEnvironment({ expectedEpoch: epoch }, { signal: abort.signal })
+      .then(value => { if (!abort.signal.aborted) setEnvironment(value.status === "ok" ? value : null); }, () => { /* What was read stays shown. */ });
+    return () => abort.abort();
+  }, [api, epoch, environmentGeneration, named]);
+  const run = useCallback(async (call: () => SecretsResult) => {
+    const done = await mutate(call, "Saved.");
+    setEnvironmentGeneration(value => value + 1);
+    return done;
+  }, [mutate]);
   const actions: SecretsActions = {
     setSecret: (name, value) => api.setSecret({ expectedEpoch, name, value }),
     rotateSecret: (name, value) => api.rotateSecret({ expectedEpoch, name, value }),
@@ -60,48 +84,81 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
     setVariable: (name, value) => api.setVariable({ expectedEpoch, name, value }),
     deleteVariable: name => api.deleteVariable({ expectedEpoch, name }),
   };
-  const run = (call: () => Result) => mutate(call, "Saved.");
   const browse = useCallback((provider: string, parent: string | null, signal?: AbortSignal) => api.browse({ expectedEpoch, id: provider, parent }, { signal }),
     [api, expectedEpoch]);
   // A host with a credential broker offers the vaults; without a provider yet, using a vault item adds one first.
   const vaults: SecretVaultActions | null = listing && listing.types.length > 0 ? {
-    keepInVault: name => { if (listing.providers.length > 0) setBinding({ name }); else setProviderDialog({ editing: null }); },
+    keepInVault: (name, provider) => { if (listing.providers.length > 0) setBinding({ name, provider }); else setProviderDialog({ editing: null }); },
     icon: listing.providers[0]?.icon ?? null,
     setAskBeforeUse: (name, duration) => api.setAskBeforeUse({ expectedEpoch, name, duration }),
     verification: listing.verification,
   } : null;
-  return <SettingsPage className="secrets-settings" label={t("Secrets")} group="Agent & models" title="Secrets"
-    description="Named values of this machine. The configuration refers to them as ${secret:NAME} and ${var:NAME}."
-    notice={notice} loading={loading} busy={busy} onReload={reload}>
+  const offered = listing ? offeredSecretsTabs(listing, environment) : [];
+  const current = offered.includes(tab) ? tab : "overview";
+  // Left and Right move between the tabs, as in a list of tabs.
+  function moveTab(event: KeyboardEvent<HTMLDivElement>) {
+    const at = offered.indexOf(current);
+    const next = event.key === "ArrowRight" ? at + 1 : event.key === "ArrowLeft" ? at - 1 : event.key === "Home" ? 0 : event.key === "End" ? offered.length - 1 : null;
+    if (next === null) return;
+    event.preventDefault();
+    const target = offered[(next + offered.length) % offered.length];
+    setTab(target);
+    tabs.current?.querySelector<HTMLElement>(`[data-secrets-tab="${target}"]`)?.focus();
+  }
+  const addSecret = (name?: string) => { setTab("secrets"); setAddingSecret(name ? { name } : {}); };
+  return <SettingsPage className="secrets-settings" label={t("Secrets and environment")} group="Agent & models" title="Secrets and environment"
+    notice={notice} loading={loading} busy={busy} onReload={() => { reload(); setEnvironmentGeneration(value => value + 1); }}>
     {!listing ? <SettingsUnavailable loading={loading} icon="secret" title="Secrets unavailable" />
       : <>
         {listing.pending.length > 0 && <PendingUses listing={listing} busy={busy}
           onConfirm={(name, use) => run(() => api.confirmUse({ expectedEpoch, name, use, names: null }))} onDecline={(name, use) => run(() => api.declineUse({ expectedEpoch, name, use, names: null }))} />}
-        <SecretsBody listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} vaults={vaults}
-          secretActions={<>
-            {vaults && <Button size="small" icon={<CredentialIcon icon={listing.providers[0]?.icon ?? "secret"} size={14} />} disabled={!epoch || busy}
-              onClick={() => listing.providers.length > 0 ? setBinding({}) : setProviderDialog({ editing: null })}>{t("Add from a vault…")}</Button>}
-            <Button size="small" intent="primary" icon={<AppIcon name="plus" size={14} />} disabled={!epoch || adding} onClick={() => setAdding(true)}>{t("Add a secret…")}</Button>
-          </>}
-          beforeVariables={<>
-            {listing.types.length > 0 && <CredentialProviders listing={listing} busy={busy} run={run} onAdd={() => setProviderDialog({ editing: null })} actions={{
-              unlock: (id, password) => api.unlockProvider({ expectedEpoch, id, password }),
-              lock: id => api.lockProvider({ expectedEpoch, id }),
-              test: id => api.testProvider({ expectedEpoch, id }),
-              remove: id => api.removeProvider({ expectedEpoch, id }),
-              edit: provider => setProviderDialog({ editing: provider }),
-              runInTerminal,
-              setDeveloperUnlock: enabled => api.setDeveloperUnlock({ expectedEpoch, enabled }),
+        <div className="secrets-tabs-frame">
+          <div className="space-section-nav secrets-tabs" role="tablist" aria-label={t("Secrets and environment")} ref={tabs} onKeyDown={moveTab}>
+            {offered.map(item => {
+              const status = secretsTabStatus(item, listing, environment, t);
+              return <Button key={item} variant="minimal" className="space-section-tab" role="tab" id={`secrets-tab-${item}`} data-secrets-tab={item}
+                aria-selected={item === current} aria-controls="secrets-panel" tabIndex={item === current ? 0 : -1} active={item === current}
+                title={status ? `${t(secretsTabTitles[item])}: ${status}` : undefined} onClick={() => setTab(item)}>
+                <span className="space-section-tab-title">{t(secretsTabTitles[item])}</span>
+                {status && <span className="space-section-tab-status">{status}</span>}
+              </Button>;
+            })}
+          </div>
+        </div>
+        <div className="secrets-panel" role="tabpanel" id="secrets-panel" aria-labelledby={`secrets-tab-${current}`} data-secrets-panel={current}
+          data-setting={secretsTabSetting(current) ?? undefined}>
+          {current === "overview" && <SecretsOverview listing={listing} environment={environment} offered={offered} busy={!epoch || busy} onOpen={setTab}
+            onAddSecret={() => addSecret()} onAddVariable={() => { setTab("variables"); setAddingVariable(true); }}
+            onSetEnvironment={() => { setTab("environment"); setPickingProject(true); }}
+            onAddVault={() => { setTab("vaults"); setProviderDialog({ editing: null }); }} onAddSignIn={() => { setTab("signIns"); setAddingSignIn(true); }} />}
+          {current === "secrets" && <SecretsTable listing={listing} busy={!epoch || busy} run={run} actions={actions} vaults={vaults} adding={addingSecret} onAdding={setAddingSecret}
+            restriction={{ setProjects: (name, projectIds) => api.setSecretProjects({ expectedEpoch, name, projectIds }) }}
+            toolbar={vaults && <Button size="small" icon={<CredentialIcon icon={listing.providers[0]?.icon ?? "secret"} size={14} />} disabled={!epoch || busy}
+              onClick={() => listing.providers.length > 0 ? setBinding({}) : setProviderDialog({ editing: null })}>{t("Add from a vault…")}</Button>} />}
+          {current === "variables" && <VariablesTable listing={listing} busy={!epoch || busy} run={run} actions={actions} adding={addingVariable} onAdding={setAddingVariable} />}
+          {current === "environment" && environment && <EnvironmentTab environment={environment} listing={listing} busy={!epoch || busy} run={run}
+            actions={{ setVariable: (projectId, name, value) => api.setProjectEnvironment({ expectedEpoch, projectId, name, value }),
+              deleteVariable: (projectId, name) => api.deleteProjectEnvironment({ expectedEpoch, projectId, name }) }}
+            picking={pickingProject} onPicking={setPickingProject} onSetSecret={addSecret} onOpenFile={onOpenFile} onOpenSpace={onOpenSpace} />}
+          {current === "vaults" && <CredentialProviders listing={listing} busy={busy} run={run} onAdd={() => setProviderDialog({ editing: null })} actions={{
+            unlock: (id, password) => api.unlockProvider({ expectedEpoch, id, password }),
+            lock: id => api.lockProvider({ expectedEpoch, id }),
+            test: id => api.testProvider({ expectedEpoch, id }),
+            remove: id => api.removeProvider({ expectedEpoch, id }),
+            edit: provider => setProviderDialog({ editing: provider }),
+            runInTerminal,
+            setDeveloperUnlock: enabled => api.setDeveloperUnlock({ expectedEpoch, enabled }),
+          }} />}
+          {current === "signIns" && <SignInsTable signIns={listing.signIns} providers={listing.providers} types={listing.types} busy={busy} run={run}
+            adding={addingSignIn} onAdding={setAddingSignIn} actions={{
+              save: draft => api.saveSignIn({ expectedEpoch, id: draft.id, label: draft.label, provider: draft.provider, sites: [...draft.sites],
+                username: draft.username, password: draft.password, totp: draft.totp.trim() || null }),
+              remove: id => api.removeSignIn({ expectedEpoch, id }),
+              revoke: (id, origin) => api.revokeSiteGrant({ expectedEpoch, id, origin }),
+              browse,
             }} />}
-            {listing.types.length > 0 && <SignInsCard signIns={listing.signIns} providers={listing.providers} types={listing.types} busy={busy} run={run} actions={{
-          save: draft => api.saveSignIn({ expectedEpoch, id: draft.id, label: draft.label, provider: draft.provider, sites: [...draft.sites],
-            username: draft.username, password: draft.password, totp: draft.totp.trim() || null }),
-          remove: id => api.removeSignIn({ expectedEpoch, id }),
-          revoke: (id, origin) => api.revokeSiteGrant({ expectedEpoch, id, origin }),
-          browse,
-        }} />}
-          </>} />
-        {listing.uses.length > 0 && <RecentUses listing={listing} />}
+          {current === "activity" && <RecentUses listing={listing} />}
+        </div>
       </>}
     {providerDialog && listing && <ProviderDialog types={listing.types} providers={listing.providers} editing={providerDialog.editing} busy={busy}
       onClose={() => setProviderDialog(null)}
@@ -114,23 +171,6 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal }: { epoch
   </SettingsPage>;
 }
 
-/** The reference the configuration writes, such as ${secret:NAME}: a click copies it, and a check says it was copied. */
-export function CopyReference({ text, copy = value => navigator.clipboard.writeText(value) }: { text: string; copy?: (value: string) => Promise<void> }) {
-  const { t } = useShellLanguage();
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 1400);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  const label = t("Copy {reference}", { reference: text });
-  return <button type="button" className="secret-reference-copy" title={label} aria-label={label} data-copied={copied || undefined}
-    onClick={() => void copy(text).then(() => setCopied(true), () => { /* No clipboard: nothing is copied. */ })}>
-    <span className="secret-reference">{text}</span>
-    <AppIcon name={copied ? "check" : "copy"} size={12} />
-  </button>;
-}
-
 /** The uses of secrets that ask before use, waiting for the user: Confirm asks the system to verify the user. */
 function PendingUses({ listing, busy, onConfirm, onDecline }: {
   listing: SecretsList; busy: boolean; onConfirm: (name: string, use: string | null) => Promise<boolean>; onDecline: (name: string, use: string | null) => Promise<boolean>;
@@ -140,7 +180,7 @@ function PendingUses({ listing, busy, onConfirm, onDecline }: {
     <h2 id="secret-pending-title"><AppIcon name="warning" size={16} />{t("Waits for your confirmation")}</h2>
     <ul className="secret-list">
       {listing.pending.map(pending => <li key={`${pending.name}\n${pending.use ?? ""}`} className="secret-row secret-pending-row">
-        <span className="secret-name"><code>{pending.name}</code>
+        <span className="secret-name"><code title={pending.name}>{pending.name}</code>
           <span className="secret-reference">{pending.use ? t("for the {use}", { use: pending.use }) : t("for a use nobody named")}</span></span>
         <span className="secret-meta">{new Date(pending.at).toLocaleTimeString()}</span>
         <span className="secret-actions">
@@ -154,212 +194,47 @@ function PendingUses({ listing, busy, onConfirm, onDecline }: {
   </Card>;
 }
 
-/** The last uses of the secrets: which, by what, when and how it went. Never a value. */
-function RecentUses({ listing }: { listing: SecretsList }) {
+type SecretUse = SecretsList["uses"][number];
+
+/** The Activity tab: the last uses of the secrets as a table, which, for what, when and how it went. Never a value. */
+export function RecentUses({ listing }: { listing: SecretsList }) {
   const { t, locale } = useShellLanguage();
-  const [open, setOpen] = useState(false);
-  const outcome = (value: string) => value === "given" ? t("given") : value === "waits" ? t("waits for you") : value === "confirmed" ? t("confirmed")
-    : value === "refused" ? t("declined") : value === "expired" ? t("not answered in time") : t("not available");
-  const uses = open ? listing.uses : listing.uses.slice(0, 5);
-  return <Card className="appearance-settings secret-uses" aria-labelledby="secret-uses-title">
-    <h2 id="secret-uses-title">{t("Recent uses")}</h2>
-    <ul className="secret-use-list">
-      {uses.map((use, index) => <li key={`${use.at}-${index}`} data-outcome={use.outcome}>
-        <code>{use.name}</code>
-        <span>{use.use ? t("for the {use}", { use: use.use }) : "—"}</span>
-        <span className="secret-meta">{new Date(use.at).toLocaleString(locale, { timeStyle: "short", dateStyle: "short" })}</span>
-        <Tag minimal intent={use.outcome === "given" || use.outcome === "confirmed" ? "success" : use.outcome === "waits" ? "warning" : "none"}>{outcome(use.outcome)}</Tag>
-      </li>)}
-    </ul>
-    {listing.uses.length > 5 && <Button size="small" variant="minimal" text={open ? t("Fewer") : t("All {count}", { count: String(listing.uses.length) })} onClick={() => setOpen(!open)} />}
-  </Card>;
+  const [sort, setSort] = useState<TableSort | null>({ column: "when", direction: "desc" });
+  const outcome = (use: SecretUse) => use.outcome === "given" ? t("given") : use.outcome === "waits" ? t("waits for you") : use.outcome === "confirmed" ? t("confirmed")
+    : use.outcome === "restricted" ? t("Project restricted")
+    : use.outcome === "refused" ? t("declined") : use.outcome === "expired" ? t("not answered in time") : t("not available");
+  const rows = useMemo(() => listing.uses.map((use, index) => ({ ...use, key: `${use.at}-${index}` })), [listing.uses]);
+  const columns: DataColumn<SecretUse & { key: string }>[] = [
+    { id: "secret", label: "Secret", sort: use => use.name, cell: use => <code title={use.name}>{use.name}</code> },
+    { id: "use", label: "For", sort: use => use.use, cell: use => use.use ? <span title={use.use}>{use.use}</span> : <span className="muted-text">—</span> },
+    { id: "when", label: "When", width: "11rem", sort: use => Date.parse(use.at), cell: use => new Date(use.at).toLocaleString(locale, { timeStyle: "short", dateStyle: "short" }) },
+    { id: "outcome", label: "Result", width: "11rem", sort: outcome,
+      cell: use => <Tag minimal intent={use.outcome === "given" || use.outcome === "confirmed" ? "success"
+        : use.outcome === "waits" || use.outcome === "restricted" ? "warning" : "none"}>{outcome(use)}</Tag> },
+  ];
+  return <section className="fleet-table-section secrets-table secret-uses" aria-label={t("Recent uses")}>
+    <DataTable label={t("Recent uses")} rows={rows} columns={columns} rowKey={use => use.key} sort={sort} onSort={setSort} selected={null} onSelect={() => { }}
+      rowProps={use => ({ data: { outcome: use.outcome } })} empty={<span className="muted-text">{t("No secret was used yet.")}</span>} />
+  </section>;
 }
 
 /**
- * The secrets and the variables of a listing, with their forms: two cards of a settings page, or, `flat`, two parts of a
- * section of another page (the page of a machine).
+ * The secrets and the variables of a listing as two tables, one under the other, in a section of another page (the page of
+ * a machine): the same tables as Settings > Secrets and environment, without what only this computer has.
  */
-export function SecretsBody({ listing, busy, adding = false, onAdded = () => { }, run, actions, flat = false, vaults = null, secretActions, beforeVariables }: {
-  listing: SecretsList; busy: boolean; adding?: boolean; onAdded?: () => void;
-  run: (call: () => Result) => Promise<boolean>; actions: SecretsActions; flat?: boolean; vaults?: SecretVaultActions | null;
-  /** The actions that add a secret, in the heading of the secrets. */
-  secretActions?: ReactNode;
-  /** What the page shows between the secrets and the variables: the vaults and the sign-ins of websites. */
-  beforeVariables?: ReactNode;
+export function SecretsBody({ listing, busy, run, actions, vaults = null, initialSelected = null }: {
+  listing: SecretsList; busy: boolean; run: (call: () => SecretsResult) => Promise<boolean>; actions: SecretsActions; vaults?: SecretVaultActions | null;
+  /** The secret whose details are open at first. */
+  initialSelected?: string | null;
 }) {
-  const { t, locale } = useShellLanguage();
-  const date = (value: string) => new Date(value).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
-  const names = listing.secrets.map(secret => secret.name);
-  const secretsPart = <>
-    {adding && <NewValueForm kind="secret" taken={names} busy={busy} onCancel={onAdded}
-      onSave={async (name, value) => { if (await run(() => actions.setSecret(name, value))) onAdded(); }} />}
-    {listing.secrets.length === 0 && !adding
-      ? <NonIdealState className="secrets-empty" icon={<AppIcon name="secret" size={28} />} title={t("No secret on this machine.")} />
-      : <ul className="secret-list" aria-label={t("Secrets")}>
-        {listing.secrets.map(secret => <SecretRow key={secret.name} secret={secret} busy={busy} date={date} run={run} actions={actions} vaults={vaults} />)}
-      </ul>}
-  </>;
-  const variablesPart = <>
-    {listing.variables.length > 0 && <ul className="secret-list" aria-label={t("Variables")}>
-      {listing.variables.map(variable => <VariableRow key={variable.name} variable={variable} busy={busy} run={run} actions={actions} />)}
-    </ul>}
-    <NewValueForm kind="var" taken={listing.variables.map(variable => variable.name)} busy={busy}
-      onSave={(name, value) => run(() => actions.setVariable(name, value)).then(() => { })} />
-  </>;
-  if (flat) {
-    return <div className="secrets-body secrets-body-flat">
-      <div className="secrets-part">{secretsPart}</div>
-      <div className="secrets-part" role="group" aria-label={t("Variables")}><h3>{t("Variables")}</h3>{variablesPart}</div>
-    </div>;
-  }
-
-  return <div className="settings-grid secrets-body">
-    <Card className="appearance-settings" aria-labelledby="secrets-title">
-      <div className="secrets-card-heading">
-        <h2 id="secrets-title">{t("Secrets")}</h2>
-        {secretActions && <span className="secrets-card-actions">{secretActions}</span>}
-      </div>
-      {secretActions && <p className="secrets-card-intro">{t("The configuration names a secret as ${secret:NAME}. Its value is kept on this computer, or read from an item of a vault each time it is used.")}</p>}
-      {secretsPart}
-    </Card>
-    {beforeVariables}
-    <Card className="appearance-settings" aria-labelledby="secret-variables-title">
-      <h2 id="secret-variables-title">{t("Variables")}</h2>
-      {variablesPart}
-    </Card>
+  const { t } = useShellLanguage();
+  const [addingSecret, setAddingSecret] = useState<Readonly<{ name?: string }> | null>(null);
+  const [addingVariable, setAddingVariable] = useState(false);
+  return <div className="secrets-body">
+    <SecretsTable listing={listing} busy={busy} run={run} actions={actions} vaults={vaults} adding={addingSecret} onAdding={setAddingSecret} initialSelected={initialSelected} />
+    <div className="secrets-part" role="group" aria-label={t("Variables")}>
+      <h3>{t("Variables")}</h3>
+      <VariablesTable listing={listing} busy={busy} run={run} actions={actions} adding={addingVariable} onAdding={setAddingVariable} />
+    </div>
   </div>;
-}
-
-/**
- * One secret: its name and reference, where it is kept (this computer, with its version, or an item of a vault), its state when
- * it cannot be given now, Ask before use, and Rotate (a value of this computer) and Delete.
- */
-function SecretRow({ secret, busy, date, run, actions, vaults }: {
-  secret: SecretView; busy: boolean; date: (value: string) => string; run: (call: () => Result) => Promise<boolean>; actions: SecretsActions; vaults: SecretVaultActions | null;
-}) {
-  const { t } = useShellLanguage();
-  const [deleting, setDeleting] = useState(false);
-  const [rotating, setRotating] = useState(false);
-  const [value, setValue] = useState("");
-  const rotate = async () => {
-    const typed = value;
-    setValue("");
-    if (await run(() => actions.rotateSecret(secret.name, typed))) setRotating(false);
-  };
-  const state = stateLabel(secret.state);
-  const bound = !!secret.provider;
-  return <li className="secret-row" data-secret={secret.name} data-source={bound ? secret.provider ?? undefined : "this-computer"}>
-    <span className="secret-name"><code title={secret.name}>{secret.name}</code>
-      <CopyReference text={referenceOf("secret", secret.name)} /></span>
-    {bound
-      ? <span className="secret-source" title={secret.label ?? undefined}><CredentialIcon icon={secret.icon} size={14} />
-        <span>{secret.providerName ?? secret.provider}{secret.label ? ` › ${secret.label}` : ""}</span></span>
-      : <Tag minimal>{t("Version {version}", { version: String(secret.version) })}</Tag>}
-    <span className="secret-meta">
-      {secret.state !== "ready" && <Tag minimal intent={state.intent} title={secret.stateMessage ?? undefined}>{t(state.label)}</Tag>}
-      {secret.askBeforeUse && <Tag minimal icon={<AppIcon name="shield" size={12} />}>{t("Asks before use")}</Tag>}
-      {!bound && t("Set {date} by {who}", { date: date(secret.setAt), who: secret.setBy })}
-    </span>
-    <span className="secret-actions">
-      {vaults && <AskBeforeUse secret={secret} busy={busy} run={run} vaults={vaults} />}
-      {!bound && vaults && <Button size="small" variant="minimal" icon={<CredentialIcon icon={vaults.icon ?? "secret"} size={14} />} aria-label={t("Use a vault item for {name}", { name: secret.name })}
-        title={t("Use a vault item…")} disabled={busy} onClick={() => vaults.keepInVault(secret.name)} />}
-      {!bound && <PopoverNext isOpen={rotating} placement="bottom-end" onInteraction={next => { if (!next && !busy) { setRotating(false); setValue(""); } }}
-        content={<form className="secret-rotate" onSubmit={event => { event.preventDefault(); if (value) void rotate(); }}>
-          <strong>{t("New value of {name}", { name: secret.name })}</strong>
-          <InputGroup type="password" autoComplete="off" autoFocus small value={value} disabled={busy} aria-label={t("New value of {name}", { name: secret.name })}
-            onChange={event => setValue(event.target.value)} />
-          <div className="rename-actions">
-            <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={() => { setRotating(false); setValue(""); }} />
-            <Button type="submit" intent="primary" size="small" text={t("Rotate")} disabled={busy || !value} />
-          </div>
-        </form>}>
-        <Button size="small" icon={<AppIcon name="refresh" size={14} />} text={t("Rotate")} disabled={busy} onClick={() => setRotating(true)} />
-      </PopoverNext>}
-      <span className="secret-delete">
-        <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Delete {name}", { name: secret.name })}
-          disabled={busy} onClick={() => setDeleting(true)} />
-        {deleting && <ConfirmPopover always intent="danger" busy={busy} placement="bottom-end" title={t("Delete this secret?")} subject={secret.name}
-          detail={bound ? t("Nothing changes in the vault. What refers to it stops working until it is set again.") : t("What refers to it stops working until it is set again.")}
-          confirmLabel={t("Delete")}
-          onConfirm={() => { setDeleting(false); void run(() => actions.deleteSecret(secret.name)); }} onCancel={() => setDeleting(false)} />}
-      </span>
-    </span>
-  </li>;
-}
-
-/** Ask before use: off, or a confirmation by Windows Hello or Touch ID that lasts a while; off with its reason where the system cannot verify. */
-function AskBeforeUse({ secret, busy, run, vaults }: { secret: SecretView; busy: boolean; run: (call: () => Result) => Promise<boolean>; vaults: SecretVaultActions }) {
-  const { t } = useShellLanguage();
-  const [open, setOpen] = useState(false);
-  const available = vaults.verification?.available === true;
-  const choose = async (duration: string | null) => { if (await run(() => vaults.setAskBeforeUse(secret.name, duration))) setOpen(false); };
-  return <PopoverNext isOpen={open} placement="bottom-end" onInteraction={next => { if (!next) setOpen(false); }}
-    content={<div className="secret-ask">
-      <strong>{t("Ask before use")}</strong>
-      <p>{available ? t("Windows Hello or Touch ID verifies you before CodeAlta gives {name} to what asks for it.", { name: secret.name })
-        : vaults.verification?.reason ?? t("This system cannot verify you.")}</p>
-      <div className="secret-ask-choices" role="radiogroup" aria-label={t("Ask before use")}>
-        <Button size="small" variant={secret.askBeforeUse ? "minimal" : "outlined"} active={!secret.askBeforeUse} text={t("Off")} disabled={busy} onClick={() => void choose(null)} />
-        {askDurations.map(duration => <Button key={duration.value} size="small" variant={secret.askBeforeUse === duration.value ? "outlined" : "minimal"}
-          active={secret.askBeforeUse === duration.value} text={t(duration.label)} disabled={busy || !available} onClick={() => void choose(duration.value)} />)}
-      </div>
-      {available && <p className="secret-ask-note">{t("A confirmation is kept for that secret and what uses it, for the time you choose.")}</p>}
-    </div>}>
-    <Button size="small" variant="minimal" intent={secret.askBeforeUse ? "primary" : "none"} icon={<AppIcon name="shield" size={14} />}
-      aria-label={t("Ask before using {name}", { name: secret.name })} title={t("Ask before use")} disabled={busy} onClick={() => setOpen(true)} />
-  </PopoverNext>;
-}
-
-/** One variable: its name and reference, its value, editable; Delete. */
-function VariableRow({ variable, busy, run, actions }: {
-  variable: VariableView; busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: SecretsActions;
-}) {
-  const { t } = useShellLanguage();
-  const [value, setValue] = useState(variable.value);
-  const [deleting, setDeleting] = useState(false);
-  const changed = value !== variable.value;
-  return <li className="secret-row" data-variable={variable.name}>
-    <span className="secret-name"><code title={variable.name}>{variable.name}</code>
-      <CopyReference text={referenceOf("var", variable.name)} /></span>
-    <InputGroup className="secret-value" small value={value} disabled={busy} aria-label={t("Value of {name}", { name: variable.name })}
-      onChange={event => setValue(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && changed && value) void run(() => actions.setVariable(variable.name, value)); }} />
-    <span className="secret-actions">
-      {changed && <Button size="small" intent="primary" text={t("Save")} disabled={busy || !value} onClick={() => void run(() => actions.setVariable(variable.name, value))} />}
-      <span className="secret-delete">
-        <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Delete {name}", { name: variable.name })}
-          disabled={busy} onClick={() => setDeleting(true)} />
-        {deleting && <ConfirmPopover always intent="danger" busy={busy} placement="bottom-end" title={t("Delete this variable?")} subject={variable.name}
-          detail={t("What refers to it stops working until it is set again.")} confirmLabel={t("Delete")}
-          onConfirm={() => { setDeleting(false); void run(() => actions.deleteVariable(variable.name)); }} onCancel={() => setDeleting(false)} />}
-      </span>
-    </span>
-  </li>;
-}
-
-/** The form that adds a secret (its value hidden) or a variable. */
-function NewValueForm({ kind, taken, busy, onSave, onCancel }: {
-  kind: "secret" | "var"; taken: readonly string[]; busy: boolean; onSave: (name: string, value: string) => Promise<void>; onCancel?: () => void;
-}) {
-  const { t } = useShellLanguage();
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const problem = secretNameProblem(name, taken);
-  const ready = isSecretName(name.trim()) && !problem && value.length > 0 && !busy;
-  const save = async () => {
-    if (!ready) return;
-    const [typedName, typedValue] = [name.trim(), value];
-    setValue("");
-    await onSave(typedName, typedValue);
-    setName("");
-  };
-  return <form className="secret-new" data-kind={kind} onSubmit={event => { event.preventDefault(); void save(); }}>
-    <InputGroup small value={name} placeholder={kind === "secret" ? "GRAFANA_TOKEN" : "GRAFANA_URL"} disabled={busy} intent={problem ? "danger" : "none"}
-      aria-label={t(kind === "secret" ? "Name of the secret" : "Name of the variable")} autoFocus={kind === "secret"} onChange={event => setName(event.target.value)} />
-    <InputGroup small value={value} type={kind === "secret" ? "password" : "text"} autoComplete="off" disabled={busy}
-      aria-label={t(kind === "secret" ? "Value of the secret" : "Value of the variable")} placeholder={t("Value")} onChange={event => setValue(event.target.value)} />
-    {onCancel && <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={onCancel} />}
-    <Button type="submit" size="small" intent={kind === "secret" ? "primary" : "none"} text={t("Add")} disabled={!ready} />
-    {problem && <span className="secret-problem" role="alert">{t(problem)}</span>}
-  </form>;
 }

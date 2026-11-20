@@ -4,7 +4,7 @@ title: Secrets of your machines
 
 # Secrets of your machines
 
-The secrets and variables of a machine that runs CodeAlta Node are its own, as those of this computer are (see [Secrets and Variables](readme.md)). They are set on the machine with `altanode secrets`, from a CodeAlta Desktop paired with it, or for all your machines at once through a CodeAlta Server.
+The secrets and variables of a machine that runs CodeAlta Node are its own, as those of this computer are (see [Secrets and environment](readme.md)). They are set on the machine with `altanode secrets`, from a CodeAlta Desktop paired with it, or for all your machines at once through a CodeAlta Server.
 
 ## On a machine with altanode
 
@@ -22,14 +22,16 @@ altanode secrets delete-var GRAFANA_URL
 
 The value of a secret comes from the standard input or the prompt, never from an argument, which other processes of the machine can read. A node that runs uses a new value at its next use.
 
+To [limit a secret to projects](readme.md#limit-a-secret-to-projects), repeat `--project <slug>` when setting it, or run `altanode secrets projects <name> <slug>…` to change the list. `altanode secrets projects <name>` restores access for all projects.
+
 From CodeAlta Desktop, a computer paired with the machine that manages it changes the same secrets and variables in the **Secrets** section of the page of the machine (see [Manage a machine from CodeAlta Desktop](../fleet/machines.md#manage-a-machine-from-codealta-desktop)). A computer that reaches the machine only through a CodeAlta Server never does.
 
 ## Secrets of your machines with a server
 
-With a [CodeAlta Server](../fleet/server.md), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**. Without a server, that page sends you to **Settings > Secrets**, where the values of this computer are.
+With a [CodeAlta Server](../fleet/server.md), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**. Without a server, that page sends you to **Settings > Secrets and environment**, where the values of this computer are.
 
 - **Add a value…** takes a secret or a variable, its name and value, where it applies, and the machines that get it.
-- **Where it applies**: **All my work**, a space linked to the server, a project, or an [environment](#environments). A run takes the value of the narrowest: its environment, then its project, its space, then all your work. A secret of the machine itself (**Settings > Secrets** on it, `altanode secrets`) comes first.
+- **Where it applies**: **All my work**, a space linked to the server, a project, or an [environment](#environments). A run takes the value of the narrowest: its environment, then its project, its space, then all your work. A secret of the machine itself comes first.
 - **Only for MCP servers and plugin tools, never the agent's shell**: the secret goes to providers, MCP servers and plugin tools, never to the agent's shell nor to the commands it runs. Its row says **MCP servers and plugin tools only**. A command line profile of a space that refers to it does not get it.
 - Each row shows where the value applies, its version and the machines that hold it. **Rotate** gives it a new value: the machines take it at once when they are online, else before their next run. **Machines** gives it to another machine of yours, or takes it away: the machines that keep it then get it as a new version, which the machine taken away never gets. A variable shows its value.
 - A machine removed from the server keeps nothing, and the rows of the values it held say **Rotate: a revoked machine held it** until they are rotated.

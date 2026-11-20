@@ -126,7 +126,7 @@ Safari always runs its automation in a private window of its own: it has the iso
 
 An agent can sign in to a site without ever seeing a password: the user name, the password and the one-time code are typed from an item of your [vault](secrets/vaults.md), on the sites you chose.
 
-1. In **Settings > Secrets**, under **Sign-ins of websites**, click **Add a sign-in…**. Give it a name, its sites (`https://github.com`), its vault, and the fields of the item: **User name**, **Password** and, for a site that asks one, **One-time code**. **Choose…** picks each one in the vault.
+1. Open **Settings > Secrets and environment > Sign-ins** and click **Add a sign-in…**. Give it a name, its sites (`https://github.com`), its vault, and the fields of the item: **User name**, **Password** and, for a site that asks one, **One-time code**. **Choose…** picks each one in the vault.
 <figure class="alta-figure my-4" style="max-width: 32rem;">
   <img src="{{site.basepath}}/img/alta-desktop-secrets-sign-in.webp" alt="The window of the sign-in GitHub: its site https://github.com, the vault Personal (1Password), the references of its user name, password and one-time code, and the fields of the item GitHub listed under Password" loading="lazy">
   <figcaption class="small text-secondary mt-2">A sign-in: its sites, and the fields of a vault item picked for each value.</figcaption>
@@ -137,8 +137,8 @@ An agent can sign in to a site without ever seeing a password: the user name, th
 
 - A sign-in is typed only on its sites, exactly: not on a look-alike address, another port or a subdomain. A field that is hidden, in a frame of another site, or in a form that sends to another site is never filled.
 - While CodeAlta types, the other tools of the session wait. When the site refuses the sign-in, the fields are cleared.
-- No permission mode answers the card. The sites you allowed for 30 days are listed under the sign-in in **Settings > Secrets**: remove one to be asked again.
-- A locked vault is not unlocked for the agent: it tells you to unlock it in **Settings > Secrets**.
+- No permission mode answers the card. The sites you allowed for 30 days are listed under the sign-in in **Sign-ins**: remove one to be asked again.
+- A locked vault is not unlocked for the agent: it tells you to unlock it in **Vaults**.
 - It works in the isolated and persistent profiles of Chrome and Edge. Not in your own browser, which has the extension of your vault, not in Firefox yet, and never in a sandboxed session.
 
 ## Your own browser

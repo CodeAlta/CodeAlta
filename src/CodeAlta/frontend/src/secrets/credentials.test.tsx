@@ -5,9 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { CredentialProviderRpcView, CredentialTypeView, SecretsList } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { CredentialProviders } from "./CredentialProviders";
-import { SecretsBody } from "./SecretsSettings";
+import { SecretsTable } from "./SecretsTable";
 import { commandLine, draftsOf, isProviderId, isSecretReference, isSite, localSecret, matchesQuery, suggestedSecretName, missingSetting, noCredentials, pickedLabel, settingsOf, signInDraftProblem, siteList, stateLabel, suggestedProviderId } from "./credentials";
-import { SignInsCard } from "./SignIns";
+import { SignInsTable } from "./SignIns";
 
 const never = () => assert.fail("rendering must not act");
 const render = (element: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
@@ -69,7 +69,9 @@ test("this computer comes first, then each vault with its logo, account and the 
         installCommand: ["winget", "install", "tool"], installPage: "https://example.com/install" })]),
     busy: false, run: never, onAdd: never, actions: { unlock: never, lock: never, test: never, remove: never, edit: never, runInTerminal: never },
   }));
+  assert.match(html, /<table class="fleet-table" aria-label="Vaults">/);
   assert.ok(html.indexOf("data-provider=\"this-computer\"") < html.indexOf("data-provider=\"personal\""));
+  assert.match(html, /<tr data-provider="personal"[^>]* data-state="locked"/);
   assert.match(html, /data-brand="1password"/);
   assert.match(html, /alice@example\.com/);
   assert.match(html, />Unlock</);
@@ -115,16 +117,23 @@ test("a vault CodeAlta unlocked offers Lock even when it holds no value, such as
 test("a secret kept in a vault shows its vault and item, its state and Ask before use, never a version nor Rotate", () => {
   const secret = { ...localSecret({ name: "ANTHROPIC_API_KEY", version: 2, setBy: "alex", setAt: "2026-11-12T09:00:00Z" }),
     provider: "personal", providerName: "1Password", icon: "1password", label: "Private › Anthropic › credential", askBeforeUse: "15m", state: "locked", stateMessage: "Locked." };
-  const html = render(createElement(SecretsBody, { listing: listing([provider({})], { secrets: [secret] }), busy: false, run: never,
-    actions: { setSecret: never, rotateSecret: never, deleteSecret: never, setVariable: never, deleteVariable: never },
+  const table = (initialSelected: string | null) => render(createElement(SecretsTable, { listing: listing([provider({})], { secrets: [secret] }), busy: false, run: never,
+    actions: { setSecret: never, rotateSecret: never, deleteSecret: never, setVariable: never, deleteVariable: never }, adding: null, onAdding: never, initialSelected,
     vaults: { keepInVault: never, setAskBeforeUse: never, verification: { available: true, reason: null } } }));
+  const html = table(null);
   assert.match(html, /data-source="personal"/);
+  assert.match(html, /data-brand="1password"/);
   assert.match(html, /1Password › Private › Anthropic › credential/);
   assert.match(html, />Locked</);
-  assert.match(html, />Asks before use</);
+  assert.match(html, /title="Asks before use"/, "a shield in its row");
   assert.match(html, /aria-label="Ask before using ANTHROPIC_API_KEY"/);
-  assert.doesNotMatch(html, />Rotate</);
-  assert.doesNotMatch(html, /Version 2/);
+  assert.doesNotMatch(html, /aria-label="Rotate ANTHROPIC_API_KEY"/);
+  assert.doesNotMatch(html, /This computer · v2/);
+  // Its details: why it cannot be given now, and how long a confirmation lasts.
+  const details = table("ANTHROPIC_API_KEY");
+  assert.match(details, />Locked\.</);
+  assert.match(details, /role="radiogroup" aria-label="Ask before use"/);
+  assert.match(details, />15 minutes</);
 });
 test("a sign-in lists its sites as origins, and is saved only with a name, a vault, a user name and a password", () => {
   assert.deepEqual(siteList("https://github.com\n  gitlab.com , \n"), ["https://github.com", "gitlab.com"]);
@@ -138,16 +147,19 @@ test("a sign-in lists its sites as origins, and is saved only with a name, a vau
 });
 
 test("a sign-in shows its vault, its sites and the sites allowed until a date; never a value", () => {
-  const html = render(createElement(SignInsCard, {
+  const html = render(createElement(SignInsTable, {
     signIns: [{ id: "github", label: "GitHub", provider: "personal", sites: ["https://github.com"], username: "op://Private/GitHub/username", password: "op://Private/GitHub/password",
       totp: null, providerName: "1Password", icon: "1password", grants: [{ origin: "https://github.com", until: "2026-12-12T09:00:00Z" }] }],
-    providers: [provider({})], types: [], busy: false, run: never, actions: { save: never, remove: never, revoke: never, browse: never },
+    providers: [provider({})], types: [], busy: false, run: never, adding: false, onAdding: never, actions: { save: never, remove: never, revoke: never, browse: never },
   }));
-  assert.match(html, /Sign-ins of websites/);
-  assert.match(html, /1Password · https:\/\/github\.com/);
+  assert.match(html, /<table class="fleet-table" aria-label="Sign-ins of websites">/);
+  assert.match(html, /data-sign-in="github"/);
+  assert.match(html, />1Password</);
+  assert.match(html, />https:\/\/github\.com</);
   assert.match(html, /Allowed on github\.com until/);
-  assert.doesNotMatch(html, /One-time code/, "a sign-in without a one-time code says nothing of it");
-  const empty = render(createElement(SignInsCard, { signIns: [], providers: [], types: [], busy: false, run: never, actions: { save: never, remove: never, revoke: never, browse: never } }));
+  assert.doesNotMatch(html, /<td[^>]*>(?:(?!<\/td>).)*One-time code/s, "a sign-in without a one-time code says nothing of it");
+  const empty = render(createElement(SignInsTable, { signIns: [], providers: [], types: [], busy: false, run: never, adding: false, onAdding: never,
+    actions: { save: never, remove: never, revoke: never, browse: never } }));
   assert.match(empty, /Add a vault first/);
 });
 

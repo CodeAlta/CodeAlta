@@ -272,6 +272,33 @@ public sealed class DesktopSettingsTests
         CollectionAssert.AreEqual(new[] { ("show", "sessions", (string?)"sessions.title"), ("show", "providers", null) }, events.Select(static e => (e.Kind, e.Page!, e.Id)).ToArray());
     }
 
+    [TestMethod]
+    public async Task SecretsAndEnvironment_IsOnePage_WhoseTabsAreFoundAndOpenedByTheirSettings()
+    {
+        using var fixture = Fixture.Create();
+        Assert.AreEqual("Agent & models › Secrets and environment", fixture.Catalog.PathOf("secrets"));
+        foreach (var id in new[] { "secrets.list", "secrets.variables", "secrets.environment", "secrets.vaults", "secrets.sign_ins", "secrets.activity" })
+        {
+            var setting = fixture.Catalog.Find(id);
+            Assert.IsNotNull(setting, id);
+            Assert.AreEqual(("secrets", AltaSettingKinds.Collection, AltaSettingAccess.Read), (setting!.Page, setting.Kind, setting.Agents), id);
+            Assert.AreEqual("Agent & models › Secrets and environment", setting.PagePath, id);
+            // A list of the page: an agent is told where it is changed, and is given no way to write it.
+            Assert.AreEqual(AltaSettingStatus.Managed, (await fixture.Settings.SetAsync(id, Value("true"), null, Agent, CancellationToken.None)).Status, id);
+        }
+
+        // The words a user types to find where the environment variables of the sessions are set.
+        var environment = fixture.Catalog.Find("secrets.environment")!;
+        CollectionAssert.IsSubsetOf(new[] { "environment variable", "env" }, environment.Keywords.ToArray());
+        Assert.AreEqual("Environment", environment.Section);
+
+        // `alta settings open secrets.environment` shows the page with that setting, which the page opens its tab for.
+        var events = new List<SettingsEvent>();
+        using var watch = fixture.Settings.Watch(null, events.Add);
+        Assert.IsTrue(fixture.Settings.Open(null, "secrets.environment", null));
+        CollectionAssert.AreEqual(new[] { ("show", "secrets", (string?)"secrets.environment") }, events.Select(static e => (e.Kind, e.Page!, e.Id)).ToArray());
+    }
+
     private static JsonElement Value(string json)
     {
         using var document = JsonDocument.Parse(json);

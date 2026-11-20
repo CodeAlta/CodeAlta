@@ -35,19 +35,7 @@ export const credentialMessages = {
   "Use a vault item as a secret": ["Usar un elemento de una bóveda como secreto", "Utiliser un élément d’un coffre comme secret", "Einen Tresoreintrag als Geheimnis verwenden", "保管庫の項目をシークレットとして使う", "将保管库中的项目用作机密"],
   "Use a vault item for {name}": ["Usar un elemento de una bóveda para {name}", "Utiliser un élément d’un coffre pour {name}", "Einen Tresoreintrag für {name} verwenden", "{name} に保管庫の項目を使う", "为 {name} 使用保管库中的项目"],
   "Type the reference instead…": ["Escribir la referencia…", "Taper la référence…", "Stattdessen die Referenz eingeben…", "代わりに参照を入力…", "改为输入引用…"],
-  "The configuration names a secret as ${secret:NAME}. Its value is kept on this computer, or read from an item of a vault each time it is used.": [
-    "La configuración nombra un secreto como ${secret:NAME}. Su valor se guarda en este equipo, o se lee de un elemento de una bóveda cada vez que se usa.",
-    "La configuration nomme un secret ${secret:NAME}. Sa valeur est gardée sur cet ordinateur, ou lue dans un élément d’un coffre chaque fois qu’il est utilisé.",
-    "Die Konfiguration nennt ein Geheimnis ${secret:NAME}. Sein Wert liegt auf diesem Computer oder wird bei jeder Verwendung aus einem Tresoreintrag gelesen.",
-    "構成はシークレットを ${secret:NAME} と呼びます。値はこのコンピューターに保管されるか、使われるたびに保管庫の項目から読み取られます。",
-    "配置以 ${secret:NAME} 指代机密。其值保存在本机上，或在每次使用时从保管库中的项目读取。"],
   "Vaults": ["Bóvedas", "Coffres", "Tresore", "保管庫", "保管库"],
-  "Where the values of the secrets are kept: this computer, or a vault CodeAlta reads through its program and never writes into.": [
-    "Dónde se guardan los valores de los secretos: este equipo, o una bóveda que CodeAlta lee mediante su programa y en la que nunca escribe.",
-    "Où sont gardées les valeurs des secrets : cet ordinateur, ou un coffre que CodeAlta lit par son programme et dans lequel il n’écrit jamais.",
-    "Wo die Werte der Geheimnisse liegen: dieser Computer oder ein Tresor, den CodeAlta über sein Programm liest und in den es nie schreibt.",
-    "シークレットの値の保管場所：このコンピューター、または CodeAlta がそのプログラムを通じて読み取り、書き込むことのない保管庫。",
-    "机密值的保存位置：本机，或 CodeAlta 通过其程序读取且从不写入的保管库。"],
   "Let the developer instance unlock the vaults": [
     "Dejar que la instancia de desarrollo desbloquee las bóvedas",
     "Laisser l’instance de développement déverrouiller les coffres",
@@ -90,7 +78,6 @@ export const credentialMessages = {
     "1Password、Bitwarden、KeePassXC などの保管庫を追加して、シークレットの値をそこに保管します。",
     "添加 1Password、Bitwarden、KeePassXC 或其他保管库，将机密的值保存在那里。"],
   "Add {name}": ["Añadir {name}", "Ajouter {name}", "{name} hinzufügen", "{name} を追加", "添加 {name}"],
-  "All {count}": ["Los {count}", "Les {count}", "Alle {count}", "すべて ({count})", "全部 {count} 条"],
   "Ask before use": ["Preguntar antes de usar", "Demander avant l’usage", "Vor der Verwendung fragen", "使用前に確認", "使用前询问"],
   "Ask before using {name}": ["Preguntar antes de usar {name}", "Demander avant d’utiliser {name}", "Vor der Verwendung von {name} fragen", "{name} を使う前に確認", "使用 {name} 前询问"],
   "Asks before use": ["Pregunta antes de usar", "Demande avant l’usage", "Fragt vor der Verwendung", "使用前に確認", "使用前询问"],
@@ -104,7 +91,6 @@ export const credentialMessages = {
   "Confirm…": ["Confirmar…", "Confirmer…", "Bestätigen…", "確認…", "确认…"],
   "Each use": ["Cada uso", "À chaque usage", "Bei jeder Verwendung", "使用のたび", "每次使用"],
   "Encrypted for you": ["Cifrado para ti", "Chiffré pour vous", "Für dich verschlüsselt", "あなた用に暗号化", "为你加密"],
-  "Fewer": ["Menos", "Moins", "Weniger", "少なく", "收起"],
   "Forget the values read from this vault until it is unlocked again.": [
     "Olvidar los valores leídos de esta bóveda hasta que se desbloquee de nuevo.",
     "Oublier les valeurs lues dans ce coffre jusqu’à son prochain déverrouillage.",
@@ -268,12 +254,6 @@ export const credentialMessages = {
   "Remove this sign-in?": ["¿Quitar este inicio de sesión?", "Retirer cette connexion ?", "Diese Anmeldung entfernen?", "このサインインを削除しますか?", "移除此登录信息？"],
   "Sign-ins of websites": ["Inicios de sesión de sitios web", "Connexions aux sites web", "Anmeldungen bei Websites", "Web サイトのサインイン", "网站登录信息"],
   "Sites": ["Sitios", "Sites", "Websites", "サイト", "站点"],
-  "The browser of a session types them on their sites, after you allow it. Agents never see them.": [
-    "El navegador de una sesión los escribe en sus sitios, después de que lo permitas. Los agentes nunca los ven.",
-    "Le navigateur d’une session les saisit sur leurs sites, une fois que vous l’autorisez. Les agents ne les voient jamais.",
-    "Der Browser einer Sitzung gibt sie auf ihren Websites ein, nachdem du es erlaubt hast. Agenten sehen sie nie.",
-    "セッションのブラウザーが、あなたの許可を得てからそのサイトで入力します。エージェントがそれを見ることはありません。",
-    "会话的浏览器在你允许后在对应站点上填写它们。代理永远看不到它们。"],
   "This vault lists nothing: type the reference.": [
     "Esta bóveda no lista nada: escribe la referencia.",
     "Ce coffre ne liste rien : saisissez la référence.",

@@ -81,6 +81,7 @@ import { addMachineMessages } from "./machines/addMachineMessages";
 import { createServerMessages } from "./fleet/createServerMessages";
 import { secretMessages } from "./secrets/messages";
 import { credentialMessages } from "./secrets/credentialMessages";
+import { environmentMessages } from "./secrets/environmentMessages";
 import { fleetMessages } from "./fleet/messages";
 import { fleetSecretMessages } from "./fleet/secretsMessages";
 import { fleetBudgetMessages } from "./fleet/budgetsMessages";
@@ -3093,6 +3094,7 @@ export const messages = dictionary({
   ...createServerMessages,
   ...secretMessages,
   ...credentialMessages,
+  ...environmentMessages,
   ...fleetMessages,
   ...fleetSecretMessages,
   ...fleetBudgetMessages,

@@ -31,10 +31,16 @@ export function cliRows(reply: SessionIdentityResponse | null): readonly Readonl
     variables: profile.env.map(variable => `${variable.name}=${variable.value}`).join(" · ") }));
 }
 
+/** The names of the environment variables the project of a session gives it (its `[env]` table); never a value. */
+export function projectEnvironmentNames(reply: SessionIdentityResponse | null): readonly string[] {
+  return reply?.status === "ok" ? reply.projectEnvironmentNames ?? [] : [];
+}
+
 /**
  * The identity a session works under, in its information window: the Git author, the signing, the GitHub profile,
- * the Jira account and the CLI profiles of its space and its project, as the session attached with them. Nothing is
- * shown for a session that keeps the usual settings, and no secret is ever shown.
+ * the Jira account, the CLI profiles of its space and its project and the environment variables its project sets, as
+ * the session attached with them. Nothing is shown for a session that keeps the usual settings, and no secret is ever
+ * shown.
  */
 export function SessionIdentityInfo({ epoch, sessionId, api = spaceIdentity }: { epoch: string | null; sessionId: string; api?: SessionIdentityApi }) {
   const { t } = useShellLanguage();
@@ -48,7 +54,8 @@ export function SessionIdentityInfo({ epoch, sessionId, api = spaceIdentity }: {
   }, [api, epoch, sessionId]);
   const rows = identityRows(reply) ?? [];
   const profiles = cliRows(reply);
-  if (rows.length === 0 && profiles.length === 0) return null;
+  const environment = projectEnvironmentNames(reply);
+  if (rows.length === 0 && profiles.length === 0 && environment.length === 0) return null;
   return <section aria-labelledby="session-info-identity"><h3 id="session-info-identity">{t("Identity")}</h3>
     <dl className="session-info-fields" tabIndex={0}>
       {rows.map(([label, value]) => <div key={label}><dt>{t(label)}</dt><dd>{identityValue(label, value, t)}</dd></div>)}
@@ -57,6 +64,10 @@ export function SessionIdentityInfo({ epoch, sessionId, api = spaceIdentity }: {
         <dd>{[profile.variables, ...profile.project ? [t("from the project")] : [],
           ...profile.unset.map(name => t("{variable} left out: a variable it refers to is not set", { variable: name }))].join(" · ")}</dd>
       </div>)}
+      {environment.length > 0 && <div data-project-environment="">
+        <dt>{t("Project environment")}</dt>
+        <dd>{environment.join(" · ")}</dd>
+      </div>}
     </dl>
   </section>;
 }

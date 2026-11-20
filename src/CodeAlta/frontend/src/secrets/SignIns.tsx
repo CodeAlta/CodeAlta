@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Button, Card, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, NonIdealState, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, NonIdealState, Tag, TextArea } from "@blueprintjs/core";
 import type { CredentialProviderRpcView, CredentialTypeView, SignInView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
+import { DataTable, type DataColumn } from "../fleet/console/DataTable";
+import type { TableSort } from "../fleet/console/tableRows";
 import { useShellLanguage } from "../shellLanguage";
 import { CredentialIcon } from "./CredentialIcon";
 import { signInDraftProblem, siteList, type SignInDraft } from "./credentials";
@@ -10,7 +12,7 @@ import { VaultBrowser, type BrowseVault } from "./VaultPicker";
 
 type Result = Promise<{ status: string; message?: string | null }>;
 
-/** What the card of the sign-ins does: each call is one change, and says how it went. */
+/** What the table of the sign-ins does: each call is one change, and says how it went. */
 export type SignInActions = Readonly<{
   save: (draft: SignInDraft) => Result;
   remove: (id: string) => Result;
@@ -19,44 +21,26 @@ export type SignInActions = Readonly<{
 }>;
 
 /**
- * The sign-ins of websites: the vault items the browser of a session types on their sites, once the user allowed it, with the
- * sites the user allowed for 30 days. A value is never shown, nor sent to an agent.
+ * The sign-ins of websites as a table: the vault items the browser of a session types on their sites, once the user allowed
+ * it, with the sites the user allowed for 30 days. A value is never shown, nor sent to an agent.
  */
-export function SignInsCard({ signIns, providers, types, busy, run, actions }: {
+export function SignInsTable({ signIns, providers, types, busy, run, actions, adding, onAdding }: {
   signIns: readonly SignInView[]; providers: readonly CredentialProviderRpcView[]; types: readonly CredentialTypeView[];
   busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: SignInActions;
-}) {
-  const { t } = useShellLanguage();
-  const [editing, setEditing] = useState<SignInView | "new" | null>(null);
-  return <Card className="appearance-settings sign-ins" aria-labelledby="sign-ins-title">
-    <div className="credential-providers-heading">
-      <h2 id="sign-ins-title">{t("Sign-ins of websites")}</h2>
-      <Button size="small" icon={<AppIcon name="plus" size={14} />} text={t("Add a sign-in…")} disabled={busy || providers.length === 0} onClick={() => setEditing("new")} />
-    </div>
-    <p className="credential-providers-intro">{t("The browser of a session types them on their sites, after you allow it. Agents never see them.")}</p>
-    {signIns.length > 0
-      ? <ul className="credential-provider-list" aria-label={t("Sign-ins of websites")}>
-        {signIns.map(signIn => <SignInRow key={signIn.id} signIn={signIn} busy={busy} run={run} actions={actions} onEdit={() => setEditing(signIn)} />)}
-      </ul>
-      : <NonIdealState className="credential-providers-empty" icon={<AppIcon name="globe" size={24} />}
-        description={providers.length === 0 ? t("Add a vault first: a sign-in is an item of a vault.") : t("Add the user name and password of a site, kept in a vault.")} />}
-    {editing && <SignInDialog editing={editing === "new" ? null : editing} providers={providers} types={types} busy={busy} browse={actions.browse}
-      onClose={() => setEditing(null)} onSave={draft => run(() => actions.save(draft))} />}
-  </Card>;
-}
-
-/** One sign-in: its vault, its sites, and the sites the user allowed until a date. */
-function SignInRow({ signIn, busy, run, actions, onEdit }: {
-  signIn: SignInView; busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: SignInActions; onEdit: () => void;
+  /** Whether the dialog that adds a sign-in is open. */
+  adding: boolean; onAdding: (adding: boolean) => void;
 }) {
   const { t, locale } = useShellLanguage();
-  const [removing, setRemoving] = useState(false);
+  const [editing, setEditing] = useState<SignInView | null>(null);
+  const [sort, setSort] = useState<TableSort | null>({ column: "name", direction: "asc" });
   const date = (value: string) => new Date(value).toLocaleDateString(locale, { dateStyle: "medium" });
-  return <li className="credential-provider-row sign-in-row" data-sign-in={signIn.id}>
-    <span className="credential-provider-icon"><CredentialIcon icon={signIn.icon} size={18} /></span>
-    <span className="credential-provider-name">
-      <strong title={signIn.id}>{signIn.label}</strong>
-      <span className="credential-provider-detail">{signIn.providerName ?? signIn.provider}{" · "}{signIn.sites.join(", ")}</span>
+  const columns: DataColumn<SignInView>[] = [
+    { id: "name", label: "Sign-in", sort: signIn => signIn.label, cell: signIn => <span className="credential-provider-cell">
+      <span className="credential-provider-icon"><CredentialIcon icon={signIn.icon} size={16} /></span>
+      <span className="credential-provider-name"><strong title={signIn.id}>{signIn.label}</strong></span></span> },
+    { id: "vault", label: "Vault", secondary: true, sort: signIn => signIn.providerName ?? signIn.provider, cell: signIn => signIn.providerName ?? signIn.provider },
+    { id: "sites", label: "Sites", sort: signIn => signIn.sites.join(", "), cell: signIn => <span className="sign-in-sites">
+      <span title={signIn.sites.join(", ")}>{signIn.sites.join(", ")}</span>
       {signIn.grants.length > 0 && <span className="sign-in-grants">
         {signIn.grants.map(grant => <Tag key={grant.origin} minimal intent="success" icon={<AppIcon name="check" size={12} />}
           onRemove={busy ? undefined : () => void run(() => actions.revoke(signIn.id, grant.origin))}
@@ -64,19 +48,40 @@ function SignInRow({ signIn, busy, run, actions, onEdit }: {
           {t("Allowed on {site} until {date}", { site: grant.origin.replace(/^https:\/\//, ""), date: date(grant.until) })}
         </Tag>)}
       </span>}
+    </span> },
+    { id: "totp", label: "One-time code", width: "9rem", secondary: true, sort: signIn => signIn.totp ? 0 : 1, cell: signIn => signIn.totp ? <Tag minimal>{t("One-time code")}</Tag> : null },
+    { id: "actions", label: "Actions", hiddenLabel: true, align: "end", width: "5.5rem", cell: signIn => <SignInRowActions signIn={signIn} busy={busy} run={run} actions={actions} onEdit={() => setEditing(signIn)} /> },
+  ];
+  return <section className="fleet-table-section secrets-table sign-ins" aria-label={t("Sign-ins of websites")}>
+    <div className="secrets-toolbar"><span className="secrets-toolbar-actions">
+      <Button size="small" intent="primary" icon={<AppIcon name="plus" size={14} />} text={t("Add a sign-in…")} disabled={busy || providers.length === 0} onClick={() => onAdding(true)} />
+    </span></div>
+    {signIns.length > 0
+      ? <DataTable label={t("Sign-ins of websites")} rows={signIns} columns={columns} rowKey={signIn => signIn.id} sort={sort} onSort={setSort} selected={null} onSelect={() => { }}
+        rowProps={signIn => ({ className: "sign-in-row", data: { "sign-in": signIn.id } })} empty={null} />
+      : <NonIdealState className="credential-providers-empty" icon={<AppIcon name="globe" size={24} />}
+        description={providers.length === 0 ? t("Add a vault first: a sign-in is an item of a vault.") : t("Add the user name and password of a site, kept in a vault.")} />}
+    {(editing || adding) && providers.length > 0 && <SignInDialog editing={editing} providers={providers} types={types} busy={busy} browse={actions.browse}
+      onClose={() => { setEditing(null); onAdding(false); }} onSave={draft => run(() => actions.save(draft))} />}
+  </section>;
+}
+
+/** The actions of a sign-in at the end of its row: Edit and Remove. */
+function SignInRowActions({ signIn, busy, run, actions, onEdit }: {
+  signIn: SignInView; busy: boolean; run: (call: () => Result) => Promise<boolean>; actions: SignInActions; onEdit: () => void;
+}) {
+  const { t } = useShellLanguage();
+  const [removing, setRemoving] = useState(false);
+  return <span className="credential-provider-actions">
+    <Button size="small" variant="minimal" icon={<AppIcon name="edit" size={14} />} aria-label={t("Edit {name}", { name: signIn.label })} disabled={busy} onClick={onEdit} />
+    <span className="secret-delete">
+      <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove {name}", { name: signIn.label })}
+        disabled={busy} onClick={() => setRemoving(true)} />
+      {removing && <ConfirmPopover always intent="danger" busy={busy} placement="bottom-end" title={t("Remove this sign-in?")} subject={signIn.label}
+        detail={t("Nothing changes in the vault.")} confirmLabel={t("Remove")}
+        onConfirm={() => { setRemoving(false); void run(() => actions.remove(signIn.id)); }} onCancel={() => setRemoving(false)} />}
     </span>
-    {signIn.totp ? <Tag minimal>{t("One-time code")}</Tag> : <span />}
-    <span className="credential-provider-actions">
-      <Button size="small" variant="minimal" icon={<AppIcon name="edit" size={14} />} aria-label={t("Edit {name}", { name: signIn.label })} disabled={busy} onClick={onEdit} />
-      <span className="secret-delete">
-        <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove {name}", { name: signIn.label })}
-          disabled={busy} onClick={() => setRemoving(true)} />
-        {removing && <ConfirmPopover always intent="danger" busy={busy} placement="bottom-end" title={t("Remove this sign-in?")} subject={signIn.label}
-          detail={t("Nothing changes in the vault.")} confirmLabel={t("Remove")}
-          onConfirm={() => { setRemoving(false); void run(() => actions.remove(signIn.id)); }} onCancel={() => setRemoving(false)} />}
-      </span>
-    </span>
-  </li>;
+  </span>;
 }
 
 type Slot = "username" | "password" | "totp";

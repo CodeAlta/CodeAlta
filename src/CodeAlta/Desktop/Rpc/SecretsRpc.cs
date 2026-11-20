@@ -41,7 +41,9 @@ internal sealed partial class SecretsService
     public async Task<SecretsList> ListAsync(SecretsRequest request, CancellationToken cancellationToken)
     {
         var list = List(request);
-        return list.Status == "ok" ? await WithCredentialsAsync(list, cancellationToken).ConfigureAwait(false) : list;
+        if (list.Status != "ok") return list;
+        list = await WithCredentialsAsync(list, cancellationToken).ConfigureAwait(false);
+        return await WithProjectUsageAsync(list, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Lists the secrets, by name, and the variables, without the vaults.</summary>
@@ -51,7 +53,10 @@ internal sealed partial class SecretsService
         try
         {
             return new("ok", _store!.Protection,
-                [.. _store.ListSecrets().Select(static secret => new SecretView(secret.Name, secret.Version, secret.SetBy, Format(secret.SetAt)))],
+                [.. _store.ListSecrets().Select(static secret => new SecretView(secret.Name, secret.Version, secret.SetBy, Format(secret.SetAt))
+                {
+                    ProjectIds = [.. secret.Projects.Select(static project => project.Id)],
+                })],
                 [.. _store.ListVariables().Select(static variable => new VariableView(variable.Name, variable.Value, variable.Version, variable.SetBy, Format(variable.SetAt)))]);
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
@@ -152,6 +157,9 @@ internal sealed record SecretsList(string Status, string? Protection, SecretView
 
     /// <summary>The sign-ins of websites the browser of a session types, with the sites the user allowed.</summary>
     public SignInView[] SignIns { get; init; } = [];
+
+    /// <summary>The projects the user can limit a secret to.</summary>
+    public SecretProjectView[] Projects { get; init; } = [];
 }
 
 /// <summary>A secret as the page shows it: never its value.</summary>
@@ -181,6 +189,12 @@ internal sealed record SecretView(string Name, int Version, string SetBy, string
 
     /// <summary>What the user reads beside its state.</summary>
     public string? StateMessage { get; init; }
+
+    /// <summary>The projects allowed to use this secret; empty for all projects.</summary>
+    public string[] ProjectIds { get; init; } = [];
+
+    /// <summary>The providers, spaces and projects that reference the secret in their configuration.</summary>
+    public SecretUsageView[] UsedBy { get; init; } = [];
 }
 
 /// <summary>A variable as the page shows it.</summary>

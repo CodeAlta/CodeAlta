@@ -172,6 +172,7 @@ export const cloudSessions = Object.freeze({ readiness: unavailable, start: unav
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
 export const network = Object.freeze({ read: unavailable, save: unavailable, check: unavailable });
 export const secrets = Object.freeze({ list: async () => ({ status: "unavailable", protection: null, secrets: [], variables: [] }),
+  listEnvironment: async () => ({ status: "unavailable", projects: [], spaces: [] }),
   setSecret: async () => ({ status: "unavailable", message: null }), rotateSecret: async () => ({ status: "unavailable", message: null }),
   deleteSecret: async () => ({ status: "unavailable", message: null }), setVariable: async () => ({ status: "unavailable", message: null }),
   deleteVariable: async () => ({ status: "unavailable", message: null }), pending: async () => ({ status: "unavailable", pending: [], canConfirm: false, reason: null }) });
@@ -264,7 +265,7 @@ export const markdownLinks = Object.freeze({ open: async () => ({ status: "unava
 // The identity of a space needs a host that keeps spaces.
 export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavailable", message: null, identity: null, usual: null }),
   update: async () => ({ status: "unavailable", message: null, identity: null, usual: null }), check: async () => ({ status: "unavailable", lines: [] }),
-  session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [] }) });
+  session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [], projectEnvironmentNames: [] }) });
 export const spaceLinks = Object.freeze({ get: async () => ({ status: "unavailable", message: null, links: null, browsers: [] }),
   update: async () => ({ status: "unavailable", message: null, links: null, browsers: [] }) });
 // The spaces need a host that keeps them: the demo has the default one alone.

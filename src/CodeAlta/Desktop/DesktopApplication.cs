@@ -1018,7 +1018,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null)
                 {
                     // Jira and Slack, with the secrets of this computer, while the desktop runs; the hooks of a server go to its machines.
-                    Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot, host.Credentials),
+                    Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot, host.Credentials, host.ProjectCatalog.GetProjectSecretScope),
                     // A run that ends tells the user when its automation asks for it.
                     Notifications = notices,
                 };
@@ -1258,6 +1258,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         () => host.AgentHub.SecretMasker?.Refresh())
                     {
                         Credentials = host.Credentials,
+                        Spaces = host.SpaceCatalog,
+                        Config = new CodeAltaConfigStore(host.CatalogOptions),
                     });
                     builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
                     {

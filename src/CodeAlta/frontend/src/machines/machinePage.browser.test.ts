@@ -3,7 +3,7 @@ import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
 import { testLimit } from "../testTime";
 
-const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css", "../secrets/secrets.css", "../mobile/canvas/canvas.css", "../mobile/settings/settings.css"],
+const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css", "../fleet/console/fleetConsole.css", "../secrets/secrets.css", "../mobile/canvas/canvas.css", "../mobile/settings/settings.css"],
   width: 1100, height: 900, reducedMotion: true } as const;
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
@@ -242,22 +242,23 @@ test("the computer that manages a machine sets, rotates and deletes its secrets 
       assert.equal(await page.evaluate(`document.querySelector('${section} .secrets-empty').textContent`), "No secret on this machine.");
       assert.equal(await page.evaluate(`document.querySelector('${section} [data-variable=GRAFANA_URL] input').value`), "https://grafana.example");
 
-      // Add a secret…: its name and its value, sent to the machine; the row shows its name, its reference and its version only.
+      // Add a secret…: its name and its value in a popover, sent to the machine; the row shows its name, the copy of its reference and its version only.
       await page.clickText(`${section} .bp6-button`, "Add a secret…");
-      await page.until(`document.querySelector('${section} .secret-new[data-kind=secret]')`, "the form");
-      await page.evaluate(type(`${section} .secret-new[data-kind=secret] input[aria-label="Name of the secret"]`, "GRAFANA_TOKEN"));
-      await page.evaluate(type(`${section} .secret-new[data-kind=secret] input[aria-label="Value of the secret"]`, "glsa_value_1"));
-      await page.clickText(`${section} .secret-new[data-kind=secret] .bp6-button`, "Add");
-      await page.until(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN]')?.textContent.includes('Version 1')`, "the secret listed");
-      assert.equal(await page.evaluate(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN] .secret-reference').textContent`), "${secret:GRAFANA_TOKEN}");
+      await page.until(`document.querySelector('.secret-new-popover .secret-new[data-kind=secret]')`, "the form");
+      await page.evaluate(type(`.secret-new-popover input[aria-label="Name of the secret"]`, "GRAFANA_TOKEN"));
+      await page.evaluate(type(`.secret-new-popover input[aria-label="Value of the secret"]`, "glsa_value_1"));
+      await page.clickText(`.secret-new-popover .bp6-button`, "Add");
+      await page.until(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN]')?.textContent.includes('This computer · v1')`, "the secret listed");
+      assert.equal(await page.evaluate(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN] .secret-reference-copy').getAttribute('aria-label')`), "Copy ${secret:GRAFANA_TOKEN}");
+      assert.equal(await page.evaluate(`!!document.querySelector('${section} [data-secret=GRAFANA_TOKEN] td[data-column=projects]')`), false, "a machine that limits no secret has no column for it");
       await page.shot("machine-page-secrets");
 
       // Rotate: a new value in a popover beside the row, a new version.
-      await page.clickText(`${section} [data-secret=GRAFANA_TOKEN] .bp6-button`, "Rotate");
+      await page.evaluate(`document.querySelector('${section} button[aria-label="Rotate GRAFANA_TOKEN"]').click()`);
       await page.until(`document.querySelector('.secret-rotate input')`, "the new value");
       await page.evaluate(type(".secret-rotate input", "glsa_value_2"));
       await page.clickText(".secret-rotate .bp6-button", "Rotate");
-      await page.until(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN]')?.textContent.includes('Version 2')`, "rotated");
+      await page.until(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN]')?.textContent.includes('This computer · v2')`, "rotated");
 
       // A variable is edited in place.
       await page.evaluate(type(`${section} [data-variable=GRAFANA_URL] input`, "https://grafana.example/v2"));

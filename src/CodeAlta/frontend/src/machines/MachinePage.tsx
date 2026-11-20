@@ -659,7 +659,6 @@ function SecretsSection({ epoch, machine, api }: { epoch: string; machine: Machi
   const { t } = useShellLanguage();
   const [listing, setListing] = useState<SecretsList | null>(null);
   const [busy, setBusy] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [problem, setProblem] = useState<Problem>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
@@ -699,11 +698,10 @@ function SecretsSection({ epoch, machine, api }: { epoch: string; machine: Machi
   return <section className="machine-section machine-secrets" aria-label={t("Secrets")}>
     <div className="machine-section-head">
       <h2>{t("Secrets")}</h2>
-      <Button size="small" icon={<AppIcon name="plus" size={14} />} disabled={!listing || busy || adding} onClick={() => setAdding(true)}>{t("Add a secret…")}</Button>
     </div>
     <p className="muted-text">{t("Named values of the machine. Its configuration refers to them as ${secret:NAME} and ${var:NAME}; the value of a secret never comes back here.")}</p>
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
-    {listing && <SecretsBody flat listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} />}
+    {listing && <SecretsBody listing={listing} busy={busy} run={run} actions={actions} />}
   </section>;
 }
 

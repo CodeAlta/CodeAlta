@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cliLoginCommand, cliPresets, givesSecret, isSecretName, newProfile, profileItems, profileProblem, profilesValid, readProfiles, sameProfiles, type CliProfileCard } from "./cliProfiles";
-import { cliRows } from "./SessionIdentityInfo";
+import { cliRows, projectEnvironmentNames } from "./SessionIdentityInfo";
 
 const card = (name: string, env: [string, string][], check = "", login = ""): CliProfileCard =>
   ({ key: name, name, env: env.map(([variable, value]) => ({ name: variable, value })), check, login });
@@ -88,9 +88,17 @@ test("the login command of a profile sets its variables for the shell of the pla
 test("the information window of a session shows its CLI profiles as they are written", () => {
   const reply = { status: "ok", spaceId: "work", gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null,
     cli: [{ name: "azure", source: "space", env: [{ name: "AZURE_CONFIG_DIR", value: "~/.azure-contoso" }], unset: [] },
-      { name: "kubectl", source: "project", env: [{ name: "KUBECONFIG", value: "${env:PROD_KUBECONFIG}" }], unset: ["KUBECONFIG"] }] };
+      { name: "kubectl", source: "project", env: [{ name: "KUBECONFIG", value: "${env:PROD_KUBECONFIG}" }], unset: ["KUBECONFIG"] }], projectEnvironmentNames: [] };
   assert.deepEqual(cliRows(reply), [
     { name: "azure", project: false, unset: [], variables: "AZURE_CONFIG_DIR=~/.azure-contoso" },
     { name: "kubectl", project: true, unset: ["KUBECONFIG"], variables: "KUBECONFIG=${env:PROD_KUBECONFIG}" }]);
   assert.deepEqual(cliRows({ ...reply, status: "stale_epoch" }), []);
+});
+
+test("the information window of a session names the environment variables of its project, never their values", () => {
+  const reply = { status: "ok", spaceId: "work", gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [],
+    projectEnvironmentNames: ["GH_TOKEN", "NODE_ENV"] };
+  assert.deepEqual(projectEnvironmentNames(reply), ["GH_TOKEN", "NODE_ENV"]);
+  assert.deepEqual(projectEnvironmentNames({ ...reply, status: "unavailable" }), []);
+  assert.deepEqual(projectEnvironmentNames(null), []);
 });

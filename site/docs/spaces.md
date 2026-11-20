@@ -235,7 +235,7 @@ check = "aws sts get-caller-identity"
 AWS_PROFILE = "contoso-prod"
 ```
 
-The project comes first, then the space, then your usual environment. A terminal listed under a project uses its profiles too. Since a project can set any variable this way, open only projects you trust, as for their `AGENTS.md` and plugins.
+The project's `[env]` settings come first, then its CLI profiles, then those of the space, then your usual environment. See [Project environment](secrets/readme.md#project-environment) to view the profiles or set variables in CodeAlta Desktop. A terminal listed under a project uses these settings too. Since a project's configuration changes the environment of commands, open only projects you trust, as for their `AGENTS.md` and plugins.
 
 A profile separates logins; it is not a sandbox: an agent can still set another value in a command. A tool that keeps its credentials in the system keychain (Docker's `osxkeychain` helper, the Atlassian CLI) keeps one login for your computer, and a variable of your environment that a tool reads first (such as `AWS_ACCESS_KEY_ID` before `AWS_PROFILE`) still applies unless the profile sets it.
 

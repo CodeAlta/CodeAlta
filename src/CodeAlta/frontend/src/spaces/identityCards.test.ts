@@ -47,7 +47,7 @@ test("the login command of a GitHub profile is written for the shell of the plat
 
 test("the information window of a session shows its identity, and nothing for the usual settings", () => {
   const reply = { status: "ok", spaceId: "business", gitAuthor: "A. Mutel <alex@contoso.example>", signing: "ssh", signOff: true,
-    gitHubProfile: "/home/me/.config/gh-contoso", jiraSite: "contoso.atlassian.net", jiraEmail: "alex@contoso.example", cli: [] };
+    gitHubProfile: "/home/me/.config/gh-contoso", jiraSite: "contoso.atlassian.net", jiraEmail: "alex@contoso.example", cli: [], projectEnvironmentNames: [] };
   assert.deepEqual(identityRows(reply), [["Git author", "A. Mutel <alex@contoso.example>"], ["Commit signing", "SSH · Signed-off-by"],
     ["GitHub profile", "/home/me/.config/gh-contoso"], ["Jira account", "contoso.atlassian.net · alex@contoso.example"]]);
   assert.equal(identityRows({ ...reply, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null }), null);
@@ -55,7 +55,7 @@ test("the information window of a session shows its identity, and nothing for th
 });
 
 test("a signing that is off is shown in the language of the window", () => {
-  const reply = { status: "ok", spaceId: "business", gitAuthor: null, signing: "off", signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [] };
+  const reply = { status: "ok", spaceId: "business", gitAuthor: null, signing: "off", signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [], projectEnvironmentNames: [] };
   const t = (key: "Off") => translate("fr", key);
   const [[label, value]] = identityRows(reply)!;
   assert.equal(identityValue(label, value, t), "Désactivée");
