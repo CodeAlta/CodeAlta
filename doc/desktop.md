@@ -316,9 +316,12 @@ setting `general.turn_alerts`, NeoAstra's notifications, badge and attention):
   has the focus, with the mark of the application; both go once a window has the focus again.
 - **Notices** (`DesktopNotices`, an `IUserNotifications`): what an automation whose run ended (`AutomationDefinition.Notify`),
   a plugin (`IPluginUiService.NotifyAsync(PluginNotification)`) or a script (`notify()`) tells. In the background, and
-  with the setting on, a notification of the system; otherwise a notice in the window (`PluginUiEvent` `notify`), which
-  stays until closed when it came in the background. Each notice is a notification of its own (`codealta.notice.<n>`);
-  its activation data is the session a click opens, else the click shows the window.
+  with the setting on, a notification of the system; otherwise a notice in the window (`PluginUiEvent` `notify`): the
+  window of the plugin command that sent it, else the window used last. A notice that came in the background stays
+  until closed: toasts that pass never take its place, and past ten such toasts the next ones wait their turn
+  (`appToaster`). The notifications of the system take turns over 32 identities (`codealta.notice.<n>`), the oldest
+  replaced, since the system tracks a bounded number per process; the activation data is the session a click opens,
+  else the click shows the window.
 - A notification's identity says whose it is (`codealta.session.`, `codealta.secret.`, `codealta.notice.`): the one
   activation handler of `DesktopApplication` sends each to its owner.
 

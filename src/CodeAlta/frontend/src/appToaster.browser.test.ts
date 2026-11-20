@@ -76,6 +76,28 @@ test("A toast is above a window of the app and can be clicked there, and goes ba
   }, options);
 });
 
+test("Toasts that pass give way to the next ones; toasts kept until closed are never taken away and wait for room", { skip: !edge, timeout: testLimit(120_000) }, async () => {
+  await withCanvas(async page => {
+    // Notices that came while the user was away stay; a burst of passing toasts keeps the four newest of them.
+    await page.evaluate(`${f}.show({ message: "kept 1", timeout: 0 }, "k1"); ${f}.show({ message: "kept 2", timeout: 0 });
+      for (let n = 1; n <= 6; n++) ${f}.show({ message: "pass " + n, timeout: 60000 })`); // not a limit: the time of the toasts
+    await page.until(`${f}.messages().includes("pass 6") && !${f}.messages().includes("pass 2")`, "the newest passing toasts");
+    await pause(300);
+    assert.deepEqual([...await page.evaluate<string[]>(`${f}.messages()`)].sort(), ["kept 1", "kept 2", "pass 3", "pass 4", "pass 5", "pass 6"]);
+
+    // Past the limit of the kept toasts, the next ones wait: one that is closed shows the oldest that waits.
+    await page.evaluate(`for (let n = 3; n <= 12; n++) ${f}.show({ message: "kept " + n, timeout: 0 })`);
+    await page.until(`${f}.messages().filter(m => m.startsWith("kept")).length === 10`, "ten kept toasts");
+    await pause(300);
+    const kept = async () => (await page.evaluate<string[]>(`${f}.messages()`)).filter(m => m.startsWith("kept"));
+    assert.deepEqual((await kept()).length, 10);
+    assert.ok(!(await kept()).includes("kept 11"), "kept 11 waits");
+    await page.evaluate(`${f}.dismiss("k1")`);
+    await page.until(`${f}.messages().includes("kept 11") && !${f}.messages().includes("kept 1")`, "the oldest kept toast that waits to show");
+    assert.ok(!(await kept()).includes("kept 12"), "kept 12 still waits");
+  }, options);
+});
+
 test("A toast without a key is a toast of its own", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`${f}.show({ message: "one", timeout: 0 }); ${f}.show({ message: "one", timeout: 0 })`);

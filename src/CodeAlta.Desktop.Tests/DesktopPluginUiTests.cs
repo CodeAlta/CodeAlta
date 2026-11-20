@@ -231,6 +231,10 @@ public sealed class DesktopPluginUiTests
         await ui.NotifyAsync("background");
         Assert.AreEqual("background", second[^1].Message);
         Assert.AreEqual(2, main.Count);
+        // A notice of a session shown in another window, an automation's run that ended: the window used last too.
+        ui.ShowNotice(new PluginNotification { Title = "Nightly review", SessionId = "s1" }, waits: false);
+        Assert.AreEqual(("Nightly review", "s1"), (second[^1].Title, second[^1].SessionId));
+        Assert.AreEqual(2, main.Count);
 
         // What changes for every page goes to each.
         ui.InvalidateButtons();

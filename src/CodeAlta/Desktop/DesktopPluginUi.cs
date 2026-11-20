@@ -621,7 +621,14 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         var scope = _scope.Value;
         var session = Open(value.SessionId is { } sessionId ? SessionWindow?.Invoke(sessionId) : null);
         var origin = Open(scope?.WindowLabel);
-        var window = value.Kind is "prompt" or "draft" ? session ?? origin : origin ?? session;
+        var window = value.Kind switch
+        {
+            "prompt" or "draft" => session ?? origin,
+            // A notice goes where the user acted, else to the window used last, where the user is or comes back to: the
+            // window of its session may be behind another one, or minimized.
+            "notify" => origin ?? Open(FocusedWindow?.Invoke()) ?? session,
+            _ => origin ?? session,
+        };
         return window
             ?? Open(scope?.SessionId is { } paneSession && paneSession != value.SessionId ? SessionWindow?.Invoke(paneSession) : null)
             ?? Open(FocusedWindow?.Invoke())
