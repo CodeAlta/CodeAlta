@@ -22,6 +22,8 @@ public sealed class SystemUserPresenceTests
         var verifier = SystemUserPresence.ForThisSystem(() => 0);
         var availability = await verifier.GetAvailabilityAsync(CancellationToken.None);
         Assert.IsTrue(availability.Available || availability.Reason is { Length: > 0 }, "an availability that is not, says why");
+        // E_NOINTERFACE: an interface id that Windows does not know, which would make Windows Hello unavailable everywhere.
+        Assert.IsFalse(availability.Reason?.Contains("0x80004002", StringComparison.Ordinal) == true, availability.Reason);
         if (OperatingSystem.IsWindows()) Assert.AreEqual(UserPresenceResult.Unavailable, await verifier.VerifyAsync("x", CancellationToken.None), "without a window, nothing is asked");
     }
 }

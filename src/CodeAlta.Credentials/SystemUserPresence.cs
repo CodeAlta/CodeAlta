@@ -39,7 +39,7 @@ internal sealed class WindowsHelloVerifier(Func<nint> window) : IUserPresenceVer
 {
     private const string ClassName = "Windows.Security.Credentials.UI.UserConsentVerifier";
     private static readonly Guid InteropId = new("39E050C3-4E74-441A-8DC0-B81104DF949C");
-    private static readonly Guid StaticsId = new("AF4F3F91-564C-4DDC-B8B8-973447627C8C");
+    private static readonly Guid StaticsId = new("AF4F3F91-564C-4DDC-B8B5-973447627C65");
     private static readonly Guid AsyncInfoId = new("00000036-0000-0000-C000-000000000046");
     private const string AsyncOperation = "{9fc2b0bb-e446-44e2-aa61-9cab8f636af2}";
     private static readonly Guid VerificationOperationId = ParameterizedId($"pinterface({AsyncOperation};enum(Windows.Security.Credentials.UI.UserConsentVerificationResult;i4))");
