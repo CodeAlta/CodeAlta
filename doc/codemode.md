@@ -182,8 +182,8 @@ goes to the background, but not toward the time limit, and its wake time is reco
 
 `notify()` calls `codemode.notify` (`CodeModeNotifyBinding`), which hands a `PluginNotification` to the host's
 `IUserNotifications`: in the desktop, `DesktopNotices` (see [desktop](desktop.md#notifications)); a host without one answers
-`shown: false`. A click opens the session the script names, else the session that runs it. Its calls are recorded
-(not idempotent), so a resume does not notify again.
+`shown: false`. A click opens the session the script names, else the session that runs it. A notification changes
+nothing a resume must protect: it is idempotent, so a resume does not stop on it and may show it again.
 
 ## Limits
 

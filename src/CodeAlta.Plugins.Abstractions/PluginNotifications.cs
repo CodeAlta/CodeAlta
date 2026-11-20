@@ -29,10 +29,10 @@ public sealed record PluginNotification
     /// <summary>The longest body every system shows whole.</summary>
     public const int MaximumBodyLength = 255;
 
-    /// <summary>Gets the title: what it is about, such as the name of an automation. A longer one is cut to <see cref="MaximumTitleLength"/>.</summary>
+    /// <summary>Gets the title: what it is about, such as the name of an automation. A notification of the system cuts a longer one to <see cref="MaximumTitleLength"/>.</summary>
     public required string Title { get; init; }
 
-    /// <summary>Gets the text under the title, or <see langword="null"/> for none. A longer one is cut to <see cref="MaximumBodyLength"/>.</summary>
+    /// <summary>Gets the text under the title, or <see langword="null"/> for none. A notification of the system cuts a longer one to <see cref="MaximumBodyLength"/>.</summary>
     public string? Body { get; init; }
 
     /// <summary>Gets what it tells, which gives its color in the window.</summary>

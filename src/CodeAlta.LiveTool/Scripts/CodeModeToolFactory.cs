@@ -354,9 +354,10 @@ public static class CodeModeToolFactory
             ResumesRunId = plan?.Run.Id,
             // The run a launcher of the library asked the session for: its value is for the user, not for an agent to work from.
             ForUser = options.Runs.RequiresCodeMode(sessionId) && CodeModeScriptRunPrompt.IsRunOfScript(plan?.Source ?? code),
+            // Of the functions of scripts, only agents change something: a resume may show a notification (notify()) again, but
+            // does not stop on it.
             IsIdempotent = path => path.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) ? alta.IsReadOnly(path)
-                // A notification shown once is not shown again by a resume.
-                : path.StartsWith(CodeModeDiscovery.Namespace + ".", StringComparison.Ordinal) ? path != CodeModeNotifyBinding.Path && (!CodeModeAgentBinding.Paths.Contains(path) || path == CodeModeAgentBinding.ClosePath)
+                : path.StartsWith(CodeModeDiscovery.Namespace + ".", StringComparison.Ordinal) ? !CodeModeAgentBinding.Paths.Contains(path) || path == CodeModeAgentBinding.ClosePath
                 : tools?.IsIdempotent(path) == true,
         };
 

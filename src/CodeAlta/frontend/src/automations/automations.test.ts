@@ -197,6 +197,8 @@ test("the form of an automation holds what it is, and where it is written", () =
   // Which runs notify go to the form and back; a value the form does not know reads as none.
   assert.deepEqual([formOf(item("n", { notify: "failures" })).notify, inputOf(formOf(item("n", { notify: "failures" }))).notify], ["failures", "failures"]);
   assert.deepEqual([formOf(item("n", { notify: "sometimes" })).notify, inputOf(formOf(item("n", { notify: "sometimes" }))).notify], ["", null]);
+  // A run placed on another machine ends there, which tells this computer nothing: it is sent without it.
+  assert.deepEqual([inputOf(formOf(item("n", { notify: "always", runsOn: "mac-mini" }))).notify, inputOf(formOf(item("n", { notify: "always", runsOnTags: ["gpu"] }))).notify], [null, null]);
   assert.equal(placementLabel(item("p", { runsOnTags: ["gpu", "linux"] }), english), "On the machines with gpu, linux");
 });
 

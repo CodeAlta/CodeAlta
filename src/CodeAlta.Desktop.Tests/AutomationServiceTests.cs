@@ -1331,8 +1331,8 @@ public sealed class AutomationServiceTests
             var started = await fixture.Runner.NextAsync();
             await run;
             started.Complete(outcome);
-            await fixture.UntilAsync(() => !fixture.Service.IsRunning(Second));
-            Assert.AreEqual(expected, notifications.Shown.Count);
+            // The run stops running before its notification goes: wait for both.
+            await fixture.UntilAsync(() => !fixture.Service.IsRunning(Second) && notifications.Shown.Count == expected);
         }
 
         var failed = notifications.Shown[1];
@@ -1356,7 +1356,13 @@ public sealed class AutomationServiceTests
         (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
         await tried;
         await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
-        Assert.AreEqual(3, notifications.Shown.Count);
+        // A run that tells comes after them: had they told anything, it would be before it.
+        var again = fixture.Service.RunAsync(First, CancellationToken.None);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+        await again;
+        await fixture.UntilAsync(() => notifications.Shown.Count >= 4);
+        Assert.AreEqual(4, notifications.Shown.Count);
+        Assert.AreEqual("Nightly review", notifications.Shown[3].Title);
     }
 
     [TestMethod]

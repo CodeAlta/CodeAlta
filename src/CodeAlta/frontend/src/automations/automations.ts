@@ -422,7 +422,8 @@ export function inputOf(form: AutomationForm): AutomationInput {
     runsOn: form.storeInProject || form.runsOnTags ? null : form.runsOn,
     runsOnTags: form.storeInProject || !form.runsOnTags || form.runsOnTags.length === 0 ? null : [...form.runsOnTags],
     maxRuns: form.maxRuns && form.maxRuns > 1 ? form.maxRuns : null,
-    notify: form.notify || null,
+    // A run placed on another machine ends there: only the runs of this computer notify.
+    notify: placedElsewhere(form) ? null : form.notify || null,
     // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
     publishTo: form.storeInProject || !(form.runsOn || form.runsOnTags) ? null : form.publishTo ?? null,
     autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,

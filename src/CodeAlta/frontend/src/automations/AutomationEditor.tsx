@@ -328,14 +328,15 @@ export function AutomationEditor({ hub, initial, projects, providers, spaces = n
           {form.triggers.length > 0 && <Switch checked={form.catchUp} disabled={busy} label={t("Catch up on what was missed while CodeAlta was closed")}
             onChange={event => edit({ catchUp: event.currentTarget.checked })} />}
         </div>
-        {/* A notification of CodeAlta when a run ends: its click opens the session of the run. */}
-        <div className="automation-editor-switches automation-editor-notify">
+        {/* A notification of CodeAlta when a run ends: its click opens the session of the run. A run placed on another machine
+            ends there, which tells this computer nothing: the switch is for the automations that run here. */}
+        {!elsewhere && <div className="automation-editor-switches automation-editor-notify">
           <Switch checked={form.notify !== ""} disabled={busy} label={t("Notify me when a run ends")}
             onChange={event => edit({ notify: event.currentTarget.checked ? "always" : "" })} />
           {form.notify !== "" && <SegmentedControl size="small" value={form.notify} disabled={busy} aria-label={t("Notify me when a run ends")}
             onValueChange={value => edit({ notify: value === "failures" ? "failures" : "always" })}
             options={[{ value: "always", label: t("Every run") }, { value: "failures", label: t("Failures only") }]} />}
-        </div>
+        </div>}
         {/* What most automations leave as it is: how many of its runs work at once on a machine. */}
         <Button className="automation-more-options" size="small" variant="minimal" disabled={busy} endIcon={<AppIcon name={more ? "chevronDown" : "chevronRight"} size={13} />}
           text={t(more ? "Fewer options" : "More options")} aria-expanded={more} onClick={() => setMore(value => !value)} />

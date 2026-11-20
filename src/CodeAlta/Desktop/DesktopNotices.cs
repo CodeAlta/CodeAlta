@@ -15,8 +15,15 @@ namespace CodeAlta.Desktop;
 /// </summary>
 internal sealed class DesktopNotices : IUserNotifications
 {
-    /// <summary>The start of the identity of these notifications; the rest is their number.</summary>
+    /// <summary>The start of the identity of these notifications; the rest is their slot.</summary>
     internal const string NotificationPrefix = "codealta.notice.";
+
+    /// <summary>
+    /// How many of these notifications the system keeps at once: the next one takes the place of the oldest. The notifications
+    /// of the system track a bounded number of identities per process (256 in NeoAstra), shared with the sessions that are done
+    /// or wait and with the secrets that ask: notices that nobody clicks must not use them up.
+    /// </summary>
+    internal const int MaximumShown = 32;
 
     private readonly IDesktopTurnAlertSurface _surface;
     private readonly Action<PluginNotification, bool> _showInWindow;
@@ -51,7 +58,7 @@ internal sealed class DesktopNotices : IUserNotifications
 
     /// <summary>The notification of the system of a notice: its title and body cut to what every system shows, and its session when it can name one.</summary>
     /// <param name="notification">The notice.</param>
-    /// <param name="number">Its number, which makes its identity.</param>
+    /// <param name="number">Its slot, from 0 to <see cref="MaximumShown"/> - 1, which makes its identity.</param>
     /// <returns>The notification.</returns>
     internal static NeoNotificationRequest NotificationOf(PluginNotification notification, long number)
     {
@@ -74,7 +81,7 @@ internal sealed class DesktopNotices : IUserNotifications
         var background = !_surface.IsForeground;
         if (background && _surface.Mode == DesktopTurnAlertMode.All)
         {
-            var request = NotificationOf(notification, Interlocked.Increment(ref _next));
+            var request = NotificationOf(notification, (Interlocked.Increment(ref _next) - 1) % MaximumShown);
             var status = await ShowAsync(request, cancellationToken).ConfigureAwait(false);
             if (status == NeoDesktopStatus.Success) return true;
             // What the platform does not have is no failure; anything else is logged once, not at each notice.

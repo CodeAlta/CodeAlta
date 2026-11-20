@@ -41,6 +41,11 @@ public sealed class DesktopNoticesTests
         Assert.AreNotEqual(surface.Shown[0].Id, surface.Shown[1].Id);
         Assert.IsTrue(DesktopNotices.IsNotice(new(surface.Shown[1].Id, null, surface.Shown[1].ActivationData, false), out session));
         Assert.IsNull(session, "without a session, a click brings CodeAlta to the front");
+
+        // The system tracks a bounded number of notifications, shared with the sessions: a notice takes the place of the oldest.
+        for (var count = surface.Shown.Count; count <= DesktopNotices.MaximumShown; count++) await notices.NotifyAsync(Run, CancellationToken.None);
+        Assert.AreEqual(DesktopNotices.MaximumShown, surface.Shown.Select(static request => request.Id).Distinct().Count());
+        Assert.AreEqual(surface.Shown[0].Id, surface.Shown[DesktopNotices.MaximumShown].Id);
     }
 
     [TestMethod]
