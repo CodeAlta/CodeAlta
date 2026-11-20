@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.CodeMode;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
 
 namespace CodeAlta.LiveTool.Scripts;
@@ -40,6 +41,9 @@ public sealed record CodeModeToolOptions
 
     /// <summary>Gets where the questions of scripts (<c>ask()</c>) reach the user, or null for a host where nobody can be asked.</summary>
     public ICodeModeQuestions? Questions { get; init; }
+
+    /// <summary>Gets where the notifications of scripts (<c>notify()</c>) reach the user, or null for a host that has nowhere to show them.</summary>
+    public IUserNotifications? Notifications { get; init; }
 
     /// <summary>Gets the library of scripts that <c>workflow("name")</c> runs, or null for none.</summary>
     public CodeModeScriptLibrary? Library { get; init; }
@@ -115,6 +119,7 @@ public static class CodeModeToolFactory
     private const string ExecDescriptionLibrary = """
         - `workflow("name", args)` runs a script of the library (the project's `.alta/scripts`, the user's, the samples) and resolves with what it returns: `codemode.search` finds them as `workflow:<name>`, and `codemode.describe({ path: "workflow:<name>" })` gives their arguments. `workflow({ scriptPath }, args)` runs a script file.
         - `ask(question, { choices, default })` asks the user and resolves with the answer; it throws an `AskError` (code `cancelled` or `unavailable`, as in an automation).
+        - `notify({ title, body, tone, session })` tells the user with a notification of CodeAlta (one of the system while CodeAlta is in the background), whose click opens this session: for the end of a long run nobody watches.
         - `sleep(duration)` waits (milliseconds, or "30s", "5m", "2h", "1d"; 7 days at most): a run CodeAlta ended during goes on by itself when it wakes.
         - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
         - `present(markdown)` shows Markdown to the user on the card of the run, at once; call it again to add a part. Use it when the user waits on a long run (progress, intermediate findings) or for a report the script writes for them; the result tells you what was presented, so do not repeat it. A quick script needs none: your answer presents its result. `image(path, { title })` attaches a picture to the result: the user sees it, and you too.
@@ -333,7 +338,7 @@ public static class CodeModeToolFactory
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
-            .. agentHost is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function, .. CodeModeValueBinding.Functions]);
+            .. agentHost is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function, CodeModeNotifyBinding.Function, .. CodeModeValueBinding.Functions]);
         // The scripts of the library the run sees: those of its project, and of yours and the samples those its space has.
         var spaces = options.Library is null ? null
             : caller.Spaces ?? (options.SpaceOf is { } spaceOf ? await spaceOf(sessionId, cancellationToken).ConfigureAwait(false) : null);
@@ -349,6 +354,8 @@ public static class CodeModeToolFactory
             ResumesRunId = plan?.Run.Id,
             // The run a launcher of the library asked the session for: its value is for the user, not for an agent to work from.
             ForUser = options.Runs.RequiresCodeMode(sessionId) && CodeModeScriptRunPrompt.IsRunOfScript(plan?.Source ?? code),
+            // Of the functions of scripts, only agents change something: a resume may show a notification (notify()) again, but
+            // does not stop on it.
             IsIdempotent = path => path.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) ? alta.IsReadOnly(path)
                 : path.StartsWith(CodeModeDiscovery.Namespace + ".", StringComparison.Ordinal) ? !CodeModeAgentBinding.Paths.Contains(path) || path == CodeModeAgentBinding.ClosePath
                 : tools?.IsIdempotent(path) == true,
@@ -369,6 +376,7 @@ public static class CodeModeToolFactory
                 [
                     .. agents is null ? [] : CodeModeAgentBinding.Paths.Select(path => (path, (ICodeModeCallHandler)agents)),
                     (CodeModeAskBinding.Path, new CodeModeAskBinding(options.Questions, sessionId, () => ((CodeModeRunHandle)observer).Id)),
+                    (CodeModeNotifyBinding.Path, new CodeModeNotifyBinding(options.Notifications, sessionId)),
                     .. CodeModeValueBinding.Paths.Select(path => (path, (ICodeModeCallHandler)values)),
                     (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity with { ScriptRunId = ((CodeModeRunHandle)observer).Id }, cwd, invocation.Tools)),
                     (ToolScriptBinding.ToolsNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),

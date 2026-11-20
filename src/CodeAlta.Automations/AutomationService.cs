@@ -136,6 +136,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
     internal event Action? Changed;
 
     /// <summary>
+    /// Gets or sets where a run that ended tells the user, for an automation that asks for it (<see cref="AutomationDefinition.Notify"/>);
+    /// null for a host that has nowhere to show it.
+    /// </summary>
+    internal CodeAlta.Orchestration.Runtime.IUserNotifications? Notifications { get; set; }
+
+    /// <summary>
     /// Gets or sets what runs by hand an automation placed on another machine (<see cref="AutomationDefinition.RunsOn"/>);
     /// null when this host places none: such an automation then fails to run by hand here.
     /// </summary>
@@ -1000,7 +1006,23 @@ internal sealed partial class AutomationService : IAsyncDisposable
         _claims?.Release(runId, _time.GetUtcNow());
         if (waiting) Wake();
         Changed?.Invoke();
+        // A try is watched by who started it: only a run tells the user, as its automation asks.
+        if (ended is not null && ended.Trigger != TryTrigger && Notifications is { } notifications && Snapshot.Find(automationId)?.Definition.NotifiesOn(ended.Status) == true)
+            _ = NotifyAsync(notifications, AutomationRunNotice.Of(ended, outcome.Answer));
         return ended;
+    }
+
+    // A notification that could not be shown changes nothing of the run: the host logs why it could not show it.
+    private static async Task NotifyAsync(CodeAlta.Orchestration.Runtime.IUserNotifications notifications, CodeAlta.Plugins.Abstractions.PluginNotification notification)
+    {
+        try
+        {
+            await notifications.NotifyAsync(notification, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Nothing more to do here: the run ended as it is recorded.
+        }
     }
 
     private async Task ScanAsync(CancellationToken cancellationToken)

@@ -180,6 +180,47 @@ public sealed class PluginAbstractionsTests
     }
 
     [TestMethod]
+    public async Task ANotificationWithATitle_IsAMessageOnAHostThatShowsOnlyMessages()
+    {
+        // NoopPluginUiService, as a host written before notifications had a title, has only NotifyAsync(string): the
+        // interface gives it the title and the body as one message.
+        var ui = new RecordingUi();
+        IPluginUiService service = ui;
+        await service.NotifyAsync(new PluginNotification { Title = " Build ", Body = "  It passed.  ", Tone = PluginNotificationTone.Success, SessionId = "s1" });
+        await service.NotifyAsync(new PluginNotification { Title = "Build" });
+        CollectionAssert.AreEqual(new[] { "Build: It passed.", "Build" }, ui.Messages);
+        await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await service.NotifyAsync((PluginNotification)null!));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(async () => await service.NotifyAsync(new PluginNotification { Title = " " }));
+        await NoopPluginServices.Create().Ui.NotifyAsync(new PluginNotification { Title = "Build" });
+    }
+
+    private sealed class RecordingUi : IPluginUiService
+    {
+        public List<string> Messages { get; } = [];
+
+        public bool HasInteractiveUi => false;
+
+        public ValueTask NotifyAsync(string message, CancellationToken cancellationToken = default)
+        {
+            Messages.Add(message);
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+
+        public ValueTask<string?> InputAsync(string title, string? initialText = null, CancellationToken cancellationToken = default) => ValueTask.FromResult<string?>(null);
+
+        public ValueTask<string?> EditTextAsync(string title, string text, CancellationToken cancellationToken = default) => ValueTask.FromResult<string?>(null);
+
+        public ValueTask<T?> SelectAsync<T>(string title, IReadOnlyList<PluginSelectItem<T>> items, CancellationToken cancellationToken = default) => ValueTask.FromResult<T?>(default);
+
+        public ValueTask ShowDialogAsync(PluginDialogRequest request, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<PluginDialogResponse?>(null);
+    }
+
+    [TestMethod]
     public async Task NoopServicesArePredictableAndHeadless()
     {
         var services = NoopPluginServices.Create();

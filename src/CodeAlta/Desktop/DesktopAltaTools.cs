@@ -65,6 +65,7 @@ internal static class DesktopAltaTools
     /// <param name="releaseNotes">The release notes the <c>alta release-notes</c> commands read.</param>
     /// <param name="modelServers">The model servers the <c>alta llama</c> commands manage; without them the commands do not exist.</param>
     /// <param name="providers">The providers of the configuration, which <c>alta provider refresh</c> applies again; without them it only tests the providers.</param>
+    /// <param name="notifications">Where the notifications of the scripts of sessions (<c>notify()</c>) reach the user; without them they are shown nowhere.</param>
     /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
@@ -75,7 +76,7 @@ internal static class DesktopAltaTools
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null, IAltaSettings? settings = null,
         IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null, IAltaReleaseNotes? releaseNotes = null, IAltaModelServers? modelServers = null,
-        IAltaProviderConfiguration? providers = null)
+        IAltaProviderConfiguration? providers = null, CodeAlta.Orchestration.Runtime.IUserNotifications? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
@@ -83,6 +84,7 @@ internal static class DesktopAltaTools
         var codeMode = CodeModeSessionTools.FromSettings(host.CodeModeRuns, host.CatalogOptions, host.RuntimeService.ScratchpadRoot,
             new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions)
             .WithSpaces(async (sessionId, token) => await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false));
+        if (notifications is not null) codeMode = codeMode.WithNotifications(notifications);
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
             reviews, reviewPolicy, windows, codeMode, settings, machineMoves, fleet, releaseNotes, modelServers, providers);
         pluginAlta?.SetDispatcher(dispatcher);

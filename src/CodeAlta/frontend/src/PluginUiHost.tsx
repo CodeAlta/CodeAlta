@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, InputGroup, TextArea } from "@blueprintjs/core";
+import { Button, InputGroup, TextArea, type ToastProps } from "@blueprintjs/core";
 import { pluginUi, type PluginUiAnswer, type PluginUiEvent } from "#neoastra";
 import { AppWindow } from "./AppWindow";
 import { showToast } from "./appToaster";
@@ -17,18 +17,36 @@ type Ask = PluginUiEvent & { requestId: string };
 const reconnectMilliseconds = 2000;
 
 /**
+ * The toast of a notification: of a plugin, a script or an automation whose run ended. Its title is above its text, its tone
+ * gives its color, and its session an action that opens it. One that came while CodeAlta was in the background waits until
+ * it is closed.
+ */
+export function noticeToast(event: PluginUiEvent, openLabel: string, onOpenSession: (sessionId: string) => void): ToastProps {
+  const tone = event.tone === "success" || event.tone === "warning" || event.tone === "danger" ? event.tone : null;
+  const sessionId = event.sessionId;
+  return {
+    message: event.title ? <><strong>{event.title}</strong>{event.message && <div className="plugin-notice-body">{event.message}</div>}</> : event.message,
+    intent: tone ?? "none",
+    icon: tone === "success" ? "tick-circle" : tone === "warning" ? "warning-sign" : tone === "danger" ? "error" : "info-sign",
+    timeout: event.waits ? 0 : 8000,
+    action: sessionId ? { text: openLabel, onClick: () => onOpenSession(sessionId) } : undefined,
+  };
+}
+
+/**
  * Shows what plugins ask of the window: a notification as a toast, a dialog as a window of the application,
  * and a prompt handed to the composer of its session. One instance watches the host for the whole window.
  *
  * `onPrompt` sends, queues or steers a prompt, or compacts, and resolves to whether the composer took it;
- * `onDraft` replaces a prompt draft.
+ * `onDraft` replaces a prompt draft; `onOpenSession` opens the session of a notification.
  */
-export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
+export function PluginUiHost({ epoch, onPrompt, onDraft, onOpenSession, api = pluginUi }: {
   epoch: string | null; onPrompt: (request: PluginUiEvent, signal: AbortSignal) => PluginPromptOutcome | Promise<PluginPromptOutcome>;
-  onDraft: (request: PluginUiEvent) => void; api?: Api;
+  onDraft: (request: PluginUiEvent) => void; onOpenSession: (sessionId: string) => void; api?: Api;
 }) {
+  const { t } = useShellLanguage();
   const [asks, setAsks] = useState<readonly Ask[]>([]);
-  const handlers = useRef({ onPrompt, onDraft }); handlers.current = { onPrompt, onDraft };
+  const handlers = useRef({ onPrompt, onDraft, onOpenSession, t }); handlers.current = { onPrompt, onDraft, onOpenSession, t };
   useEffect(() => {
     if (!epoch) return;
     const abort = new AbortController();
@@ -43,8 +61,8 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
         for await (const event of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) {
           if (abort.signal.aborted) return;
           const requestId = event.requestId;
-          if (event.kind === "notify" && event.message) {
-            showToast({ message: event.message, intent: event.tone === "warning" ? "warning" : "none", icon: event.tone === "warning" ? "warning-sign" : "info-sign", timeout: 8000 });
+          if (event.kind === "notify" && (event.message || event.title)) {
+            showToast(noticeToast(event, handlers.current.t("Open"), id => handlers.current.onOpenSession(id)));
           } else if (event.kind === "ask" && requestId) {
             setAsks(current => current.some(ask => ask.requestId === requestId) ? current : [...current, { ...event, requestId }]);
           } else if (event.kind === "close" && requestId) {

@@ -633,13 +633,16 @@ internal sealed record PluginUiEvent(string Kind)
     /// <summary>For <c>prompt</c>: <c>send</c>, <c>enqueue</c>, <c>steer</c> or <c>compact</c>.</summary>
     public string? Mode { get; init; }
 
-    /// <summary>The session a prompt or a draft is for; null means the focused pane.</summary>
+    /// <summary>The session a prompt or a draft is for, null meaning the focused pane; for <c>notify</c>, the session its action opens, or null for none.</summary>
     public string? SessionId { get; init; }
 
     public string? ProjectId { get; init; }
 
-    /// <summary>For <c>notify</c>: <c>warning</c>, or null for an ordinary message.</summary>
+    /// <summary>For <c>notify</c>: <c>success</c>, <c>warning</c>, <c>danger</c>, or null for an ordinary message.</summary>
     public string? Tone { get; init; }
+
+    /// <summary>For <c>notify</c>: the notice stays until it is closed, for it came while CodeAlta was in the background.</summary>
+    public bool Waits { get; init; }
 }
 
 internal sealed record PluginUiChoice(string Label, string? Description, bool Selected);

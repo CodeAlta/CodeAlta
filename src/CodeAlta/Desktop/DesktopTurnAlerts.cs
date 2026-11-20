@@ -1,4 +1,5 @@
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Plugins.Abstractions;
 using NeoAstra;
 using NeoAstra.Desktop;
 using NeoAstra.Desktop.Notifications;
@@ -129,10 +130,6 @@ internal sealed class DesktopTurnAlerts : IAsyncDisposable
     /// <summary>The start of the identity of the notifications of the sessions; the rest is the session.</summary>
     internal const string NotificationPrefix = "codealta.session.";
 
-    // The longest title and text that every system shows whole (a Windows balloon takes 63 and 255 characters).
-    private const int MaximumTitle = 63;
-    private const int MaximumBody = 255;
-
     private readonly IDesktopTurnAlertSurface _surface;
     private readonly DesktopTurnAlertTracker _tracker = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -173,16 +170,21 @@ internal sealed class DesktopTurnAlerts : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(alert);
         var id = NotificationPrefix + alert.SessionId;
-        if (id.Length > 128 || alert.SessionId.Length > 512 || !alert.SessionId.All(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or ':')) return null;
-        var title = string.IsNullOrWhiteSpace(alert.Title) ? "CodeAlta" : Cut(alert.Title.ReplaceLineEndings(" ").Trim(), MaximumTitle);
+        if (id.Length > 128 || !CanActivate(alert.SessionId)) return null;
+        // The longest title and text that every system shows whole (a Windows balloon takes 63 and 255 characters).
+        var title = string.IsNullOrWhiteSpace(alert.Title) ? "CodeAlta" : Cut(alert.Title.ReplaceLineEndings(" ").Trim(), PluginNotification.MaximumTitleLength);
         var body = alert.Kind switch
         {
             DesktopTurnAlertKind.Failed => "Stopped on an error.",
             DesktopTurnAlertKind.Waiting => "Waits for you: a question or an approval.",
             _ => "Done: ready for your next prompt.",
         };
-        return new NeoNotificationRequest { Id = id, Title = title, Body = Cut(body, MaximumBody), ActivationData = alert.SessionId };
+        return new NeoNotificationRequest { Id = id, Title = title, Body = Cut(body, PluginNotification.MaximumBodyLength), ActivationData = alert.SessionId };
     }
+
+    /// <summary>Whether a session can be the activation data of a notification: an identity of the characters every system keeps.</summary>
+    internal static bool CanActivate(string sessionId)
+        => sessionId is { Length: > 0 and <= 512 } && sessionId.All(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or ':');
 
     /// <summary>Reads the sessions once, tells the user of what changed while the application is in the background, and clears the mark once it is not.</summary>
     internal async Task RefreshAsync(CancellationToken cancellationToken = default)
@@ -275,7 +277,8 @@ internal sealed class DesktopTurnAlerts : IAsyncDisposable
         return false;
     }
 
-    private static string Cut(string value, int length) => value.Length <= length ? value : value[..(length - 1)].TrimEnd() + "…";
+    /// <summary>A text cut to a length, with an ellipsis when it is longer.</summary>
+    internal static string Cut(string value, int length) => value.Length <= length ? value : value[..(length - 1)].TrimEnd() + "…";
 
     private async Task ObserveAsync(TimeSpan period)
     {

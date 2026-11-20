@@ -212,6 +212,8 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-more-options { align-self: flex-start; margin-bottom: 6px; }
 .automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
 .automation-editor-switches .bp6-control { margin: 0; }
+/* The switch of the notification, and which runs notify beside it once it is on. */
+.automation-editor-notify { align-items: center; gap: 4px 14px; }
 .automation-editor-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }
 
 /* A session an automation started: the automation that sent its prompt, beside the title of the card of that prompt. Its

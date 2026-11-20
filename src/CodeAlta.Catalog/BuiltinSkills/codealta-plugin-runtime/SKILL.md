@@ -177,6 +177,12 @@ var text = await context.Ui.EditTextAsync("Note", "First line", cancellationToke
 var kind = await context.Ui.SelectAsync("Kind", [new PluginSelectItem<string> { Label = "Bug", Value = "bug" }], cancellationToken);
 ```
 
+To tell the user something while they are elsewhere, give the notification a title, a tone and the session a click opens. CodeAlta Desktop shows a notification of the system while it is in the background, and a notice in the window otherwise; CodeAlta TUI shows the title and the body as a message:
+
+```csharp
+await context.Ui.NotifyAsync(new PluginNotification { Title = "Deploy", Body = "It passed.", Tone = PluginNotificationTone.Success, SessionId = sessionId }, cancellationToken);
+```
+
 A dialog with its own content has one form per application:
 
 ```csharp

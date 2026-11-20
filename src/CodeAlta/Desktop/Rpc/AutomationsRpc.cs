@@ -530,6 +530,7 @@ internal sealed class AutomationsService
                 RunsOn = definition.RunsOn,
                 RunsOnTags = definition.RunsOnTags,
                 MaxRuns = definition.MaxRuns,
+                Notify = definition.Notify,
                 PublishTo = definition.PublishTo,
                 Placement = placed,
                 Autonomy = Autonomy(definition.Autonomy),
@@ -693,6 +694,7 @@ internal sealed class AutomationsService
                     ? new AutomationOnCall(onCall.Source.Trim(), onCall.Schedule.Trim(), onCall.Token.Trim()) { Region = Blank(onCall.Region) } : null,
             } : null,
             CatchUp = input.CatchUp,
+            Notify = Blank(input.Notify),
             Triggers = triggers,
         };
         problem = AutomationConfig.Validate(definition with { Prompt = definition.Prompt.ReplaceLineEndings("\n").Trim() });
@@ -924,6 +926,9 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 
     /// <summary>How many of its runs work at once on a machine; null for one.</summary>
     public int? MaxRuns { get; init; }
+
+    /// <summary>Which of its runs tell the user with a notification when they end: <c>always</c>, <c>failures</c>, or null for none.</summary>
+    public string? Notify { get; init; }
 
     /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
     public string? PublishTo { get; init; }
@@ -1201,6 +1206,9 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>How many of its runs work at once on a machine; null for one.</summary>
     public int? MaxRuns { get; init; }
+
+    /// <summary>Which of its runs tell the user with a notification when they end: <c>always</c>, <c>failures</c>, or null for none.</summary>
+    public string? Notify { get; init; }
 
     /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
     public string? PublishTo { get; init; }

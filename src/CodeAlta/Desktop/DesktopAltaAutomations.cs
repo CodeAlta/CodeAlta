@@ -125,6 +125,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
             Tier = tier,
             Agent = string.IsNullOrWhiteSpace(request.Agent) ? null : request.Agent.Trim(),
             CatchUp = request.CatchUp,
+            Notify = request.Notify,
             Triggers = triggers,
         };
         return await automations.SaveAsync(definition, request.StoreInProject ? request.ProjectId : null, cancellationToken).ConfigureAwait(false) is { } refused

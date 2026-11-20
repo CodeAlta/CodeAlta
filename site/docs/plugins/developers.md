@@ -148,6 +148,7 @@ Most of the API is portable: each app shows it its own way. Where the look matte
 | What | Portable | Desktop form | TUI form |
 |---|---|---|---|
 | Notification, confirm, input, selection, text editor | `context.Ui.NotifyAsync`, `ConfirmAsync`, `InputAsync`, `SelectAsync`, `EditTextAsync` | | |
+| Notification with a title, a tone and a session to open | `context.Ui.NotifyAsync(new PluginNotification { Title, Body, Tone, SessionId })` | A notification of the system while CodeAlta is in the background, a notice in the window otherwise | The title and the body as a message |
 | Dialog with your own content | | `PluginUi.HtmlDialog` | `PluginTui.CustomDialog` |
 | Content around the prompt | `PluginUi.Content` with Markdown or text | `PluginRenderResult.FromHtml` | `PluginTui.Visual` |
 | Status item | `PluginStatusContribution` | `Command` makes it clickable | |

@@ -1363,6 +1363,41 @@ public sealed class CodeModeToolTests
         CollectionAssert.AreEqual(new[] { "github_list_issues" }, tools.Calls.ToArray());
     }
 
+    [TestMethod]
+    public async Task Resume_RunsANotificationAgain_RatherThanStopOnIt()
+    {
+        using var root = TestTempDirectory.Create();
+        var store = Path.Combine(root.Path, "runs");
+        await using var before = new CodeModeRunRegistry(null);
+        await before.UseStoreAsync(new CodeModeRunStore(store));
+        var execBefore = Create(root.Path, before);
+        var hanging = new FakeTools { Gate = new TaskCompletionSource() };
+        await InvokeAsync(execBefore, """
+            // @exec: {"yield_ms": 50}
+            await notify("Started");
+            return await mcp.github.list_issues({ state: "open" });
+            """, hanging);
+        var runId = before.List("session-1").Single().Id;
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
+        while (before.Store!.TryLoad(runId)?.InFlightCalls.Count is not 1)
+        {
+            Assert.IsLessThan(deadline, DateTime.UtcNow, "the call in flight was not recorded");
+            await Task.Delay(20);
+        }
+
+        // The notification shown before is no call that may have changed something: CodeAlta starts again, and only the call
+        // in flight holds the resume.
+        Assert.IsEmpty(before.Store.TryLoad(runId)!.CompletedCalls);
+        await using var after = new CodeModeRunRegistry(null);
+        await after.UseStoreAsync(new CodeModeRunStore(store));
+        var refused = await InvokeAsync(Create(root.Path, after), $$"""// @exec: {"resume": "{{runId}}"}""", new FakeTools());
+        hanging.Gate.SetResult();
+
+        Assert.IsFalse(refused.Success);
+        StringAssert.Contains(Text(refused), "`mcp.github.list_issues` outside any step");
+        Assert.DoesNotContain("codemode.notify", Text(refused));
+    }
+
     // A library of one project with the scripts Run… and the automations start with `return await workflow("name", args)`.
     private static (string Project, CodeModeScriptLibrary Library) LibraryOf(string root)
     {

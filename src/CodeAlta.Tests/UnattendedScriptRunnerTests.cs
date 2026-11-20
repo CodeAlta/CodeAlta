@@ -2,7 +2,9 @@ using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
 using CodeAlta.LiveTool.Scripts;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
@@ -22,6 +24,14 @@ public sealed class UnattendedScriptRunnerTests
           canCreateSession: await works(() => alta.session.create({ title: "x" })),
           canSendSession: await works(() => alta.session.send({ sessionId: "s", stdin: "x" })),
         };
+        """;
+
+    private const string Notifier = """
+        export const meta = { name: "notifier" };
+        const shown = await notify({ title: "Deploy", body: "It passed.", tone: "success", session: "s1" });
+        const short = await notify("Done");
+        const refused = await notify({ title: "Deploy", tone: "loud" }).then(() => "notified", (e) => e.name);
+        return { shown: shown.shown, short: short.shown, refused };
         """;
 
     private const string Writer = """
@@ -74,6 +84,53 @@ public sealed class UnattendedScriptRunnerTests
     }
 
     [TestMethod]
+    public async Task AScriptWithoutAModel_Notifies_WhereTheHostShowsNotifications()
+    {
+        using var root = TestTempDirectory.Create();
+        var (runner, project) = Create(root.Path);
+
+        // A host that has nowhere to show them: the script goes on, and reads that nothing was shown.
+        var nowhere = await runner.RunAsync(new UnattendedScriptRequest("run-6", "notifier") { ProjectPath = project }, default);
+        Assert.IsTrue(nowhere.Succeeded, nowhere.Error);
+        Assert.AreEqual("""{"shown":false,"short":false,"refused":"TypeError"}""", nowhere.Value);
+
+        var notifications = new RecordedNotifications();
+        runner.Notifications = notifications;
+        var told = await runner.RunAsync(new UnattendedScriptRequest("run-7", "notifier") { ProjectPath = project }, default);
+        Assert.IsTrue(told.Succeeded, told.Error);
+        Assert.AreEqual("""{"shown":true,"short":true,"refused":"TypeError"}""", told.Value);
+        Assert.AreEqual(2, notifications.Shown.Count);
+        Assert.AreEqual(("Deploy", "It passed.", PluginNotificationTone.Success, "s1"),
+            (notifications.Shown[0].Title, notifications.Shown[0].Body, notifications.Shown[0].Tone, notifications.Shown[0].SessionId));
+        // No session runs it: a click on a notification that names none brings CodeAlta to the front.
+        Assert.AreEqual(("Done", (string?)null, PluginNotificationTone.Info, (string?)null),
+            (notifications.Shown[1].Title, notifications.Shown[1].Body, notifications.Shown[1].Tone, notifications.Shown[1].SessionId));
+    }
+
+    [TestMethod]
+    public async Task AScriptOfASession_Notifies_AndAClickOpensThatSession()
+    {
+        var notifications = new RecordedNotifications();
+        var binding = new CodeModeNotifyBinding(notifications, "session-1");
+        var result = await binding.InvokeAsync(new CodeAlta.CodeMode.CodeModeCall(0, CodeModeNotifyBinding.Path, """{"title":"Review","body":"3 findings."}""", null, null), default);
+        Assert.AreEqual("""{"shown":true}""", result.ValueJson);
+        Assert.AreEqual(("Review", "session-1"), (notifications.Shown.Single().Title, notifications.Shown.Single().SessionId));
+        var refused = await binding.InvokeAsync(new CodeAlta.CodeMode.CodeModeCall(1, CodeModeNotifyBinding.Path, """{"title":" "}""", null, null), default);
+        Assert.AreEqual("TypeError", refused.Error?.Name);
+    }
+
+    private sealed class RecordedNotifications : IUserNotifications
+    {
+        internal List<PluginNotification> Shown { get; } = [];
+
+        public ValueTask<bool> NotifyAsync(PluginNotification notification, CancellationToken cancellationToken)
+        {
+            Shown.Add(notification);
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    [TestMethod]
     public async Task AScriptThatCannotRun_SaysWhy()
     {
         using var root = TestTempDirectory.Create();
@@ -110,6 +167,7 @@ public sealed class UnattendedScriptRunnerTests
         var library = new CodeModeScriptLibrary(catalog);
         library.Save("probe", CodeModeScriptScope.Project, Probe, project, null);
         library.Save("writer", CodeModeScriptScope.Project, Writer, project, null);
+        library.Save("notifier", CodeModeScriptScope.Project, Notifier, project, null);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(catalog).Add(registry).Add(library));
         return (new UnattendedScriptRunner(dispatcher, library, null, () => []), project);

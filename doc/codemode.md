@@ -153,7 +153,7 @@ call.
 An automation that runs a script **without a model** has no session, so no one is there to approve a call: what the run
 may do is declared on the automation and bound by `UnattendedScriptRunner` (`CodeAlta.LiveTool`). Its `alta` is the
 commands whose policy changes nothing, plus those of plugins, with caller kind `automation` and no sub-sessions; nothing
-that starts or drives an agent, and no `agent()`, `ask()` or MCP. Its `tools.*` are the built-in tools that read, and,
+that starts or drives an agent, and no `agent()`, `ask()` or MCP; `notify()` goes where `UnattendedScriptRunner.Notifications` says. Its `tools.*` are the built-in tools that read, and,
 when the automation declares write access, those that write, behind the same `SandboxToolRouter` as a session's
 (`SessionRuntimeService.CreateUnattendedToolsAsync`). A script of a project's configuration that writes needs a sandbox,
 since others change that file; only the user's own configuration may write without one. The value of the script is
@@ -179,6 +179,11 @@ shows at once, also during its turn, because the turn's `exec` is the one waitin
 run's clocks (its time limit and `exec`'s yield), and the questions and approvals of a run come one at a time. A session
 nobody watches (an automation's, `altacli`) gets `unavailable`. `sleep()` counts toward the yield, so a sleeping script
 goes to the background, but not toward the time limit, and its wake time is recorded for a resume.
+
+`notify()` calls `codemode.notify` (`CodeModeNotifyBinding`), which hands a `PluginNotification` to the host's
+`IUserNotifications`: in the desktop, `DesktopNotices` (see [desktop](desktop.md#notifications)); a host without one answers
+`shown: false`. A click opens the session the script names, else the session that runs it. A notification changes
+nothing a resume must protect: it is idempotent, so a resume does not stop on it and may show it again.
 
 ## Limits
 

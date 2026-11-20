@@ -307,6 +307,21 @@ Explorer, title-bar actions, Settings, the questions of an exit); a secondary wi
   clamped to the displays that exist (`NeoWindowStateRestore.Clamp`). On exit the windows are saved first, then
   closed. Dragging a tab out needs a platform that knows where its windows are (`NeoWindowCapability.Placement`).
 
+## Notifications
+
+One channel tells the user what happens while they are elsewhere, over `IDesktopTurnAlertSurface` (the windows, the
+setting `general.turn_alerts`, NeoAstra's notifications, badge and attention):
+
+- **Sessions** (`DesktopTurnAlerts`): a session that is done or waits, read every second, notified only while no window
+  has the focus, with the mark of the application; both go once a window has the focus again.
+- **Notices** (`DesktopNotices`, an `IUserNotifications`): what an automation whose run ended (`AutomationDefinition.Notify`),
+  a plugin (`IPluginUiService.NotifyAsync(PluginNotification)`) or a script (`notify()`) tells. In the background, and
+  with the setting on, a notification of the system; otherwise a notice in the window (`PluginUiEvent` `notify`), which
+  stays until closed when it came in the background. Each notice is a notification of its own (`codealta.notice.<n>`);
+  its activation data is the session a click opens, else the click shows the window.
+- A notification's identity says whose it is (`codealta.session.`, `codealta.secret.`, `codealta.notice.`): the one
+  activation handler of `DesktopApplication` sends each to its owner.
+
 ## Security boundaries
 
 The page is trusted; what it shows often is not. Each boundary has one owner:
