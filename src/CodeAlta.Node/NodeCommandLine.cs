@@ -457,6 +457,7 @@ internal static class NodeCommandLine
         {
             new CommandUsage("Usage: {NAME} [list] [options]"),
             new CommandUsage("       {NAME} set|rotate <name> [options]"),
+            new CommandUsage("       {NAME} projects <name> [project...] [options]"),
             new CommandUsage("       {NAME} delete <name> [options]"),
             new CommandUsage("       {NAME} set-var <name> <value> [options]"),
             new CommandUsage("       {NAME} delete-var <name> [options]"),
@@ -464,9 +465,10 @@ internal static class NodeCommandLine
             _,
             "The secrets and variables of this machine, which the configuration names",
             "with ${secret:NAME}, ${var:NAME} and api_key_secret, as CodeAlta Desktop",
-            "shows them in Settings > Secrets. A secret is never shown again.",
+            "shows them in Settings > Secrets and environment. A secret is never shown again.",
             "  list        the secrets (name, version, when, by whom) and the variables",
             "  set         sets a secret, or gives it a new version; rotate needs it set",
+            "  projects    changes which projects may use a secret; no projects means all",
             "  delete      deletes a secret",
             "  set-var     sets a variable, which is not secret",
             "  delete-var  deletes a variable",
@@ -480,6 +482,7 @@ internal static class NodeCommandLine
             "Options:",
         };
         AddProfile(secretsCommand, secrets.Profile);
+        secretsCommand.Add("project=", "Limit the secret to this catalog {PROJECT} (repeat for more projects)", value => secrets.Projects.Add(value ?? string.Empty));
         secretsCommand.Add("<>", "The command and its arguments");
         secretsCommand.Add((_, words) =>
         {

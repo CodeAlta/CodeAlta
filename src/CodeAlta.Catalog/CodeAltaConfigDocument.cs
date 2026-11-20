@@ -136,6 +136,10 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("identity")]
     public TomlTable? Identity { get; set; }
 
+    /// <summary>Gets or sets the <c>[env]</c> table of a project, whose variables go to each of its sessions.</summary>
+    [JsonPropertyName("env")]
+    public TomlTable? Env { get; set; }
+
     /// <summary>
     /// Gets or sets where the links of the sessions of a project open, over the setting of their space: <c>[links]</c> with
     /// <c>browser</c> and <c>profile</c>. Read from a project file only, as a table, so that a value of another type is left

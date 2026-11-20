@@ -28,7 +28,8 @@ public sealed partial class FleetNodeService
 
     private Task<FleetSecretList> ControlListSecretsAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)
         => Task.FromResult(OnSecrets(store => new FleetSecretList(
-            [.. store.ListSecrets().Select(static secret => new FleetSecretInfo(secret.Name, secret.Version, secret.SetBy, secret.SetAt, null))],
+            [.. store.ListSecrets().Select(static secret => new FleetSecretInfo(secret.Name, secret.Version, secret.SetBy, secret.SetAt, null)
+                { Projects = secret.Projects, Provider = secret.Provider })],
             [.. store.ListVariables().Select(static variable => new FleetSecretInfo(variable.Name, variable.Version, variable.SetBy, variable.SetAt, variable.Value))],
             store.Protection)));
 

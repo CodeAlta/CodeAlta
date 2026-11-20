@@ -698,17 +698,16 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities
-                    // The CLI profiles read their ${secret:NAME} and ${var:NAME} from the store of this machine: its own values,
+                    // The CLI profiles and project environment read ${secret:NAME} and ${var:NAME} from the store of this machine: its own values,
                     // then those the fleet gave it for the environment, the project and the space of the session, never a
                     // host-only one; each use of a value of the fleet is recorded for the session.
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
                         // Each secret is masked from the moment it is given, before the processes of the session take it.
                         // One resolution of an identity is one use of each secret, whatever the number of variables that name it and the
                         // number of times its environment is built while it waits for confirmations.
-                        (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, shellConfirmations.SecretsOf(scope), ShellUseOf(scope)).Read,
-                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
-                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
+                        scope => SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
+                            scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain, shellConfirmations.SecretsOf(scope), ShellUseOf(scope)),
+                        new CodeAltaConfigStore(catalogOptions),
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
                         new SessionSecretEnvironments(readOnlyGlobalState ? null : Path.Combine(catalogOptions.FleetRoot, "environment-admissions.json")))
                     {
@@ -1308,6 +1307,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         private readonly Lock _gate = new();
         private readonly Dictionary<(string Name, string? Use), BoundSecretRead> _reads = [];
         private readonly Dictionary<(string Name, string? Use), string?> _authorizations = [];
+        private readonly Dictionary<string, string> _projectRefusals = new(StringComparer.OrdinalIgnoreCase);
         // What each secret that asks before use ended with, by its name in upper case, in the order they were read.
         private readonly Dictionary<string, Answer> _answers = new(StringComparer.Ordinal);
         private readonly List<Answer> _order = [];
@@ -1369,6 +1369,16 @@ public sealed class CodeAltaHost : IAsyncDisposable
             }
         }
 
+        /// <inheritdoc />
+        public void RecordProjectRefusal(string name, string? use, string problem)
+        {
+            lock (_gate)
+            {
+                if (_projectRefusals.TryAdd(name, problem))
+                    (_asks ? _asked : _unasked).RecordProjectRefusal(name, use, problem);
+            }
+        }
+
         /// <summary>Gets the secrets whose use this resolution asked the user for, and that wait for the answer.</summary>
         /// <returns>The names.</returns>
         public IReadOnlyList<string> Waiting()
@@ -1420,7 +1430,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
                 outcome = new SessionSecretOutcome(
                     System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(_order, static answer => answer.Name, static answer => answer.State == AnswerState.Given, StringComparer.OrdinalIgnoreCase),
-                    [.. _order.Where(static answer => answer.State != AnswerState.Given && answer.Problem is not null).Select(static answer => answer.Problem!)]);
+                    [.. _order.Where(static answer => answer.State != AnswerState.Given && answer.Problem is not null).Select(static answer => answer.Problem!), .. _projectRefusals.Values]);
             }
 
             foreach (var name in expired) _broker.Expire(name, use);
@@ -1536,6 +1546,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
         /// <inheritdoc />
         public string? AuthorizeUse(string name, string? use) => _inner.AuthorizeUse(name, use);
+
+        /// <inheritdoc />
+        public void RecordProjectRefusal(string name, string? use, string problem) => _inner.RecordProjectRefusal(name, use, problem);
 
         private sealed class Values(System.Collections.Concurrent.ConcurrentDictionary<string, byte> values) : IReadOnlyCollection<string>
         {

@@ -91,6 +91,7 @@ public sealed class VaultSecretWaiter : IProviderSecretWaiter
         ArgumentNullException.ThrowIfNull(names);
         foreach (var name in names)
         {
+            if (ProjectRefusal(name) is { } refusal) return refusal;
             if (_broker.GetAvailability(name) is not { } availability) continue;
             var vault = availability.Provider is { } id ? _broker.GetProvider(id)?.DisplayName ?? id : "its vault";
             switch (availability.State)
@@ -117,6 +118,11 @@ public sealed class VaultSecretWaiter : IProviderSecretWaiter
         ArgumentNullException.ThrowIfNull(names);
         foreach (var name in names)
         {
+            if (ProjectRefusal(name) is { } refusal)
+            {
+                _broker.RecordProjectRefusal(name, use, refusal);
+                return false;
+            }
             if (_broker.GetAvailability(name) is not { } availability || availability.State == SecretAvailabilityState.Ready) continue;
             if (!_broker.CanPrompt) return false;
             if (availability.State == SecretAvailabilityState.Locked && availability.Provider is { } id)
@@ -136,6 +142,14 @@ public sealed class VaultSecretWaiter : IProviderSecretWaiter
         }
 
         return true;
+    }
+
+    // Model providers are configured for the host, with no project. Don't start an unlock or confirmation
+    // that would never allow their resolver to give a limited secret.
+    private string? ProjectRefusal(string name)
+    {
+        try { return CodeAlta.Catalog.Secrets.SecretProject.Refusal(name, _broker.Store.Bindings.ProjectsOf(name), scope: null); }
+        catch (InvalidDataException exception) { return exception.Message; }
     }
 
     // Asks a vault to unlock, once for every run that waits for it at the same time.

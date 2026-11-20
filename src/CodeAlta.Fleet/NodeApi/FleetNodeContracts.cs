@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Fleet.NodeApi;
 
@@ -1054,7 +1055,14 @@ public sealed record FleetDeviceInfo(string DeviceId, string Name, string Finger
 /// <param name="SetBy">Who set its current value.</param>
 /// <param name="SetAt">When its current value was set.</param>
 /// <param name="Value">The value of a variable; null for a secret.</param>
-public sealed record FleetSecretInfo(string Name, int Version, string SetBy, DateTimeOffset SetAt, string? Value);
+public sealed record FleetSecretInfo(string Name, int Version, string SetBy, DateTimeOffset SetAt, string? Value)
+{
+    /// <summary>Gets the projects allowed to use a secret, or an empty list for all projects.</summary>
+    public IReadOnlyList<SecretProject> Projects { get; init; } = [];
+
+    /// <summary>Gets the credential provider that holds a bound secret, or null for a value on the machine.</summary>
+    public string? Provider { get; init; }
+}
 
 /// <summary>The result of <c>control.secrets.list</c>.</summary>
 /// <param name="Secrets">The secrets, by name, without their values.</param>

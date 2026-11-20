@@ -67,7 +67,8 @@ public sealed partial class ProjectCatalog
 
     // The folders each sub-project inherits from, as the last load found them, replaced whole by each load: for the readers
     // that hold an identifier of a project and no descriptor.
-    private IReadOnlyDictionary<string, IReadOnlyList<string>> _inheritedRoots = new Dictionary<string, IReadOnlyList<string>>();
+    private IReadOnlyDictionary<string, (IReadOnlyList<string> Roots, IReadOnlyList<string> Ids)> _inheritance =
+        new Dictionary<string, (IReadOnlyList<string>, IReadOnlyList<string>)>();
 
     /// <summary>
     /// Gets the folders a project inherits its setup from, the nearest first (<see cref="ProjectResourceRoots.Inherited"/>),
@@ -77,7 +78,16 @@ public sealed partial class ProjectCatalog
     /// <param name="projectId">The identifier of the project; null for none.</param>
     /// <returns>The folders; empty for a project that is no sub-project, or before the first load.</returns>
     public IReadOnlyList<string> GetInheritedRoots(string? projectId)
-        => projectId is not null && Volatile.Read(ref _inheritedRoots).TryGetValue(projectId, out var roots) ? roots : [];
+        => projectId is not null && Volatile.Read(ref _inheritance).TryGetValue(projectId, out var info) ? info.Roots : [];
+
+    /// <summary>Gets the secret scope of a known project from the last load, for a caller that holds only its identifier.</summary>
+    /// <param name="projectId">The project id, or null for no project.</param>
+    /// <returns>The project and its catalog ancestors, with no space or admitted environment.</returns>
+    public Secrets.SecretScope GetProjectSecretScope(string? projectId)
+        => new(null, projectId, null)
+        {
+            InheritedProjectIds = projectId is not null && Volatile.Read(ref _inheritance).TryGetValue(projectId, out var info) ? info.Ids : [],
+        };
 
     // The same, by the folder of the project.
     private IReadOnlyDictionary<string, IReadOnlyList<string>> _inheritedRootsOfFolders = new Dictionary<string, IReadOnlyList<string>>();
@@ -362,17 +372,22 @@ public sealed partial class ProjectCatalog
         var result = await WithDeclaredSubProjectsAsync(projects, ignored, owners, cancellationToken).ConfigureAwait(false);
         Volatile.Write(ref _ignoredMaps, ignored);
         Volatile.Write(ref _folderOwners, owners);
-        var inherited = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var inherited = new Dictionary<string, (IReadOnlyList<string> Roots, IReadOnlyList<string> Ids)>(StringComparer.OrdinalIgnoreCase);
         var ofFolders = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var idsOfFolders = result.Any(static project => project.IsSubProject)
+            ? result.ToDictionary(static project => project.ProjectPath, static project => project.Id, StringComparer.OrdinalIgnoreCase)
+            : null;
         foreach (var project in result)
         {
             if (!project.IsSubProject) continue;
             IReadOnlyList<string> roots = [.. project.InheritedRoots];
-            inherited[project.Id] = roots;
+            if (idsOfFolders is not null)
+                project.InheritedProjectIds = [.. roots.Where(idsOfFolders.ContainsKey).Select(root => idsOfFolders[root])];
+            inherited[project.Id] = (roots, project.InheritedProjectIds);
             ofFolders[project.ProjectPath] = roots;
         }
 
-        Volatile.Write(ref _inheritedRoots, inherited);
+        Volatile.Write(ref _inheritance, inherited);
         Volatile.Write(ref _inheritedRootsOfFolders, ofFolders);
         return result;
     }

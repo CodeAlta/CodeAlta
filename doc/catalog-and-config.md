@@ -53,7 +53,7 @@ tool output, paths and credentials: they are private user data.
 
 | Under `<project>/.alta/` | Content |
 | --- | --- |
-| `config.toml` | Project overrides, CLI profiles of its sessions (`[identity.cli.*]`), project automations, `[search] enabled`. |
+| `config.toml` | Project overrides, environment and CLI profiles of its sessions (`[env]`, `[identity.cli.*]`), project automations, `[search] enabled`. |
 | `issues.toml`, `local/issues.toml` | Views of the issues and of the pull requests (`[<service>.pull_requests]`), and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
 | `mcp.json`, `plugins/`, `plugin-data/`, `skills/`, `prompts/` | Project MCP servers, plugins, plugin data, skills, prompts. |
 | `plans/`, `tasks/` | Plans and follow-up tasks, Markdown with a front matter. |
@@ -214,10 +214,11 @@ are stored, never a secret.
   `config.toml`; absent means every space (`SpaceScope.IsAvailable`). `SpaceFilter` is what a session's space has,
   applied before global and project enablement, so a project cannot bring into a space what the space does not have.
   Only the window writes these lists.
-- **Identity.** In the desktop (`CodeAltaHostOptions.AppliesSpaceIdentities`), `SessionIdentityResolver` turns the
-  space identity, with the CLI profiles of the project, into one environment (`AgentProcessEnvironment`) kept by the
-  attachment and applied to every process the session starts (shell, Claude Code CLI, jobs, Git plugin tools, stdio MCP
-  servers, terminals). A profile separates accounts; it is not a sandbox.
+- **Identity.** On hosts that apply space identities, `SessionIdentityResolver` builds one process environment from
+  the space identity, then the project's CLI profiles, then the project's `[env]`. The project configuration inherits
+  the monorepo's settings; the CLI profile validator and scoped secret resolver apply to `[env]` too. A shadowed
+  assignment is not resolved. The attachment keeps the resulting environment for the processes of the session. A
+  profile separates accounts; it is not a sandbox.
 
 Which space a window shows, and its tabs, belong to the page's local storage, not the catalog.
 

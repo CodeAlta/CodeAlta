@@ -667,7 +667,7 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
-    public async Task ASession_WorksUnderTheCliProfilesOfItsSpace_WithTheOnesOfItsProjectOverThem()
+    public async Task ASession_WorksUnderSpaceAndProjectCliProfiles_WithTheProjectEnvironmentOnTop()
     {
         using var temp = TempDirectory.Create();
         var provider = new RecordingProvider();
@@ -678,7 +678,7 @@ public sealed class SessionForkRewindTests
             Identity = new SpaceIdentity(Cli:
             [
                 new("azure", [new("AZURE_CONFIG_DIR", "/srv/azure-contoso")]),
-                new("kubectl", [new("KUBECONFIG", "/srv/kube/contoso"), new("KUBE_EDITOR", "vim")]),
+                new("kubectl", [new("KUBECONFIG", "/srv/kube/contoso"), new("KUBE_EDITOR", "vim"), new("KUBE_CACHE", "/srv/cache")]),
             ]),
         })).Succeeded);
         // The project targets another cluster than the rest of its space.
@@ -686,18 +686,86 @@ public sealed class SessionForkRewindTests
         await File.WriteAllTextAsync(Path.Combine(host.CurrentProject.ProjectPath, ".alta", "config.toml"), """
             [identity.cli.kubectl.env]
             KUBECONFIG = "/srv/kube/contoso-prod-readonly"
+            KUBE_CACHE = "/srv/prod-cache"
+
+            [env]
+            KUBECONFIG = "~/.kube/acme"
+            KUBE_CACHE = "${var:TEST_MISSING_KUBE_CACHE}"
+            GRAFANA_URL = "${var:TEST_GRAFANA_URL}/dashboards"
             """);
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(temp.GlobalRoot).SetVariable("TEST_GRAFANA_URL", "https://grafana.example", "test");
         var options = Options(temp, provider);
         var business = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Infra", null, null, null, "business", CancellationToken.None);
         await SendAsync(host, business, options, "one");
 
         var environment = provider.Requests.Last(value => value.SessionId == business.SessionId).Environment!;
         Assert.AreEqual("/srv/azure-contoso", environment.Get("AZURE_CONFIG_DIR"));
-        Assert.AreEqual("/srv/kube/contoso-prod-readonly", environment.Get("KUBECONFIG"), "The project's variable is over the space's.");
+        Assert.AreEqual(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('/', '\\') + "/.kube/acme",
+            environment.Get("KUBECONFIG"), "[env] wins over the project's CLI profile and expands ~.");
+        Assert.AreEqual("https://grafana.example/dashboards", environment.Get("GRAFANA_URL"));
+        Assert.IsNull(environment.Get("KUBE_CACHE"), "An unavailable [env] value does not fall back to a CLI profile.");
         Assert.AreEqual("vim", environment.Get("KUBE_EDITOR"), "The variables the project does not name stay the space's.");
         var identity = await host.RuntimeService.GetSessionIdentityAsync(business.SessionId);
         CollectionAssert.AreEqual(new[] { "kubectl" }, identity.ProjectProfiles.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "KUBECONFIG", "KUBE_CACHE", "GRAFANA_URL" }, identity.ProjectEnvironmentNames.ToArray());
+        StringAssert.Contains(identity.SecretProblems.Single(), "KUBE_CACHE was left out: The variable TEST_MISSING_KUBE_CACHE is not set");
         Assert.IsFalse(identity.IsUsual);
+    }
+
+    [TestMethod]
+    public async Task ASessionsProjectEnvironment_AsksBeforeUseEvenWithoutASpaceIdentity()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider,
+            new AvailableVerifier { Answer = CodeAlta.Credentials.UserPresenceResult.Verified });
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Deploy", null, null, null, "business", CancellationToken.None);
+        Directory.CreateDirectory(Path.Combine(temp.ProjectRoot, ".alta"));
+        await File.WriteAllTextAsync(Path.Combine(temp.ProjectRoot, ".alta", "config.toml"), """
+            [env]
+            DEPLOY_TOKEN = "${secret:DEPLOY}"
+            """);
+        await host.RuntimeService.DetachRuntimeSessionAsync(session.SessionId);
+        var sending = Task.Run(() => SendAsync(host, session, options, "one"));
+        var use = $"shell of the session {session.SessionId}";
+        await AwaitedAsync(host, use);
+        Assert.AreEqual(CodeAlta.Credentials.UserPresenceResult.Verified, await host.Credentials!.ConfirmAsync("DEPLOY", use));
+        await sending.WithinAsync(TestTime.Seconds(30));
+        var identity = await host.RuntimeService.GetSessionIdentityAsync(session.SessionId);
+        Assert.IsTrue(identity.SecretAnswers["DEPLOY"]);
+        Assert.IsEmpty(identity.SecretProblems);
+        Assert.AreEqual("local-deploy-value-1", provider.Requests.Last(value => value.SessionId == session.SessionId).Environment!.Get("DEPLOY_TOKEN"));
+    }
+
+    [TestMethod]
+    public async Task RestrictedSecretsAreRefusedInAnotherProjectsEnvironmentAndSpaceProfileBeforeAsking()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostWithAskingSecretAsync(temp, provider);
+        var allowed = await host.ProjectCatalog.GetOrAddTransientAsync(Path.Combine(temp.GlobalRoot, "allowed"));
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(temp.GlobalRoot).Bindings.SetProjects("DEPLOY", [new(allowed.Id, allowed.Slug)]);
+        Directory.CreateDirectory(Path.Combine(temp.ProjectRoot, ".alta"));
+        await File.WriteAllTextAsync(Path.Combine(temp.ProjectRoot, ".alta", "config.toml"), """
+            [env]
+            DEPLOY_TOKEN = "${secret:DEPLOY}"
+            """);
+        Assert.IsTrue((await host.SpaceCatalog.UpdateSettingsAsync("business", settings => settings with
+        {
+            Identity = new SpaceIdentity(Cli: [new("deploy", [new("DEPLOY_CLI", "${secret:DEPLOY}")])]),
+        })).Succeeded);
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Deploy", null, null, null, "business", CancellationToken.None);
+        await SendAsync(host, session, options, "one");
+
+        var identity = await host.RuntimeService.GetSessionIdentityAsync(session.SessionId);
+        Assert.IsNull(identity.Environment.Get("DEPLOY_TOKEN"));
+        Assert.IsNull(identity.Environment.Get("DEPLOY_CLI"));
+        StringAssert.Contains(identity.SecretProblems.Single(), $"DEPLOY is limited to the projects {allowed.Slug}");
+        Assert.IsEmpty(host.Credentials!.ListPending());
+        Assert.IsTrue(host.Credentials.ListUses().Any(use => use.Name == "DEPLOY" && use.Outcome == "restricted" &&
+            use.Use == $"shell of the session {session.SessionId}"));
     }
 
     [TestMethod]

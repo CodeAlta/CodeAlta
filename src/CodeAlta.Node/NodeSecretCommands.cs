@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Node;
@@ -12,6 +13,9 @@ internal sealed class NodeSecretCommandOptions
 
     /// <summary>Gets the words: the subcommand and its arguments.</summary>
     public List<string> Words { get; } = [];
+
+    /// <summary>Gets the project references to apply before writing a secret.</summary>
+    public List<string> Projects { get; } = [];
 }
 
 /// <summary>
@@ -46,16 +50,27 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
         var (command, arguments) = options.Words is [var first, .. var rest] ? (first, rest) : ("list", []);
         try
         {
+            if (options.Projects.Count > 0 && command is not ("set" or "rotate"))
+                return await UsageAsync("--project is for secrets set or rotate. Use secrets projects <name> [project...] to edit a restriction.").ConfigureAwait(false);
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = profile.GlobalRoot, StateRoot = profile.StateRoot });
             switch (command)
             {
                 case "list" when arguments.Count == 0:
                     return await ListAsync(store).ConfigureAwait(false);
                 case "set" or "rotate" when arguments.Count == 1:
-                    return await SetAsync(store, arguments[0], rotate: command == "rotate").ConfigureAwait(false);
+                    return await SetAsync(store, arguments[0], rotate: command == "rotate",
+                        await ResolveProjectsAsync(catalog, options.Projects).ConfigureAwait(false)).ConfigureAwait(false);
                 case "set" or "rotate" when arguments.Count > 1:
                     return await UsageAsync($"secrets {command} takes the name alone: the value is read from the standard input, or typed at the prompt, never given as an argument.").ConfigureAwait(false);
                 case "delete" when arguments.Count == 1:
                     return await DeleteAsync(store.DeleteSecret(arguments[0]), $"secret {arguments[0]}").ConfigureAwait(false);
+                case "projects" when arguments.Count > 0:
+                    var secret = store.ListSecrets().FirstOrDefault(secret => string.Equals(secret.Name, arguments[0], StringComparison.OrdinalIgnoreCase))
+                        ?? throw new KeyNotFoundException($"No secret is named {arguments[0]} on this machine.");
+                    var projects = await ResolveProjectsAsync(catalog, arguments.Skip(1).ToArray()).ConfigureAwait(false);
+                    store.Bindings.SetProjects(secret.Name, projects);
+                    await output.WriteLineAsync($"{secret.Name}: {ProjectNames(projects)}.").ConfigureAwait(false);
+                    return NodeExitCodes.Success;
                 case "set-var" when arguments.Count == 2:
                     var variable = store.SetVariable(arguments[0], arguments[1], SetBy);
                     await output.WriteLineAsync($"Variable {variable.Name} is set (version {variable.Version}).").ConfigureAwait(false);
@@ -66,7 +81,7 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
                     return await KeyFileAsync(store).ConfigureAwait(false);
                 case "key-file":
                     return await UsageAsync("secrets key-file takes no argument.").ConfigureAwait(false);
-                case "list" or "set" or "rotate" or "delete" or "set-var" or "delete-var":
+                case "list" or "set" or "rotate" or "delete" or "set-var" or "delete-var" or "projects":
                     return await UsageAsync(command switch
                     {
                         "list" => "secrets list takes no argument.",
@@ -74,7 +89,7 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
                         _ => $"secrets {command} takes a name.",
                     }).ConfigureAwait(false);
                 default:
-                    return await UsageAsync($"'{command}' is not a command of secrets: list, set, rotate, delete, set-var, delete-var or key-file.").ConfigureAwait(false);
+                    return await UsageAsync($"'{command}' is not a command of secrets: list, set, rotate, projects, delete, set-var, delete-var or key-file.").ConfigureAwait(false);
             }
         }
         catch (ArgumentException exception)
@@ -101,10 +116,11 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
         var width = Math.Min(48, Math.Max(4, secrets.Select(static secret => secret.Name.Length).Concat(variables.Select(static variable => variable.Name.Length)).Max()));
         if (secrets.Count > 0)
         {
-            await output.WriteLineAsync($"{"SECRET".PadRight(width)}  {"VERSION",-7}  {"SET",-16}  BY").ConfigureAwait(false);
+            var projectsWidth = Math.Max("PROJECTS".Length, secrets.Max(static secret => ProjectNames(secret.Projects).Length));
+            await output.WriteLineAsync($"{"SECRET".PadRight(width)}  {"VERSION",-7}  {"SET",-16}  {"PROJECTS".PadRight(projectsWidth)}  BY").ConfigureAwait(false);
             foreach (var secret in secrets)
             {
-                await output.WriteLineAsync($"{secret.Name.PadRight(width)}  {secret.Version,-7}  {Format(secret.SetAt),-16}  {secret.SetBy}").ConfigureAwait(false);
+                await output.WriteLineAsync($"{secret.Name.PadRight(width)}  {secret.Version,-7}  {Format(secret.SetAt),-16}  {ProjectNames(secret.Projects).PadRight(projectsWidth)}  {secret.SetBy}").ConfigureAwait(false);
             }
         }
 
@@ -121,7 +137,7 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
         return NodeExitCodes.Success;
     }
 
-    private async Task<int> SetAsync(LocalSecretStore store, string name, bool rotate)
+    private async Task<int> SetAsync(LocalSecretStore store, string name, bool rotate, IReadOnlyList<SecretProject> projects)
     {
         if (!LocalSecretStore.IsName(name)) return await UsageAsync($"'{name}' is not a valid name: letters, digits and _, not starting with a digit.").ConfigureAwait(false);
         if (rotate && !store.ListSecrets().Any(secret => string.Equals(secret.Name, name, StringComparison.OrdinalIgnoreCase)))
@@ -147,10 +163,29 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
         }
 
         if (string.IsNullOrEmpty(value)) return await UsageAsync($"No value was given for {name}.").ConfigureAwait(false);
+        if (value.Length > LocalSecretStore.MaximumValueLength) return await UsageAsync("The value is too large.").ConfigureAwait(false);
+        // Establish the restriction before the new value can be read. A set with no option leaves an existing restriction alone.
+        if (projects.Count > 0) store.Bindings.SetProjects(name, projects);
         var secret = rotate ? store.RotateSecret(name, value, SetBy) : store.SetSecret(name, value, SetBy);
         await output.WriteLineAsync($"Secret {secret.Name} is set (version {secret.Version}).").ConfigureAwait(false);
         return NodeExitCodes.Success;
     }
+
+    private static async Task<IReadOnlyList<SecretProject>> ResolveProjectsAsync(ProjectCatalog catalog, IReadOnlyList<string> references)
+    {
+        if (references.Count == 0) return [];
+        var available = (await catalog.LoadReadableAsync().ConfigureAwait(false)).Projects;
+        return [.. references.Select(reference =>
+        {
+            var project = available.FirstOrDefault(project => string.Equals(project.Id, reference, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(project.Slug, reference, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"No project is named '{reference}' in the node's catalog.");
+            return new SecretProject(project.Id, project.Slug);
+        }).DistinctBy(static project => project.Id, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static string ProjectNames(IReadOnlyList<SecretProject> projects)
+        => projects.Count == 0 ? "All projects" : string.Join(", ", projects.Select(static project => project.Name));
 
     // A node that a LaunchDaemon or a system unit starts has no login session, where the Keychain and libsecret answer:
     // the key of its secrets moves into a file only this user reads, while they still answer.

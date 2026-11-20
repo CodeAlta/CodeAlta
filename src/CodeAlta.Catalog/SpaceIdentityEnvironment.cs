@@ -39,12 +39,26 @@ public static class SpaceIdentityEnvironment
     /// <returns>The variables to set; <see cref="AgentProcessEnvironment.Empty"/> for an identity that sets nothing.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="inherited"/> or <paramref name="userProfile"/> is <see langword="null"/>.</exception>
     public static AgentProcessEnvironment Create(SpaceIdentity? identity, Func<string, string?> inherited, string userProfile, bool windows)
+        => Create(identity, [], inherited, userProfile, windows, missing: null);
+
+    /// <summary>Creates the environment of a session, with the project's variables taking precedence over its CLI profiles.</summary>
+    /// <param name="identity">The identity with the space and project CLI profiles already combined; null for none.</param>
+    /// <param name="project">The project's <c>[env]</c> variables as written.</param>
+    /// <param name="inherited">Reads a value of the application environment or a reference to the machine store.</param>
+    /// <param name="userProfile">The folder of the user, which a path written <c>~</c> starts from.</param>
+    /// <param name="windows">Whether the processes run on Windows.</param>
+    /// <param name="missing">Receives each project variable left out, with the reference that did not resolve; null to skip.</param>
+    /// <returns>The variables to set; an empty environment when nothing is set.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/>, <paramref name="inherited"/> or <paramref name="userProfile"/> is null.</exception>
+    public static AgentProcessEnvironment Create(SpaceIdentity? identity, IReadOnlyList<KeyValuePair<string, string>> project,
+        Func<string, string?> inherited, string userProfile, bool windows, ICollection<KeyValuePair<string, string>>? missing)
     {
+        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(inherited);
         ArgumentNullException.ThrowIfNull(userProfile);
-        if (identity is null || identity.IsEmpty) return AgentProcessEnvironment.Empty;
+        if ((identity is null || identity.IsEmpty) && project.Count == 0) return AgentProcessEnvironment.Empty;
         var variables = new List<KeyValuePair<string, string>>();
-        if (identity.Git is { } git)
+        if (identity?.Git is { } git)
         {
             if (git.Name is { } name)
             {
@@ -79,16 +93,20 @@ public static class SpaceIdentityEnvironment
             }
         }
 
-        if (identity.GitHub?.ConfigDir is { } folder)
+        if (identity?.GitHub?.ConfigDir is { } folder)
         {
             variables.Add(new(GitHubConfigDirectoryVariable, ExpandPath(folder, userProfile)));
         }
 
-        foreach (var profile in identity.Cli ?? [])
+        // Don't resolve or ask for references in shadowed assignments. If a project assigns a variable
+        // and that value is unavailable, the session must not fall back to a different CLI profile's value.
+        var overridden = project.Count == 0 ? null : project.Select(static pair => pair.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var profile in identity?.Cli ?? [])
         {
-            AddProfile(variables, profile, inherited, userProfile, windows, missing: null);
+            AddVariables(variables, profile.Environment, inherited, userProfile, windows, missing: null, overridden);
         }
 
+        AddVariables(variables, project, inherited, userProfile, windows, missing);
         return variables.Count == 0 ? AgentProcessEnvironment.Empty : new AgentProcessEnvironment(variables);
     }
 
@@ -111,16 +129,17 @@ public static class SpaceIdentityEnvironment
         ArgumentNullException.ThrowIfNull(userProfile);
         ArgumentNullException.ThrowIfNull(missing);
         var variables = new List<KeyValuePair<string, string>>();
-        AddProfile(variables, profile, inherited, userProfile, windows, missing);
+        AddVariables(variables, profile.Environment, inherited, userProfile, windows, missing);
         return variables.Count == 0 ? AgentProcessEnvironment.Empty : new AgentProcessEnvironment(variables);
     }
 
     // A variable that refers to one that is not set is left out: the tool keeps its own value of it, never half a path.
-    private static void AddProfile(List<KeyValuePair<string, string>> variables, SpaceCliProfile profile, Func<string, string?> inherited, string userProfile,
-        bool windows, ICollection<KeyValuePair<string, string>>? missing)
+    private static void AddVariables(List<KeyValuePair<string, string>> variables, IReadOnlyList<KeyValuePair<string, string>> written,
+        Func<string, string?> inherited, string userProfile, bool windows, ICollection<KeyValuePair<string, string>>? missing, HashSet<string>? overridden = null)
     {
-        foreach (var (name, value) in profile.Environment)
+        foreach (var (name, value) in written)
         {
+            if (overridden?.Contains(name) == true) continue;
             if (SpaceCliProfile.Resolve(value, inherited, userProfile, windows, out var unset) is { } resolved) variables.Add(new(name, resolved));
             else missing?.Add(new(name, unset!));
         }

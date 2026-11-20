@@ -56,6 +56,19 @@ public sealed record SecretScope(string? SpaceId, string? ProjectId, string? Env
     /// <summary>Gets the work of no space, project or environment.</summary>
     public static SecretScope None { get; } = new(null, null, null);
 
+    /// <summary>Creates the scope of a known project, including the monorepo projects it inherits from.</summary>
+    /// <param name="spaceId">The space of the run; null for none.</param>
+    /// <param name="project">The project from the catalog, independent of the run's working directory; null for no project.</param>
+    /// <param name="environment">The environment the run was admitted to; null for none.</param>
+    /// <returns>The scope of the run.</returns>
+    public static SecretScope ForProject(string? spaceId, ProjectDescriptor? project, string? environment)
+        => new(spaceId, project?.Id, environment) { InheritedProjectIds = project?.InheritedProjectIds ?? [] };
+
+    internal IReadOnlyList<string> InheritedProjectIds { get; init; } = [];
+
+    internal bool IncludesProject(string id) => string.Equals(id, ProjectId, StringComparison.OrdinalIgnoreCase)
+        || InheritedProjectIds.Contains(id, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Gets the run (a session, a run of an automation) its uses are recorded for; null records none.</summary>
     public string? RunId { get; init; }
 
@@ -238,7 +251,7 @@ public sealed class SecretReferenceResolver
     public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used, IBoundSecretSource? bound, string? use)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        var store = new LocalSecretStore(root) { BoundSecrets = bound, Use = use };
+        var store = new LocalSecretStore(root) { BoundSecrets = bound, Use = use, ProjectScope = scope };
         var sources = new List<ISecretLookup>(5);
         if (scope.OwnerWork) sources.Add(store);
         if (!string.IsNullOrWhiteSpace(scope.Environment)) sources.Add(store.FleetScope(FleetSecretScopes.Environment, scope.Environment, shell, used));
@@ -334,9 +347,17 @@ public sealed class SecretReferenceResolver
     /// </summary>
     /// <param name="key">The key.</param>
     /// <returns>The value, or <see langword="null"/> when it is not set or cannot be read.</returns>
-    public string? Read(string key)
+    public string? Read(string key) => Read(key, out _);
+
+    /// <summary>Reads a value by the key a reader of variables is given and explains why a known reference could not be read.</summary>
+    /// <param name="key">The name of an environment variable, <c>env:NAME</c>, <c>secret:NAME</c> or <c>var:NAME</c>.</param>
+    /// <param name="problem">Why a known reference has no value, without including any secret values.</param>
+    /// <returns>The value, or null when it is not set or cannot be read.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
+    public string? Read(string key, out string? problem)
     {
         ArgumentNullException.ThrowIfNull(key);
+        problem = null;
         var colon = key.IndexOf(':');
         var reference = colon < 0 ? new SecretReference(SecretReferenceKind.Environment, key)
             : key.AsSpan(0, colon) is "secret" ? new SecretReference(SecretReferenceKind.Secret, key[(colon + 1)..])
@@ -346,12 +367,14 @@ public sealed class SecretReferenceResolver
         if (reference is not { } known) return null;
         try
         {
-            return TryGet(known, out var value) ? value : null;
+            if (TryGet(known, out var value)) return value;
+            problem = SecretReferences.MissingMessage(known);
         }
-        catch (SecretReferenceException)
+        catch (SecretReferenceException exception)
         {
-            return null;
+            problem = exception.Message;
         }
+        return null;
     }
 
     /// <summary>Gets the value of a reference.</summary>

@@ -148,6 +148,9 @@ public sealed class ProjectDescriptor
     [JsonPropertyName("inherited_roots")]
     public List<string> InheritedRoots { get; set; } = [];
 
+    // Catalog IDs of the projects occupying the inherited roots. Only a catalog load establishes that relationship.
+    internal IReadOnlyList<string> InheritedProjectIds { get; set; } = [];
+
     /// <summary>
     /// Gets or sets the sandbox the repository project chose, which a sub-project without a choice of its own uses
     /// (<see cref="EffectiveSandbox"/>). Computed, never written.
@@ -259,6 +262,7 @@ public sealed class ProjectDescriptor
         DeclaredOptional = DeclaredOptional,
         WriteScope = WriteScope,
         InheritedRoots = [.. InheritedRoots],
+        InheritedProjectIds = [.. InheritedProjectIds],
         InheritedSandbox = InheritedSandbox,
         InheritedSkillFolders = [.. InheritedSkillFolders],
         RepositoryName = RepositoryName,

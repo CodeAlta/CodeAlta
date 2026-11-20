@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Node.Tests;
@@ -80,6 +81,31 @@ public sealed class NodeSecretCommandTests
         Assert.IsTrue(Store(root).TryGetSecret("TYPED", out var stored));
         Assert.AreEqual("typed-secret-value", stored);
         Assert.AreEqual(NodeExitCodes.InvalidUsage, (await RunAsync(root, null, "set", "bad-name")).Code);
+    }
+
+    [TestMethod]
+    public async Task SetCanLimitASecretToCatalogProjectsAndListShowsTheRestriction()
+    {
+        using var root = new NodeTestRoot();
+        var projectFolder = Directory.CreateDirectory(Path.Combine(root.DataRoot, "acme")).FullName;
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root.DataRoot });
+        var project = await catalog.GetOrAddTransientAsync(projectFolder);
+        await catalog.SaveAsync(project);
+        var options = new NodeSecretCommandOptions();
+        options.Profile.DataRoot = root.DataRoot;
+        options.Words.AddRange(["set", "GH_TOKEN"]);
+        options.Projects.Add(project.Slug);
+        Assert.AreEqual(NodeExitCodes.Success, await Commands(new StringWriter(), new StringWriter(), Value).RunAsync(options));
+
+        var listing = await RunAsync(root, null, "list");
+        Assert.AreEqual(NodeExitCodes.Success, listing.Code);
+        StringAssert.Contains(listing.Output, project.Slug);
+        Assert.DoesNotContain(Value, listing.Output);
+        Assert.ThrowsExactly<SecretStoreUnavailableException>(() => Store(root).TryGetSecret("GH_TOKEN", out _));
+        Assert.AreEqual(Value, SecretReferenceResolver.ForScope(root.DataRoot, SecretScope.ForProject(null, project, null), shell: true)
+            .Resolve("${secret:GH_TOKEN}"));
+        Assert.AreEqual(NodeExitCodes.Success, (await RunAsync(root, null, "projects", "GH_TOKEN")).Code);
+        Assert.IsTrue(Store(root).TryGetSecret("GH_TOKEN", out _));
     }
 
     private static LocalSecretStore Store(NodeTestRoot root) => new(root.DataRoot, FileProtector(root.DataRoot));

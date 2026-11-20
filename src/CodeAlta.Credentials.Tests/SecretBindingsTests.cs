@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Credentials.Tests;
@@ -83,6 +84,79 @@ public sealed class SecretBindingsTests
         Assert.AreEqual("Bearer vault-value-1", SecretReferenceResolver.ForMachine(vault.Profile, null, source, "provider a").Resolve("Bearer ${secret:TOKEN}"));
     }
 
+    [TestMethod]
+    public async Task ProjectRestrictionsCoverDeclaredSubprojectsButNotOtherProjectsOrHostUses()
+    {
+        using var vault = new FakeVault();
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = vault.Profile });
+        var repository = Directory.CreateDirectory(Path.Combine(vault.Profile, "repo")).FullName;
+        var child = Directory.CreateDirectory(Path.Combine(repository, "app", "billing")).FullName;
+        Directory.CreateDirectory(Path.Combine(repository, ".alta"));
+        await File.WriteAllTextAsync(ProjectManifest.PathOf(repository), """
+            [projects.app]
+            path = "app"
+
+            [projects.billing]
+            path = "app/billing"
+            """);
+        var rootProject = await catalog.GetOrAddTransientAsync(repository);
+        var projects = await catalog.LoadAsync();
+        var app = projects.Single(project => project.DeclaredKey == "app");
+        var billing = projects.Single(project => project.ProjectPath == child);
+        Assert.AreEqual(rootProject.Id, billing.ParentId);
+
+        var store = new LocalSecretStore(vault.Profile,
+            new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(vault.Profile, "secrets", "key"))));
+        store.Bindings.SetProjects("GH_TOKEN", [new(app.Id, "acme-app")]);
+        store.SetSecret("GH_TOKEN", "test-token-v1", "alice");
+        store.RotateSecret("GH_TOKEN", "test-token-v2", "alice");
+        var source = new Source();
+        var checkout = SecretReferenceResolver.ForScope(vault.Profile, SecretScope.ForProject("default", billing, null), shell: true);
+        Assert.AreEqual("test-token-v2", checkout.Resolve("${secret:gh_token}"));
+        Assert.ThrowsExactly<SecretReferenceException>(() =>
+            SecretReferenceResolver.ForScope(vault.Profile, SecretScope.ForProject("default", rootProject, null), shell: true).Resolve("${secret:GH_TOKEN}"));
+        var denied = Assert.ThrowsExactly<SecretReferenceException>(() => SecretReferenceResolver.ForMachine(vault.Profile, null, source, "provider test")
+            .Resolve("${secret:GH_TOKEN}"));
+        StringAssert.Contains(denied.Message, "GH_TOKEN is limited to the projects acme-app");
+        Assert.AreEqual(("GH_TOKEN", "provider test"), source.ProjectRefusals.Single());
+
+        store.Bind("GH_TOKEN", "vault", "item/field", "item", "alice");
+        store.Bindings.SetAskBeforeUse("GH_TOKEN", SecretAskDurations.EachUse);
+        source.Values["GH_TOKEN"] = "cached-vault-token";
+        Assert.ThrowsExactly<SecretReferenceException>(() => SecretReferenceResolver.ForMachine(vault.Profile, null, source, "MCP server test")
+            .Resolve("${secret:GH_TOKEN}"));
+        Assert.IsNull(source.LastUse, "The refusal neither reads a cached vault value nor asks for approval.");
+        Assert.AreEqual("cached-vault-token", SecretReferenceResolver.ForScope(vault.Profile, SecretScope.ForProject("default", billing, null), shell: true,
+            null, source, "allowed shell").Resolve("${secret:GH_TOKEN}"));
+        Assert.AreEqual(app.Id, store.ListSecrets().Single().Projects.Single().Id);
+
+        Assert.IsTrue(store.DeleteSecret("GH_TOKEN"));
+        Assert.IsEmpty(new LocalSecretStore(vault.Profile).Bindings.ProjectsOf("GH_TOKEN"));
+    }
+
+    [TestMethod]
+    public void AProjectRestrictionOnTheWinningMachineSecretDoesNotFallThroughToFleetValues()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile,
+            new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(vault.Profile, "secrets", "key"))));
+        store.Bind("TOKEN", "vault", "item/field", "item", "alice");
+        var projectId = ProjectId.NewVersion7().ToString();
+        store.Bindings.SetProjects("TOKEN", [new(projectId, "acme-app")]);
+        store.ReplaceFleetCopies("server", [new("server", "id", FleetSecretValue.SecretKind, "TOKEN", FleetSecretScopes.Person, null, 1, false, "fleet-value")]);
+        var source = new Source { Values = { ["TOKEN"] = "cached-vault-token" } };
+
+        Assert.ThrowsExactly<SecretReferenceException>(() => SecretReferenceResolver.ForScope(vault.Profile, SecretScope.None, shell: true, null, source, "shell")
+            .Resolve("${secret:TOKEN}"));
+        Assert.IsNull(source.LastUse);
+        Assert.AreEqual("cached-vault-token", SecretReferenceResolver.ForScope(vault.Profile, new SecretScope(null, projectId, null), shell: true, null, source, "shell")
+            .Resolve("${secret:TOKEN}"));
+
+        Assert.IsTrue(store.Bindings.Unbind("TOKEN"));
+        Assert.AreEqual("fleet-value", SecretReferenceResolver.ForScope(vault.Profile, SecretScope.None, shell: true)
+            .Resolve("${secret:TOKEN}"), "A restriction left by an absent machine secret doesn't apply to the fleet copy.");
+    }
+
     internal sealed class Source : IBoundSecretSource
     {
         public Dictionary<string, string> Values { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -93,6 +167,8 @@ public sealed class SecretBindingsTests
 
         public string? LastUse { get; private set; }
 
+        public List<(string Name, string? Use)> ProjectRefusals { get; } = [];
+
         public BoundSecretRead ReadBound(string name, string? use)
         {
             LastUse = use;
@@ -100,6 +176,8 @@ public sealed class SecretBindingsTests
         }
 
         public string? AuthorizeUse(string name, string? use) => Refusal;
+
+        public void RecordProjectRefusal(string name, string? use, string problem) => ProjectRefusals.Add((name, use));
     }
 
     // Keeps the values in clear, so that the tests need no protected store of the machine.

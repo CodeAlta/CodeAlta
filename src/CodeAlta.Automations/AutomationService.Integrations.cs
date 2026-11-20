@@ -55,7 +55,8 @@ internal sealed class AutomationIntegrationOptions
     internal static AutomationIntegrationOptions ForHost(string globalRoot) => ForHost(globalRoot, null);
 
     // bound: the secrets kept in vaults the host holds, which the triggers of automations are given for their own use.
-    internal static AutomationIntegrationOptions ForHost(string globalRoot, CodeAlta.Agent.Runtime.IBoundSecretSource? bound)
+    internal static AutomationIntegrationOptions ForHost(string globalRoot, CodeAlta.Agent.Runtime.IBoundSecretSource? bound,
+        Func<string?, CodeAlta.Catalog.Secrets.SecretScope>? projectScope = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
         return new AutomationIntegrationOptions
@@ -66,7 +67,8 @@ internal sealed class AutomationIntegrationOptions
             {
                 if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Automations").Warn(message);
             },
-            Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot, new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false,
+            Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot,
+                    projectScope?.Invoke(projectId) ?? new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false,
                     null, bound, TriggerUseOf(projectId))
                 .TryResolve(text, out var value, out var problem) ? (value, null) : (null, problem),
         };

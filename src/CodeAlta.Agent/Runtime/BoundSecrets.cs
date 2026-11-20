@@ -66,6 +66,12 @@ public interface IBoundSecretSource
     /// <param name="use">What will get the value; null for a use nobody names.</param>
     /// <returns>Null when it may; else why not, naming the secret.</returns>
     string? AuthorizeUse(string name, string? use);
+
+    /// <summary>Records a use refused by a project restriction before the lookup reached a vault or asked for confirmation.</summary>
+    /// <param name="name">The name of the secret.</param>
+    /// <param name="use">What would get the value; null for a use nobody names.</param>
+    /// <param name="problem">Why the secret was refused, without its value.</param>
+    void RecordProjectRefusal(string name, string? use, string problem) { }
 }
 
 /// <summary>

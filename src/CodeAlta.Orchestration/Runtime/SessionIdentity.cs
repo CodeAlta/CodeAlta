@@ -5,8 +5,9 @@ using CodeAlta.Catalog.Secrets;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// The identity a session works under: the one of its space, with the CLI profiles of its project over it, as they
-/// were when the session attached. It holds only references (names, emails, paths, names of variables), never a secret.
+/// The identity a session works under: the one of its space, with the CLI profiles and environment of its project
+/// over it, as they were when the session attached. Its settings keep references; the resolved process environment
+/// goes only to the processes that use it.
 /// </summary>
 /// <param name="SpaceId">The space the identity is of; <see langword="null"/> for the usual settings of a host without spaces.</param>
 /// <param name="Identity">The identity of the space with the profiles of the project; <see langword="null"/> when it sets nothing.</param>
@@ -17,7 +18,7 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
     public static SessionIdentity Usual { get; } = new(null, null, AgentProcessEnvironment.Empty);
 
     /// <summary>Gets whether the identity changes nothing.</summary>
-    public bool IsUsual => Identity is null || Identity.IsEmpty;
+    public bool IsUsual => (Identity is null || Identity.IsEmpty) && ProjectEnvironmentNames.Count == 0;
 
     /// <summary>
     /// Gets the names of the CLI profiles of <see cref="Identity"/> that the project of the session gives or changes;
@@ -25,10 +26,12 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
     /// </summary>
     public IReadOnlyList<string> ProjectProfiles { get; init; } = [];
 
+    /// <summary>Gets the names, never the resolved values, of the variables the project's <c>[env]</c> assigns.</summary>
+    public IReadOnlyList<string> ProjectEnvironmentNames { get; init; } = [];
+
     /// <summary>
-    /// Gets what the processes of the session start without: a sentence for each secret that asks before use whose use the user
-    /// denied or did not confirm in time when the session attached (<see cref="SessionIdentityResolver.ResolveForAttachmentAsync"/>);
-    /// empty when nothing is missing.
+    /// Gets what the processes of the session start without: project variables with unresolved references and secrets
+    /// the user did not confirm when the session attached. Empty when nothing is missing.
     /// </summary>
     public IReadOnlyList<string> SecretProblems { get; init; } = [];
 
@@ -99,6 +102,8 @@ public sealed class SessionIdentityResolver
     private readonly SpaceCatalog? _spaces;
     private readonly Func<SpaceIdentity?, SecretScope, AgentProcessEnvironment> _environment;
     private readonly Func<string, IReadOnlyList<SpaceCliProfile>> _projectProfiles;
+    private readonly CodeAltaConfigStore? _projectConfig;
+    private readonly Func<SecretScope, SecretReferenceResolver>? _references;
 
     /// <summary>Initializes a resolver.</summary>
     /// <param name="spaces">The spaces, or <see langword="null"/> for a host whose sessions keep the usual settings.</param>
@@ -128,6 +133,15 @@ public sealed class SessionIdentityResolver
         _environment = environment ?? (static (identity, _) => SpaceIdentityEnvironment.Create(identity));
         _projectProfiles = projectProfiles ?? (static _ => []);
         Environments = environments ?? new SessionSecretEnvironments();
+    }
+
+    // The host supplies one scoped lookup for all sources of the session's environment, including every rebuild while it attaches.
+    internal SessionIdentityResolver(SpaceCatalog spaces, Func<SecretScope, SecretReferenceResolver> references, CodeAltaConfigStore projectConfig,
+        SessionSecretEnvironments environments)
+        : this(spaces, (Func<SpaceIdentity?, SecretScope, AgentProcessEnvironment>?)null, projectConfig.LoadProjectCliProfiles, environments)
+    {
+        _projectConfig = projectConfig;
+        _references = references;
     }
 
     /// <summary>Gets the environments sessions were admitted to, whose values their processes get.</summary>
@@ -203,7 +217,7 @@ public sealed class SessionIdentityResolver
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public async Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
         => await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false) is { } read
-            ? Of(read.Space, read.Profiles, read.Scope)
+            ? Of(read.Space, read.Profiles, read.Variables, read.Scope)
             : SessionIdentity.Usual;
 
     /// <summary>
@@ -277,14 +291,14 @@ public sealed class SessionIdentityResolver
         if (Confirmations is not { } confirmations)
         {
             alsoBuilt?.Invoke(read.Scope);
-            return Of(read.Space, read.Profiles, read.Scope);
+            return Of(read.Space, read.Profiles, read.Variables, read.Scope);
         }
 
         // Told before the first build: it decides which secrets the user is asked for.
         confirmations.Begin(read.Scope, attachment);
-        var identity = Of(read.Space, read.Profiles, read.Scope);
+        var identity = Of(read.Space, read.Profiles, read.Variables, read.Scope);
         alsoBuilt?.Invoke(read.Scope);
-        if (identity.Identity is null && alsoBuilt is null) return identity;
+        if (identity.IsUsual && alsoBuilt is null) return identity;
         using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopWaiting))
         {
             // Built again for the secrets the user confirmed: nothing was given for them before. A build can ask for a secret the
@@ -293,7 +307,7 @@ public sealed class SessionIdentityResolver
             for (var round = 0; round < MaximumConfirmationRounds && await confirmations.WaitAsync(read.Scope, waiting.Token).ConfigureAwait(false); round++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                identity = Of(read.Space, read.Profiles, read.Scope);
+                identity = Of(read.Space, read.Profiles, read.Variables, read.Scope);
                 alsoBuilt?.Invoke(read.Scope);
             }
         }
@@ -302,7 +316,12 @@ public sealed class SessionIdentityResolver
         var outcome = confirmations.End(read.Scope);
         return outcome.Answers.Count == 0 && outcome.Problems.Count == 0
             ? identity
-            : identity with { SecretProblems = outcome.Problems, SecretAnswers = outcome.Answers };
+            : identity with
+            {
+                SecretProblems = [.. identity.SecretProblems, .. outcome.Problems.Where(message =>
+                    !identity.SecretProblems.Any(problem => problem.Contains(message, StringComparison.Ordinal)))],
+                SecretAnswers = outcome.Answers,
+            };
     }
 
     // The work of a session, for the references another part of its environment resolves (the variables its sandbox profile
@@ -310,20 +329,26 @@ public sealed class SessionIdentityResolver
     internal async Task<SecretScope?> ScopeOfAsync(string? recordedSpaceId, string? projectId, string sessionId, string? parentSessionId, CancellationToken cancellationToken)
         => (await ReadAsync(recordedSpaceId, projectId, sessionId, parentSessionId, cancellationToken).ConfigureAwait(false))?.Scope;
 
-    // The space, the profiles of the project and the scope of a session; null when the catalog cannot be read.
-    private async Task<(SpaceDescriptor Space, IReadOnlyList<SpaceCliProfile> Profiles, SecretScope Scope)?> ReadAsync(string? recordedSpaceId, string? projectId,
-        string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
+    // The space, the project settings and the scope of a session; null when the catalog cannot be read.
+    private async Task<(SpaceDescriptor Space, IReadOnlyList<SpaceCliProfile> Profiles, IReadOnlyList<KeyValuePair<string, string>> Variables, SecretScope Scope)?>
+        ReadAsync(string? recordedSpaceId, string? projectId, string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
     {
         if (_spaces is null) return null;
         SpaceDescriptor space;
+        ProjectDescriptor? project = null;
         IReadOnlyList<SpaceCliProfile> profiles = [];
+        IReadOnlyList<KeyValuePair<string, string>> variables = [];
         try
         {
             space = await _spaces.ResolveSessionSpaceAsync(recordedSpaceId, projectId, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(projectId)
-                && await _spaces.Projects.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) is { ProjectPath: { Length: > 0 } root })
+            if (!string.IsNullOrWhiteSpace(projectId))
             {
-                profiles = _projectProfiles(root);
+                project = await _spaces.Projects.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+                if (project is { ProjectPath: { Length: > 0 } root })
+                {
+                    profiles = _projectProfiles(root);
+                    variables = _projectConfig?.LoadProjectEnvironment(root) ?? [];
+                }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -332,7 +357,7 @@ public sealed class SessionIdentityResolver
             return null;
         }
 
-        return (space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.ScopeOf(sessionId))
+        return (space, profiles, variables, SecretScope.ForProject(space.Id, project, sessionId is null ? null : Environments.ScopeOf(sessionId)) with
         {
             RunId = sessionId,
             OwnerWork = IsOwnersWork(sessionId, parentSessionId),
@@ -385,15 +410,49 @@ public sealed class SessionIdentityResolver
     /// <returns>The identity.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     public SessionIdentity Of(SpaceDescriptor space, IReadOnlyList<SpaceCliProfile> projectProfiles, SecretScope scope)
+        => Of(space, projectProfiles, [], scope);
+
+    private SessionIdentity Of(SpaceDescriptor space, IReadOnlyList<SpaceCliProfile> projectProfiles, IReadOnlyList<KeyValuePair<string, string>> projectVariables,
+        SecretScope scope)
     {
         ArgumentNullException.ThrowIfNull(space);
         ArgumentNullException.ThrowIfNull(projectProfiles);
         ArgumentNullException.ThrowIfNull(scope);
         var identity = (space.Settings.Identity ?? new SpaceIdentity()).WithProjectCli(projectProfiles);
-        if (identity.IsEmpty) return new SessionIdentity(space.Id, null, AgentProcessEnvironment.Empty);
-        return new SessionIdentity(space.Id, identity, _environment(identity, scope))
+        if (identity.IsEmpty && projectVariables.Count == 0) return new SessionIdentity(space.Id, null, AgentProcessEnvironment.Empty);
+        IReadOnlyList<string> problems = [];
+        var environment = _references is { } references
+            ? ResolveEnvironment(identity, projectVariables, references(scope), out problems)
+            : _environment(identity, scope);
+        return new SessionIdentity(space.Id, identity.IsEmpty ? null : identity, environment)
         {
             ProjectProfiles = [.. projectProfiles.Select(static profile => profile.Name)],
+            ProjectEnvironmentNames = [.. projectVariables.Select(static variable => variable.Key)],
+            SecretProblems = problems,
         };
+    }
+
+    private static AgentProcessEnvironment ResolveEnvironment(SpaceIdentity identity, IReadOnlyList<KeyValuePair<string, string>> projectVariables, SecretReferenceResolver references,
+        out IReadOnlyList<string> problems)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var windows = OperatingSystem.IsWindows();
+        if (projectVariables.Count == 0)
+        {
+            problems = [];
+            return SpaceIdentityEnvironment.Create(identity, references.Read, home, windows);
+        }
+
+        var failures = new Dictionary<string, string>(StringComparer.Ordinal);
+        var missing = new List<KeyValuePair<string, string>>();
+        var environment = SpaceIdentityEnvironment.Create(identity, projectVariables, key =>
+        {
+            var value = references.Read(key, out var problem);
+            if (problem is not null) failures[key.Contains(':', StringComparison.Ordinal) ? $"${{{key}}}" : key] = problem;
+            return value;
+        }, home, windows, missing);
+        problems = [.. missing.Select(pair =>
+            $"The project environment variable {pair.Key} was left out: {failures.GetValueOrDefault(pair.Value) ?? $"{pair.Value} is not set."}")];
+        return environment;
     }
 }

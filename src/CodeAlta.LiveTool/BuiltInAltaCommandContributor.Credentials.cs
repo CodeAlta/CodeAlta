@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Credentials;
 using CodeAlta.Plugins.Abstractions;
@@ -99,11 +100,13 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateSecretBindCommand(AltaCommandContext context)
     {
         string? name = null, provider = null, reference = null, label = null;
+        List<string> projects = [];
         var command = Leaf("bind", "Propose to keep a secret in a vault: the user agrees on a card of the session.");
         command.Add("<name>", "The name of the secret.", value => name = value);
         command.Add("provider=", "The id of the credential provider.", value => provider = value);
         command.Add("ref=", "What the provider reads, such as op://Private/Anthropic/credential.", value => reference = value);
         command.Add("label=", "What the list of the secrets shows; the reference when left out.", value => label = value);
+        command.Add("project=", "Limit the secret to this project (repeat for more projects; omit to keep its current restriction).", value => projects.Add(value ?? string.Empty));
         command.Add(async (_, _) =>
         {
             if (!TryGetBroker(context, out var broker)) return AltaExitCodes.ServiceUnavailable;
@@ -112,8 +115,24 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (string.IsNullOrWhiteSpace(reference) || reference.Length > SecretBindings.MaximumTextLength) return UsageError(context, "secret.invalidReference", "--ref is required.", "secret bind");
             if (broker.Store.ListSecrets().FirstOrDefault(secret => string.Equals(secret.Name, name, StringComparison.OrdinalIgnoreCase)) is { Provider: null })
                 return PermissionDenied(context, "secret.hasLocalValue", $"{name} has a value on this computer: the user replaces it in Settings > Secrets of CodeAlta Desktop.");
+            var allowed = new List<SecretProject>();
+            if (projects.Count > 0)
+            {
+                if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog)) return AltaExitCodes.ServiceUnavailable;
+                foreach (var projectRef in projects)
+                {
+                    var project = await ResolveProjectAsync(catalog, projectRef, context, includeArchived: false).ConfigureAwait(false);
+                    if (project is null) return NotFound(context, "secret.projectNotFound", $"No project is named '{projectRef}'.");
+                    if (allowed.All(item => item.Id != project.Id)) allowed.Add(new(project.Id, project.Slug));
+                }
+            }
             var shown = string.IsNullOrWhiteSpace(label) ? reference.Trim() : label.Trim();
-            if (await AskCredentialAsync(context, "bind", name, BindCardDetail(view, reference.Trim(), shown)).ConfigureAwait(false) is { } refused) return refused;
+            if (shown.Length > SecretBindings.MaximumTextLength)
+                return UsageError(context, "secret.invalidLabel", "The label is too long.", "secret bind");
+            var detail = BindCardDetail(view, reference.Trim(), shown);
+            if (allowed.Count > 0) detail += " Limit use to " + string.Join(", ", allowed.Select(static project => Quote(project.Name))) + ".";
+            if (await AskCredentialAsync(context, "bind", name, detail).ConfigureAwait(false) is { } refused) return refused;
+            if (allowed.Count > 0) broker.Store.Bindings.SetProjects(name, allowed);
             broker.Store.Bind(name, view.Id, reference.Trim(), shown, AgentSetBy(context));
             var availability = await broker.ReadSecretAsync(name, context.CancellationToken).ConfigureAwait(false);
             WriteAvailability(context, availability);

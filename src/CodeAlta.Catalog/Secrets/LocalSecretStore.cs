@@ -54,6 +54,9 @@ public sealed record SecretInfo(string Name, int Version, string SetBy, DateTime
 
     /// <summary>Gets how long a confirmation of the secret lasts when it asks before use (<see cref="SecretAskDurations"/>); null when it does not ask.</summary>
     public string? AskBeforeUse { get; init; }
+
+    /// <summary>Gets the projects allowed to use this secret, or an empty list for all projects.</summary>
+    public IReadOnlyList<SecretProject> Projects { get; init; } = [];
 }
 
 /// <summary>A variable: a named value that is not secret.</summary>
@@ -132,6 +135,8 @@ public sealed partial class LocalSecretStore : ISecretLookup
     /// <summary>Gets what the values read through this instance are for, such as <c>provider anthropic</c>; null for a use nobody names.</summary>
     public string? Use { get; init; }
 
+    internal SecretScope? ProjectScope { get; init; }
+
     /// <inheritdoc />
     public string Scope => MachineScope;
 
@@ -177,12 +182,18 @@ public sealed partial class LocalSecretStore : ISecretLookup
     {
         var bindings = Bindings.List();
         var asks = Bindings.ListAskBeforeUse();
+        var projects = Bindings.ListProjects();
         var bound = bindings.Select(static binding => binding.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return [.. Read().Document.Secrets.Where(entry => !bound.Contains(entry.Key))
-                .Select(entry => new SecretInfo(entry.Key, entry.Value.Version, entry.Value.SetBy ?? string.Empty, entry.Value.SetAt, MachineScope) { AskBeforeUse = asks.GetValueOrDefault(entry.Key) })
+                .Select(entry => new SecretInfo(entry.Key, entry.Value.Version, entry.Value.SetBy ?? string.Empty, entry.Value.SetAt, MachineScope)
+                {
+                    AskBeforeUse = asks.GetValueOrDefault(entry.Key),
+                    Projects = projects.GetValueOrDefault(entry.Key) ?? [],
+                })
             .Concat(bindings.Select(binding => new SecretInfo(binding.Name, binding.Version, binding.SetBy, binding.SetAt, MachineScope)
             {
                 Provider = binding.Provider, Label = binding.Label, VaultReference = binding.Reference, AskBeforeUse = asks.GetValueOrDefault(binding.Name),
+                Projects = projects.GetValueOrDefault(binding.Name) ?? [],
             }))
             .OrderBy(static secret => secret.Name, StringComparer.OrdinalIgnoreCase)];
     }
@@ -248,7 +259,11 @@ public sealed partial class LocalSecretStore : ISecretLookup
         ArgumentNullException.ThrowIfNull(name);
         var removed = RemoveLocal(name);
         removed |= Bindings.Unbind(name);
-        if (IsName(name)) Bindings.SetAskBeforeUse(name, null);
+        if (IsName(name))
+        {
+            Bindings.SetAskBeforeUse(name, null);
+            if (removed) Bindings.SetProjects(name, []);
+        }
         return removed;
     }
 
@@ -318,11 +333,15 @@ public sealed partial class LocalSecretStore : ISecretLookup
     public bool TryGetSecret(string name, [NotNullWhen(true)] out string? value)
     {
         ArgumentNullException.ThrowIfNull(name);
+        var policyStamp = Bindings.ChangeStamp;
+
         if (Bindings.TryGet(name, out var binding))
         {
+            CheckProjectRestriction(name);
             var read = BoundSecrets?.ReadBound(binding.Name, Use)
                 ?? throw new SecretStoreUnavailableException($"{binding.Name} is kept in a vault (the credential provider '{binding.Provider}'), which this application does not read.");
             value = read.Value ?? throw new SecretStoreUnavailableException(read.Problem ?? $"{binding.Name} cannot be read from its vault now.");
+            if (Bindings.ChangeStamp != policyStamp) CheckProjectRestriction(name);
             return true;
         }
 
@@ -333,6 +352,7 @@ public sealed partial class LocalSecretStore : ISecretLookup
             return false;
         }
 
+        CheckProjectRestriction(name);
         if (Bindings.AskBeforeUse(name) is not null)
         {
             var problem = BoundSecrets is null
@@ -342,7 +362,17 @@ public sealed partial class LocalSecretStore : ISecretLookup
         }
 
         value = Values(snapshot)[name];
+        // A writer can make a restriction and a new value visible between the initial check and the read.
+        if (Bindings.ChangeStamp != policyStamp) CheckProjectRestriction(name);
         return true;
+    }
+
+    private void CheckProjectRestriction(string name)
+    {
+        if (SecretProject.Refusal(name, Bindings.ProjectsOf(name), ProjectScope) is not { } refusal) return;
+        BoundSecrets?.RecordProjectRefusal(name, Use, refusal);
+        // Throw rather than falling through to another source's same-named secret.
+        throw new SecretStoreUnavailableException(refusal);
     }
 
     /// <inheritdoc />

@@ -7,9 +7,10 @@ broker* of a host owns the providers, the values they read and the confirmations
 
 ## The model
 
-- **A binding** maps a name to a vault item: `~/.alta/secrets/bindings.json` (`SecretBindings`), beside the store,
-  `{ bindings: { NAME: { provider, ref, label, version, set_by, set_at } }, ask_before_use: { NAME: duration } }`. It
-  holds no value. Members it does not know are kept, so that a part that owns another member (`ReadMember`,
+- **A binding** maps a name to a vault item. `~/.alta/secrets/bindings.json` (`SecretBindings`), beside the store,
+  holds bindings, approval policy and optional project restrictions by name, never values. A restriction uses stable
+  catalog IDs for matching and slugs for diagnostics. It applies to both local values and vault bindings. Members it does
+  not know are kept, so that a part that owns another member (`ReadMember`,
   `ChangeMember`) and an older CodeAlta on the same profile do not lose each other's data.
 - **A provider** is a table `[credentials.<id>]` of the user's own `config.toml` (`CredentialProviderSettings`): its
   `type`, the settings of that type, `cache` and `unlock_at_start`. The configuration of a project never names a vault,
@@ -19,6 +20,11 @@ broker* of a host owns the providers, the values they read and the confirmations
 
 Why a separate file: an older CodeAlta, such as the normal instance beside a developer instance, rewrites `store.json`
 whole and would drop a field it does not know.
+
+`LocalSecretStore` checks the project restriction before reading either kind of secret or asking for confirmation.
+It matches the project and its catalog ancestors, independent of the working directory of a worktree. A use with no
+project or the wrong project is refused, recorded by the host broker, and does not fall through to another source.
+The check governs resolution, not values a process already received.
 
 ## The broker
 

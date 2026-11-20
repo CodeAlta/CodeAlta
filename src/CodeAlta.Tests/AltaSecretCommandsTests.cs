@@ -17,7 +17,9 @@ public sealed class AltaSecretCommandsTests
         Directory.CreateDirectory(root);
         var options = new CatalogOptions { GlobalRoot = root };
         var store = new LocalSecretStore(root, new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(root, "secrets", "key"))));
+        var projectId = ProjectId.NewVersion7().ToString();
         store.SetSecret("GRAFANA_TOKEN", Value, "tests");
+        store.Bindings.SetProjects("GRAFANA_TOKEN", [new(projectId, "dashboard")]);
         store.SetVariable("GRAFANA_URL", "https://grafana.example", "tests");
         try
         {
@@ -29,6 +31,7 @@ public sealed class AltaSecretCommandsTests
             StringAssert.Contains(list.Stdout, "\"name\":\"GRAFANA_TOKEN\"");
             StringAssert.Contains(list.Stdout, "\"reference\":\"${secret:GRAFANA_TOKEN}\"");
             StringAssert.Contains(list.Stdout, "\"reference\":\"${var:GRAFANA_URL}\"");
+            StringAssert.Contains(list.Stdout, $"\"projects\":[{{\"id\":\"{projectId}\",\"name\":\"dashboard\"}}]");
             Assert.IsFalse(list.Stdout.Contains(Value, StringComparison.Ordinal), "An agent never reads a value of a secret.");
             Assert.IsFalse(list.Stdout.Contains("https://grafana.example", StringComparison.Ordinal), "Names only.");
 
@@ -36,8 +39,8 @@ public sealed class AltaSecretCommandsTests
             Assert.AreEqual(AltaExitCodes.PolicyDenied, set.ExitCode);
             StringAssert.Contains(set.Stdout + set.Stderr, "secret.setByAgent");
             StringAssert.Contains(set.Stdout + set.Stderr, "altanode secrets set");
-            Assert.IsTrue(store.TryGetSecret("GRAFANA_TOKEN", out var kept));
-            Assert.AreEqual(Value, kept);
+            var resolver = SecretReferenceResolver.ForScope(root, new SecretScope(null, projectId, null), shell: true);
+            Assert.AreEqual(Value, resolver.Resolve("${secret:GRAFANA_TOKEN}"));
         }
         finally
         {

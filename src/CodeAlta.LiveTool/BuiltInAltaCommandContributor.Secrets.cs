@@ -7,7 +7,7 @@ namespace CodeAlta.LiveTool;
 
 // The `alta secret` commands: the names of the secrets and variables of this machine, which an agent writes into the
 // configuration as ${secret:NAME} or ${var:NAME}. An agent never reads a value, and never sets one: the user does, in
-// Settings > Secrets or with `altanode secrets set`.
+// Settings > Secrets and environment or with `altanode secrets set`.
 internal sealed partial class BuiltInAltaCommandContributor
 {
     private static readonly AltaCommandPolicy[] SecretPolicies =
@@ -25,8 +25,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddSecretVaultCommands(group, context);
         AddHelpText(
             group,
-            "A secret or a variable is named in the configuration, never copied there: `${secret:NAME}` and `${var:NAME}` wherever `${env:NAME}` works (CLI profiles of spaces, `env` and headers of MCP servers), and `api_key_secret = \"NAME\"` for a provider.",
-            "Agents read names only. The user sets values in Settings > Secrets of CodeAlta Desktop, or with `altanode secrets set <name>`.",
+            "A secret or a variable is named in the configuration, never copied there: `${secret:NAME}` and `${var:NAME}` wherever `${env:NAME}` works (project `[env]`, CLI profiles of spaces, `env` and headers of MCP servers), and `api_key_secret = \"NAME\"` for a provider.",
+            "Agents read names only. The user sets values in Settings > Secrets and environment of CodeAlta Desktop, or with `altanode secrets set <name>`.",
             "A secret can be kept in a vault (`alta credential`): `secret list` names its provider and its state, `secret test` checks it, `secret bind` proposes to keep one in a vault.",
             "Example: `alta secret list`.");
         return group;
@@ -45,7 +45,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("set", "Refused: an agent never sets the value of a secret.");
         command.Add("<words>*", "Ignored.", _ => { });
         command.Add((_, _) => ValueTask.FromResult(PermissionDenied(context, "secret.setByAgent",
-            "An agent never sets the value of a secret. Ask the user to set it in Settings > Secrets of CodeAlta Desktop, or with `altanode secrets set <name>` on the machine.")));
+            "An agent never sets the value of a secret. Ask the user to set it in Settings > Secrets and environment of CodeAlta Desktop, or with `altanode secrets set <name>` on the machine.")));
         return command;
     }
 
@@ -95,6 +95,7 @@ internal sealed partial class BuiltInAltaCommandContributor
                     _ => "unavailable",
                 },
                 askBeforeUse = secret.AskBeforeUse is not null,
+                projects = secret.Projects.Select(static project => new { id = project.Id, name = project.Name }).ToArray(),
             });
         }
 

@@ -97,7 +97,7 @@ public sealed record CredentialProviderView(string Id, string Type, string Displ
 /// <param name="At">When.</param>
 /// <param name="Outcome">
 /// <c>given</c>, <c>waits</c> (for a confirmation), <c>confirmed</c>, <c>refused</c>, <c>expired</c> (what waited for the confirmation
-/// stopped waiting before the user answered) or <c>unavailable</c>.
+/// stopped waiting before the user answered), <c>restricted</c> (not allowed for the project), or <c>unavailable</c>.
 /// </param>
 public sealed record SecretUseRecord(string Name, string? Use, DateTimeOffset At, string Outcome);
 
@@ -1205,6 +1205,12 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
     /// <inheritdoc />
     public string? AuthorizeUse(string name, string? use) => AuthorizeUse(name, use, Asking.User);
 
+    /// <inheritdoc />
+    public void RecordProjectRefusal(string name, string? use, string problem)
+    {
+        lock (_gate) Record(name, use, "restricted");
+    }
+
     private BoundSecretRead ReadBound(string name, string? use, Asking asking)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -2002,6 +2008,11 @@ public sealed class CredentialBroker : IBoundSecretSource, IDisposable
         public BoundSecretRead ReadBound(string name, string? use) => broker.ReadBound(name, use, asking);
 
         public string? AuthorizeUse(string name, string? use) => broker.AuthorizeUse(name, use, asking);
+
+        public void RecordProjectRefusal(string name, string? use, string problem)
+        {
+            if (asking != Asking.Nobody) broker.RecordProjectRefusal(name, use, problem);
+        }
     }
 
     // Something that waits for the answer of the user to a use, until a time.

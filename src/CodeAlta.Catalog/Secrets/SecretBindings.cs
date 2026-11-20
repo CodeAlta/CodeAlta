@@ -49,8 +49,23 @@ public static class SecretAskDurations
 /// <param name="SetAt">When.</param>
 public sealed record SecretBinding(string Name, string Provider, string Reference, string Label, int Version, string SetBy, DateTimeOffset SetAt);
 
+/// <summary>A project allowed to use a secret of this machine.</summary>
+/// <param name="Id">Its stable catalog identifier, which authorizes the use.</param>
+/// <param name="Name">Its catalog slug at the time the restriction was saved, for diagnostics without the catalog.</param>
+public sealed record SecretProject(string Id, string Name)
+{
+    /// <summary>Explains why a use has no access to a limited secret, without reading its value.</summary>
+    /// <param name="secret">The name of the secret.</param>
+    /// <param name="projects">Its allowed projects; empty when the secret is not limited.</param>
+    /// <param name="scope">The work of the use; null for no project.</param>
+    /// <returns>The refusal, or null when the restriction allows the use.</returns>
+    public static string? Refusal(string secret, IReadOnlyList<SecretProject> projects, SecretScope? scope)
+        => projects.Count == 0 || projects.Any(project => scope?.IncludesProject(project.Id) == true)
+            ? null : $"{secret} is limited to the projects {string.Join(", ", projects.Select(static project => project.Name))}.";
+}
+
 /// <summary>
-/// The secrets of this machine whose values are kept in vaults, and the secrets that ask before use, in
+/// The vault bindings, confirmations policy and project restrictions of secrets of this machine, in
 /// <c>~/.alta/secrets/bindings.json</c> beside the store. Only the user's own store maps a name to a vault item: no
 /// configuration file can choose what is read from a vault. The file holds no value.
 /// </summary>
@@ -68,6 +83,7 @@ public sealed class SecretBindings
 
     private const string BindingsMember = "bindings";
     private const string AskMember = "ask_before_use";
+    private const string ProjectsMember = "projects";
 
     private readonly Lock _gate = new();
     private (long Stamp, JsonObject Document)? _read;
@@ -266,6 +282,83 @@ public sealed class SecretBindings
             return true;
         });
     }
+
+    /// <summary>Gets the projects a secret is limited to; empty for all projects.</summary>
+    /// <param name="name">The name of the secret.</param>
+    /// <returns>The allowed projects, without reading the secret.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The project restrictions cannot be read; the secret must not be given.</exception>
+    public IReadOnlyList<SecretProject> ProjectsOf(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var limits = ProjectLimits(Read());
+        return limits is not null && Find(limits, name) is { } key ? ReadProjects(limits[key]) : [];
+    }
+
+    /// <summary>Lists the project restrictions of the secrets, by name.</summary>
+    /// <returns>The allowed projects of each restricted secret.</returns>
+    /// <exception cref="InvalidDataException">A project restriction cannot be read.</exception>
+    public IReadOnlyDictionary<string, IReadOnlyList<SecretProject>> ListProjects()
+    {
+        var result = new Dictionary<string, IReadOnlyList<SecretProject>>(StringComparer.OrdinalIgnoreCase);
+        if (ProjectLimits(Read()) is not { } limits) return result;
+        foreach (var (name, entry) in limits)
+            if (!result.TryAdd(name, ReadProjects(entry))) throw new InvalidDataException("A secret has more than one project restriction.");
+        return result;
+    }
+
+    /// <summary>Sets the projects allowed to use a secret, whether kept on this computer or bound to a vault.</summary>
+    /// <param name="name">The name of the secret.</param>
+    /// <param name="projects">The projects from the catalog; empty to allow all projects.</param>
+    /// <returns>True when the restriction changed.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">A name or project is invalid.</exception>
+    /// <exception cref="InvalidDataException">The metadata could not be read.</exception>
+    public bool SetProjects(string name, IReadOnlyList<SecretProject> projects)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(projects);
+        if (!LocalSecretStore.IsName(name)) throw new ArgumentException($"'{name}' is not a valid name.", nameof(name));
+        if (projects.Any(static project => project is null || !IsProjectId(project.Id) || !IsProjectName(project.Name)))
+            throw new ArgumentException("The restriction must name projects from the catalog.", nameof(projects));
+        var distinct = projects.DistinctBy(static project => project.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+        return Change(document =>
+        {
+            var limits = ProjectLimits(document);
+            var key = limits is null ? null : Find(limits, name);
+            if (distinct.Length == 0) return key is not null && limits!.Remove(key);
+            limits ??= (JsonObject)(document[ProjectsMember] = new JsonObject());
+            var entries = new JsonObject();
+            foreach (var project in distinct) entries[project.Id] = project.Name;
+            if (key is not null && JsonNode.DeepEquals(limits[key], entries)) return false;
+            if (key is not null) limits.Remove(key);
+            limits[name] = entries;
+            return true;
+        });
+    }
+
+    private static JsonObject? ProjectLimits(JsonObject document)
+        => !document.TryGetPropertyValue(ProjectsMember, out var limits) ? null
+            : limits as JsonObject ?? throw new InvalidDataException("The project restrictions of the secrets cannot be read.");
+
+    private static IReadOnlyList<SecretProject> ReadProjects(JsonNode? entry)
+    {
+        if (entry is not JsonObject { Count: > 0 } projects)
+            throw new InvalidDataException("A project's restriction on a secret cannot be read.");
+        var result = new List<SecretProject>(projects.Count);
+        foreach (var (id, value) in projects)
+        {
+            if (!IsProjectId(id) || value is not JsonValue text || !text.TryGetValue<string>(out var name) || !IsProjectName(name))
+                throw new InvalidDataException("A project's restriction on a secret cannot be read.");
+            result.Add(new(id, name));
+        }
+        return result;
+    }
+
+    private static bool IsProjectId(string? id) => Guid.TryParseExact(id, "D", out _);
+
+    private static bool IsProjectName([NotNullWhen(true)] string? name)
+        => name is { Length: > 0 and <= 256 } && !name.Any(char.IsControl);
 
     /// <summary>Gets a raw member of the file that another part of CodeAlta keeps there (the sign-ins of websites), as a copy.</summary>
     /// <param name="member">The name of the member.</param>
