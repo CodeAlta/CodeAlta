@@ -48,7 +48,7 @@ An automation an agent creates is disabled, and an agent enables none: what runs
 
 Turn on **Run without a model** for a script that only does something on its own: write a line in a file, call a command of a plugin that sends a mail. No session starts and no model is called: the script runs alone, and what it returns is the answer of the run.
 
-- It calls the `alta` commands that change nothing, and the commands of [plugins](plugins/readme.md). The commands that start, steer or create a session are not there, nor `agent()`, `ask()` or the tools of MCP servers. `notify()` is: it tells you what you need to know, with a [notification](sessions/code-mode.md#functions) of CodeAlta.
+- It calls the `alta` commands that change nothing, and the commands of [plugins](plugins/readme.md). The commands that start, steer or create a session are not there, nor `agent()`, `ask()` or the tools of MCP servers. `notify()` is: it tells you what you need to know, with a [notification](sessions/code-mode.md#what-a-script-can-call) of CodeAlta.
 - Its `tools.*` read files and search. Turn on **It may edit files and run commands** to let it write and run commands too, in the [sandbox](sessions/sandbox.md) chosen in **Runs with**.
 - Without a sandbox, a script that writes runs only from **My configuration**: one in the configuration of a project, which others can change, needs a sandbox.
 
