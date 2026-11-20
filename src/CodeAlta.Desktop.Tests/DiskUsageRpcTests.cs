@@ -835,7 +835,7 @@ public sealed class DiskUsageRpcTests
         // Nothing measured yet: nothing to clean.
         Assert.AreEqual("not_found", (await service.CleanAsync(new(Epoch, project.Id, repository.Root, "id", ["bin"]))).Status);
         Directory.Delete(gone, recursive: true);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         var id = (await ShownAsync(service, project, repository.Root)).MeasureId;
 
         Assert.AreEqual("stale_epoch", (await service.CleanAsync(new("other", project.Id, repository.Root, id, ["bin"]))).Status);
@@ -892,10 +892,10 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         var shownInTheFirstWindow = (await ShownAsync(service, project, repository.Root)).MeasureId;
         // A second window measures again.
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         var answer = await service.CleanAsync(new(Epoch, project.Id, repository.Root, shownInTheFirstWindow, ["bin"]));
 
@@ -910,7 +910,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         // A project of its own registered inside the checkout after the measure: the checkout is now measured without it.
         var nested = fixture.Repository(Path.Combine("building", "bin", "tool"));
         await fixture.Projects.UpsertFromPathAsync(nested.Root);
@@ -929,7 +929,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         fixture.Busy.Add(new("late", Directory.CreateDirectory(repository.At("src")).FullName, true));
 
         var answer = await CleanAsync(service, project, repository.Root, "bin");
@@ -945,7 +945,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         // No run: the Worktrees window does not see it; a clean does.
         fixture.Working.Add(new("with-a-command", repository.Root, false));
 
@@ -962,7 +962,7 @@ public sealed class DiskUsageRpcTests
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         fixture.AddSubmodule(repository, "lib");
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         fixture.Busy.Add(new("in-the-submodule", repository.At("lib"), false));
 
         var answer = await CleanAsync(service, project, repository.Root, "bin");
@@ -981,7 +981,7 @@ public sealed class DiskUsageRpcTests
         repository.Write("lib/bin/lib.dll", new string('l', 200));
         var holding = new CleanGate(fixture.RunAsync);
         var service = fixture.Service(holding.RunAsync);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         CollectionAssert.IsSubsetOf(new[] { "bin", "lib/bin" }, (await ShownAsync(service, project, repository.Root)).Planned.Select(static entry => entry.Path).ToArray());
 
         var cleaning = CleanAsync(service, project, repository.Root, "bin", "lib/bin");
@@ -1003,7 +1003,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service(applicationPaths: [repository.At("bin/alta")]);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         var answer = await CleanAsync(service, project, repository.Root, "bin");
 
@@ -1017,7 +1017,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         // A program started from the build folder: a server, a test run, another instance.
         var (source, arguments) = OperatingSystem.IsWindows()
             ? (Path.Combine(Environment.SystemDirectory, "ping.exe"), new[] { "-n", "600", "127.0.0.1" })
@@ -1049,7 +1049,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         // A build folder that appeared after the measure: the user never saw it.
         repository.Write("dist/late.js", new string('l', 300));
 
@@ -1070,7 +1070,7 @@ public sealed class DiskUsageRpcTests
         for (var index = 0; index <= DiskUsageService.MaximumPlannedEntries; index++) repository.Write($"p{index:D3}/bin/a.dll", new string('a', 10 + index));
         var project = await fixture.Projects.UpsertFromPathAsync(repository.Root);
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         var shown = await ShownAsync(service, project, repository.Root);
         Assert.AreEqual((DiskUsageService.MaximumPlannedEntries, true), (shown.Planned.Length, shown.PlannedTruncated));
         // The smallest is the one the record does not show.
@@ -1101,7 +1101,7 @@ public sealed class DiskUsageRpcTests
                 await commit.Task;
             }
         });
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         // A scan whose last listener left, whose worker has not ended yet: no clean.
         Volatile.Write(ref hold, 1);
@@ -1139,7 +1139,7 @@ public sealed class DiskUsageRpcTests
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var holding = new CleanGate(fixture.RunAsync);
         var service = fixture.Service(holding.RunAsync);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         var first = CleanAsync(service, project, repository.Root, "bin");
         await holding.Entered.Task.WithinAsync(Patience);
@@ -1158,7 +1158,7 @@ public sealed class DiskUsageRpcTests
         var holding = new CleanGate(fixture.RunAsync);
         holding.Open();
         var service = fixture.Service(holding.RunAsync);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         var events = new List<DiskUsageCleanEvent>();
         await foreach (var update in service.CleanStreamAsync(new(Epoch, project.Id, repository.Root, (await ShownAsync(service, project, repository.Root)).MeasureId, ["bin"]), default))
@@ -1194,7 +1194,7 @@ public sealed class DiskUsageRpcTests
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var holding = new CleanGate(fixture.RunAsync);
         var service = fixture.Service(holding.RunAsync);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         var id = (await ShownAsync(service, project, repository.Root)).MeasureId;
 
         var cleaning = service.CleanAsync(new(Epoch, project.Id, repository.Root, id, ["bin"]));
@@ -1217,7 +1217,7 @@ public sealed class DiskUsageRpcTests
         using var fixture = Fixture.Create();
         var (repository, project) = await fixture.BuildingRepositoryAsync();
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         var first = (await ShownAsync(service, project, repository.Root)).MeasureId;
         // A build folder written after the scan: not in the first measure, in the one the first clean makes.
         repository.Write("dist/late.js", new string('l', 300));
@@ -1243,7 +1243,7 @@ public sealed class DiskUsageRpcTests
         var worktree = (await fixture.Worktrees.CreateAsync(project)).Root!;
         File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(worktree, "bin")).FullName, "w.dll"), new string('w', 700));
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         var answer = await CleanAsync(service, project, worktree, "bin");
 
@@ -1263,7 +1263,7 @@ public sealed class DiskUsageRpcTests
         repository.Write("bin/app.dll", new string('b', 1000));
         var project = await fixture.Projects.UpsertFromPathAsync(repository.Root);
         var service = fixture.Service();
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
         var before = (await service.LastAsync(new(Epoch), default)).Measurement!;
 
         var answer = await CleanAsync(service, project, repository.Root, "bin");
@@ -1282,7 +1282,7 @@ public sealed class DiskUsageRpcTests
         var failing = new CleanGate(fixture.RunAsync, failClean: true);
         failing.Open();
         var service = fixture.Service(failing.RunAsync);
-        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await ScanToEndAsync(service);
 
         var failed = await CleanAsync(service, project, repository.Root, "bin");
         Assert.AreEqual(BuildOutputCleaner.Failed, failed.Status);
@@ -1370,6 +1370,14 @@ public sealed class DiskUsageRpcTests
     }
 
     private static DateTimeOffset? Later(DateTimeOffset? one, DateTimeOffset other) => one is null || other > one ? other : one;
+
+    // A scan read to its end, then its worker: the records end at `done`, before the worker ends the scan, and until then a
+    // clean answers `scanning`.
+    private static async Task ScanToEndAsync(DiskUsageService service)
+    {
+        await ReadAllAsync(service.ScanAsync(new(Epoch), default));
+        await service.Worker!.WithinAsync(Patience);
+    }
 
     private static async Task<List<DiskUsageScanEvent>> ReadAllAsync(IAsyncEnumerable<DiskUsageScanEvent> events)
     {
