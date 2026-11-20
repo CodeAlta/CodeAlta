@@ -44,6 +44,9 @@ public sealed class HelloPlugin : PluginBase
 - **A contribution method is called once per activation.** What it returns is what the plugin contributes until it is
   stopped or rebuilt. The runtime owns handles, registration, ordering, validation and removal; a contribution that
   breaks a rule (a duplicate id, too many buttons) is left out with a diagnostic, not thrown.
+- **A notification with a title** (`IPluginUiService.NotifyAsync(PluginNotification)`: title, body, tone, session) is a
+  default interface method that falls back to `NotifyAsync(string)` with the title and the body; the desktop sends it
+  through `DesktopNotices`, the channel of the sessions that are done or wait.
 - **Plugins see services, not frontends.** A command receives `PluginCommandContext` (`Ui`, `Sessions`, `Prompts`,
   `Workspace`), never raw command text, frontend view models or controls. `IPluginServices` gives the `alta` bridge,
   state, database, tasks, canvases, spaces, identity and asks. A host without a window gives no-op services

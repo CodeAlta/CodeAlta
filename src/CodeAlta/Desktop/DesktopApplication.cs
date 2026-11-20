@@ -860,6 +860,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 async _ => await SessionsWaitingAsync(), () => shell.TurnAlerts, () => windows.AnyFocused,
                 DesktopTurnAlertSurface.CanNotify(OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null));
             sessionTurnAlerts = new DesktopTurnAlerts(alertSurface, DesktopTurnAlerts.Period);
+            // What an automation whose run ended, a plugin or a script tells the user goes the same way: a notification of the
+            // system while the application is in the background, a notice in the window otherwise.
+            var notices = new DesktopNotices(alertSurface, pluginUi.ShowNotice);
+            pluginUi.Notices = notices;
             // A use of a secret that asks before use waits for the user while the application is in the background: a notification,
             // which brings the window and its prompt back.
             // The prompt of the page reads them again at each change.
@@ -868,7 +872,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             chrome.Services.Notifications.Activated += (_, activation) =>
             {
                 if (DesktopTurnAlerts.SessionOf(activation) is { } notifiedSession) shell.ShowSession(notifiedSession);
-                else if (DesktopSecretPrompts.IsPrompt(activation, out var askingSession))
+                else if (DesktopSecretPrompts.IsPrompt(activation, out var askingSession) || DesktopNotices.IsNotice(activation, out askingSession))
                 {
                     if (askingSession is not null) shell.ShowSession(askingSession);
                     else shell.Show();
@@ -1015,6 +1019,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     // Jira and Slack, with the secrets of this computer, while the desktop runs; the hooks of a server go to its machines.
                     Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot, host.Credentials),
+                    // A run that ends tells the user when its automation asks for it.
+                    Notifications = notices,
                 };
                 // The triggers of CodeAlta, and those the plugins give, as they run now.
                 Automations.AutomationBuiltInSources.AddProjectTrigger(automations, host.ProjectCatalog);
@@ -1127,7 +1133,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     modelServers is null ? null : ModelServers.DesktopAltaModelServers.Of(modelServers, host.RuntimeService),
                     // `alta provider refresh`: the providers of config.toml, applied again as Save and apply does.
                     new DesktopAltaProviderConfiguration(new CodeAltaConfigStore(host.CatalogOptions), host.ModelProviderRegistry, options.CatalogRoot!,
-                        pluginProviderTypes, modelsDev, () => _copilotPolicies?.RefreshSoon()));
+                        pluginProviderTypes, modelsDev, () => _copilotPolicies?.RefreshSoon()), notices);
                 // A script of an automation without a model runs with these commands, as the automation allows them.
                 // The person's other computers read the sessions of this one with its alta commands (sessions.read of the node API).
                 desktopNode?.AttachAlta(async (args, maxBytes, token) =>
@@ -1135,7 +1141,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var (exitCode, jsonl, truncated, error) = await AltaPersonCommands.RunAsync(altaCommands, args, maxBytes, token).ConfigureAwait(false);
                     return new CodeAlta.Fleet.NodeApi.FleetNodeAltaResult(exitCode, jsonl, truncated, error);
                 });
-                if (automationRunner is not null) automationRunner.Unattended = DesktopUnattendedScripts.Create(altaCommands, host);
+                if (automationRunner is not null) automationRunner.Unattended = DesktopUnattendedScripts.Create(altaCommands, host, notices);
                 search.AttachCommands(altaCommands);
                 search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));

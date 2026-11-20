@@ -709,6 +709,28 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The triggers. None: the automation is run by hand.</summary>
     public IReadOnlyList<AutomationTrigger> Triggers { get; init; } = [];
 
+    /// <summary><see cref="Notify"/>: every run that ends tells the user.</summary>
+    internal const string NotifyAlways = "always";
+
+    /// <summary><see cref="Notify"/>: a run that fails tells the user.</summary>
+    internal const string NotifyFailures = "failures";
+
+    /// <summary>
+    /// Which runs tell the user with a notification when they end (<c>notify</c>): <see cref="NotifyAlways"/>,
+    /// <see cref="NotifyFailures"/>, or null for none. It changes nothing of what the automation runs.
+    /// </summary>
+    public string? Notify { get; init; }
+
+    /// <summary>Whether a run that ended with a status tells the user, as <see cref="Notify"/> asks.</summary>
+    /// <param name="status">The status the run ended with, one of the constants of <see cref="AutomationRun"/>.</param>
+    internal bool NotifiesOn(string status) => Notify switch
+    {
+        // A run skipped did not run: a trigger came while the previous one worked.
+        NotifyAlways => status is AutomationRun.Completed or AutomationRun.Failed or AutomationRun.Cancelled,
+        NotifyFailures => status == AutomationRun.Failed,
+        _ => false,
+    };
+
     /// <summary>
     /// A value that changes with what the automation runs and with when it runs: its name, prompt or script, model or tier, agent
     /// prompt, permission mode, review, sandbox, project and triggers, the command and the folder of a command

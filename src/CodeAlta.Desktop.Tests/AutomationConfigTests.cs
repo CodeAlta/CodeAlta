@@ -56,6 +56,28 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void Notify_IsReadAndWritten_AndOnlyAlwaysOrFailures()
+    {
+        var definition = new AutomationDefinition(First, "Nightly") { Prompt = "Review.", Notify = AutomationDefinition.NotifyFailures };
+        Assert.IsNull(AutomationConfig.Validate(definition));
+        var written = AutomationConfig.Write(string.Empty, definition);
+        StringAssert.Contains(written, "notify = \"failures\"");
+        Assert.AreEqual("failures", AutomationConfig.Read(written, Global).Definitions.Single().Notify);
+        Assert.AreEqual("always", AutomationConfig.Read(written.Replace("\"failures\"", "\" Always \"", StringComparison.Ordinal), Global).Definitions.Single().Notify);
+        // Without it nothing is written, and nothing tells.
+        Assert.IsFalse(AutomationConfig.Write(string.Empty, definition with { Notify = null }).Contains("notify", StringComparison.Ordinal));
+        StringAssert.Contains(AutomationConfig.Read(written.Replace("\"failures\"", "\"sometimes\"", StringComparison.Ordinal), Global).Faults.Single().Message, "notify is always");
+        // It changes nothing of what runs: an automation of a project allowed before is still allowed.
+        Assert.AreEqual(definition.Fingerprint(), (definition with { Notify = null }).Fingerprint());
+
+        Assert.IsTrue(definition.NotifiesOn(AutomationRun.Failed));
+        Assert.IsFalse(definition.NotifiesOn(AutomationRun.Completed));
+        var always = definition with { Notify = AutomationDefinition.NotifyAlways };
+        Assert.IsTrue(always.NotifiesOn(AutomationRun.Completed) && always.NotifiesOn(AutomationRun.Cancelled) && always.NotifiesOn(AutomationRun.Failed));
+        Assert.IsFalse(always.NotifiesOn(AutomationRun.Skipped), "a run that was skipped did not run");
+    }
+
+    [TestMethod]
     public void ATier_IsReadAndWrittenInPlaceOfAModel_OnTheMachineThatRunsTheAutomation()
     {
         var definition = new AutomationDefinition(First, "Nightly") { Prompt = "Review.", Tier = SessionStartTier.Parse("Adaptive:High") };

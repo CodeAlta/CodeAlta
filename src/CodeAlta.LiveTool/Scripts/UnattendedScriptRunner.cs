@@ -61,7 +61,7 @@ public sealed record UnattendedScriptResult(bool Succeeded, string? Value, strin
 /// tools. Nobody is there to approve a call, so what it may do is fixed: the <c>alta</c> commands that change nothing and the
 /// commands of plugins, never one that starts or drives an agent; the built-in tools that read, and, when it may write, those
 /// that edit and run commands; all of them in its sandbox, which a command cannot leave. It has no <c>agent()</c>,
-/// <c>session()</c>, <c>ask()</c> nor MCP tools.
+/// <c>session()</c>, <c>ask()</c> nor MCP tools; <c>notify()</c> tells the user where <see cref="Notifications"/> says.
 /// </summary>
 public sealed class UnattendedScriptRunner
 {
@@ -101,6 +101,9 @@ public sealed class UnattendedScriptRunner
         ArgumentNullException.ThrowIfNull(pluginCommands);
         (_dispatcher, _library, _runtime, _pluginCommands) = (dispatcher, library, runtime, pluginCommands);
     }
+
+    /// <summary>Gets or sets where the notifications of its scripts (<c>notify()</c>) reach the user; null for a host that has nowhere to show them.</summary>
+    public IUserNotifications? Notifications { get; set; }
 
     // The commands of the MCP plugin start the programs of servers and call their tools: a run without a session has no
     // sandbox nor guard to run them under, so it gets those that only read.
@@ -179,13 +182,15 @@ public sealed class UnattendedScriptRunner
             var alta = new AltaScriptBinding([.. _dispatcher.Describe(identity, cwd).Where(command => Allows(command, plugins))]);
             var bound = new ToolScriptBinding(invoker, ["alta", "exec"]);
             CodeModeApi? api = null;
-            api = new CodeModeApi([.. alta.Functions, .. bound.Functions, .. CodeModeDiscovery.Functions]);
+            api = new CodeModeApi([.. alta.Functions, .. bound.Functions, .. CodeModeDiscovery.Functions, CodeModeNotifyBinding.Function]);
             var discovery = new CodeModeDiscovery(() => api, () => _library.List(CodeModeScriptLibrary.ProjectRootOf(cwd), request.Spaces));
             var handler = new CodeModeCallRouter(
             [
                 (AltaScriptBinding.Namespace, new AltaScriptCallHandler(_dispatcher, alta, identity, cwd)),
                 (ToolScriptBinding.ToolsNamespace, bound),
                 (ToolScriptBinding.McpNamespace, new CodeModeCallRouter([])),
+                // No session runs it: a click on its notification brings CodeAlta to the front, unless it names a session.
+                (CodeModeNotifyBinding.Path, new CodeModeNotifyBinding(Notifications, null)),
                 (CodeModeDiscovery.Namespace, discovery),
             ]);
             var source = CodeModeSource.Prepare($"return await workflow({JsonSerializer.Serialize(request.Script)}, {json});");

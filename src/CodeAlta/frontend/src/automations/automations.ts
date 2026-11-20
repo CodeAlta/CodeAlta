@@ -249,12 +249,18 @@ export type AutomationForm = Readonly<{
   runsOnTags: readonly string[] | null;
   /** How many of its runs work at once on a machine; null for one. */
   maxRuns: number | null;
+  /** Which of its runs tell you with a notification when they end: every run, the runs that fail, or none (empty). */
+  notify: AutomationNotify;
   /** Whom it is published to on the server of its machine: `team:<id>`, `organization`, or null (absent) for the person's own. */
   publishTo?: string | null;
   triggers: readonly AutomationTriggerItem[];
   /** What its runs may do without a person; null for an automation that runs as before. */
   autonomy: AutomationAutonomyItem | null;
 }>;
+
+/** Which runs of an automation tell you when they end: `always`, `failures`, or none (empty). */
+export type AutomationNotify = "" | "always" | "failures";
+const notifyOf = (value: string | null | undefined): AutomationNotify => value === "always" || value === "failures" ? value : "";
 
 /** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
 export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null, onCall: null });
@@ -285,7 +291,7 @@ export const toolNames = (text: string): readonly string[] => [...new Set(text.s
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", withoutModel: false, writes: false, projectId, storeInProject: false, provider: "", model: "", effort: "", tier: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, runsOnTags: null, maxRuns: null, publishTo: null, triggers: [], autonomy: null };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, runsOnTags: null, maxRuns: null, notify: "", publishTo: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
@@ -294,7 +300,8 @@ export function formOf(item: AutomationItem): AutomationForm {
     withoutModel: item.scriptMode === "direct", writes: item.scriptMode === "direct" && item.scriptAccess === "write", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", tier: item.tier ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
-    runsOn: item.runsOn ?? null, runsOnTags: item.runsOnTags ?? null, maxRuns: item.maxRuns ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
+    runsOn: item.runsOn ?? null, runsOnTags: item.runsOnTags ?? null, maxRuns: item.maxRuns ?? null, notify: notifyOf(item.notify), publishTo: item.publishTo ?? null, triggers: item.triggers,
+    autonomy: item.autonomy ?? null };
 }
 
 /** The machine an automation runs on, in words: null for this computer. */
@@ -415,6 +422,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
     runsOn: form.storeInProject || form.runsOnTags ? null : form.runsOn,
     runsOnTags: form.storeInProject || !form.runsOnTags || form.runsOnTags.length === 0 ? null : [...form.runsOnTags],
     maxRuns: form.maxRuns && form.maxRuns > 1 ? form.maxRuns : null,
+    notify: form.notify || null,
     // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
     publishTo: form.storeInProject || !(form.runsOn || form.runsOnTags) ? null : form.publishTo ?? null,
     autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,

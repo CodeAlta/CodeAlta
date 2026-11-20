@@ -113,6 +113,12 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     /// </summary>
     internal Func<string, bool>? WindowOpen { get; set; }
 
+    /// <summary>
+    /// Gets or sets where a notification with a title goes (<see cref="NotifyAsync(PluginNotification, CancellationToken)"/>): a
+    /// notification of the system while CodeAlta is in the background; set once the window has them. Before, it is a notice in the window.
+    /// </summary>
+    internal DesktopNotices? Notices { get; set; }
+
     /// <inheritdoc />
     public IPluginUiService ForPlugin(string pluginRuntimeKey)
     {
@@ -246,6 +252,41 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         cancellationToken.ThrowIfCancellationRequested();
         Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits) }, routed: true);
         return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask NotifyAsync(PluginNotification notification, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        ArgumentException.ThrowIfNullOrWhiteSpace(notification.Title, nameof(notification));
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Notices is { } notices) await notices.NotifyAsync(notification, cancellationToken).ConfigureAwait(false);
+        else ShowNotice(notification, waits: false);
+    }
+
+    /// <summary>
+    /// Shows a notification with a title as a notice in the window: its tone gives its color, and its session an action that opens
+    /// it. A notice that waits stays until it is closed: it came while the user was not there.
+    /// </summary>
+    /// <param name="notification">The notification.</param>
+    /// <param name="waits">Whether it stays until it is closed.</param>
+    internal void ShowNotice(PluginNotification notification, bool waits)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        Post(new PluginUiEvent("notify")
+        {
+            Title = Cut(notification.Title.ReplaceLineEndings(" ").Trim(), MaximumTitleUnits),
+            Message = notification.Body is { } body && !string.IsNullOrWhiteSpace(body) ? Cut(body.Trim(), MaximumMessageUnits) : null,
+            Tone = notification.Tone switch
+            {
+                PluginNotificationTone.Success => "success",
+                PluginNotificationTone.Warning => "warning",
+                PluginNotificationTone.Danger => "danger",
+                _ => null,
+            },
+            SessionId = string.IsNullOrWhiteSpace(notification.SessionId) ? null : notification.SessionId,
+            Waits = waits,
+        }, routed: true);
     }
 
     /// <summary>
@@ -698,6 +739,8 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         public bool HasInteractiveUi => owner.HasInteractiveUi;
 
         public ValueTask NotifyAsync(string message, CancellationToken cancellationToken = default) => owner.NotifyAsync(message, cancellationToken);
+
+        public ValueTask NotifyAsync(PluginNotification notification, CancellationToken cancellationToken = default) => owner.NotifyAsync(notification, cancellationToken);
 
         public ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default) => owner.ConfirmAsync(title, message, pluginKey, cancellationToken);
 

@@ -669,8 +669,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             // The run started: its session at work holds the seat from now on, and the reservation of the run goes.
             if (_gate is not null) _ = admission.Receipt.Completion.ContinueWith(_ => _gate.ReleaseSeat(runId), CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-            // Its answer is read only when a trigger of it writes the answer back to the source of its event.
-            var observed = ObserveAsync(admission.Receipt, sessionId, definition.Triggers.Any(static trigger => trigger.Reply));
+            // Its answer is read only when a trigger of it writes the answer back to the source of its event, or when the
+            // notification of its end shows the start of it.
+            var observed = ObserveAsync(admission.Receipt, sessionId, definition.Notify is not null || definition.Triggers.Any(static trigger => trigger.Reply));
             if (guard is not null) observed = GuardAsync(observed, admission.Receipt, sessionId, runId, guard, definition.Autonomy!);
             return new(sessionId, null, observed) { Guard = guard };
         }

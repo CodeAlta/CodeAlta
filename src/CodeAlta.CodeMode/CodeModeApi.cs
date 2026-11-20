@@ -16,7 +16,7 @@ public sealed class CodeModeApi
     public static IReadOnlySet<string> ReservedNames { get; } = new[]
     {
         "args", "console", "log", "text", "step", "meta", "workflow", "agent", "ask", "sleep", "session", "parallel",
-        "pipeline", "phase", "budget", "store", "load", "image", "present", "exit", "globalThis", "Math", "JSON", "Promise",
+        "pipeline", "phase", "budget", "store", "load", "image", "present", "notify", "exit", "globalThis", "Math", "JSON", "Promise",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     private readonly FrozenDictionary<string, CodeModeFunction> _byPath;
@@ -200,6 +200,14 @@ public sealed class CodeModeApi
                 return Promise.reject(new TypeError('ask(question, options): options is an object, such as { choices: ["yes", "no"] }.'));
               }
               return host("codemode.ask", stringify(Object.assign({}, options, { question }))).then(unwrap).then((reply) => reply.answer);
+            });
+            // notify({ title, body, tone, session }) or notify(title): a notification of CodeAlta; resolves with { shown }.
+            global("notify", function (options) {
+              const given = typeof options === "string" ? { title: options } : options;
+              if (given === null || typeof given !== "object" || Array.isArray(given) || typeof given.title !== "string" || given.title.length === 0) {
+                return Promise.reject(new TypeError('notify({ title, body, tone, session }): title is a non-empty string, such as notify({ title: "Build", body: "It passed." }).'));
+              }
+              return host("codemode.notify", stringify(given)).then(unwrap);
             });
             // store(key, value) and load(key): JSON values kept for the later scripts of the session; undefined removes one.
             global("store", function (key, value) {

@@ -2415,6 +2415,8 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-region .bp6-button.bp6-small { min-height: 20px; padding: 0 7px; font-size: 11px; }
 .ide-shell .timeline-plugin-html .plugin-html { overflow: hidden; color: inherit; font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .ide-shell .timeline-plugin-html .plugin-html > * { display: inline; margin: 0; }
+/* The text of a notification with a title, under it: its lines as they were written. */
+.plugin-notice-body { margin-top: 2px; white-space: pre-line; overflow-wrap: anywhere; }
 .plugin-dialog .app-window-body { display: flex; flex-direction: column; min-height: 0; }
 .plugin-dialog-body { display: flex; flex: 1 1 0; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 14px; overflow: auto; }
 .plugin-dialog-body[aria-busy="true"] { opacity: .7; }

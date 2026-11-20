@@ -214,6 +214,9 @@ public sealed record AltaAutomationRequest(string Name, string Prompt)
     /// </summary>
     public bool CatchUp { get; init; }
 
+    /// <summary>Gets which of its runs tell the user with a notification when they end: <c>always</c>, <c>failures</c>, or null for none.</summary>
+    public string? Notify { get; init; }
+
     /// <summary>Gets its triggers, written as <see cref="AltaAutomation.Triggers"/> shows them.</summary>
     public IReadOnlyList<string> Triggers { get; init; } = [];
 }

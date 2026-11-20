@@ -119,6 +119,8 @@ internal static class AutomationConfig
             return "The time zone of an automation is the id of a time zone this machine knows, such as Europe/Paris.";
         if (definition.MaxRuns is { } maxRuns && maxRuns is < 1 or > AutomationDefinition.MaximumRuns)
             return $"max_runs is how many runs of the automation work at once on a machine: 1 to {AutomationDefinition.MaximumRuns}.";
+        if (definition.Notify is not (null or AutomationDefinition.NotifyAlways or AutomationDefinition.NotifyFailures))
+            return "notify is always (every run that ends tells you) or failures (a run that fails does).";
         if (definition.PublishTo is { } scope && (scope != "organization" && !(scope.StartsWith("team:", StringComparison.Ordinal) && scope.Length is > 5 and <= 133
                 && !scope.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))) || !definition.IsPlaced))
             return "An automation is published to a team (team:<id>) or to the organization of the machine it runs on.";
@@ -289,7 +291,7 @@ internal static class AutomationConfig
             || !TryRunsOn(table, out var runsOn, out var runsOnTags, out problem) || !TryText(table, "environment", out var environment, out problem)
             || !TryText(table, "publish_to", out var publishTo, out problem) || !TryText(table, "script_mode", out var scriptMode, out problem)
             || !TryText(table, "script_access", out var scriptAccess, out problem) || !TryText(table, "time_zone", out var timeZone, out problem)
-            || !TryText(table, "tier", out var tierName, out problem)) return false;
+            || !TryText(table, "tier", out var tierName, out problem) || !TryText(table, "notify", out var notify, out problem)) return false;
         int? maxRuns = null;
         if (table.TryGetValue("max_runs", out var maxRunsValue))
         {
@@ -381,6 +383,7 @@ internal static class AutomationConfig
             Autonomy = autonomy,
             CatchUp = catchUp,
             Triggers = triggers,
+            Notify = Blank(notify)?.ToLowerInvariant(),
         };
         problem = Validate(definition) ?? SourceProblem(definition, source);
         return problem is null;
@@ -639,6 +642,7 @@ internal static class AutomationConfig
         // An option is written only when it is not its default.
         if (AgentSessionOptions.Stored(definition.SessionOptions) is { SubSessions: false }) builder.Append("sub_sessions = false").Append(newline);
         if (definition.CatchUp) builder.Append("catch_up = true").Append(newline);
+        if (definition.Notify is { } notify) builder.Append("notify = ").Append(Quote(notify)).Append(newline);
         if (definition.Triggers.Count > 0)
         {
             builder.Append("triggers = [").Append(newline);

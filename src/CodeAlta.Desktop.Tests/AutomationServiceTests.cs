@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using CodeAlta.Automations;
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Git;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -1286,6 +1287,104 @@ public sealed class AutomationServiceTests
         Assert.AreEqual(new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero), fixture.Service.NextDue(Second), "without one, the zone of the machine");
         var (_, faults) = AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\ntime_zone = \"Nowhere/Atlantis\"\n", new AutomationSource("config.toml", null, null));
         StringAssert.Contains(faults.Single().Message, "time zone");
+    }
+
+    [TestMethod]
+    public async Task ARunThatEnds_TellsTheUser_AsItsAutomationAsks()
+    {
+        await using var fixture = new Fixture();
+        var notifications = new RecordedNotifications();
+        fixture.Service.Notifications = notifications;
+        fixture.WriteGlobal($$"""
+            [automations.{{First}}]
+            name = "Nightly review"
+            prompt = "review"
+            notify = "always"
+
+            [automations.{{Second}}]
+            name = "Failures only"
+            prompt = "deploy"
+            notify = "failures"
+
+            [automations.{{Third}}]
+            name = "Silent"
+            prompt = "quiet"
+            """);
+        await fixture.Service.RefreshAsync();
+
+        // Every run that ends tells the user: the name of its automation, how it ended and how long it took, the start of its
+        // answer, and a click opens its session.
+        var manual = fixture.Service.RunAsync(First, CancellationToken.None);
+        var start = await fixture.Runner.NextAsync();
+        await manual;
+        fixture.Clock.Now = Noon.AddMinutes(3).AddSeconds(12);
+        start.Complete(new(AutomationRun.Completed) { Answer = "## Findings\n\nTwo pull requests   need a review." });
+        await fixture.UntilAsync(() => notifications.Shown.Count == 1);
+        var told = notifications.Shown.Single();
+        Assert.AreEqual(("Nightly review", "Completed in 3 min 12 s.\n## Findings Two pull requests need a review.", PluginNotificationTone.Success, "session-1"),
+            (told.Title, told.Body, told.Tone, told.SessionId));
+
+        // Failures only: a run that completes says nothing, one that fails says why.
+        foreach (var (outcome, expected) in new[] { (new AutomationOutcome(AutomationRun.Completed) { Answer = "done" }, 1), (new AutomationOutcome(AutomationRun.Failed, "The provider refused the model."), 2) })
+        {
+            var run = fixture.Service.RunAsync(Second, CancellationToken.None);
+            var started = await fixture.Runner.NextAsync();
+            await run;
+            started.Complete(outcome);
+            await fixture.UntilAsync(() => !fixture.Service.IsRunning(Second));
+            Assert.AreEqual(expected, notifications.Shown.Count);
+        }
+
+        var failed = notifications.Shown[1];
+        Assert.AreEqual(("Failures only", PluginNotificationTone.Danger), (failed.Title, failed.Tone));
+        StringAssert.EndsWith(failed.Body, "\nThe provider refused the model.");
+
+        // A run that could not start fails before any session: it tells too, with nothing to open.
+        fixture.Runner.Refuse = "No provider is set up.";
+        await fixture.Service.RunAsync(Second, CancellationToken.None);
+        await fixture.Runner.NextAsync();
+        await fixture.UntilAsync(() => notifications.Shown.Count == 3);
+        Assert.AreEqual(((string?)null, "Failed in 0 s.\nNo provider is set up."), (notifications.Shown[2].SessionId, notifications.Shown[2].Body));
+        fixture.Runner.Refuse = null;
+
+        // An automation that asks for nothing, and a try, which its user watches, tell nothing.
+        var silent = fixture.Service.RunAsync(Third, CancellationToken.None);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+        await silent;
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(Third));
+        var tried = fixture.Service.RunAsync(First, null, dryRun: true, CancellationToken.None);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+        await tried;
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+        Assert.AreEqual(3, notifications.Shown.Count);
+    }
+
+    [TestMethod]
+    public void TheNotificationOfARun_SaysHowItEnded_AndHowLongItTook()
+    {
+        var run = new AutomationRun("run", First, Noon, "manual") { Name = "Deploy", Status = AutomationRun.Cancelled, EndedAt = Noon.AddHours(1).AddMinutes(5), SessionId = "s1" };
+        var told = AutomationRunNotice.Of(run, null);
+        Assert.AreEqual(("Deploy", "Cancelled in 1 h 05 min.", PluginNotificationTone.Warning, "s1"), (told.Title, told.Body, told.Tone, told.SessionId));
+        // A long answer is cut to what every system shows; a run without a name is named by its automation.
+        var cut = AutomationRunNotice.Of(run with { Name = null, Status = AutomationRun.Completed, EndedAt = Noon.AddSeconds(45) }, new string('a', 1000));
+        Assert.AreEqual(First, cut.Title);
+        Assert.IsLessThanOrEqualTo(PluginNotification.MaximumBodyLength, cut.Body!.Length);
+        StringAssert.StartsWith(cut.Body, "Completed in 45 s.\naaa");
+        StringAssert.EndsWith(cut.Body, "…");
+    }
+
+    // What the user was told, in order.
+    private sealed class RecordedNotifications : CodeAlta.Orchestration.Runtime.IUserNotifications
+    {
+        internal ConcurrentQueue<PluginNotification> Queue { get; } = new();
+
+        internal IReadOnlyList<PluginNotification> Shown => [.. Queue];
+
+        public ValueTask<bool> NotifyAsync(PluginNotification notification, CancellationToken cancellationToken)
+        {
+            Queue.Enqueue(notification);
+            return ValueTask.FromResult(true);
+        }
     }
 
     private sealed class Fixture : IAsyncDisposable

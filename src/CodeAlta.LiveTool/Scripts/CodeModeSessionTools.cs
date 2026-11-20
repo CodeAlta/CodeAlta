@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.CodeMode;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
 
 namespace CodeAlta.LiveTool.Scripts;
@@ -167,6 +168,16 @@ public sealed class CodeModeSessionTools
     {
         ArgumentNullException.ThrowIfNull(spaceOf);
         return new CodeModeSessionTools(_options with { SpaceOf = spaceOf }, _mode);
+    }
+
+    /// <summary>Gives the scripts of these tools where their notifications (<c>notify()</c>) reach the user.</summary>
+    /// <param name="notifications">Where they reach the user.</param>
+    /// <returns>The tools, whose scripts notify there.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="notifications"/> is null.</exception>
+    public CodeModeSessionTools WithNotifications(IUserNotifications notifications)
+    {
+        ArgumentNullException.ThrowIfNull(notifications);
+        return new CodeModeSessionTools(_options with { Notifications = notifications }, _mode);
     }
 
     // The scripts of the library offered as tools, under a name no other tool of the session has.

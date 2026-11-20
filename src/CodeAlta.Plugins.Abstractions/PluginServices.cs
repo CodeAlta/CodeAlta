@@ -224,6 +224,23 @@ public interface IPluginUiService
     /// <returns>A task representing asynchronous UI work.</returns>
     ValueTask NotifyAsync(string message, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Shows a notification with a title, a tone and the session a click opens. CodeAlta Desktop shows a notification of the
+    /// system while no window of CodeAlta has the focus, as for a session that is done, and a notice in the window otherwise.
+    /// A host without notifications shows it as <see cref="NotifyAsync(string, CancellationToken)"/> does.
+    /// </summary>
+    /// <param name="notification">The notification.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A task representing asynchronous UI work.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="notification"/> is null.</exception>
+    /// <exception cref="ArgumentException">The title of <paramref name="notification"/> is empty.</exception>
+    ValueTask NotifyAsync(PluginNotification notification, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        ArgumentException.ThrowIfNullOrWhiteSpace(notification.Title, nameof(notification));
+        return NotifyAsync(notification.ToMessage(), cancellationToken);
+    }
+
     /// <summary>Asks the user to confirm an action.</summary>
     /// <param name="title">The dialog title.</param>
     /// <param name="message">The dialog message.</param>

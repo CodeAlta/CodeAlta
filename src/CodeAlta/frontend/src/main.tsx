@@ -7199,7 +7199,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         const command = askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null, null, signal);
         return command.completion ?? command.result;
       }}
-      onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
+      onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }}
+      onOpenSession={sessionId => showHostSession.current(sessionId)} />
   </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></NewSessionBesideContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SkillChoicesContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
 }
 

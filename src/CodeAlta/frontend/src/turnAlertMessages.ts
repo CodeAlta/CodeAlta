@@ -36,4 +36,9 @@ export const turnAlertMessages = {
     "CodeAlta meldet nicht, wenn eine Sitzung fertig ist oder auf Sie wartet, während es im Hintergrund ist.",
     "バックグラウンドにある間、CodeAlta はセッションの完了や応答待ちを知らせません。",
     "CodeAlta 处于后台时，不会在会话完成或等待你时提醒你。"],
+  // The automation editor: a notification of CodeAlta when a run ends, for every run or for the runs that fail.
+  "Notify me when a run ends": ["Avisarme cuando termine una ejecución", "M’avertir à la fin d’une exécution", "Benachrichtigen, wenn ein Lauf endet",
+    "実行が終わったら通知する", "运行结束时通知我"],
+  "Every run": ["Cada ejecución", "Chaque exécution", "Jeder Lauf", "すべての実行", "每次运行"],
+  "Failures only": ["Solo los fallos", "Échecs seulement", "Nur Fehlschläge", "失敗のみ", "仅失败"],
 } as const;

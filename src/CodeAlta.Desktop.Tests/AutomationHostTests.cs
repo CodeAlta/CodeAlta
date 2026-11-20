@@ -321,10 +321,12 @@ public sealed class AutomationHostTests
         await using var fixture = await Fixture.CreateAsync(withLibrary: true);
 
         var created = await fixture.One("alta.automation.created", "automation", "create", "--name", "Onboard", "--chat", "--trigger", "project@added,archived",
-            "--trigger", """{ type = "automation", on = ["failed"], automations = ["Nightly"] }""", "--script", "review-pr", "--script-mode", "direct", "--script-access", "write", "--sandbox", "off");
+            "--trigger", """{ type = "automation", on = ["failed"], automations = ["Nightly"] }""", "--script", "review-pr", "--script-mode", "direct", "--script-access", "write", "--sandbox", "off",
+            "--notify", "Failures");
 
         var definition = fixture.Service.Snapshot.Find(Text(created, "id")!)!.Definition;
         Assert.AreEqual(("review-pr", "direct", "write", "off"), (definition.Script, definition.ScriptMode, definition.ScriptAccess, definition.Sandbox));
+        Assert.AreEqual(AutomationDefinition.NotifyFailures, definition.Notify);
         CollectionAssert.AreEqual(new[] { "project", "automation" }, definition.Triggers.Select(static trigger => trigger.Source).ToArray());
         CollectionAssert.AreEqual(new[] { "added", "archived" }, definition.Triggers[0].On.ToArray());
         CollectionAssert.AreEqual(new[] { "Nightly" }, definition.Triggers[1].Settings.Texts("automations").ToArray());
@@ -337,6 +339,7 @@ public sealed class AutomationHostTests
                      (["automation", "create", "--name", "x", "--script", "review-pr", "--script-access", "write"], "usage.scriptModeWithoutScript"),
                      (["automation", "create", "--name", "x", "--script", "review-pr", "--script-mode", "fast"], "usage.invalidScriptMode"),
                      (["automation", "create", "--name", "x", "--content", "y", "--trigger", "project@was-added"], "was-added"),
+                     (["automation", "create", "--name", "x", "--content", "y", "--notify", "sometimes"], "notify is always"),
                      // Kept with its project, a script that writes without a model names its sandbox.
                      (["automation", "create", "--name", "x", "--store", "project", "--script", "review-pr", "--script-mode", "direct", "--script-access", "write"], "sandbox profile"),
                  })

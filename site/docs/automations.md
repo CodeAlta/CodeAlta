@@ -48,7 +48,7 @@ An automation an agent creates is disabled, and an agent enables none: what runs
 
 Turn on **Run without a model** for a script that only does something on its own: write a line in a file, call a command of a plugin that sends a mail. No session starts and no model is called: the script runs alone, and what it returns is the answer of the run.
 
-- It calls the `alta` commands that change nothing, and the commands of [plugins](plugins/readme.md). The commands that start, steer or create a session are not there, nor `agent()`, `ask()` or the tools of MCP servers.
+- It calls the `alta` commands that change nothing, and the commands of [plugins](plugins/readme.md). The commands that start, steer or create a session are not there, nor `agent()`, `ask()` or the tools of MCP servers. `notify()` is: it tells you what you need to know, with a [notification](sessions/code-mode.md#functions) of CodeAlta.
 - Its `tools.*` read files and search. Turn on **It may edit files and run commands** to let it write and run commands too, in the [sandbox](sessions/sandbox.md) chosen in **Runs with**.
 - Without a sandbox, a script that writes runs only from **My configuration**: one in the configuration of a project, which others can change, needs a sandbox.
 
@@ -212,6 +212,7 @@ The approvals go to the owner of the automation: you, or on a [server](fleet/ses
 </figure>
 
 - A session started by an automation has a bolt in the sidebar. Its first card, **Automation**, is the prompt the automation sent: it names the automation, which you open with a click, and what started the run.
+- Turn on **Notify me when a run ends** in an automation, for **Every run** or **Failures only**, to be told without watching: the name of the automation, how the run ended and how long it took, then the start of its answer or why it failed. Click it to open the session of the run; a run that failed before its session started brings CodeAlta to the front. It comes as a [notification of the system](workspace/readme.md#done-or-waiting) while you are in another application, and as a notice in the window otherwise, also for a script [without a model](#without-a-model). In the file it is `notify = "always"` or `notify = "failures"`, and `alta automation create` takes `--notify`.
 - In the **Automations** tab, select an automation to see its runs. Click a run to open its session. A run started by another tool says what was done with its answer.
 - The switch of an automation turns its triggers off. The **Running** switch at the top turns off the triggers of all of them. **Run now** always works.
 
