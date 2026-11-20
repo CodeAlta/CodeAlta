@@ -9,7 +9,7 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import type { SessionTab } from "./sessionTabs";
-import { browseSessions, browseTree } from "./sessionBrowser";
+import { browseSessions, browseTree, browserLimit } from "./sessionBrowser";
 import type { RuntimeObservationControls } from "./RuntimeObservation";
 import { sessionRunning } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
@@ -74,13 +74,15 @@ export type CheckedSessionControls = Readonly<{
  * the archived sessions instead, where Enter restores the selected one. Sessions checked in the first column are
  * archived, restored or deleted together; a session at work is not checked.
  */
-export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, archived, checking }: {
+export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, archived, checking, onWant }: {
   snapshot: WorkspaceSnapshot; projectId: string | null; stale: boolean;
   open: (tab: SessionTab) => boolean; close: () => void;
   observations?: RuntimeObservationControls;
   recentCount?: number; activeSessionId?: string | null;
   archived?: ArchivedSessionControls;
   checking?: CheckedSessionControls;
+  /** Told the scope shown, what is typed and the rows shown: the window reads the sessions of that scope with it, the old ones too. */
+  onWant?: (scope: string | null, query: string, rows: number) => void;
 }) {
   const { t, locale } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -89,6 +91,9 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const search = useRef<HTMLInputElement>(null);
   const [scope, setScope] = useState(projectId);
   const [query, setQuery] = useState("");
+  // The rows shown at most: "Show more" adds as many again, for a scope that has more.
+  const [limit, setLimit] = useState(browserLimit);
+  useEffect(() => { onWant?.(scope, query.trim(), limit); }, [scope, query, limit]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sort, setSort] = useState<{ column: SortColumn; descending: boolean }>({ column: "updated", descending: true });
   const observed = useSyncExternalStore(observations?.store.subscribe ?? noSubscribe, observations?.store.getSnapshot ?? noSnapshot);
@@ -124,7 +129,10 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   };
   // The sessions as a tree, each under the one it comes from, sorted within each level; with a search, the sessions
   // shown with a match are not matches themselves. A check acts on the rows shown only: nothing is checked unseen.
-  const page = browseTree(source, scope, query, order);
+  const page = browseTree(source, scope, query, order, limit);
+  // The rows of the scope the window was not given yet: they come as more are shown.
+  const older = archive || query.trim() ? 0 : scope === null ? snapshot.omittedChatSessions ?? 0 : snapshot.projects.find(row => row.id === scope)?.omittedSessions ?? 0;
+  const more = page.hidden + (snapshot.wantedTruncated ? 0 : older);
   const rows = page.rows;
   const scopeSessions = rows.map(item => item.row);
   const selected = Math.max(0, rows.findIndex(item => tabKey(item.tab) === selectedKey));
@@ -268,7 +276,9 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         onClick={() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); clearChecked(); }}>
         {t("Archived")}{archivedHere > 0 && <span className="session-browser-count">{archivedHere}</span>}</Button>}
       <span className="settings-editor-spacer" />
-      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: page.shownMatches, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
+      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: page.shownMatches, matching: page.matched })}</span>
+      {more > 0 && <Button className="session-browser-more" size="small" variant="minimal" onClick={() => setLimit(value => value + browserLimit)}>
+        {t("Show more…")} <span className="bp6-text-muted">({more})</span></Button>}
     </div>
     {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
     <div ref={results} id="session-browser-results" className="session-browser-results" role="region" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>

@@ -15,7 +15,9 @@ test("a message between agents names its session by its title, which opens it", 
   assert.match(html, /^<button type="button" class="session-reference" title="Open the session Map the &lt;parser&gt;" aria-label="Open the session Map the &lt;parser&gt;">/);
   assert.ok(html.endsWith("<span>Map the &lt;parser&gt;</span></button>"));
   // A session the window does not list is named by the start of its id, and opens nothing.
-  assert.equal(render(createElement(SessionReference, { sessionId: "01a2ffff-0000" }), links), '<small class="session-reference-id" title="01a2ffff-0000">01a2ffff</small>');
+  // A session the window was not given is looked for when its id is clicked: it may only be an old one.
+  assert.equal(render(createElement(SessionReference, { sessionId: "01a2ffff-0000" }), links),
+    '<button type="button" class="session-reference session-reference-id" title="Open the session 01a2ffff-0000">01a2ffff</button>');
   assert.equal(render(createElement(SessionReference, { sessionId: "01a105f5-60d1" })), '<small class="session-reference-id" title="01a105f5-60d1">01a105f5</small>');
 });
 

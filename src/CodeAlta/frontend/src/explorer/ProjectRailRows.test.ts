@@ -184,14 +184,25 @@ test("the sessions of an open scope are rows that open them, with more on demand
   assert.match(render(all, 0, true), /Show fewer/);
   assert.match(render([], 0, false), /No sessions in this project\./);
   assert.match(render([], 0, false, true), /No chats\./);
-  // A list that has older sessions the window was not given says so after its last row: they are not listed, not gone.
-  const omitted = (rows: typeof all, more: number, count: number) => renderToStaticMarkup(createElement(ExplorerSessions, { entries: list(rows), global: false, projectId: "a", more, omitted: count,
+  // "Show more" counts the older sessions the window was not given with the ones it hides: it asks for them. The saved
+  // sessions, where all of them are browsed, are offered beside it, with the keys of the command.
+  const omitted = (rows: typeof all, more: number, count: number, unreachable = false, filtered = false) => renderToStaticMarkup(createElement(ExplorerSessions, { entries: list(rows), global: false, projectId: "a", more, omitted: count,
+    unreachable, filtered, onBrowse: never, browseKeys: "Ctrl+Alt+B",
     extended: false, tree, access: () => ({ rename: true, delete: true }), marks: () => null, onAction: never, onMore: never, onFewer: never }));
-  assert.match(omitted(all, 0, 7), /role="note">Older sessions not listed: 7</);
-  assert.doesNotMatch(omitted(all.slice(0, 1), 2, 7), /Older sessions not listed/, "Show more comes first");
-  assert.match(omitted([], 0, 7), /Older sessions not listed: 7/);
+  assert.match(omitted(all, 0, 7), /Show more… <span class="muted-text">\(7\)<\/span>/);
+  assert.match(omitted(all.slice(0, 1), 2, 7), /Show more… <span class="muted-text">\(9\)<\/span>/);
+  assert.match(omitted(all, 0, 7), /title="Browse saved sessions \(Ctrl\+Alt\+B\)">Browse all…</);
+  assert.doesNotMatch(omitted(all, 0, 7), /Older sessions not listed/);
   assert.doesNotMatch(omitted([], 0, 7), /No sessions in this project/);
-  assert.doesNotMatch(html, /Older sessions not listed/);
+  assert.doesNotMatch(omitted(all, 0, 0), /Browse all|Show more/, "a list that is whole offers nothing");
+  // A filter shows what it finds: the older sessions of the list are not counted.
+  assert.doesNotMatch(omitted(all, 0, 7, false, true), /Show more|Browse all/);
+  // When the window cannot be given more, the list says how many sessions it leaves out, and the saved sessions stay.
+  assert.match(omitted(all, 0, 7, true), /Browse all…[\s\S]*role="note">Older sessions not listed: 7</);
+  assert.doesNotMatch(omitted(all, 0, 7, true), /Show more/);
+  assert.match(omitted(all.slice(0, 1), 2, 7, true), /Show more… <span class="muted-text">\(2\)<\/span>/);
+  assert.doesNotMatch(omitted(all.slice(0, 1), 2, 7, true), /Older sessions not listed/, "Show more comes first");
+  assert.doesNotMatch(html, /Older sessions not listed|Browse all/);
 });
 
 test("a session that has sub-agents hides them and shows them, and lists more of them on demand", () => {

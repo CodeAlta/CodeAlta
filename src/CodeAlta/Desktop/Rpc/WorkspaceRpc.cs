@@ -20,7 +20,7 @@ internal sealed partial class WorkspaceService
     /// <summary>The most projects a snapshot lists: room for the sub-projects of monorepos.</summary>
     internal const int MaximumProjects = 1000;
 
-    private readonly Func<CancellationToken, Task<WorkspaceSnapshot>>? _read;
+    private readonly Func<WorkspaceRequest, CancellationToken, Task<WorkspaceSnapshot>>? _read;
 
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads)
     {
@@ -35,13 +35,16 @@ internal sealed partial class WorkspaceService
     }
 
     // The snapshot of the page from the one of a host: the sessions whose folder exists, with their worktrees.
-    private static Func<CancellationToken, Task<WorkspaceSnapshot>> ProjectedSnapshot(Func<CancellationToken, Task<CodeAlta.Orchestration.Runtime.OwnedWorkspaceSnapshot>> read)
-        => async token =>
+    // The spaces are read only for a window that shows one of them: what it asks for is counted and chosen in that space.
+    private static Func<WorkspaceRequest, CancellationToken, Task<WorkspaceSnapshot>> ProjectedSnapshot(Func<CancellationToken, Task<CodeAlta.Orchestration.Runtime.OwnedWorkspaceSnapshot>> read,
+        Func<CancellationToken, Task<IReadOnlyList<SpaceDescriptor>>>? readSpaces = null)
+        => async (wanted, token) =>
         {
             var actual = read(token);
             var snapshot = await actual.ConfigureAwait(false);
             var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
-            return WithRepositories(ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce()),
+            var spaces = readSpaces is not null && wanted.Space is not null ? await readSpaces(token).ConfigureAwait(false) : null;
+            return WithRepositories(ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce(), wanted, spaces),
                     static path => CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(path) is not null)
                 with { UnreadableProjectFiles = UnreadableFiles(snapshot.UnreadableProjects) };
         };
@@ -81,8 +84,8 @@ internal sealed partial class WorkspaceService
         _readHistoryTail = store.ReadHistoryTailPageAsync;
         _readTimeline = store.ReadTimelinePageAsync;
         _readHistorySource = store.ReadHistorySourceAsync;
-        _read = cancellationToken => ReadAsync(projects.LoadAsync,
-            token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), existingFoldersOnly: true, cancellationToken);
+        _read = (wanted, cancellationToken) => ReadAsync(projects.LoadAsync,
+            token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), existingFoldersOnly: true, wanted, cancellationToken);
     }
 
     [NeoRpcMethod("snapshot")]
@@ -91,7 +94,7 @@ internal sealed partial class WorkspaceService
         ArgumentNullException.ThrowIfNull(request);
         return _read is null
             ? Task.FromResult(new WorkspaceSnapshot(false, [], [], false, false, false))
-            : ServeAsync(_read(cancellationToken));
+            : ServeAsync(_read(request, cancellationToken));
 
         async Task<WorkspaceSnapshot> ServeAsync(Task<WorkspaceSnapshot> read)
         {
@@ -109,13 +112,14 @@ internal sealed partial class WorkspaceService
         Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> loadProjects,
         Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> loadSessions,
         CancellationToken cancellationToken)
-        => ReadAsync(loadProjects, loadSessions, existingFoldersOnly: false, cancellationToken);
+        => ReadAsync(loadProjects, loadSessions, existingFoldersOnly: false, wanted: null, cancellationToken);
 
     // The scope of each session comes from the journal header the session list records: no journal is opened.
     private static Task<WorkspaceSnapshot> ReadAsync(
         Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> loadProjects,
         Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> loadSessions,
         bool existingFoldersOnly,
+        WorkspaceRequest? wanted,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(loadProjects);
@@ -131,9 +135,9 @@ internal sealed partial class WorkspaceService
                 sessions.Add(session);
             }
             var headers = CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace.ReadSessionHeaders(sessions);
-            if (!existingFoldersOnly) return ProjectSnapshot(projects, sessions, headers);
+            if (!existingFoldersOnly) return ProjectSnapshot(projects, sessions, headers, wanted: wanted);
             var shown = WithExistingFolders(projects, sessions, Directory.Exists);
-            return ProjectSnapshot(shown.Projects, shown.Sessions, headers);
+            return ProjectSnapshot(shown.Projects, shown.Sessions, headers, wanted: wanted);
         }
     }
 
@@ -179,7 +183,8 @@ internal sealed partial class WorkspaceService
     internal static WorkspaceSnapshot ProjectSnapshot(
         IReadOnlyList<ProjectDescriptor> projects, IReadOnlyList<AgentSessionMetadata> sessions,
         IReadOnlyDictionary<string, SessionViewJournalHeader>? headers = null,
-        Func<string, (string Root, string Name, bool Missing)>? worktree = null)
+        Func<string, (string Root, string Name, bool Missing)>? worktree = null, WorkspaceRequest? wanted = null,
+        IReadOnlyList<SpaceDescriptor>? spaces = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -238,9 +243,36 @@ internal sealed partial class WorkspaceService
         // The list a session is in: its project when the window shows it, the chats otherwise.
         string? ListOf(int position) => scopes[position].ProjectId is { } id && shownProjects.Contains(id) ? id : null;
         var rows = new List<(int Position, WorkspaceSession Session)>();
-        foreach (var index in FairOrder(ordered, ListOf))
+        var kept = new HashSet<int>();
+        var projectsById = projects.ToDictionary(static project => project.Id, StringComparer.Ordinal);
+        string SourceTitle(int position) => CodeAlta.Orchestration.Runtime.SessionRuntimeService.ListedTitle(ordered[position],
+            scopes[position].ScopeKind switch { "global" => SessionViewKind.GlobalSession, "project" => SessionViewKind.ProjectSession, _ => (SessionViewKind?)null },
+            scopes[position].ProjectId is { } scopeProject ? projectsById.GetValueOrDefault(scopeProject) : null);
+        // The space the window shows, when it shows one: the rows it asks for, and those it is told are left out, are the ones
+        // it lists (see InSpace). Without it, every session is.
+        var shownSpace = spaces is not null && wanted?.Space is { } asked && spaces.Any(space => space.Id == asked) ? asked : null;
+        bool Shown(int position) => shownSpace is null || InSpace(scopes[position],
+            scopes[position].ProjectId is { } owner ? projectsById.GetValueOrDefault(owner) : null, shownSpace, spaces!);
+        // What the window asks for comes first, whatever its age; then what every list shows at first, which is the same
+        // whatever was asked for: a list that is extended, or a search, does not change what the other lists show.
+        var wantedCut = false;
+        var first = FairOrder(ordered, ListOf).Take(MaximumSessions).ToArray();
+        foreach (var (index, ofList) in WantedOrder(wanted, ordered, ListOf, SourceTitle,
+                     position => scopes[position].ProjectId is { } named ? projectsById.GetValueOrDefault(named)?.DisplayName : null, first.ToHashSet().Contains, Shown))
         {
-            if (rows.Count == MaximumSessions) break;
+            // No row fits any more: the smallest one takes more than what is left.
+            if (remaining < 512 + 64) { wantedCut = true; break; }
+            // A row that has no room does not keep a smaller one out. Only a list that is cut is said: its rows are counted.
+            if (!kept.Contains(index) && !Keep(index)) wantedCut |= ofList;
+        }
+        foreach (var index in first)
+        {
+            if (!kept.Contains(index) && !Keep(index)) break;
+        }
+
+        // Adds the row of a session; false when the snapshot has no room for it.
+        bool Keep(int index)
+        {
             var session = ordered[index];
             var (scopeKind, projectId, automationId, recordedSpace) = scopes[index];
             var parent = session.ParentSessionId ?? session.ViewState?.ParentSessionId;
@@ -259,9 +291,7 @@ internal sealed partial class WorkspaceService
             // A session that was never named keeps the text it was created with as its saved title, while its summary
             // follows the conversation: it is listed by the first line of that summary, as the terminal UI does. The
             // deletion of a session is confirmed with the same title.
-            var sourceTitle = CodeAlta.Orchestration.Runtime.SessionRuntimeService.ListedTitle(session,
-                scopeKind switch { "global" => SessionViewKind.GlobalSession, "project" => SessionViewKind.ProjectSession, _ => (SessionViewKind?)null },
-                projectId is null ? null : projects.FirstOrDefault(project => project.Id == projectId));
+            var sourceTitle = SourceTitle(index);
             var title = DisplayText(sourceTitle, ref shortened);
             var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
             var spaceId = string.IsNullOrWhiteSpace(recordedSpace) ? null
@@ -276,13 +306,14 @@ internal sealed partial class WorkspaceService
                 forkTurns = Math.Max(0, origin.TurnCount);
             }
 
-            var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
-                + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0)
-                + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0)
-                + (forkedFrom?.Length ?? 0) + (forkedTitle?.Length ?? 0) + (spaceId?.Length ?? 0) + 24
-                + (session.ViewState?.Cloud is null ? 0 : 6 * 900));
-            if (cost > remaining) break;
+            var cost = 512 + 64 + WireLength(session.SessionId) + WireLength(title) + WireLength(fullTitle) + WireLength(parent)
+                + WireLength(session.WorkspacePath) + WireLength(session.ProviderKey) + WireLength(projectId) + WireLength(automationId)
+                + WireLength(worktreePath) + WireLength(worktreeRoot) + WireLength(worktreeName)
+                + WireLength(forkedFrom) + WireLength(forkedTitle) + WireLength(spaceId) + 6 * 24
+                + (session.ViewState?.Cloud is null ? 0 : 6 * 900);
+            if (cost > remaining) return false;
             remaining -= cost;
+            kept.Add(index);
             rows.Add((index, new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
@@ -293,18 +324,22 @@ internal sealed partial class WorkspaceService
                 ProviderConversation = (session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is { Length: > 0 } ? true : null,
                 Cloud = WorkspaceSessionCloud.Of(session.ViewState?.Cloud),
             }));
+            return true;
         }
+
         // The rows are sent in the order the lists show them, whatever the order they were kept in.
         rows.Sort(static (left, right) => left.Position.CompareTo(right.Position));
         var displayedSessions = rows.ConvertAll(static row => row.Session);
 
-        // What each list leaves out, so that the window says it: a list that stops is never taken for sessions that are gone.
-        var kept = rows.Select(static row => row.Position).ToHashSet();
+        // What each list leaves out, so that the window says it and asks for it: a list that stops is never taken for
+        // sessions that are gone. The rows of a list are counted, as the window counts them: not the sub-agents under them.
+        var positions = PositionsById(ordered);
         var omitted = new Dictionary<string, int>(StringComparer.Ordinal);
         var omittedChats = 0;
         for (var position = 0; position < ordered.Length; position++)
         {
-            if (kept.Contains(position) || ordered[position].ViewState?.Archived == true) continue;
+            if (kept.Contains(position) || ordered[position].ViewState?.Archived == true || !Shown(position)) continue;
+            if (ParentInList(ordered, positions, ListOf, position) >= 0) continue;
             if (ListOf(position) is { } id) omitted[id] = omitted.GetValueOrDefault(id) + 1;
             else omittedChats++;
         }
@@ -316,7 +351,165 @@ internal sealed partial class WorkspaceService
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened)
         {
             OmittedChatSessions = omittedChats > 0 ? omittedChats : null,
+            WantedTruncated = wantedCut ? true : null,
         };
+    }
+
+    /// <summary>
+    /// Whether a window that shows one space lists a session, as the window decides it: the session is in that space (see
+    /// <see cref="SpaceCatalog.SessionSpaces"/>). A session that records no scope is listed by its folder, which the window
+    /// looks at: it counts as listed, so that it is never kept out of what the window can ask for.
+    /// </summary>
+    internal static bool InSpace(SessionScope scope, ProjectDescriptor? project, string space, IReadOnlyList<SpaceDescriptor> spaces)
+        => scope.ScopeKind is null || SpaceCatalog.SessionSpaces(scope.RecordedSpace, project, spaces).Contains(space, StringComparer.Ordinal);
+
+    // The bytes a text takes at most in the JSON of a snapshot: a character the serializer may escape takes six.
+    private static int WireLength(string? value)
+    {
+        if (value is null) return 0;
+        var length = 0;
+        foreach (var character in value)
+            length += character is >= ' ' and < (char)0x7F and not ('"' or '\\' or '<' or '>' or '&' or '\'' or '+' or '`') ? 1 : 6;
+        return length;
+    }
+
+    /// <summary>The most sessions a request names, lists it extends, and texts it searches.</summary>
+    internal const int MaximumWantedSessions = 256, MaximumWantedLists = 64, MaximumWantedSearches = 4;
+
+    /// <summary>The most sessions one search of every list adds to a snapshot, the newest first.</summary>
+    internal const int MaximumFoundSessions = 200;
+
+    /// <summary>The most sessions a search of one list adds: the saved sessions of a project show all those it finds.</summary>
+    internal const int MaximumFoundInList = 2000;
+
+    private static Dictionary<string, int> PositionsById(IReadOnlyList<AgentSessionMetadata> ordered)
+    {
+        var positions = new Dictionary<string, int>(ordered.Count, StringComparer.Ordinal);
+        for (var position = 0; position < ordered.Count; position++) positions[ordered[position].SessionId] = position;
+        return positions;
+    }
+
+    // The position of the session a session is listed under: its parent, when it is a live session of the same list;
+    // -1 for a row of the list itself.
+    private static int ParentInList(IReadOnlyList<AgentSessionMetadata> ordered, Dictionary<string, int> positions, Func<int, string?> listOf, int position)
+    {
+        var parent = ordered[position].ParentSessionId ?? ordered[position].ViewState?.ParentSessionId;
+        return !string.IsNullOrWhiteSpace(parent) && positions.TryGetValue(parent, out var above) && above != position
+            && ordered[above].ViewState?.Archived != true && listOf(above) == listOf(position) ? above : -1;
+    }
+
+    /// <summary>
+    /// The sessions a window asks for beyond what every list shows at first, as positions in <paramref name="ordered"/>, the
+    /// most wanted first: the sessions it names (those of its tabs, one it opens) with the sessions they are under; the
+    /// sessions a text it searches finds, the newest first and at most <see cref="MaximumFoundSessions"/> more than those
+    /// listed at first (<see cref="MaximumFoundInList"/> for a search of one list); the first rows of the lists it extends, each with its sub-agents; then the archived sessions, when
+    /// it shows them. A text finds a session that has each of its words in its title, its identifier or the name of its
+    /// project, and one of them at least in its title or its identifier.
+    /// </summary>
+    /// <param name="wanted">The request, or null.</param>
+    /// <param name="ordered">The sessions: the archived ones last, then the newest first.</param>
+    /// <param name="listOf">The list of a session: its project, or null for the chats.</param>
+    /// <param name="title">The title a session is listed with.</param>
+    /// <param name="projectName">The name of the project of a session, or null.</param>
+    /// <param name="listedAtFirst">Whether a session is among those listed whatever is asked for: a search does not count them.</param>
+    /// <param name="shown">Whether the window lists a session: the rows of a list and what a search finds are among those.</param>
+    /// <returns>The positions, each with whether it is a row of a list the window extends.</returns>
+    internal static List<(int Position, bool OfList)> WantedOrder(WorkspaceRequest? wanted, IReadOnlyList<AgentSessionMetadata> ordered, Func<int, string?> listOf,
+        Func<int, string> title, Func<int, string?> projectName, Func<int, bool> listedAtFirst, Func<int, bool> shown)
+    {
+        var order = new List<(int Position, bool OfList)>();
+        if (wanted is null || ordered.Count == 0) return order;
+        var positions = PositionsById(ordered);
+        var seen = new HashSet<int>();
+        void Add(int position, bool ofList = false) { if (seen.Add(position)) order.Add((position, ofList)); }
+
+        foreach (var id in (wanted.Sessions ?? []).Take(MaximumWantedSessions))
+        {
+            if (id is null || !positions.TryGetValue(id, out var position)) continue;
+            // With the sessions it is under, so that the list shows it in its place. A lineage that loops ends where it does.
+            for (var depth = 0; position >= 0 && depth < 64 && seen.Add(position); depth++)
+            {
+                order.Add((position, false));
+                position = ordered[position].ViewState?.Archived == true ? -1 : ParentInList(ordered, positions, listOf, position);
+            }
+        }
+
+        AddFound(wanted, ordered, listOf, title, projectName, listedAtFirst, shown, position => Add(position));
+
+        var lists = (wanted.Lists ?? []).Where(static list => list is { Count: > 0 }).Take(MaximumWantedLists).ToArray();
+        if (lists.Length > 0)
+        {
+            var live = 0;
+            while (live < ordered.Count && ordered[live].ViewState?.Archived != true) live++;
+            // The row each live session is under, itself for a row: found once for every list asked for.
+            var rows = new int[live];
+            Array.Fill(rows, -1);
+            int RowOf(int position)
+            {
+                var path = new List<int>();
+                var current = position;
+                while (rows[current] < 0 && !path.Contains(current))
+                {
+                    path.Add(current);
+                    var above = ParentInList(ordered, positions, listOf, current);
+                    if (above < 0) break;
+                    current = above;
+                }
+                // A lineage that loops has no row above it: the session it came back to is the row.
+                var row = rows[current] >= 0 ? rows[current] : current;
+                foreach (var member in path) rows[member] = row;
+                return row;
+            }
+            foreach (var list in lists)
+            {
+                // The rows of a list are in the order of what was done last under them: the first session of each tree.
+                var chosen = new HashSet<int>();
+                for (var position = 0; position < live && chosen.Count < list.Count; position++)
+                    if (listOf(position) == list.ProjectId && shown(position)) chosen.Add(RowOf(position));
+                for (var position = 0; position < live; position++)
+                    if (listOf(position) == list.ProjectId && chosen.Contains(RowOf(position))) Add(position, ofList: true);
+            }
+        }
+
+        // The archived sessions, which no list shows: the newest first, as they are ordered.
+        if (wanted.Archived)
+        {
+            for (var position = 0; position < ordered.Count; position++)
+                if (ordered[position].ViewState?.Archived == true) Add(position);
+        }
+        return order;
+    }
+
+    // What a search of the window finds, before the rows of the lists: a session that is looked for is not kept out by them.
+    private static void AddFound(WorkspaceRequest wanted, IReadOnlyList<AgentSessionMetadata> ordered, Func<int, string?> listOf, Func<int, string> title,
+        Func<int, string?> projectName, Func<int, bool> listedAtFirst, Func<int, bool> shown, Action<int> add)
+    {
+        foreach (var search in (wanted.Searches ?? []).Take(MaximumWantedSearches))
+        {
+            if (search?.Text is not { Length: > 0 and <= 256 } query) continue;
+            var words = query.Split((char[]?)null, 16, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (words.Length == 0) continue;
+            var found = 0;
+            var most = search.Scoped ? MaximumFoundInList : MaximumFoundSessions;
+            for (var position = 0; position < ordered.Count && found < most; position++)
+            {
+                if (search.Scoped && listOf(position) != search.ProjectId || !shown(position)) continue;
+                string? text = null, project = null;
+                var (all, own) = (true, false);
+                foreach (var word in words)
+                {
+                    if (ordered[position].SessionId.Contains(word, StringComparison.OrdinalIgnoreCase)
+                        || (text ??= title(position)).Contains(word, StringComparison.OrdinalIgnoreCase)) { own = true; continue; }
+                    if ((project ??= projectName(position) ?? string.Empty).Contains(word, StringComparison.OrdinalIgnoreCase)) continue;
+                    all = false;
+                    break;
+                }
+                if (!all || !own) continue;
+                // One that is listed at first is asked for too, in case the snapshot has no room for all of those; it is not counted.
+                if (!listedAtFirst(position)) found++;
+                add(position);
+            }
+        }
     }
 
     /// <summary>The most sessions a snapshot lists.</summary>
@@ -445,7 +638,41 @@ internal sealed partial class WorkspaceService
     }
 }
 
-internal sealed record WorkspaceRequest;
+/// <summary>
+/// What a window asks of the sessions beyond what every list shows at first, so that an old session is never out of reach:
+/// all of it is optional, and what is beyond a bound is left out.
+/// </summary>
+internal sealed record WorkspaceRequest
+{
+    /// <summary>The sessions the window shows whatever their age: those of its tabs, and one it is opening.</summary>
+    public string[]? Sessions { get; init; }
+
+    /// <summary>The lists the window shows more rows of than the snapshot has at first.</summary>
+    public WorkspaceWantedList[]? Lists { get; init; }
+
+    /// <summary>What the window searches the titles of the sessions for: the sessions found are listed.</summary>
+    public WorkspaceWantedSearch[]? Searches { get; init; }
+
+    /// <summary>Whether the window shows the archived sessions, which are otherwise listed only while there is room.</summary>
+    public bool Archived { get; init; }
+
+    /// <summary>
+    /// The space the window shows, or null when it shows the sessions of every space: the rows of the lists, what a search
+    /// finds and the rows said to be left out are those of that space.
+    /// </summary>
+    public string? Space { get; init; }
+}
+
+/// <summary>A text a window searches the sessions for.</summary>
+/// <param name="Text">The words: a session found has each of them in its title or its identifier, whatever the case.</param>
+/// <param name="Scoped">Whether one list is searched; every list otherwise.</param>
+/// <param name="ProjectId">The project of that list, or null for the chats.</param>
+internal sealed record WorkspaceWantedSearch(string Text, bool Scoped, string? ProjectId);
+
+/// <summary>A list of sessions a window shows, and how many of its rows.</summary>
+/// <param name="ProjectId">The project of the list, or null for the chats.</param>
+/// <param name="Count">The rows wanted, from the newest: each comes with its sub-agents.</param>
+internal sealed record WorkspaceWantedList(string? ProjectId, int Count);
 internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Projects, WorkspaceSession[] Sessions,
     bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated)
 {
@@ -453,13 +680,17 @@ internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Pro
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? UnreadableProjectFiles { get; init; }
 
-    // How many sessions the chats have that the snapshot has no room for, older than the ones it lists; absent when none.
+    // How many rows the list of the chats has that the snapshot leaves out, older than the ones it lists; absent when none.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? OmittedChatSessions { get; init; }
+
+    // True when the snapshot has no room for every row of the lists the request extends.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? WantedTruncated { get; init; }
 }
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived)
 {
-    // How many sessions the project has that the snapshot has no room for, older than the ones it lists; absent when none.
+    // How many rows the list of the project has that the snapshot leaves out, older than the ones it lists; absent when none.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? OmittedSessions { get; init; }
 

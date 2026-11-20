@@ -68,13 +68,13 @@ internal sealed partial class WorkspaceService
         var local = hosts.Local;
         _readAllSessions = local.ReadSnapshotAsync;
         _remoteHosts = () => [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()];
-        var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
+        var projected = ProjectedSnapshot(local.ReadSnapshotAsync, token => host.SpaceCatalog.LoadAsync(token));
         // A session this process gave to a paired machine (a move) gives its row to the one that machine lists.
         Func<string, bool> movedAway = id => host.RuntimeService.Relinquishments.Read(id) is { IsRelinquished: true };
         var privacy = _privacy!;
-        _read = async token =>
+        _read = async (wanted, token) =>
         {
-            var snapshot = WithPrivacy(await projected(token).ConfigureAwait(false), privacy);
+            var snapshot = WithPrivacy(await projected(wanted, token).ConfigureAwait(false), privacy);
             CodeAlta.Desktop.Fleet.RemoteSessionHost[] remotes = [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()];
             if (remotes.Length == 0) return snapshot;
             // A remote session goes under the project of this catalog in the same repository: the repositories of the

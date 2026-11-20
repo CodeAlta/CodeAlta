@@ -523,6 +523,206 @@ public sealed class DesktopWorkspaceTests
         Assert.IsFalse(listed.Contains("archived"));
     }
 
+    // The catalog of the tests below: 700 sessions of one project, 8 of another and 3 chats, from the newest.
+    private static (ProjectDescriptor[] Projects, List<AgentSessionMetadata> Sessions, Dictionary<string, SessionViewJournalHeader> Headers) BusyCatalog()
+    {
+        var (sessions, headers) = (new List<AgentSessionMetadata>(), new Dictionary<string, SessionViewJournalHeader>());
+        for (var index = 0; index < 700; index++) Add(sessions, headers, $"busy-{index:D3}", "busy", DateTimeOffset.UnixEpoch.AddDays(30).AddMinutes(-index));
+        for (var index = 0; index < 8; index++) Add(sessions, headers, $"quiet-{index}", "quiet", DateTimeOffset.UnixEpoch.AddDays(2).AddMinutes(-index));
+        for (var index = 0; index < 3; index++) Add(sessions, headers, $"chat-{index}", null, DateTimeOffset.UnixEpoch.AddDays(1).AddMinutes(-index));
+        return ([Project("busy"), Project("quiet")], sessions, headers);
+    }
+
+    private static string[] Ids(WorkspaceSnapshot snapshot, string project)
+        => [.. snapshot.Sessions.Where(session => session.ProjectId == project).Select(static session => session.Id)];
+
+    // An old session was out of reach: no tab, no link and no search of the window could show it (#483).
+    [TestMethod]
+    public void Projection_ASessionTheWindowNames_IsListedWhateverItsAge_WithTheSessionItIsUnder()
+    {
+        var (projects, sessions, headers) = BusyCatalog();
+        // The oldest session of the busy project is a sub-agent of another old one.
+        sessions[699] = sessions[699] with { ParentSessionId = "busy-650" };
+        var first = WorkspaceService.ProjectSnapshot(projects, sessions, headers);
+        Assert.IsFalse(first.Sessions.Any(static session => session.Id is "busy-699" or "busy-650"));
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Sessions = ["busy-699", "gone", null!] });
+
+        CollectionAssert.AreEquivalent(first.Sessions.Select(static session => session.Id).Append("busy-699").Append("busy-650").ToArray(),
+            snapshot.Sessions.Select(static session => session.Id).ToArray(), "What every list shows at first is the same.");
+        Assert.AreEqual("busy-650", snapshot.Sessions.Single(static session => session.Id == "busy-699").ParentSessionId);
+        // The rows keep the order the lists show: the newest first.
+        CollectionAssert.AreEqual(snapshot.Sessions.OrderByDescending(static session => session.UpdatedAt).Select(static session => session.Id).ToArray(),
+            snapshot.Sessions.Select(static session => session.Id).ToArray());
+        Assert.IsNull(snapshot.WantedTruncated);
+    }
+
+    [TestMethod]
+    public void Projection_AListTheWindowExtends_HasItsRowsWithTheirSubAgents_AndCountsTheRowsLeftOut()
+    {
+        var (projects, sessions, headers) = BusyCatalog();
+        // The row 495 has the oldest session as a sub-agent; the session before the oldest is a sub-agent of a row left out.
+        sessions[699] = sessions[699] with { ParentSessionId = "busy-495" };
+        sessions[698] = sessions[698] with { ParentSessionId = "busy-697" };
+        var first = WorkspaceService.ProjectSnapshot(projects, sessions, headers);
+        // 489 rows are listed at first: 211 sessions are left out, two of them sub-agents, which are not rows of the list.
+        Assert.AreEqual(209, first.Projects.Single(static project => project.Id == "busy").OmittedSessions);
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Lists = [new("busy", 496), new("quiet", 4), new("unknown", 9)] });
+
+        CollectionAssert.AreEqual(Enumerable.Range(0, 496).Select(static index => $"busy-{index:D3}").Append("busy-699").ToArray(), Ids(snapshot, "busy"));
+        Assert.AreEqual(700 - 497 - 1, snapshot.Projects.Single(static project => project.Id == "busy").OmittedSessions);
+        Assert.HasCount(8, Ids(snapshot, "quiet"), "The other lists are as they were.");
+        Assert.AreEqual(3, snapshot.Sessions.Count(static session => session.ScopeKind == "global"));
+    }
+
+    [TestMethod]
+    public void Projection_TheRowsOfAnExtendedList_AreInTheOrderOfWhatWasDoneLastUnderThem()
+    {
+        var (projects, sessions, headers) = BusyCatalog();
+        // An old session whose sub-agent worked last is the first row of its list, as the window shows it.
+        Add(sessions, headers, "old-row", "busy", DateTimeOffset.UnixEpoch);
+        Add(sessions, headers, "new-child", "busy", DateTimeOffset.UnixEpoch.AddDays(31));
+        sessions[^1] = sessions[^1] with { ParentSessionId = "old-row" };
+        Assert.IsFalse(WorkspaceService.ProjectSnapshot(projects, sessions, headers).Sessions.Any(static session => session.Id == "old-row"));
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Lists = [new("busy", 1)] });
+
+        Assert.IsTrue(snapshot.Sessions.Any(static session => session.Id == "old-row"));
+        Assert.AreEqual("old-row", snapshot.Sessions.Single(static session => session.Id == "new-child").ParentSessionId);
+    }
+
+    [TestMethod]
+    public void Projection_ASearchOfTheWindow_FindsTheSessionsLeftOut_ByTheirTitleOrTheirId()
+    {
+        var (projects, sessions, headers) = BusyCatalog();
+        sessions[600] = sessions[600] with { Details = new RawApiSessionMetadataDetails(Title: "Fix the Zebra parser") };
+        sessions[650] = sessions[650] with { Details = new RawApiSessionMetadataDetails(Title: "Zebra crossing") };
+        WorkspaceSnapshot Search(string text, bool scoped = false, string? project = null)
+            => WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Searches = [new(text, scoped, project)] });
+        var first = WorkspaceService.ProjectSnapshot(projects, sessions, headers);
+
+        // Every word, whatever its case and its order.
+        CollectionAssert.AreEqual(new[] { "busy-600" }, Search("  PARSER zebra ").Sessions.Select(static session => session.Id).Except(first.Sessions.Select(static session => session.Id)).ToArray());
+        Assert.HasCount(first.Sessions.Length + 2, Search("zebra").Sessions);
+        Assert.HasCount(first.Sessions.Length + 1, Search("busy-699").Sessions, "A session is found by its identifier.");
+        Assert.HasCount(first.Sessions.Length, Search("nothing has this").Sessions);
+        // A search of one list leaves the others alone.
+        Assert.HasCount(first.Sessions.Length, Search("zebra", scoped: true, project: "quiet").Sessions);
+        Assert.HasCount(first.Sessions.Length, Search("zebra", scoped: true).Sessions);
+        Assert.HasCount(first.Sessions.Length + 2, Search("zebra", scoped: true, project: "busy").Sessions);
+        // A text that many sessions have adds the newest of those left out, and no more than a search adds.
+        var many = Search("busy");
+        Assert.HasCount(first.Sessions.Length + WorkspaceService.MaximumFoundSessions, many.Sessions);
+        Assert.IsTrue(many.Sessions.Any(static session => session.Id == "busy-489") && !many.Sessions.Any(static session => session.Id == "busy-699"));
+        // A search of one list finds all of them: the saved sessions of a project show every session found.
+        Assert.HasCount(700, Ids(Search("busy", scoped: true, project: "busy"), "busy"));
+        // The name of the project counts with a word of the title, as in the search of the window; alone, it finds no session.
+        Add(sessions, headers, "odd-one", "quiet", DateTimeOffset.UnixEpoch.AddDays(-1));
+        sessions[^1] = sessions[^1] with { Details = new RawApiSessionMetadataDetails(Title: "Yak shaving") };
+        for (var index = 0; index < 600; index++) Add(sessions, headers, $"filler-{index:D3}", "quiet", DateTimeOffset.UnixEpoch.AddDays(20).AddMinutes(-index));
+        Assert.IsFalse(Search("zebra").Sessions.Any(static session => session.Id == "odd-one"));
+        Assert.IsTrue(Search("QUIET yak").Sessions.Any(static session => session.Id == "odd-one"));
+        Assert.IsFalse(Search("quiet").Sessions.Any(static session => session.Id == "odd-one"));
+    }
+
+    [TestMethod]
+    public void Projection_TheArchivedSessions_AreListedWhenTheWindowShowsThem_OrSearchesThem()
+    {
+        var (projects, sessions, headers) = BusyCatalog();
+        Add(sessions, headers, "kept-away", "quiet", DateTimeOffset.UnixEpoch.AddDays(40));
+        sessions[^1] = sessions[^1] with { ViewState = new AgentSessionViewStateMetadata(Archived: true), Details = new RawApiSessionMetadataDetails(Title: "Put away") };
+
+        Assert.IsFalse(WorkspaceService.ProjectSnapshot(projects, sessions, headers).Sessions.Any(static session => session.Archived));
+        Assert.AreEqual("kept-away", WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Archived = true }).Sessions.Single(static session => session.Archived).Id);
+        Assert.AreEqual("kept-away", WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Searches = [new("put away", false, null)] }).Sessions.Single(static session => session.Archived).Id);
+    }
+
+    [TestMethod]
+    public void Projection_WhenWhatIsAskedForHasNoRoom_TheSnapshotSaysSo_AndStaysUnderTheWireLimit()
+    {
+        var (projects, sessions, headers) = BusyCatalog();
+        // Titles that take all the room a title can take on the wire.
+        for (var index = 0; index < 700; index++) sessions[index] = sessions[index] with { Details = new RawApiSessionMetadataDetails(Title: new string('é', 5000)) };
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: new() { Lists = [new("busy", 600)] });
+
+        Assert.IsTrue(snapshot.WantedTruncated);
+        Assert.IsTrue(snapshot.Sessions.Length is > 10 and < 100, snapshot.Sessions.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.IsTrue(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJsonContext.Default.WorkspaceSnapshot).Length < 768 * 1024);
+        Assert.IsNull(WorkspaceService.ProjectSnapshot(projects, sessions, headers).WantedTruncated, "Nothing was asked for.");
+    }
+
+    // With several spaces, the chats of another space counted in "Show more" and took the results of a search.
+    [TestMethod]
+    public void Projection_ForAWindowThatShowsOneSpace_TheRowsAskedFor_AndThoseLeftOut_AreTheOnesOfThatSpace()
+    {
+        SpaceDescriptor[] spaces = [SpaceDescriptor.CreateDefault(), new() { Id = "work", Name = "Work" }];
+        ProjectDescriptor[] projects = [Project("shared"), Project("mine")];
+        projects[1].Spaces = ["work"];
+        var (sessions, headers) = (new List<AgentSessionMetadata>(), new Dictionary<string, SessionViewJournalHeader>());
+        void AddIn(string id, string? project, string? space, DateTimeOffset updated)
+        {
+            Add(sessions, headers, id, project, updated);
+            sessions[^1] = sessions[^1] with { SpaceId = space };
+        }
+        // 750 chats of the default space, newer than everything of the space "work": its 30 chats, an old session of a
+        // project of every space that records it, and the sessions of its own project, which record no space.
+        for (var index = 0; index < 750; index++) AddIn($"other-{index:D3}", null, null, DateTimeOffset.UnixEpoch.AddDays(30).AddMinutes(-index));
+        for (var index = 0; index < 30; index++) AddIn($"work-chat-{index:D2}", null, "work", DateTimeOffset.UnixEpoch.AddDays(2).AddMinutes(-index));
+        AddIn("work-in-shared", "shared", "work", DateTimeOffset.UnixEpoch.AddDays(1));
+        AddIn("default-in-shared", "shared", null, DateTimeOffset.UnixEpoch.AddDays(1).AddMinutes(-1));
+        AddIn("work-in-mine", "mine", null, DateTimeOffset.UnixEpoch.AddDays(1).AddMinutes(-2));
+        WorkspaceSnapshot Read(WorkspaceRequest wanted) => WorkspaceService.ProjectSnapshot(projects, sessions, headers, wanted: wanted, spaces: spaces);
+        int Chats(WorkspaceSnapshot snapshot, string prefix) => snapshot.Sessions.Count(session => session.ScopeKind == "global" && session.Id.StartsWith(prefix, StringComparison.Ordinal));
+
+        // Every space: the chats left out are those of both spaces.
+        var all = Read(new());
+        Assert.AreEqual(750 + 30 - Chats(all, "other-") - Chats(all, "work-chat-"), all.OmittedChatSessions);
+
+        // The space "work": only its own chats are counted, and "Show more" brings them, not the newer ones of the default space.
+        var work = Read(new() { Space = "work" });
+        Assert.AreEqual(30 - Chats(work, "work-chat-"), work.OmittedChatSessions ?? 0);
+        var more = Read(new() { Space = "work", Lists = [new(null, 30)] });
+        Assert.AreEqual(30, Chats(more, "work-chat-"));
+        Assert.AreEqual(Chats(work, "other-"), Chats(more, "other-"));
+        Assert.IsNull(more.OmittedChatSessions);
+        // The default space: its chats, never those of "work".
+        var main = Read(new() { Space = "default", Lists = [new(null, 600)] });
+        Assert.AreEqual(600, Chats(main, "other-"));
+        Assert.AreEqual(150, main.OmittedChatSessions);
+
+        // A search finds the sessions of the space shown: 200 more of them, not 200 of another space.
+        Assert.AreEqual(30, Chats(Read(new() { Space = "work", Searches = [new("chat", false, null)] }), "work-chat-"));
+        var found = Read(new() { Space = "work", Searches = [new("other", false, null)] });
+        Assert.HasCount(work.Sessions.Length, found.Sessions, "The chats of the default space are not looked for.");
+
+        // A session is in the space it records, else in the spaces of its project, else in the default space.
+        var scope = new WorkspaceService.SessionScope("project", "shared", null, "work");
+        Assert.IsTrue(WorkspaceService.InSpace(scope, projects[0], "work", spaces));
+        Assert.IsFalse(WorkspaceService.InSpace(scope, projects[0], "default", spaces));
+        Assert.IsTrue(WorkspaceService.InSpace(scope with { RecordedSpace = null }, projects[0], "default", spaces));
+        Assert.IsTrue(WorkspaceService.InSpace(scope with { ProjectId = "mine", RecordedSpace = null }, projects[1], "work", spaces));
+        Assert.IsFalse(WorkspaceService.InSpace(scope with { ProjectId = "mine", RecordedSpace = null }, projects[1], "default", spaces));
+        Assert.IsTrue(WorkspaceService.InSpace(scope with { RecordedSpace = "gone" }, projects[0], "default", spaces), "A space that is gone is the default one.");
+        // A session that records no scope is listed by its folder, which the window looks at: it is never kept out.
+        Assert.IsTrue(WorkspaceService.InSpace(new(null, null, null, null), null, "work", spaces));
+        // A space the catalog does not have shows what every space does.
+        Assert.AreEqual(all.OmittedChatSessions, Read(new() { Space = "unknown" }).OmittedChatSessions);
+    }
+
+    // The room of a row is what its texts take on the wire: plain titles and paths take a sixth of what was reserved for them.
+    [TestMethod]
+    public void Projection_RowsOfPlainText_FitTheSessionLimit_WithLongTitlesAndPaths()
+    {
+        var sessions = Enumerable.Range(0, 600).Select(index => new AgentSessionMetadata($"{Guid.Empty:D}-{index:D4}",
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddSeconds(index), WorkspacePath: "/home/someone/code/" + new string('p', 80),
+            Details: new RawApiSessionMetadataDetails(Title: new string('t', 200)))).ToArray();
+        var snapshot = WorkspaceService.ProjectSnapshot([], sessions);
+        Assert.HasCount(WorkspaceService.MaximumSessions, snapshot.Sessions);
+        Assert.IsTrue(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJsonContext.Default.WorkspaceSnapshot).Length < 768 * 1024);
+    }
+
     private static void Add(List<AgentSessionMetadata> sessions, Dictionary<string, SessionViewJournalHeader> headers, string id, string? project, DateTimeOffset updated)
     {
         // A session of a project works in the folder of that project.

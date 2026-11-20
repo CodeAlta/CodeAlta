@@ -10,13 +10,16 @@ export const SessionLinksContext = createContext<SessionLinks | null>(null);
 
 /**
  * The session a message between agents comes from: its title, which opens it. A session the window does not
- * list (deleted, or of a project that is not loaded) is named by the start of its id and opens nothing.
+ * list (deleted, or older than the sessions it was given) is named by the start of its id, which looks for it and opens
+ * it when it exists.
  */
 export function SessionReference({ sessionId }: { sessionId: string }) {
   const { t } = useShellLanguage();
   const links = useContext(SessionLinksContext);
   const title = links?.title(sessionId) ?? null;
-  if (!links || title === null) return <small className="session-reference-id" title={sessionId}>{sessionId.slice(0, 8)}</small>;
+  if (!links) return <small className="session-reference-id" title={sessionId}>{sessionId.slice(0, 8)}</small>;
+  if (title === null) return <button type="button" className="session-reference session-reference-id" title={t("Open the session {title}", { title: sessionId })}
+    onClick={event => { event.stopPropagation(); links.open(sessionId); }}>{sessionId.slice(0, 8)}</button>;
   const label = t("Open the session {title}", { title });
   return <button type="button" className="session-reference" title={label} aria-label={label} onClick={event => { event.stopPropagation(); links.open(sessionId); }}>
     <AppIcon name="childSession" size={12} /><span>{title}</span></button>;

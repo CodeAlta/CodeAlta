@@ -88,10 +88,37 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
   </div>;
 }
 
-/** What a list says after its last row when it has older sessions the window was not given: they exist, and are not listed. */
-export function OmittedSessionsNote({ count }: { count: number }) {
+/**
+ * What follows the rows of a list of sessions that has more: "Show more" with how many rows the list has beyond the ones
+ * shown (those hidden, and the older ones the window was not given yet, which it then asks for), "Show fewer" once it
+ * was extended, and the saved sessions, where all of them are browsed. When the window cannot be given more rows, the
+ * list says how many it leaves out instead.
+ */
+export function SessionListDisclosure({ more, omitted, unreachable, filtered, extended, onMore, onFewer, onBrowse, browseKeys }: {
+  /** The rows the window has and does not show. */
+  more: number;
+  /** The older rows the window was not given. */
+  omitted: number;
+  /** Whether the window cannot be given more rows than it has. */
+  unreachable: boolean;
+  filtered: boolean; extended: boolean; onMore: () => void; onFewer: () => void;
+  /** Opens the saved sessions of the scope. */
+  onBrowse?: () => void;
+  /** The keys of that command, shown with it. */
+  browseKeys?: string;
+}) {
   const { t } = useShellLanguage();
-  return count > 0 ? <div className="sidebar-empty session-list-omitted" role="note">{t("Older sessions not listed: {count}", { count })}</div> : null;
+  const older = filtered ? 0 : omitted;
+  const count = more + (unreachable ? 0 : older);
+  return <>
+    <div className="session-list-disclosure">
+      {count > 0 && <button type="button" className="quiet-button" onClick={onMore}>{t("Show more…")} <span className="muted-text">({count})</span></button>}
+      {extended && <button type="button" className="quiet-button" onClick={onFewer}>{t("Show fewer")}</button>}
+      {onBrowse && (count > 0 || older > 0) && <button type="button" className="quiet-button session-list-browse" onClick={onBrowse}
+        title={browseKeys ? `${t("Browse saved sessions")} (${browseKeys})` : t("Browse saved sessions")}>{t("Browse all…")}</button>}
+    </div>
+    {unreachable && more === 0 && older > 0 && <div className="sidebar-empty session-list-omitted" role="note">{t("Older sessions not listed: {count}", { count: older })}</div>}
+  </>;
 }
 
 /**
@@ -101,7 +128,7 @@ export function OmittedSessionsNote({ count }: { count: number }) {
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, omitted = 0, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
+export function ExplorerSessions({ entries, global, projectId, more, omitted = 0, unreachable = false, onBrowse, browseKeys, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
   /** The sessions listed, what stands for the sub-agents that are not, and the place of the Claude Code sessions started elsewhere. */
   entries: readonly SessionListEntry[];
   /** Whether the sidebar is filtered: a scope with no session found says nothing. */
@@ -114,6 +141,10 @@ export function ExplorerSessions({ entries, global, projectId, more, omitted = 0
   more: number;
   /** How many older sessions the scope has that the window was not given: said after the last row. */
   omitted?: number;
+  /** Whether the window cannot be given more rows of the scope than it has. */
+  unreachable?: boolean;
+  /** Opens the saved sessions of the scope; `browseKeys` are the keys of that command. */
+  onBrowse?: () => void; browseKeys?: string;
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
@@ -221,11 +252,8 @@ export function ExplorerSessions({ entries, global, projectId, more, omitted = 0
       </div>;
     })}
     {sessionEntries(entries).length === 0 && !filtered && omitted === 0 && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
-    <div className="session-list-disclosure">
-      {more > 0 && <button type="button" className="quiet-button" onClick={onMore}>{t("Show more…")} <span className="muted-text">({more})</span></button>}
-      {extended && <button type="button" className="quiet-button" onClick={onFewer}>{t("Show fewer")}</button>}
-    </div>
-    <OmittedSessionsNote count={more === 0 && !filtered ? omitted : 0} />
+    <SessionListDisclosure more={more} omitted={omitted} unreachable={unreachable} filtered={filtered} extended={!!extended} onMore={onMore} onFewer={onFewer}
+      onBrowse={onBrowse} browseKeys={browseKeys} />
     {entries.map(entry => entry.kind === "claude-code" && <Fragment key={`claude-code:${entry.projectId}`}>{claudeCode?.(entry.projectId)}</Fragment>)}
   </div></div>;
 }

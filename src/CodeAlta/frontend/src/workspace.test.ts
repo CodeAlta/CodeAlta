@@ -76,11 +76,19 @@ test("workspace keeps persisted global/project scope and unverified or truncated
   assert.deepEqual(sessionsForProject(snapshot, null).map(value => value.id), ["global", "global-in-project", "unmatched", "omitted"]);
 });
 
-test("workspace shows truncation without implying paging", () => {
+test("workspace says what the display limits leave out, and that older sessions are still reached", () => {
   assert.equal(workspaceNotice(empty), null);
-  assert.match(workspaceNotice({ ...empty, projectsTruncated: true })!, /not paging/i);
-  assert.match(workspaceNotice({ ...empty, sessionsTruncated: true })!, /whole catalog/i);
+  assert.match(workspaceNotice({ ...empty, projectsTruncated: true })!, /up to 1000 projects/i);
+  assert.match(workspaceNotice({ ...empty, sessionsTruncated: true })!, /older sessions are listed when a list is extended or a search finds them/i);
   assert.match(workspaceNotice({ ...empty, displayTextTruncated: true })!, /shortened/i);
+});
+
+test("a list that leaves more or fewer older sessions out is another list: Show more counts them", () => {
+  const busy = (omittedSessions: number): WorkspaceSnapshot => ({ ...empty, sessionsTruncated: true, projects: [{ id: "busy", name: "Busy", path: "/busy", archived: false, omittedSessions }] });
+  assert.equal(sessionListSignature(busy(7)), sessionListSignature(busy(7)));
+  assert.notEqual(sessionListSignature(busy(7)), sessionListSignature(busy(8)));
+  assert.notEqual(sessionListSignature({ ...busy(7), omittedChatSessions: 2 }), sessionListSignature(busy(7)));
+  assert.notEqual(sessionListSignature({ ...busy(7), wantedTruncated: true }), sessionListSignature(busy(7)));
 });
 
 test("a list says how many of its older sessions the window was not given, and nothing when it has them all", () => {

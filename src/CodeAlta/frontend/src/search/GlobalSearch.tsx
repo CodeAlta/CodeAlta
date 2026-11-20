@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { CanvasItem, LocalSearchHit, LocalSearchQueryResponse, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot, WorkspaceClaudeCodeConversation } from "#neoastra";
+import type { WorkspaceWantedSearch, CanvasItem, LocalSearchHit, LocalSearchQueryResponse, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot, WorkspaceClaudeCodeConversation } from "#neoastra";
 import type { ClaudeCodeConversations } from "../claudeCodeImport/claudeCodeSessions";
 import { canvasCommands, matchesCanvasCommand } from "../canvases/canvasPages";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -74,12 +74,14 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * the name of a skill goes with it. It is a movable, resizable window like the others; its place and size are remembered.
  */
 export function GlobalSearch({ snapshot, favorites, start, files, note, available, unavailableReason, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
-  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning, claudeCode = null, onClaudeCode, settings, onSetting }: {
+  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning, claudeCode = null, onClaudeCode, settings, onSetting, onWant }: {
   snapshot: WorkspaceSnapshot | null;
   /** The settings the window knows: a query finds them, and the pages of Settings, in a group of their own; absent where Settings is not this window's. */
   settings?: readonly SettingEntry[];
   /** A setting or a page of Settings was chosen: Settings opens on its page, and the setting glows. */
   onSetting?: (page: string, setting: string | null) => void;
+  /** Told what is looked for among the sessions, null for nothing: the window reads the sessions with it, the old ones too. */
+  onWant?: (search: WorkspaceWantedSearch | null) => void;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
   archived?: readonly WorkspaceSession[];
   /** The projects of the catalog, which name the project of an archived session that the shown space does not list. */
@@ -135,6 +137,10 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   const query = useMemo(() => readQuery(text), [text]);
   const words = query.words;
   const scoped = scope !== undefined;
+  // The window is told what is looked for, and reads the sessions with it: an old session is found as a recent one is.
+  const wantedText = query.commands ? "" : words.join(" ");
+  useEffect(() => { onWant?.(wantedText ? { text: wantedText, scoped, projectId: scope ?? null } : null); }, [wantedText, scope]);
+  useEffect(() => () => onWant?.(null), []);
   const offersSkills = skills.length > 0 && !!onSkill;
   // A text that starts with "/" shows the commands, or the commands and the skills, or one of the two.
   const shownCategory: SearchCategory = scoped ? "sessions" : !query.commands ? category : !offersSkills ? "commands"

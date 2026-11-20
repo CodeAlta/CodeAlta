@@ -42,12 +42,13 @@ import {
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
-  type ConfigurationSnapshot, type WorkspaceClaudeCodeConversation, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
+  type ConfigurationSnapshot, type WorkspaceClaudeCodeConversation, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot, type WorkspaceWantedSearch,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workflows as workflowsApi, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
 import type { SkillChoice } from "./search/skillResults";
 import { SkillChoicesContext, type SkillChoices } from "./skillMentions";
+import { nothingWanted, storedTabSessions, wantedRequest, wantsKey, withWantedSession } from "./workspaceWants";
 import { archivedSessions, loadWorkspace, omittedSessions, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
@@ -247,7 +248,7 @@ import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { terminalPaste } from "./terminal/shellBlocks";
-import { ExplorerSessions, OmittedSessionsNote, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
+import { ExplorerSessions, SessionListDisclosure, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
 import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
 import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode, readClaudeCodeConversations, type ClaudeCodeConversations } from "./claudeCodeImport/claudeCodeSessions";
@@ -591,15 +592,26 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const catalog = useRef<WorkspaceSnapshot | undefined>(undefined);
   // What the window was last given of the catalog: it is given the catalog again when that changes.
   const scopedView = useRef<string | null>(null);
-  const [workspace] = useState(() => ({ ...workspaceApi, snapshot: async (...request: Parameters<typeof workspaceApi.snapshot>) => {
-    const fresh = await workspaceApi.snapshot(...request);
+  // What this window needs of the sessions beyond what every list shows at first (see `workspaceWants`): every read of
+  // the list asks for it, so that an old session of a tab, of an extended list or of a search stays listed.
+  const wanted = useRef(nothingWanted);
+  // The session that is being opened, which no tab shows yet: one found by a search stays listed once the search is over.
+  const openingSession = useRef<string | null>(null);
+  // What each list was read with: until the list shown was read with what the window needs now, a search has not looked everywhere.
+  const [servedWants] = useState(() => new WeakMap<WorkspaceSnapshot, string>());
+  const [, renderServedWants] = useState(0);
+  const [workspace] = useState(() => ({ ...workspaceApi, snapshot: async (_request: object, options?: Parameters<typeof workspaceApi.snapshot>[1]) => {
+    const asked = wanted.current;
+    const fresh = await workspaceApi.snapshot(withWantedSession(asked, openingSession.current), options);
     // A window that comes back on a space waits for the spaces before it shows the projects of that one alone.
     if (shownSpace.current !== defaultSpaceId) await spacesHub.whenLoaded(6_000);
     catalog.current = fresh;
     const view = spaceView(spacesHub.getSnapshot().spaces, shownSpace.current, showingOthers.current);
     scopedView.current = spaceViewKey(view);
     // The archived sessions stay in the catalog, for the saved sessions and the search; the window lists the others.
-    return withoutArchived(scopeSnapshot(fresh, view));
+    const shown = withoutArchived(scopeSnapshot(fresh, view));
+    servedWants.set(shown, wantsKey(asked));
+    return shown;
   } }));
   const [runtimeObservations] = useState(() => createRuntimeObservations(sessionRuntimeState.observe));
   useEffect(() => () => runtimeObservations.invalidate(), [runtimeObservations]);
@@ -676,6 +688,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!creationAlive.current || !shown || !fresh.configured || revision !== browserRevision.current
       || sessionListSignature(shown) === sessionListSignature(fresh)) return;
     publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    // The saved sessions go on with the list as it is now: it is read again as they are searched and extended.
+    refreshBrowserCapture();
   };
   // A move publishes its own list, with the tabs of the moved sessions pointed at their new project: read during it,
   // a list would drop those tabs. What is asked for then is read once the move ends.
@@ -1359,6 +1373,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The filter at the top of the sidebar: while something is typed, the sidebar shows only the sessions, the projects
   // and the Claude Code sessions started elsewhere whose title has every word, open. Nothing of the tree is changed.
   const [sidebarText, setSidebarText] = useState("");
+  // What the search of the window and the saved sessions look for, which the list of the sessions is read with.
+  const [searchWant, setSearchWant] = useState<WorkspaceWantedSearch | null>(null);
+  const [browserWant, setBrowserWant] = useState<Readonly<{ projectId: string | null; text: string; rows: number }> | null>(null);
   const sidebarWords = useMemo(() => readQuery(sidebarText).words, [sidebarText]);
   // The Claude Code sessions started elsewhere the search and the filter look through, read when one of them is used.
   const [searchedClaudeCode, setSearchedClaudeCode] = useState<ClaudeCodeConversations | null>(null);
@@ -2871,6 +2888,59 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
     return scopes;
   }, [snapshot, projectTree.expanded, projectTree.collapsed, projectId, recentSessionCount, sessionExtras, subAgentCount, subAgentExtras, filterView, sidebarWords]);
+  // What the window needs of the sessions: those of its tabs (of every space, which come back with their space), the
+  // rows of the open lists, what is typed in the filter, the search and the saved sessions, and the archived sessions
+  // while the saved sessions show them.
+  const [storedSessions] = useState(() => storedTabSessions(localStorage));
+  const typedFilter = useSettled(sidebarWords.join(" "), 200);
+  const typedSearch = useSettled(searchOpen ? searchWant : null, 200);
+  const typedBrowser = useSettled(dialog === "sessions" ? browserWant : null, 200);
+  const openTabSessions = tabs.open.map(tab => tab.sessionId).join("\n");
+  // The space whose sessions alone are listed; none for a window that lists those of every space.
+  const shownSpaceOnly = useMemo(() => { const view = spaceView(spacesState.spaces, spaceId, showOthers); return view.everything ? null : view.space.id; },
+    [spacesState.spaces, spaceId, showOthers]);
+  const wantedNow = useMemo(() => wantedRequest({
+    sessions: [...openTabSessions.split("\n"), sessionId, ...tabs.closed.map(tab => tab.sessionId), ...(restoredTabs?.open.map(tab => tab.sessionId) ?? []), ...storedSessions,
+      ...[...spaceTabs.current.values()].flatMap(kept => kept.tabs.open.map(tab => tab.sessionId))],
+    lists: [...new Set([scopeKey(projectId), ...projectTree.expanded])].map(key => ({ projectId: key === globalScope ? null : key,
+      count: recentSessionCount + (sessionExtras.get(key) ?? 0) })).concat(typedBrowser ? [{ projectId: typedBrowser.projectId, count: typedBrowser.rows }] : []),
+    searches: [typedFilter ? { text: typedFilter, scoped: false, projectId: null } : null, typedSearch,
+      typedBrowser?.text ? { text: typedBrowser.text, scoped: true, projectId: typedBrowser.projectId } : null],
+    archived: typedBrowser !== null,
+    space: shownSpaceOnly,
+  }), [shownSpaceOnly, openTabSessions, tabs.closed, sessionId, restoredTabs, storedSessions, projectId, projectTree.expanded, recentSessionCount, sessionExtras, typedFilter, typedSearch, typedBrowser, spaceId]);
+  wanted.current = wantedNow;
+  const wantedKeyNow = wantsKey(wantedNow);
+  // A list that leaves sessions out is read again with what is needed now. It is the list of the saved sessions too, which
+  // go on with it. A list that has every session already has what is needed.
+  const readWanted = useRef(async () => {});
+  readWanted.current = async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const shown = currentSnapshot.current;
+      if (!creationAlive.current || !shown || movingPending.current) return;
+      if (!shown.sessionsTruncated) return;
+      const [revision, asked] = [browserRevision.current, wantsKey(wanted.current)];
+      const archivedBefore = archivedIds(catalog.current);
+      let fresh: WorkspaceSnapshot;
+      try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { return; }
+      if (!creationAlive.current || !fresh.configured || asked !== wantsKey(wanted.current)) return;
+      // Another list was shown meanwhile: it is read again, as it may be older than this one.
+      if (revision !== browserRevision.current || currentSnapshot.current !== shown) continue;
+      // The archived sessions are not in the list: they are shown again when they are the only thing that came.
+      if (sessionListSignature(shown) !== sessionListSignature(fresh) || archivedBefore !== archivedIds(catalog.current)) {
+        publishWorkspaceState({ kind: "ready", snapshot: fresh });
+        refreshBrowserCapture();
+      } else {
+        // The same list: it is what was asked for.
+        servedWants.set(shown, asked);
+        renderServedWants(value => value + 1);
+      }
+      return;
+    }
+  };
+  useEffect(() => { void readWanted.current(); }, [wantedKeyNow]);
+  // Whether the list shown was read with what is needed now: a search that finds nothing has then looked everywhere.
+  const wantsServed = !snapshot?.sessionsTruncated || servedWants.get(snapshot) === wantedKeyNow;
   const autoStatusRefresh = useRef<() => Promise<void> | undefined>(() => undefined);
   autoStatusRefresh.current = () => {
     if (!snapshot || document.visibilityState === "hidden") return;
@@ -2995,6 +3065,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // Opens a session by its id, reading the sessions again when this window does not list it yet; says whether it opened.
   // A run that just started on another machine is listed once that machine reports it: it is looked for a few seconds.
   async function openAutomationSession(id: string): Promise<boolean> {
+    // An old session is not in the list until the window asks for it.
+    openingSession.current = id;
     return findWithPatience(async () => {
       let shown = currentSnapshot.current;
       if (!shown?.sessions.some(session => session.id === id)) {
@@ -3713,7 +3785,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "plugin": requestAnimationFrame(() => pluginShortcuts.current.run(choice.id)); break;
       // A project is shown in the Explorer with its sessions, and its prompt takes the keyboard.
       case "project": setProjectTree(current => expandScope(current, choice.id)); selectProject(choice.id); focusPromptSoon(); break;
-      case "session": selectProject(choice.projectId, choice.id); focusPromptSoon(); break;
+      case "session": openingSession.current = choice.id; selectProject(choice.projectId, choice.id); focusPromptSoon(); break;
       case "file": openEditor(choice.project, { path: choice.path, line: null, column: null, explorer: null }); break;
       case "canvas": { const item = canvasCatalog.find(value => value.pluginKey === choice.pluginKey && value.id === choice.id); if (item) openCanvasHere(item); break; }
       case "skill": insertSkill(choice.name, choice.args); break;
@@ -4470,7 +4542,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} filtered={!!filterView}
+    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} unreachable={snapshot.wantedTruncated === true} filtered={!!filterView}
+      onBrowse={() => scopeSessionAction(scope, "browse")} browseKeys={commandKeys(commandDefinitions.find(command => command.id === "browseSessions")!)[0]}
       extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
@@ -6366,7 +6439,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
             } : undefined}
             filter={<SidebarFilterBox value={sidebarText} onChange={setSidebarText}
-              empty={!!filterView && !filterView.scopes.size && !filterView.projects.size && !filterView.claudeCode.size && (!claudeCodeConfigured || claudeCodeSearched)} />}
+              empty={!!filterView && !filterView.scopes.size && !filterView.projects.size && !filterView.claudeCode.size && (!claudeCodeConfigured || claudeCodeSearched) && wantsServed} />}
             tree={{ expanded: id => filterView && filterOpens(filterView, id) ? !filterFolded.has(id) : isExpanded(projectTree, id),
               toggle: id => filterView && filterOpens(filterView, id) ? setFilterFolded(current => toggleFilterFold(current, id))
                 : setProjectTree(current => toggleScope(current, id)),
@@ -6571,11 +6644,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && !filterView && omittedSessions(snapshot, projectId) === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
-            <div className="session-list-disclosure">
-              {selectedList.hidden > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({selectedList.hidden})</span></button>}
-              {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
-            </div>
-            <OmittedSessionsNote count={snapshot && selectedList.hidden === 0 && !filterView ? omittedSessions(snapshot, projectId) : 0} />
+            {snapshot && <SessionListDisclosure more={selectedList.hidden} omitted={omittedSessions(snapshot, projectId)} unreachable={snapshot.wantedTruncated === true}
+              filtered={!!filterView} extended={extraSessions > 0} onMore={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}
+              onFewer={() => setSessionExtra(projectId, 0)} onBrowse={openSessionBrowser}
+              browseKeys={commandKeys(commandDefinitions.find(command => command.id === "browseSessions")!)[0]} />}
             {withClaudeCodeSessions(selectedList.entries, projectId, claudeCodeConfigured).map(entry => entry.kind === "claude-code"
               && <Fragment key={`claude-code:${entry.projectId}`}>{claudeCodeGroup(entry.projectId)}</Fragment>)}
           </div>
@@ -7092,10 +7164,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId}
       archived={archivedSessionControls()} checking={checkedSessionControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}
-      close={() => setDialog(null)} open={tab => {
+      onWant={(scope, text, rows) => setBrowserWant({ projectId: scope, text, rows })}
+      close={() => { setBrowserWant(null); setDialog(null); }} open={tab => {
         if (view !== "workspace" || settingsVisible.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false)
           || !browserActivation(currentSnapshot.current, tab, browserCapture.revision, browserRevision.current)) return false;
-        selectSessionTab(tab); setDialog(null); return true;
+        openingSession.current = tab.sessionId;
+        selectSessionTab(tab); setBrowserWant(null); setDialog(null); return true;
       }} />}
     {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
       demo={demoMode} onClose={() => setArchivedInfo(null)}
@@ -7107,6 +7181,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}
       onProject={project => chooseSearch({ kind: "project", id: project.id })}
       onSession={session => chooseSearch({ kind: "session", projectId: session.projectId, id: session.id })}
+      onWant={setSearchWant}
       archived={owned && mutation?.capability.canMutate() ? shownArchived : undefined} archivedProjects={catalog.current?.projects}
       onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
@@ -7126,6 +7201,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
   </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></NewSessionBesideContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownChartDataContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SkillChoicesContext.Provider></TaskReferencesContext.Provider></ReferenceSourcesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
+}
+
+// The archived sessions of a catalog, as a text that tells two sets of them apart.
+const archivedIds = (catalog: WorkspaceSnapshot | undefined): string => (catalog?.sessions ?? []).filter(session => session.archived).map(session => session.id).join("\n");
+
+// A value once it has stopped changing for a moment: what is typed, when the typing pauses. Nothing is waited for to empty it.
+function useSettled<T>(value: T, delay: number): T {
+  const [settled, setSettled] = useState(value);
+  const key = JSON.stringify(value ?? null);
+  useEffect(() => {
+    if (value === null || value === "") { setSettled(value); return; }
+    const timer = setTimeout(() => setSettled(value), delay);
+    return () => clearTimeout(timer);
+  }, [key]);
+  return settled;
 }
 
 // Where a prompt names skills, as the host reads it when the prompt is sent.

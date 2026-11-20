@@ -1,4 +1,4 @@
-import type { WorkspaceRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { translate } from "./localization";
 
 export type WorkspaceState =
@@ -8,7 +8,7 @@ export type WorkspaceState =
   | { kind: "error"; message: string };
 
 export async function loadWorkspace(
-  invoke: (request: WorkspaceRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<WorkspaceSnapshot>,
+  invoke: (request: object, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<WorkspaceSnapshot>,
   signal: AbortSignal,
   publish: (state: WorkspaceState) => void,
 ): Promise<void> {
@@ -40,11 +40,13 @@ export function sessionsForProject(snapshot: WorkspaceSnapshot, projectId: strin
 
 /**
  * What the Explorer shows of a snapshot's sessions, without their activity times: two snapshots with the
- * same signature list the same sessions under the same parents and titles.
+ * same signature list the same sessions under the same parents and titles, and leave as many older ones out.
  */
 export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
   return JSON.stringify([snapshot.projects.map(project => [project.id, project.name, project.path, project.archived, project.parentId ?? null, project.subPath ?? null,
-    project.repositoryName ?? null, project.secure ?? null, project.noRepository ?? null]),
+    project.repositoryName ?? null, project.secure ?? null, project.noRepository ?? null, project.omittedSessions ?? 0]),
+    // What "Show more" counts of the sessions the lists leave out, and whether more of them can be asked for.
+    snapshot.omittedChatSessions ?? 0, snapshot.wantedTruncated === true,
     snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath,
       session.worktreePath, session.worktreeMissing, session.rewindCount, session.forkedFromSessionId, session.forkKind, session.archived, session.providerConversation === true])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
@@ -74,8 +76,8 @@ export function unreadableProjectsNotice(snapshot: WorkspaceSnapshot, locale: st
 }
 
 /**
- * How many older sessions a list of the Explorer has that the snapshot has no room for: those of a project, or the chats
- * (null). The list says so after its last row, so that sessions that are not listed are never taken for sessions that are gone.
+ * How many older rows a list of the Explorer has that the snapshot leaves out: those of a project, or the chats (null).
+ * "Show more" counts them with the rows it hides, and asks for them: they are never taken for sessions that are gone.
  */
 export function omittedSessions(snapshot: WorkspaceSnapshot, projectId: string | null): number {
   return (projectId === null ? snapshot.omittedChatSessions : snapshot.projects.find(project => project.id === projectId)?.omittedSessions) ?? 0;
@@ -83,5 +85,5 @@ export function omittedSessions(snapshot: WorkspaceSnapshot, projectId: string |
 
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {
   if (!snapshot.projectsTruncated && !snapshot.sessionsTruncated && !snapshot.displayTextTruncated) return null;
-  return "Display limits applied (up to 200 projects / 500 sessions, with a wire-size limit); some labels may be shortened. This is not paging: the shared loader still reads the whole catalog. Sessions whose projects are omitted appear under Chats.";
+  return "Display limits applied (up to 1000 projects, and the newest sessions of each list, with a wire-size limit); some labels may be shortened. Older sessions are listed when a list is extended or a search finds them. Sessions whose projects are omitted appear under Chats.";
 }
