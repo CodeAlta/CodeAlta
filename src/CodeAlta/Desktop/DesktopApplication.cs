@@ -1260,6 +1260,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Credentials = host.Credentials,
                         Spaces = host.SpaceCatalog,
                         Config = new CodeAltaConfigStore(host.CatalogOptions),
+                        McpHome = options.McpHome,
                     });
                     builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
                     {

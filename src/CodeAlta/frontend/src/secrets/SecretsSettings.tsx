@@ -47,7 +47,7 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal, focus = n
   const [environmentGeneration, setEnvironmentGeneration] = useState(0);
   // What each tab is adding: opened from its own toolbar, or from the card of the overview.
   const [addingSecret, setAddingSecret] = useState<Readonly<{ name?: string }> | null>(null);
-  const [addingVariable, setAddingVariable] = useState(false);
+  const [addingVariable, setAddingVariable] = useState<Readonly<{ name?: string }> | null>(null);
   const [addingSignIn, setAddingSignIn] = useState(false);
   const [pickingProject, setPickingProject] = useState(false);
   const [providerDialog, setProviderDialog] = useState<{ editing: CredentialProviderRpcView | null } | null>(null);
@@ -106,6 +106,7 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal, focus = n
     tabs.current?.querySelector<HTMLElement>(`[data-secrets-tab="${target}"]`)?.focus();
   }
   const addSecret = (name?: string) => { setTab("secrets"); setAddingSecret(name ? { name } : {}); };
+  const addVariable = (name?: string) => { setTab("variables"); setAddingVariable(name ? { name } : {}); };
   return <SettingsPage className="secrets-settings" label={t("Secrets and environment")} group="Agent & models" title="Secrets and environment"
     notice={notice} loading={loading} busy={busy} onReload={() => { reload(); setEnvironmentGeneration(value => value + 1); }}>
     {!listing ? <SettingsUnavailable loading={loading} icon="secret" title="Secrets unavailable" />
@@ -128,7 +129,7 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal, focus = n
         <div className="secrets-panel" role="tabpanel" id="secrets-panel" aria-labelledby={`secrets-tab-${current}`} data-secrets-panel={current}
           data-setting={secretsTabSetting(current) ?? undefined}>
           {current === "overview" && <SecretsOverview listing={listing} environment={environment} offered={offered} busy={!epoch || busy} onOpen={setTab}
-            onAddSecret={() => addSecret()} onAddVariable={() => { setTab("variables"); setAddingVariable(true); }}
+            onAddSecret={() => addSecret()} onAddVariable={() => addVariable()}
             onSetEnvironment={() => { setTab("environment"); setPickingProject(true); }}
             onAddVault={() => { setTab("vaults"); setProviderDialog({ editing: null }); }} onAddSignIn={() => { setTab("signIns"); setAddingSignIn(true); }} />}
           {current === "secrets" && <SecretsTable listing={listing} busy={!epoch || busy} run={run} actions={actions} vaults={vaults} adding={addingSecret} onAdding={setAddingSecret}
@@ -139,7 +140,7 @@ export function SecretsSettings({ epoch, api = secrets, runInTerminal, focus = n
           {current === "environment" && environment && <EnvironmentTab environment={environment} listing={listing} busy={!epoch || busy} run={run}
             actions={{ setVariable: (projectId, name, value) => api.setProjectEnvironment({ expectedEpoch, projectId, name, value }),
               deleteVariable: (projectId, name) => api.deleteProjectEnvironment({ expectedEpoch, projectId, name }) }}
-            picking={pickingProject} onPicking={setPickingProject} onSetSecret={addSecret} onOpenFile={onOpenFile} onOpenSpace={onOpenSpace} />}
+            picking={pickingProject} onPicking={setPickingProject} onSetValue={(kind, name) => kind === "secret" ? addSecret(name) : addVariable(name)} onOpenFile={onOpenFile} onOpenSpace={onOpenSpace} />}
           {current === "vaults" && <CredentialProviders listing={listing} busy={busy} run={run} onAdd={() => setProviderDialog({ editing: null })} actions={{
             unlock: (id, password) => api.unlockProvider({ expectedEpoch, id, password }),
             lock: id => api.lockProvider({ expectedEpoch, id }),
@@ -201,7 +202,7 @@ export function RecentUses({ listing }: { listing: SecretsList }) {
   const { t, locale } = useShellLanguage();
   const [sort, setSort] = useState<TableSort | null>({ column: "when", direction: "desc" });
   const outcome = (use: SecretUse) => use.outcome === "given" ? t("given") : use.outcome === "waits" ? t("waits for you") : use.outcome === "confirmed" ? t("confirmed")
-    : use.outcome === "restricted" ? t("Project restricted")
+    : use.outcome === "restricted" ? t("limited to other projects")
     : use.outcome === "refused" ? t("declined") : use.outcome === "expired" ? t("not answered in time") : t("not available");
   const rows = useMemo(() => listing.uses.map((use, index) => ({ ...use, key: `${use.at}-${index}` })), [listing.uses]);
   const columns: DataColumn<SecretUse & { key: string }>[] = [
@@ -229,7 +230,7 @@ export function SecretsBody({ listing, busy, run, actions, vaults = null, initia
 }) {
   const { t } = useShellLanguage();
   const [addingSecret, setAddingSecret] = useState<Readonly<{ name?: string }> | null>(null);
-  const [addingVariable, setAddingVariable] = useState(false);
+  const [addingVariable, setAddingVariable] = useState<Readonly<{ name?: string }> | null>(null);
   return <div className="secrets-body">
     <SecretsTable listing={listing} busy={busy} run={run} actions={actions} vaults={vaults} adding={addingSecret} onAdding={setAddingSecret} initialSelected={initialSelected} />
     <div className="secrets-part" role="group" aria-label={t("Variables")}>

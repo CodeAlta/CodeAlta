@@ -82,7 +82,7 @@ export function SecretsTable({ listing, busy, run, actions, vaults = null, restr
     { id: "name", label: "Name", sort: secret => secret.name, cell: secret => <span className="secret-cell-name">
       <code title={secret.name}>{secret.name}</code><CopyReference compact text={referenceOf("secret", secret.name)} /></span> },
     { id: "source", label: "Kept in", sort: secret => secretSourceText(secret, t), cell: secret => <span className="secret-source" title={secretSourceText(secret, t)}>
-      <CredentialIcon icon={secret.provider ? secret.icon : "computer"} size={14} /><span>{secretSourceText(secret, t)}</span></span> },
+      <CredentialIcon icon={secret.provider ? secret.icon : "computer"} size={14} /><span>{secretSourceText(secret, t, true)}</span></span> },
     { id: "state", label: "State", width: "6.5rem", sort: secret => secret.state === "ready" ? null : t(stateLabel(secret.state).label),
       cell: secret => secret.state === "ready" ? null : <Tag minimal intent={stateLabel(secret.state).intent} title={secret.stateMessage ?? undefined}>{t(stateLabel(secret.state).label)}</Tag> },
     ...(restriction || limited ? [{ id: "projects", label: "Projects", secondary: true, sort: secret => secretProjectNames(secret, projects).join(", "), cell: secret => {
@@ -170,7 +170,7 @@ function SecretDetails({ secret, projects, busy, run, vaults, restriction }: {
   const { t, locale } = useShellLanguage();
   const names = secretProjectNames(secret, projects);
   const usedBy = secret.usedBy ?? null;
-  const kinds = { provider: ["provider", t("Provider")], space: ["space", t("Space")], project: ["folder", t("Project")] } as const;
+  const kinds = { provider: ["provider", t("Provider")], mcp: ["server", t("MCP server")], space: ["space", t("Space")], project: ["folder", t("Project")] } as const;
   return <div className="secret-details" data-secret-details={secret.name}>
     <dl className="secret-details-facts">
       <div><dt>{t("Reference")}</dt><dd><CopyReference text={referenceOf("secret", secret.name)} /></dd></div>
@@ -257,7 +257,7 @@ export function ProjectRestriction({ secret, projects, busy, run, restriction }:
 export function VariablesTable({ listing, busy, run, actions, adding, onAdding }: {
   listing: SecretsList; busy: boolean; run: Run; actions: SecretsActions;
   /** Whether the form that adds a variable is open. */
-  adding: boolean; onAdding: (adding: boolean) => void;
+  adding: Readonly<{ name?: string }> | null; onAdding: (adding: Readonly<{ name?: string }> | null) => void;
 }) {
   const { t, locale } = useShellLanguage();
   const [sort, setSort] = useState<TableSort | null>({ column: "name", direction: "asc" });
@@ -289,13 +289,13 @@ export function VariablesTable({ listing, busy, run, actions, adding, onAdding }
   return <section className="fleet-table-section secrets-table" aria-label={t("Variables")}>
     <div className="secrets-toolbar">
       <span className="secrets-toolbar-actions">
-        <PopoverNext isOpen={adding} placement="bottom-end" onInteraction={next => { if (!next && !busy) onAdding(false); }}
+        <PopoverNext isOpen={adding !== null} placement="bottom-end" onInteraction={next => { if (!next && !busy) onAdding(null); }}
           content={<div className="secret-new-popover">
             <strong>{t("Add a variable")}</strong>
-            <NewValueForm kind="var" taken={listing.variables.map(variable => variable.name)} busy={busy} onCancel={() => onAdding(false)}
-              onSave={async (name, value) => { if (await run(() => actions.setVariable(name, value))) onAdding(false); }} />
+            <NewValueForm key={adding?.name ?? ""} kind="var" initialName={adding?.name} taken={listing.variables.map(variable => variable.name)} busy={busy} onCancel={() => onAdding(null)}
+              onSave={async (name, value) => { if (await run(() => actions.setVariable(name, value))) onAdding(null); }} />
           </div>}>
-          <Button size="small" icon={<AppIcon name="plus" size={14} />} disabled={busy} onClick={() => onAdding(true)}>{t("Add a variable…")}</Button>
+          <Button size="small" icon={<AppIcon name="plus" size={14} />} disabled={busy} onClick={() => onAdding({})}>{t("Add a variable…")}</Button>
         </PopoverNext>
       </span>
     </div>

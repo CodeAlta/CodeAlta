@@ -100,9 +100,11 @@ export function secretProjectNames(secret: Pick<SecretView, "projectIds">, proje
 }
 
 /** Where a secret is kept, in words: this computer with its version, or its vault and its item. */
-export function secretSourceText(secret: SecretView, t: Translate): string {
-  return secret.provider ? `${secret.providerName ?? secret.provider}${secret.label ? ` › ${secret.label}` : ""}`
-    : `${t("This computer")} · v${secret.version}`;
+export function secretSourceText(secret: SecretView, t: Translate, short = false): string {
+  if (!secret.provider) return `${t("This computer")} · v${secret.version}`;
+  // A vault item is usually named as its secret: the cell of a table does not say the name twice.
+  const parts = (secret.label ?? "").split(" › ").filter(part => part && !(short && part.localeCompare(secret.name, undefined, { sensitivity: "accent" }) === 0));
+  return [secret.providerName ?? secret.provider, ...parts].join(" › ");
 }
 
 /** What a secret says of itself to the filter of its table: its name, where it is kept, its state and its projects. */

@@ -1,6 +1,8 @@
+using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Credentials;
+using CodeAlta.Plugin.Mcp;
 using NeoAstra.Rpc;
 using Tomlyn;
 using Tomlyn.Model;
@@ -11,6 +13,9 @@ internal sealed partial class SecretsService
 {
     internal SpaceCatalog? Spaces { get; init; }
     internal CodeAltaConfigStore? Config { get; init; }
+
+    /// <summary>The home the MCP servers are read from, for what names a secret; null reads none.</summary>
+    internal McpHome? McpHome { get; init; }
 
     /// <summary>Lists the project environment and CLI profiles as written, with local availability, without resolving values.</summary>
     [NeoRpcMethod("listEnvironment")]
@@ -189,6 +194,31 @@ internal sealed partial class SecretsService
             foreach (var space in spaces)
                 foreach (var profile in space.Settings.Identity?.Cli ?? [])
                     Add(References(profile.Environment), new("space", space.Name));
+            var mcp = McpHome is { } home ? new McpManagementService() : null;
+            // The servers of the global files once, then those of each project's own files, named with their project.
+            void AddMcpServers(string? projectRoot, string? projectName)
+            {
+                if (mcp is null) return;
+                IReadOnlyList<McpManagementServerSnapshot> servers;
+                try
+                {
+                    servers = mcp.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectRoot, Home = McpHome!.Value, ProbeWritability = false }).Servers;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+                {
+                    return;
+                }
+
+                foreach (var server in servers)
+                {
+                    if (projectName is not null && server.SourceScope != McpManagementScope.Project) continue;
+                    var texts = (server.EditableEnv ?? server.Env).Values.Concat((server.EditableHeaders ?? server.Headers).Values)
+                        .Concat(server.EditableArgs ?? server.Args).Append(server.EditableUrl ?? server.Url ?? string.Empty);
+                    Add(texts.SelectMany(SecretReferences.Find), new("mcp", projectName is null ? server.DisplayName : $"{server.DisplayName} ({projectName})"));
+                }
+            }
+
+            AddMcpServers(null, null);
             foreach (var project in projects)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -196,6 +226,7 @@ internal sealed partial class SecretsService
                 Add(References(config.LoadProjectEnvironment(project.ProjectPath)), owner);
                 foreach (var profile in config.LoadProjectCliProfiles(project.ProjectPath))
                     Add(References(profile.Environment), owner);
+                AddMcpServers(project.ProjectPath, project.DisplayName);
             }
 
             return list with

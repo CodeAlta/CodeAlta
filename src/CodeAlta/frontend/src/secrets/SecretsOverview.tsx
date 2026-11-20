@@ -36,7 +36,7 @@ export function SecretsOverview({ listing, environment, offered, busy, onOpen, o
       action: "Add a variable…", onAction: onAddVariable },
     { tab: "environment", icon: "terminal", sentence: "Environment variables the sessions of a project get.", count: projectsWithEnvironment(environment).length,
       attention: withIssues === 1 ? [t("1 project misses a value")] : withIssues > 1 ? [t("{count} projects miss a value", { count: withIssues })] : [],
-      action: "Set the environment of a project…", onAction: onSetEnvironment },
+      action: "Add a project…", onAction: onSetEnvironment },
     { tab: "vaults", icon: "lock", sentence: "Where the values are kept: this computer, or a vault such as 1Password.", count: listing.providers.length,
       attention: listing.providers.filter(provider => provider.state !== "ready").map(provider => `${provider.displayName}: ${t(stateLabel(provider.state).label)}`),
       action: "Add a vault…", onAction: onAddVault },

@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Plugin.Mcp;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -65,7 +66,14 @@ public sealed class SecretsRpcTests
         var other = await catalog.GetOrAddTransientAsync(Directory.CreateDirectory(Path.Combine(root.Path, "other")).FullName);
         var config = new CodeAltaConfigStore(options);
         var store = FileStore(root.Path);
-        var service = new SecretsService(store, Epoch) { Spaces = spaces, Config = config };
+        var service = new SecretsService(store, Epoch)
+        {
+            Spaces = spaces, Config = config,
+            McpHome = new McpHome(Directory.CreateDirectory(Path.Combine(root.Path, "home")).FullName, root.Path),
+        };
+        File.WriteAllText(Path.Combine(root.Path, "mcp.json"), """{ "mcpServers": { "grafana": { "url": "https://grafana.test/mcp", "headers": { "Authorization": "Bearer ${secret:ACME_TOKEN}" } } } }""");
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(project.ProjectPath, ".alta")).FullName, "mcp.json"),
+            """{ "mcpServers": { "deploy": { "command": "deploy-mcp", "env": { "DEPLOY_TOKEN": "${secret:ACME_TOKEN}" } } } }""");
         var space = (await spaces.CreateAsync("Work")).Space!;
         Assert.IsTrue((await spaces.UpdateSettingsAsync(space.Id, _ => new SpaceSettings(Identity: new SpaceIdentity(Cli:
             [new("gh", [new("GH_TOKEN", "${secret:ACME_TOKEN}")])])))).Succeeded);
@@ -104,6 +112,8 @@ public sealed class SecretsRpcTests
         CollectionAssert.AreEquivalent(new[]
         {
             new SecretUsageView("provider", "work"),
+            new SecretUsageView("mcp", "grafana"),
+            new SecretUsageView("mcp", $"deploy ({project.DisplayName})"),
             new SecretUsageView("space", "Work"),
             new SecretUsageView("project", project.DisplayName),
             new SecretUsageView("project", other.DisplayName),

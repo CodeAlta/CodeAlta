@@ -30,12 +30,12 @@ function ProjectMark({ project, size = 15 }: { project: Readonly<{ icon?: string
  * `.alta/config.toml`, and their CLI profiles), each with what is missing on this computer; a row opens the editor of
  * its project. Under them, the spaces whose Identity sets CLI profiles, each with the way to that section.
  */
-export function EnvironmentTab({ environment, listing, busy, run, actions, picking, onPicking, onSetSecret, onOpenFile, onOpenSpace, initialSelected = null }: {
+export function EnvironmentTab({ environment, listing, busy, run, actions, picking, onPicking, onSetValue, onOpenFile, onOpenSpace, initialSelected = null }: {
   environment: EnvironmentList; listing: SecretsList; busy: boolean; run: Run; actions: EnvironmentActions;
   /** Whether the choice of a project to give an environment is open. */
   picking: boolean; onPicking: (picking: boolean) => void;
-  /** Opens the form that adds a secret, with the name a variable asks for. */
-  onSetSecret: (name: string) => void;
+  /** Opens the form that adds a secret or a variable of this computer, with the name a value refers to. */
+  onSetValue: (kind: "secret" | "var", name: string) => void;
   /** Opens the configuration file of a project in the editor; absent where no editor can be opened. */
   onOpenFile?: (projectId: string, path: string) => void;
   /** Opens the page of a space on its Identity; absent where it cannot be opened. */
@@ -83,12 +83,12 @@ export function EnvironmentTab({ environment, listing, busy, run, actions, picki
         : <DataTable label={t("Environment variables of projects")} rows={rows} columns={columns} rowKey={project => project.id} sort={sort} onSort={setSort}
           selected={selected} onSelect={setSelected} rowProps={project => ({ data: { project: project.id } })}
           empty={<span className="muted-text">{t("No project matches.")}</span>}
-          details={project => <ProjectEnvironment project={project} listing={listing} busy={busy} run={run} actions={actions} onSetSecret={onSetSecret} onOpenFile={onOpenFile} />} />}
+          details={project => <ProjectEnvironment project={project} listing={listing} busy={busy} run={run} actions={actions} onSetValue={onSetValue} onOpenFile={onOpenFile} />} />}
     </section>
     {draftProject && <section className="environment-draft">
       <h3><ProjectMark project={draftProject} /> {draftProject.name}</h3>
       <ProjectEnvironment key={draftProject.id} project={draftProject} listing={listing} busy={busy} run={run} actions={actions}
-        onSetSecret={onSetSecret} onOpenFile={onOpenFile} />
+        onSetValue={onSetValue} onOpenFile={onOpenFile} />
     </section>}
     {environment.spaces.length > 0 && <section className="environment-spaces" aria-labelledby="environment-spaces-title">
       <h3 id="environment-spaces-title">{t("CLI profiles of spaces")}</h3>
@@ -113,8 +113,8 @@ function ProfileTag({ profile }: { profile: Readonly<{ name: string; variables: 
  * The environment of one project, under its row: its variables (name, value, what is missing on this computer, Delete),
  * the form that adds one, the file they are saved in, and its CLI profiles, read only.
  */
-function ProjectEnvironment({ project, listing, busy, run, actions, onSetSecret, onOpenFile }: {
-  project: EnvironmentProject; listing: SecretsList; busy: boolean; run: Run; actions: EnvironmentActions; onSetSecret: (name: string) => void;
+function ProjectEnvironment({ project, listing, busy, run, actions, onSetValue, onOpenFile }: {
+  project: EnvironmentProject; listing: SecretsList; busy: boolean; run: Run; actions: EnvironmentActions; onSetValue: (kind: "secret" | "var", name: string) => void;
   onOpenFile?: (projectId: string, path: string) => void;
 }) {
   const { t } = useShellLanguage();
@@ -127,7 +127,7 @@ function ProjectEnvironment({ project, listing, busy, run, actions, onSetSecret,
         <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Value")}</th>
           <th scope="col">{t("On this computer")}</th><th scope="col" aria-label={t("Actions")} /></tr></thead>
         <tbody>{project.variables.map(variable => <VariableLine key={variable.name} project={project} variable={variable} busy={busy}
-          run={run} actions={actions} onSetSecret={onSetSecret} />)}</tbody>
+          run={run} actions={actions} onSetValue={onSetValue} />)}</tbody>
       </table>
     </div>}
     <NewEnvironmentVariable project={project} listing={listing} busy={busy} run={run} actions={actions} />
@@ -139,26 +139,26 @@ function ProjectEnvironment({ project, listing, busy, run, actions, onSetSecret,
       <h4>{t("CLI profiles")}</h4>
       <span className="environment-profiles">{project.profiles.map(profile => <ProfileTag key={profile.name} profile={profile} />)}</span>
     </div>}
-    <IssueList issues={others} onSetSecret={onSetSecret} />
+    <IssueList issues={others} onSetValue={onSetValue} />
   </div>;
 }
 
 /** What is missing on this computer for a value: each issue in words, and Set it for a secret that is not set. */
-function IssueList({ issues, onSetSecret }: { issues: readonly EnvironmentIssue[]; onSetSecret: (name: string) => void }) {
+function IssueList({ issues, onSetValue }: { issues: readonly EnvironmentIssue[]; onSetValue: (kind: "secret" | "var", name: string) => void }) {
   const { t } = useShellLanguage();
   if (issues.length === 0) return null;
   return <span className="environment-issues">
     {issues.map(issue => <span key={`${issue.kind}\n${issue.name}\n${issue.state}`} className="environment-issue" data-issue={issue.state} title={issue.message ?? undefined}>
       <AppIcon name="warning" size={12} />{issueText(issue, t)}
-      {issue.kind === "secret" && issue.state === "not_set" && <Button size="small" variant="minimal" intent="primary" text={t("Set it…")}
-        aria-label={t("Set {name}…", { name: issue.name })} onClick={() => onSetSecret(issue.name)} />}
+      {(issue.kind === "secret" || issue.kind === "var") && issue.state === "not_set" && <Button size="small" variant="minimal" intent="primary" text={t("Set it…")}
+        aria-label={t("Set {name}…", { name: issue.name })} onClick={() => onSetValue(issue.kind as "secret" | "var", issue.name)} />}
     </span>)}
   </span>;
 }
 
 /** One variable of a project: its name, its value edited in place, what is missing for it on this computer, and Delete for one the project sets itself. */
-function VariableLine({ project, variable, busy, run, actions, onSetSecret }: {
-  project: EnvironmentProject; variable: EnvironmentVariable; busy: boolean; run: Run; actions: EnvironmentActions; onSetSecret: (name: string) => void;
+function VariableLine({ project, variable, busy, run, actions, onSetValue }: {
+  project: EnvironmentProject; variable: EnvironmentVariable; busy: boolean; run: Run; actions: EnvironmentActions; onSetValue: (kind: "secret" | "var", name: string) => void;
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState<string | null>(null);
@@ -178,7 +178,7 @@ function VariableLine({ project, variable, busy, run, actions, onSetSecret }: {
       }} /></td>
     <td>
       {variable.issues.length === 0 ? <span role="img" className="environment-ready" aria-label={t("All set")} title={t("All set")}><AppIcon name="check" size={13} /></span>
-        : <IssueList issues={variable.issues} onSetSecret={onSetSecret} />}
+        : <IssueList issues={variable.issues} onSetValue={onSetValue} />}
     </td>
     <td><span className="secret-actions">
       {changed && <Button size="small" intent="primary" text={t("Save")} disabled={busy || !value} onClick={() => void save()} />}

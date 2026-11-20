@@ -95,7 +95,7 @@ test("a secret given to every project offers the choice of projects, none checke
 });
 
 test("a variable shows its value, editable, and its reference", () => {
-  const html = render(createElement(VariablesTable, { listing, busy: false, run: never, actions, adding: false, onAdding: never }));
+  const html = render(createElement(VariablesTable, { listing, busy: false, run: never, actions, adding: null, onAdding: never }));
 
   assert.match(html, /data-variable="GRAFANA_URL"/);
   assert.match(html, /aria-label="Value of GRAFANA_URL"[^>]*value="https:\/\/grafana.example"|value="https:\/\/grafana.example"[^>]*aria-label="Value of GRAFANA_URL"/);
@@ -181,6 +181,9 @@ test("each tab says what it holds in a few words, and a host offers the tabs it 
 test("a secret is found by its name, where it is kept and its projects", () => {
   assert.equal(secretSourceText(listing.secrets[1], t), "This computer · v2");
   assert.equal(secretSourceText({ ...listing.secrets[1], provider: "personal", providerName: "1Password", label: "Private › Anthropic" }, t), "1Password › Private › Anthropic");
+  const named = { ...listing.secrets[1], name: "OPENAI_API_KEY", provider: "personal", providerName: "1Password", label: "Private › OPENAI_API_KEY › credential" };
+  assert.equal(secretSourceText(named, t), "1Password › Private › OPENAI_API_KEY › credential");
+  assert.equal(secretSourceText(named, t, true), "1Password › Private › credential");
   assert.match(secretSearchText(listing.secrets[0], projects, t), /ACME_GH_TOKEN This computer · v1 {2}acme-web acme-api/);
 });
 
@@ -197,7 +200,7 @@ test("the environment lists only the projects that set one, with what is missing
   assert.deepEqual(missingSecrets(environment), ["NPM_TOKEN"]);
 
   const html = render(createElement(EnvironmentTab, { environment, listing, busy: false, run: never, actions: { setVariable: never, deleteVariable: never },
-    picking: false, onPicking: never, onSetSecret: never, onOpenFile: never, onOpenSpace: never, initialSelected: "acme-web" }));
+    picking: false, onPicking: never, onSetValue: never, onOpenFile: never, onOpenSpace: never, initialSelected: "acme-web" }));
   assert.match(html, /data-project="acme-web"/);
   assert.match(html, /data-project="acme-api"/);
   assert.doesNotMatch(html, /data-project="docs"/, "a project that sets nothing is not listed");
@@ -236,7 +239,7 @@ test("the overview has a card per concept, with its count, what needs attention 
   assert.match(html, /data-overview="secrets" data-attention="true"/);
   assert.match(html, /NPM_TOKEN is not set/, "a secret a project names that is not set on this computer");
   assert.match(html, /2 projects miss a value/);
-  assert.match(html, />Set the environment of a project…</);
+  assert.match(html, />Add a project…</);
   assert.match(html, />Add a vault…</);
   // A host without vaults has no card for them.
   const few = render(createElement(SecretsOverview, { listing, environment: null, offered: offeredSecretsTabs(listing, null), busy: false, onOpen: never, onAddSecret: never,
