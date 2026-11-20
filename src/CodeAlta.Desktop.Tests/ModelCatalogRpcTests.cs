@@ -27,6 +27,64 @@ public sealed class ModelCatalogRpcTests
     }
 
     [TestMethod]
+    public async Task RevalidateReadsTheModelsAgainOnlyWhenOlderThanAsked()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var probes = 0;
+        string[] listed = ["glm-exl3"];
+        var descriptor = new ModelProviderDescriptor(new("endpoint"), "Endpoint");
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => { probes++; return [.. listed.Select(static id => new AgentModelInfo(id))]; }));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+        await service.Models(new("epoch", "endpoint"), CancellationToken.None);
+        Assert.AreEqual(1, probes);
+
+        Assert.AreEqual("stale_epoch", (await service.Revalidate(new("other", "endpoint", 0), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid_request", (await service.Revalidate(new("epoch", "endpoint", -1), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid_request", (await service.Revalidate(new("epoch", "endpoint", ModelCatalogService.MaximumRevalidateAgeSeconds + 1), CancellationToken.None)).Status);
+        Assert.AreEqual("not_found", (await service.Revalidate(new("epoch", "missing", 0), CancellationToken.None)).Status);
+
+        var fresh = await service.Revalidate(new("epoch", "endpoint", 3600), CancellationToken.None);
+        Assert.AreEqual("ok", fresh.Status);
+        Assert.IsTrue(fresh.Current, "read a moment ago");
+        Assert.AreEqual(1, probes, "models read a moment ago are not read again");
+
+        listed = ["glm"];
+        var read = await service.Revalidate(new("epoch", "endpoint", 0), CancellationToken.None);
+        Assert.AreEqual("ok", read.Status);
+        Assert.AreEqual("Ready", read.Availability);
+        Assert.IsTrue(read.Current);
+        Assert.AreEqual(2, probes);
+        CollectionAssert.AreEqual(new[] { "glm" }, (await service.Models(new("epoch", "endpoint"), CancellationToken.None)).Models.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
+    public async Task ShutdownJoinsARevalidationThePageStoppedWaitingFor()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        var descriptor = new ModelProviderDescriptor(new("held"), "Held");
+        registry.RegisterOrReplace(descriptor, () => new GatedRuntime(descriptor, entered, release, () => Interlocked.Increment(ref count)));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+        using var page = new CancellationTokenSource();
+
+        try
+        {
+            var asked = service.Revalidate(new("epoch", "held", 0), page.Token);
+            await entered.Task.WithinAsync(TestTime.Seconds(5));
+            await page.CancelAsync();
+            await Assert.ThrowsAsync<OperationCanceledException>(async () => await asked);
+            var draining = service.DrainAsync();
+            Assert.IsFalse(draining.IsCompleted, "the read the page stopped waiting for still runs");
+            release.TrySetResult();
+            await draining.WithinAsync(TestTime.Seconds(5));
+            Assert.AreEqual("closed", (await service.Revalidate(new("epoch", "held", 0), CancellationToken.None)).Status);
+        }
+        finally { release.TrySetResult(); }
+    }
+
+    [TestMethod]
     [DataRow(null)]
     [DataRow(true)]
     [DataRow(false)]

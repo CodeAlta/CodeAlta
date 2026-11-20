@@ -5460,6 +5460,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       </HTMLSelect>} provider={select}
       model={<><ComposerModelPicker id={`composer-model-${choiceId}`} value={value.modelId || null} models={draftChoices.models} order={draftChoices.modelsOrder} providerKey={usedProvider || null}
         disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)}
+        onOpen={() => void draftChoices.refreshModels(120)} onRefresh={() => void draftChoices.refreshModels(0)} refreshing={draftChoices.refreshingModels}
         tiers={composerTierEntries(draftChoices.tiers, t)} currentTier={draftChoices.tier}
         onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }}
         adaptive={composerAdaptiveEntry(draftChoices.tiers, t)}

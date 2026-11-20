@@ -95,6 +95,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ModelOptions = modelProviderInitializationService.SetModelOptionAsync,
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
+        // A run that failed because its provider no longer has the model: the models of that provider are read again, so that
+        // the lists offer what it has now. At most once every ten seconds per provider, whatever the number of sessions that fail.
+        runtimeService.ModelUnavailable = provider => _ = RevalidateQuietlyAsync(modelProviderInitializationService, provider);
         // Every tool call of a session goes through the tool hooks of the plugins, whatever runs the session, then through the
         // guard the host gave that session (the autonomy of an automation's run), looked up at each call.
         var toolHooks = Commands.Plugins;
@@ -155,6 +158,20 @@ public sealed class CodeAltaHost : IAsyncDisposable
     }
 
     // Whether the provider of a run defers tools for its model: a provider that cannot be created defers none.
+    // Reads the models of a provider again after a run said it has no longer the model: what fails (a provider removed,
+    // the host shutting down) only leaves the list as it was.
+    private static async Task RevalidateQuietlyAsync(ModelProviderInitializationService service, string provider)
+    {
+        try
+        {
+            await service.RevalidateProviderAsync(new ModelProviderId(provider), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or ObjectDisposedException or InvalidOperationException
+            or ArgumentException or AgentDependencyRetentionException)
+        {
+        }
+    }
+
     private static async ValueTask<bool> DefersToolsAsync(ModelProviderRegistry registry, string providerId, string? model, CancellationToken cancellationToken)
     {
         try

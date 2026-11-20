@@ -65,6 +65,12 @@ public sealed partial class SessionRuntimeService
     internal Func<RunFailureNotice, Action<HeldRunFailure>?>? RunFailureFallback { get; set; }
 
     /// <summary>
+    /// Told the provider of a run that failed because the provider no longer has its model, on the actor of the
+    /// session: the models of that provider are read again. It must not wait.
+    /// </summary>
+    internal Action<string>? ModelUnavailable { get; set; }
+
+    /// <summary>
     /// Reads the model tiers and the fallback of the settings. A file that cannot be read, or whose tiers are not
     /// valid, gives no tier and no fallback: the settings say what is wrong when they are opened.
     /// </summary>
@@ -97,6 +103,8 @@ public sealed partial class SessionRuntimeService
     // Runs on the actor of the session, with the error of a run.
     private async ValueTask<Action<HeldRunFailure>?> TryClaimRunFailureAsync(string sessionId, RuntimeSessionEntry entry, CodeAlta.Agent.AgentErrorEvent error)
     {
+        if (error.Failure is { Kind: CodeAlta.Agent.AgentFailureKind.ModelUnavailable } && !string.IsNullOrWhiteSpace(entry.ProviderKey))
+            ModelUnavailable?.Invoke(entry.ProviderKey);
         if (RunFailureFallback is not { } fallback || entry.IsTerminated || error.RunId is null
             || error.Failure is not { Kind: CodeAlta.Agent.AgentFailureKind.QuotaExhausted or CodeAlta.Agent.AgentFailureKind.RateLimited or CodeAlta.Agent.AgentFailureKind.Unavailable or CodeAlta.Agent.AgentFailureKind.ModelUnavailable })
             return null;

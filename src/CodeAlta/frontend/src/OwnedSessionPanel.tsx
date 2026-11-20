@@ -48,7 +48,7 @@ import { parseSideQuestion } from "./sideQuestion/sideQuestions";
 import { shellAttachment, type ShellCommandEntry, type ShellCommands } from "./shellCommands/shellCommands";
 import { holdsShellOutput, useShellPrompt } from "./shellCommands/useShellPrompt";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
-import { changeSelection, validSelection } from "./sessionSelection";
+import { changeSelection, modelNotOffered, sameModels, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
 import { sessionProviderName } from "./machines/machineProviderNames";
@@ -827,10 +827,15 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       || staged.some(item => item.kind === "Queue" && item.state !== "failed"))) { stagePrompt("Queue"); return; }
     if (retained?.inFlight) return;
     const latest = selections.current(epoch, sessionId);
+    // A model its provider lists no longer: the models of the provider are read again first, and the prompt goes when
+    // the model is back; otherwise the form of the session opens on the model to choose another one.
+    const sending = latest ?? selection ?? activeChoices?.current ?? null;
+    if (!retained && modelNotOffered(activeChoices, sending?.modelId)) { void checkModelThenSend(queuePrompt, sending!.modelId!); return; }
     if (!retained && (latest || selection) && (!choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId
       || !validSelection(choices, latest ?? selection!) || latest && selection !== latest)) {
       sendDiagnostics.warn("blocked: next-send selection has not been validated");
-      setMessage("Next Send choices changed. Wait for the mounted composer to show the validated selection before sending.");
+      setSendFailure(t("The choices of this session changed: check them, then send again."));
+      setSelectionOpenRequest(value => value + 1);
       return;
     }
     const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
@@ -882,6 +887,88 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         && (inputRevision.current === revision || latestText.current === request.text)
         && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
     });
+  }
+  // A Send that waits for the models of its provider to be read again (checkModelThenSend): what it would send, so that
+  // only that Send goes, once, and nothing goes when the draft, its images or its selection changed meanwhile.
+  type CheckedSend = Readonly<{ queuePrompt: boolean; text: string; images: typeof images; latest: SessionSelection | null; selection: SessionSelection | null; provider: string }>;
+  const submitLatest = useRef(submit);
+  submitLatest.current = submit;
+  const checkedSend = useRef<CheckedSend | null>(null);
+  const checking = useRef(false);
+  const [checkingModel, setCheckingModel] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
+  useEffect(() => {
+    const send = checkedSend.current;
+    if (!send) return;
+    checkedSend.current = null;
+    if (latestText.current !== send.text || images !== send.images || selections.current(epoch, sessionId) !== send.latest || selection !== send.selection
+      || activeChoices?.current?.providerKey !== send.provider) return;
+    submitLatest.current(send.queuePrompt);
+  }, [choices]);
+  // A run that ended may have failed because its provider no longer has the model: the host then reads its models again,
+  // and the composer takes them once that read ends. A read that runs is joined; a list read today is not read again.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !runActive) void revalidateModels(86_400);
+    wasRunning.current = runActive;
+  }, [runActive]);
+  /**
+   * Reads the models of the provider of the session again when they are older than `maxAgeSeconds`, then the choices of
+   * the session, which the composer takes when their models differ, unless `apply` is false. The choices are read also
+   * when the provider was not: the host may have read it, after a run failed on its model. "unavailable" when the models
+   * could not be read as recent as asked; null when nothing was asked (a session of another machine, whose provider is
+   * not this computer's) or the composer went away.
+   */
+  async function revalidateModels(maxAgeSeconds: number, apply = true): Promise<SessionChoicesResponse | "unavailable" | null> {
+    const provider = activeChoices?.current?.providerKey;
+    const signal = scope.current?.signal;
+    if (!provider || activeChoices?.machineProvider || !signal || signal.aborted || !capability.canMutate()) return null;
+    setRevalidating(true);
+    try {
+      const reply = await modelCatalog.revalidate({ expectedEpoch: epoch, providerId: provider, maxAgeSeconds }, { signal });
+      capability.observe(reply);
+      if (signal.aborted) return null;
+      const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal });
+      capability.observe(value);
+      if (signal.aborted || value.status !== "ok" || value.epoch !== epoch || value.sessionId !== sessionId || value.current?.providerKey !== provider) return null;
+      if (apply && !sameModels(value, activeChoices)) setChoices(value);
+      return reply.status === "ok" && reply.current ? value : "unavailable";
+    } catch {
+      return signal.aborted ? null : "unavailable";
+    } finally {
+      if (!signal.aborted) setRevalidating(false);
+    }
+  }
+  // Send with a model the provider does not list: its models are read again. The prompt goes when the provider lists the
+  // model (an endpoint that added it since CodeAlta read its list); else the status line says why, also when the models
+  // could not be read, and the form of the session opens on the model.
+  async function checkModelThenSend(queuePrompt: boolean, modelId: string) {
+    const provider = activeChoices?.current?.providerKey;
+    if (checking.current || !provider) return;
+    checking.current = true;
+    const asked: CheckedSend = { queuePrompt, text: latestText.current, images, latest: selections.current(epoch, sessionId), selection, provider };
+    const name = activeChoices?.providerName ?? provider;
+    setSendFailure("");
+    setCheckingModel(true);
+    try {
+      // A session of another machine lists the models of that machine: what it lists is what is known.
+      const read = activeChoices?.machineProvider ? activeChoices : await revalidateModels(10, false);
+      if (read === null) return;
+      if (read !== "unavailable" && read.models.some(model => model.id === modelId)) {
+        // The prompt goes once the composer has these choices, which its send checks.
+        checkedSend.current = asked;
+        setChoices(read);
+        return;
+      }
+      if (read !== "unavailable" && !sameModels(read, activeChoices)) setChoices(read);
+      setSendFailure(read === "unavailable"
+        ? t("The models of {provider} could not be read: send again, or choose another model.", { provider: name })
+        : t("{model} is not offered by {provider} now: choose another model.", { model: modelId, provider: name }));
+      setSelectionOpenRequest(value => value + 1);
+    } finally {
+      checking.current = false;
+      setCheckingModel(false);
+    }
   }
   // Commands addressed to the active session's composer that no control carries out (keyboard shortcuts and the
   // command picker). Send, Abort, Clear Queue and Compact press their control, marked with data-composer-command.
@@ -1558,11 +1645,12 @@ ${value}` : value);
       {shell.mode && !pending && !invalidEpoch ? shell.status
       : <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) || !compacting && !invalidEpoch && pluginOutcome?.cancelled ? "danger"
         : !compacting && !invalidEpoch && pluginOutcome ? "notice" : undefined}>
-        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled ? "error" : pluginOutcome ? "plugin" : "prompt"} size={14} />}
+        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting || checkingModel ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled ? "error" : pluginOutcome ? "plugin" : "prompt"} size={14} />}
         {/* A steering prompt a plugin answered says so while its turn goes on. */}
         <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy && !invalidEpoch && !compacting && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
           : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
+          : checkingModel ? t("Checking the models of {provider}…", { provider: activeChoices?.providerName ?? activeChoices?.current?.providerKey ?? t("the provider") })
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
           : !invalidEpoch && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
           : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>}
@@ -1622,7 +1710,8 @@ ${value}` : value);
         fastMode: sessionFastMode(selectedModel, shownOptions, reportedFastMode),
         fastModeFellBack: sessionFastModeFellBack(selectedModel, shownOptions, reportedFastMode),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
-          : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
+          : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null,
+        modelMissing: modelNotOffered(activeChoices, selected?.modelId) }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1647,10 +1736,14 @@ ${value}` : value);
         }} />}
       model={<><ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} order={activeChoices?.modelsOrder} providerKey={selected?.providerKey}
         disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}
+        // The models an endpoint lists can change while CodeAlta runs: they are read again when the list opens, if older than two minutes.
+        onOpen={activeChoices?.machineProvider ? undefined : () => void revalidateModels(120)}
+        onRefresh={activeChoices?.machineProvider ? undefined : () => void revalidateModels(0)} refreshing={revalidating}
         tiers={composerTiers} currentTier={activeChoices?.adaptive ? adaptiveTier : activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
         adaptive={composerAdaptive} onChooseAdaptive={level => void chooseAdaptive(level)}
         currentAdaptiveLevel={activeChoices?.adaptive ? adaptiveLevelOf(tierState?.adaptive, activeChoices.adaptiveLevel)?.level ?? null : null}
-        title={activeChoices?.adaptive ? t("CodeAlta chooses the models of each turn") : selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />
+        title={activeChoices?.adaptive ? t("CodeAlta chooses the models of each turn") : modelNotOffered(activeChoices, selected?.modelId) ? t("The provider does not offer this model now. Choose another one.")
+          : selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />
         <AdaptiveSetupDialog isOpen={adaptiveSetup} onClose={() => setAdaptiveSetup(false)} /></>}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} complete={!!selectedModel?.effortsComplete} model={selectedModel?.name} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />}

@@ -217,6 +217,24 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task ModelTheProviderNoLongerHas_HasItsProviderReadAgain_WithoutAFallback()
+    {
+        // An endpoint that dropped the model of a session: the models of its provider are read again, so that the lists of
+        // the window stop offering it; a session without tiers fails as before.
+        await using var f = await Fixture.CreateAsync("");
+        var told = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = f.Host.RuntimeService.ModelUnavailable;
+        Assert.IsNotNull(host, "the host reads the models again");
+        f.Host.RuntimeService.ModelUnavailable = provider => { told.TrySetResult(provider); host(provider); };
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.ModelUnavailable)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+
+        Assert.AreEqual("prov-a", await told.Task.WithinAsync(Timeout));
+    }
+
+    [TestMethod]
     public async Task AuthFailure_DoesNotSwitch_AndTheParentIsTold()
     {
         await using var f = await Fixture.CreateAsync(Tiers);

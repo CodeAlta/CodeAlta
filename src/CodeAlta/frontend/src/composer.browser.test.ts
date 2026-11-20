@@ -31,8 +31,9 @@ const scenarios = [
   { name: "files and a folder that the host took from a drop are attached to the composer under the point", mac: false, permission: false, outside: false, removed: false, options: false, hostDrop: true },
   { name: "a prompt that starts with ! runs a shell command whose output goes with the next prompt", mac: false, permission: false, outside: false, removed: false, options: false, shell: true },
   { name: "text typed and sent in the same moment is the text the prompt sends or queues", mac: false, permission: false, outside: false, removed: false, options: false, burst: true },
+  { name: "a model its provider no longer lists is read again before a Send, which goes once and only as it was asked", mac: false, permission: false, outside: false, removed: false, options: false, gone: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false, shell = false, burst = false } of scenarios) test(name, { skip: !edge, timeout: testLimit(90_000) }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false, shell = false, burst = false, gone = false } of scenarios) test(name, { skip: !edge, timeout: testLimit(90_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -122,7 +123,8 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       ${outside ? "window.fixtureOutsideSpace=true;" : ""}
       ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}
       ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};window.fixtureSessionOptions={options:{subSessions:true},calls:[]};" : ""}
-      ${shell ? "window.fixtureReferences=true;" : ""}` });
+      ${shell ? "window.fixtureReferences=true;" : ""}
+      ${gone ? "window.fixtureGone={listed:false,reads:0,gate:null};" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -389,6 +391,55 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(await wait("fixture.sendCalls.length===1"), true);
       assert.equal(await evaluate("fixture.sendCalls[0].selection?.providerKey"), "fixture-provider");
       assert.deepEqual(await evaluate("window.fixtureRemoved.switched"), ["fixture-provider"]);
+      assert.deepEqual(exceptions, []);
+      return;
+    }
+
+    if (gone) {
+      const status = "document.querySelector('.composer-foreground-text')?.textContent";
+      const missing = "!!document.querySelector('.composer-selection-model[data-missing]')";
+      // Escape closes the list of models, and the form when the focus is in it; else its chip closes it, as a click does.
+      const closeForm = async () => {
+        if (await evaluate("!!document.querySelector('.composer-model-picker')")) {
+          await key("Escape", "Escape", 27);
+          assert.equal(await wait("!document.querySelector('.composer-model-picker')"), true);
+        }
+        if (await evaluate("!!document.querySelector('.composer-selection-popover')")) await evaluate("document.querySelector('.composer-selection').click(); true");
+        assert.equal(await wait("!document.querySelector('.composer-selection-popover')"), true);
+      };
+      // The chip warns before anything is sent.
+      assert.equal(await wait(missing), true);
+      // Send reads the models again: the provider still does not list the model, the prompt stays and the form opens on it.
+      await write("first"); await enter();
+      assert.equal(await wait(`${status}==='gone-model is not offered by fixture-provider now: choose another model.' && !!document.querySelector('.composer-selection-popover')`), true);
+      assert.equal(await evaluate("window.fixtureGone.reads"), 1);
+      assert.equal(await evaluate("fixture.sendCalls.length"), 0);
+      await closeForm();
+      // The provider lists it again, but the draft changes while its models are read: nothing is sent.
+      await evaluate("window.fixtureGone.listed=true; window.fixtureGone.gate=new Promise(resolve=>window.releaseGone=resolve); true");
+      await evaluate("document.querySelector('#session-prompt').focus()");
+      await enter();
+      assert.equal(await wait(`${status}==='Checking the models of fixture-provider…'`), true);
+      await command("Input.insertText", { text: " more" });
+      assert.equal(await wait("promptText()==='first more'"), true);
+      await evaluate("window.fixtureGone.gate=null; window.releaseGone(); true");
+      assert.equal(await wait(`!${missing} && ${status}!=='Checking the models of fixture-provider…'`), true, "the provider lists the model again");
+      await evaluate("new Promise(resolve=>setTimeout(()=>resolve(true),300))");
+      assert.equal(await evaluate("fixture.sendCalls.length"), 0, "a draft changed during the check is not sent");
+      // The model goes again (read when the list opens, and by its button); then it is back, and Send sends once.
+      await evaluate("window.fixtureGone.listed=false; document.querySelector('.composer-selection').click(); true");
+      assert.equal(await wait("!!document.querySelector('.composer-selection-popover button[id^=\"composer-model-\"]')"), true);
+      await evaluate("document.querySelector('.composer-selection-popover button[id^=\"composer-model-\"]').click(); true");
+      assert.equal(await wait("!!document.querySelector('.composer-model-refresh')"), true);
+      await evaluate("document.querySelector('.composer-model-refresh').click(); true");
+      assert.equal(await wait(missing), true);
+      await closeForm();
+      await evaluate("window.fixtureGone.listed=true; document.querySelector('#session-prompt').focus(); true");
+      await enter();
+      assert.equal(await wait("fixture.sendCalls.length===1"), true);
+      assert.deepEqual(await sends(), ["first more"]);
+      await evaluate("new Promise(resolve=>setTimeout(()=>resolve(true),300))");
+      assert.equal(await evaluate("fixture.sendCalls.length"), 1, "the Send goes once");
       assert.deepEqual(exceptions, []);
       return;
     }

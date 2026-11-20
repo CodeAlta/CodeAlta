@@ -73,7 +73,14 @@ field, required extra body) are described by rules in `ProviderDefaults/provider
 provider key and host (`RawApiProviderDefaultsCatalog`). A rule fills an `AgentProviderProfile`; what the user writes
 in the provider table wins over the rule. Adding support for a compatible endpoint is a rule, not code.
 
-The models of a provider come from its model list, or a static fallback. The models.dev snapshot
+The models of a provider come from its model list, or a static fallback. The list is read when the provider is prepared
+(at startup, after a change of its settings or of its sign-in, and by Test provider), and read again quietly
+(`ModelProviderInitializationService.RevalidateProviderAsync`) when a window opens a model list older than two minutes,
+and when a send names a model the list lacks or a run fails with `ModelUnavailable`, if the list is older than ten
+seconds. A read that runs is joined whatever the age. A quiet read keeps a ready provider ready with its old list until
+the new one arrives, and keeps that list when the read fails, so that an endpoint that does not answer for a moment
+never empties the lists; such a kept list is older than asked, which the window reads as not verified. A provider is
+asked at most once per such age. Endpoints are not polled: a provider is read when something shows that its list matters. The models.dev snapshot
 (`CodeAlta.Agent/Data/models_dev_db.json`, refreshed into `~/.alta/cache/model-catalog/` every 12 hours) adds limits,
 prices and abilities, and the user's `model_overrides` win over both. The models.dev provider of a configured provider is `models_dev_provider_id`, else the
 one whose `api` is the provider's `api_url`, else the provider key, else the default of the type; a model it does not

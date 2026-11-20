@@ -88,9 +88,19 @@ test("the setting of the model list changes how many models it shows, and a shor
     await page.click('#composer-model-test');
     await page.until(`document.querySelectorAll('.composer-model-picker [role="option"]').length === 3`, "three models");
     assert.equal(await page.evaluate(`(() => { const list = document.querySelector('.composer-model-picker [role="listbox"]'); return list.scrollHeight <= list.clientHeight; })()`), true);
-    assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').textContent`), "vendor/model-25 · Unverified", "a saved model the provider does not list is named on the button");
+    assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').textContent`), "vendor/model-25 · Not offered", "a saved model the provider does not list is named on the button");
+    assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').dataset.missing`), "true", "in the color of a warning");
+    // Each opening is told, and the button of the search box asks for the models again.
+    assert.ok(await page.evaluate<number>(`pickerFixture.opened`) >= 2);
+    await page.click('.composer-model-refresh');
+    await page.until(`pickerFixture.refreshed === 1`, "the models asked for again");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.composer-model-picker')`, "the list closed");
+
+    // A provider that lists nothing says nothing of the model: it is not known yet.
+    await page.evaluate(`pickerFixture.listed = 0; pickerFixture.apply()`);
+    await page.until(`document.querySelector('#composer-model-test').textContent === 'vendor/model-25 · Unverified'`, "an unverified model");
+    assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').dataset.missing ?? null`), null);
 
     // While the models are read, the button waits and opens nothing.
     await page.evaluate(`pickerFixture.loading = true; pickerFixture.apply()`);

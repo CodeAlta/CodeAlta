@@ -435,6 +435,170 @@ public sealed class ModelProviderInitializationServiceTests
         Assert.AreEqual(ModelProviderAvailability.Ready, service.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId).Availability);
     }
 
+    [TestMethod]
+    public async Task Revalidate_ReadsTheModelsAgain_AndKeepsTheOldListWhileTheyAreRead()
+    {
+        // An endpoint that changed its models while CodeAlta runs: the lists of the window keep the models they show
+        // until the new list arrives, never an empty list in between.
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("endpoint"), "Endpoint", "test");
+        var runtime = new ChangingRuntime(descriptor) { Models = ["glm-exl3"] };
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+        await service.RefreshProviderAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
+
+        runtime.Models = ["glm"];
+        runtime.Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.Hold = release;
+        var reading = service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.Zero);
+        await runtime.Entered.Task.WithinAsync(TestTime.Seconds(5));
+        var meanwhile = State(service, descriptor);
+        Assert.AreEqual(ModelProviderAvailability.Ready, meanwhile.Availability);
+        CollectionAssert.AreEqual(new[] { "glm-exl3" }, meanwhile.Models.Select(static model => model.Id).ToArray());
+        release.TrySetResult();
+        var after = await reading.WithinAsync(TestTime.Seconds(5));
+
+        Assert.AreEqual(ModelProviderAvailability.Ready, after!.Availability);
+        CollectionAssert.AreEqual(new[] { "glm" }, after.Models.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
+    public async Task Revalidate_JoinsARunningRead_WhateverTheAgeAsked()
+    {
+        // The list opens and starts a read; a send that checks its model meanwhile gets the answer of that read, not the
+        // list of before because it is recent.
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("joined"), "Joined", "test");
+        var runtime = new ChangingRuntime(descriptor) { Models = ["old"] };
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+        await service.RefreshProviderAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
+
+        runtime.Models = ["new"];
+        runtime.Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.Hold = release;
+        var opened = service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.Zero);
+        await runtime.Entered.Task.WithinAsync(TestTime.Seconds(5));
+        var sending = service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.FromHours(1));
+        Assert.IsFalse(sending.IsCompleted, "the send waits for the read that runs");
+        release.TrySetResult();
+        await opened.WithinAsync(TestTime.Seconds(5));
+        var after = await sending.WithinAsync(TestTime.Seconds(5));
+
+        CollectionAssert.AreEqual(new[] { "new" }, after!.Models.Select(static model => model.Id).ToArray());
+        Assert.AreEqual(2, runtime.ProbeCount);
+    }
+
+    [TestMethod]
+    public async Task Revalidate_KeepsTheModels_OfAProviderThatDoesNotAnswer()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("flaky"), "Flaky", "test");
+        var runtime = new ChangingRuntime(descriptor) { Models = ["model"] };
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+        await service.RefreshProviderAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
+
+        runtime.Failure = new HttpRequestException("Connection refused.");
+        var after = await service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.Zero).WithinAsync(TestTime.Seconds(5));
+
+        Assert.AreEqual(2, runtime.ProbeCount);
+        Assert.AreEqual(ModelProviderAvailability.Ready, after!.Availability, "a quiet read that fails keeps the provider ready");
+        CollectionAssert.AreEqual(new[] { "model" }, after.Models.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
+    public async Task Revalidate_AsksAProviderAtMostOncePerMaxAge()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("down"), "Down", "test");
+        var runtime = new ChangingRuntime(descriptor) { Models = ["model"] };
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+        await service.RefreshProviderAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
+
+        // Models read a moment ago are fresh: nothing is asked.
+        await service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.FromHours(1)).WithinAsync(TestTime.Seconds(5));
+        Assert.AreEqual(1, runtime.ProbeCount);
+
+        // A provider that failed is prepared again, once: the next look within the time asks nothing.
+        runtime.Failure = new HttpRequestException("Connection refused.");
+        await service.RefreshProviderAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
+        Assert.AreEqual(ModelProviderAvailability.Failed, State(service, descriptor).Availability);
+        await service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.FromHours(1)).WithinAsync(TestTime.Seconds(5));
+        await service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.FromHours(1)).WithinAsync(TestTime.Seconds(5));
+        Assert.AreEqual(3, runtime.ProbeCount);
+    }
+
+    [TestMethod]
+    public async Task Refresh_DoesNotTakeTheOutcomeOfAQuietRead()
+    {
+        // Test provider while a quiet read runs: the quiet read keeps the old list when it fails, Test provider must say
+        // that the provider fails.
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("tested"), "Tested", "test");
+        var runtime = new ChangingRuntime(descriptor) { Models = ["model"] };
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+        await service.RefreshProviderAsync(descriptor.ProviderId).WithinAsync(TestTime.Seconds(5));
+
+        runtime.Failure = new HttpRequestException("Connection refused.");
+        runtime.Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.Hold = release;
+        var quiet = service.RevalidateProviderAsync(descriptor.ProviderId, TimeSpan.Zero);
+        await runtime.Entered.Task.WithinAsync(TestTime.Seconds(5));
+        var tested = service.RefreshProviderAsync(descriptor.ProviderId);
+        release.TrySetResult();
+        await Task.WhenAll(quiet, tested).WithinAsync(TestTime.Seconds(5));
+
+        Assert.AreEqual(3, runtime.ProbeCount, "Test provider probes after the quiet read");
+        Assert.AreEqual(ModelProviderAvailability.Failed, State(service, descriptor).Availability);
+    }
+
+    private static ModelProviderStateSnapshot State(ModelProviderInitializationService service, ModelProviderDescriptor descriptor)
+        => service.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId);
+
+    // An endpoint whose models, failure and pause the test changes between probes; `Hold` pauses the next probe once it started.
+    private sealed class ChangingRuntime(ModelProviderDescriptor descriptor) : IModelProviderRuntime
+    {
+        private int _probes;
+
+        public volatile string[] Models = [];
+
+        public volatile Exception? Failure;
+
+        public volatile TaskCompletionSource? Hold;
+
+        // Set when the next probe starts; a test makes a new one before the probe it waits for.
+        public volatile TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int ProbeCount => Volatile.Read(ref _probes);
+
+        public ModelProviderDescriptor Descriptor => descriptor;
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public async Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _probes);
+            var (models, failure, hold) = (Models, Failure, Hold);
+            Hold = null;
+            Entered.TrySetResult();
+            if (hold is not null) await hold.Task.WaitAsync(cancellationToken);
+            if (failure is not null) throw failure;
+            return new() { ProviderId = descriptor.ProviderId, Availability = ModelProviderAvailability.Ready, Models = [.. models.Select(static id => new AgentModelInfo(id))] };
+        }
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     // Reads its "account" when a probe starts; the first probe waits until it is released.
     private sealed class AccountProbeRuntime(ModelProviderDescriptor descriptor) : IModelProviderRuntime
     {

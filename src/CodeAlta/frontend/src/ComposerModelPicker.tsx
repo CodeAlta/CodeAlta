@@ -21,15 +21,23 @@ export type ComposerAdaptive = Readonly<{ ready: boolean; detail: string; title?
  * models that match, and Enter takes the active one. A provider whose settings list its models by name shows the latest
  * model of each family first, the older ones after "Other models" (see modelOrder.ts); one in its own order keeps it.
  * The list shows the number of models chosen in Settings and scrolls for the rest.
- * A saved model the provider does not list is named on the button, never in the list.
+ * A saved model the provider does not list is named on the button, never in the list: "Unverified" while the provider
+ * lists nothing (not ready, still read), "Not offered" in the color of a warning when it lists its models and not this one.
+ * `onOpen` is told when the list opens, and `onRefresh` adds a button in the search box that reads the models again.
  */
 export function ComposerModelPicker({ id, value, models, order = null, providerKey, disabled = false, loading = false, title, onChange, preferences = modelPickerPreferences,
-  tiers, currentTier = null, onChooseTier, adaptive = null, onChooseAdaptive, currentAdaptiveLevel = null }: {
+  tiers, currentTier = null, onChooseTier, adaptive = null, onChooseAdaptive, currentAdaptiveLevel = null, onOpen, onRefresh, refreshing = false }: {
   id: string; value: string | null; models: readonly ModelPickerChoice[];
   /** The order the settings of the provider put the models in (`provider`, `name`, `name_version`); null when not known, which keeps it. */
   order?: string | null;
   providerKey?: string | null;
   disabled?: boolean; loading?: boolean; title?: string; onChange: (modelId: string) => void;
+  /** Told when the list opens: the owner can read the models again when they are old. */
+  onOpen?: () => void;
+  /** Reads the models of the provider again, from a button of the search box; none without it. */
+  onRefresh?: () => void;
+  /** Whether the models are being read again: the button turns. */
+  refreshing?: boolean;
   preferences?: ModelPickerPreferenceStore;
   /** The tiers of the settings, shown at the top of the list with the model each gives; none when the user set none. */
   tiers?: readonly ComposerTier[];
@@ -54,12 +62,27 @@ export function ComposerModelPicker({ id, value, models, order = null, providerK
   // The separator stands before the first older model, when the latest ones are listed too.
   const separatorAt = sections.frontier.length > 0 && sections.other.length > 0 ? sections.frontier.length : -1;
   const current = models.find(model => model.id === value);
-  const label = current?.name ?? (value ? loading ? t("Loading…") : `${value} · ${t("Unverified")}` : t(loading ? "Loading…" : "No model"));
+  // The provider lists its models, and not this one: it does not offer it now.
+  const missing = !!value && !current && !loading && models.length > 0;
+  const label = current?.name ?? (value ? loading ? t("Loading…") : `${value} · ${t(missing ? "Not offered" : "Unverified")}` : t(loading ? "Loading…" : "No model"));
   const usable = !disabled && !loading;
   const option = (index: number) => `${listId}-${index}`;
   const reveal = () => list.current?.querySelector(".bp6-active")?.scrollIntoView({ block: "nearest" });
   // The active model stays in view while the arrows move it and while the search changes what is listed.
   useLayoutEffect(() => { if (open) reveal(); }, [open, active, shown]);
+  // Models read again while the list is open: the active row stays on its model, or on a row that is still there.
+  const shownBefore = useRef(shown);
+  const modelsBefore = useRef(models);
+  useLayoutEffect(() => {
+    if (modelsBefore.current !== models) {
+      const id = shownBefore.current[active]?.id;
+      const found = id === undefined ? -1 : shown.findIndex(model => model.id === id);
+      const next = found >= 0 ? found : Math.min(active, Math.max(0, shown.length - 1));
+      if (next !== active) setActive(next);
+    }
+    modelsBefore.current = models;
+    shownBefore.current = shown;
+  }, [models, shown, active]);
   function choose(model: ModelPickerChoice | undefined) {
     if (!model) return;
     setOpen(false);
@@ -98,6 +121,8 @@ export function ComposerModelPicker({ id, value, models, order = null, providerK
     <InputGroup type="search" inputRef={search} role="combobox" aria-label={t("Search models")} placeholder={t("Search models")} value={query}
       aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={shown.length ? option(active) : undefined}
       leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
+      rightElement={onRefresh && <Button variant="minimal" size="small" className="composer-model-refresh" loading={refreshing} disabled={refreshing}
+        icon={<AppIcon name="refresh" size={14} />} aria-label={t("Read the models again")} title={t("Read the models again")} onClick={onRefresh} />}
       onChange={event => { setQuery(event.target.value); setActive(0); }}
       onKeyDown={event => {
         if (event.key === "Enter") { event.preventDefault(); choose(shown[active]); return; }
@@ -121,11 +146,12 @@ export function ComposerModelPicker({ id, value, models, order = null, providerK
   return <PopoverNext className="composer-model-target" fill placement="bottom-start" matchTargetWidth isOpen={open && usable} content={content} onOpening={focusSearch}
     onInteraction={next => {
       // The list opens on the model in use, with nothing searched.
-      if (next && !open) { const all = sectionModels(models, order); setQuery(""); setActive(Math.max(0, [...all.frontier, ...all.other].findIndex(model => model.id === value))); }
+      if (next && !open) { const all = sectionModels(models, order); setQuery(""); setActive(Math.max(0, [...all.frontier, ...all.other].findIndex(model => model.id === value))); onOpen?.(); }
       setOpen(next);
     }} onOpened={() => { focusSearch(); reveal(); }}>
-    <Button id={id} className="composer-model-select" data-model-selector alignText="start" aria-haspopup="listbox" aria-expanded={open && usable}
-      aria-label={`${t("Model")}: ${label}`} title={title} disabled={!usable}
+    <Button id={id} className="composer-model-select" data-model-selector data-missing={missing || undefined} alignText="start" aria-haspopup="listbox" aria-expanded={open && usable}
+      aria-label={`${t("Model")}: ${label}`} title={title ?? (missing ? t("The provider does not offer this model now. Choose another one.") : undefined)} disabled={!usable}
+      icon={missing ? <AppIcon name="warning" size={14} /> : undefined}
       endIcon={<AppIcon name="chevronDown" size={14} />}>{label}</Button>
   </PopoverNext>;
 }

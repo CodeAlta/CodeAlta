@@ -144,9 +144,67 @@ internal sealed class ModelCatalogService(
     internal async Task DrainAsync()
     {
         Task[] work;
-        lock (_probeGate) { _closed = true; work = [.. _probes, _initialization]; }
+        lock (_probeGate) { _closed = true; work = [.. _probes, .. _reads, _initialization]; }
         _closing.TrySetResult();
         await Task.WhenAll(work).ConfigureAwait(false);
+    }
+
+    /// <summary>The longest age of the models a window may ask for: a day.</summary>
+    internal const int MaximumRevalidateAgeSeconds = 86_400;
+
+    /// <summary>
+    /// Reads the models of one provider again when they are older than the age asked: the window asks when its list of
+    /// models opens, and before a send names a model the provider does not list. A ready provider keeps its models while
+    /// they are read, and when the read fails (<see cref="ModelProviderInitializationService.RevalidateProviderAsync"/>).
+    /// </summary>
+    [NeoRpcMethod("revalidate")]
+    public async Task<ModelCatalogRevalidateResponse> Revalidate(ModelCatalogRevalidateRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var denied = CheckEpoch(request.ExpectedEpoch);
+        if (denied is not null) return new(denied, epoch, null, "Unknown", false);
+        if (!ValidId(request.ProviderId) || request.MaxAgeSeconds is < 0 or > MaximumRevalidateAgeSeconds)
+            return new("invalid_request", epoch, null, "Unknown", false);
+        var descriptor = registry!.ListProviders(includeDisabled: true).FirstOrDefault(value =>
+            string.Equals(value.ProviderId.Value, request.ProviderId, StringComparison.OrdinalIgnoreCase));
+        if (descriptor is null) return new("not_found", epoch, null, "Unknown", false);
+        // The read belongs to this service, as a probe does: a page that stops waiting leaves it running, and DrainAsync
+        // joins it before the providers are released. Its place is taken under the lock, and the read starts outside it.
+        var owned = new TaskCompletionSource<ModelProviderStateSnapshot?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_probeGate)
+        {
+            if (_closed) return new("closed", epoch, descriptor.ProviderId.Value, "Unknown", false);
+            _reads.Add(owned.Task);
+        }
+
+        var maxAge = TimeSpan.FromSeconds(request.MaxAgeSeconds);
+        var asked = DateTimeOffset.UtcNow;
+        _ = ReadOwnedAsync(descriptor.ProviderId, maxAge, owned);
+        var after = await owned.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // A read that failed leaves the provider with its old list: that list is then older than asked.
+        return after is null ? new("unavailable", epoch, descriptor.ProviderId.Value, "Unknown", false)
+            : new("ok", epoch, descriptor.ProviderId.Value, after.Availability.ToString(),
+                after.Availability == ModelProviderAvailability.Ready && after.ObservedAt >= asked - maxAge);
+    }
+
+    // The revalidations a page asked for, which DrainAsync joins; apart from the probes, which allow one at a time.
+    private readonly HashSet<Task> _reads = [];
+
+    // Runs one revalidation for a page; its task ends with the state of the provider, or null when the read failed.
+    private async Task ReadOwnedAsync(ModelProviderId provider, TimeSpan maxAge, TaskCompletionSource<ModelProviderStateSnapshot?> owned)
+    {
+        ModelProviderStateSnapshot? state = null;
+        try
+        {
+            state = await initialization!.RevalidateProviderAsync(provider, maxAge, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The page is told the models could not be read; the service logs and keeps what it knows of the provider.
+        }
+
+        lock (_probeGate) _reads.Remove(owned.Task);
+        owned.TrySetResult(state);
     }
 
     [NeoRpcMethod("models")]
@@ -452,6 +510,10 @@ internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, s
 {
     public string? Reason { get; init; }
 }
+internal sealed record ModelCatalogRevalidateRequest(string ExpectedEpoch, string ProviderId, int MaxAgeSeconds);
+// "ok" with the state of the provider after the read, and `Current` when its models are no older than the age asked (a
+// read that failed leaves the host with the list it had, which is then older); "unavailable" when nothing could be read.
+internal sealed record ModelCatalogRevalidateResponse(string Status, string? Epoch, string? ProviderId, string Availability, bool Current);
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated)
 {

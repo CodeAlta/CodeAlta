@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeSelection, completeSelection, restoreSelection, validSelection } from "./sessionSelection";
+import { changeSelection, completeSelection, modelNotOffered, restoreSelection, sameModels, validSelection } from "./sessionSelection";
 import { captureSubmission, createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import type { SessionChoicesResponse, SessionSelection, SessionSendRequest } from "#neoastra";
 
@@ -30,6 +30,20 @@ test("a selection names a listed model and one of its efforts: there is no defau
   const unlisted = { ...choices, current: { ...current, modelId: null, reasoningEffort: null }, models: [] };
   assert.equal(validSelection(unlisted, { ...current, modelId: null, reasoningEffort: null }), true);
   assert.equal(changeSelection(unlisted, unlisted.current, "agentPromptId", "plan")?.agentPromptId, "plan");
+});
+
+test("a model the provider lists no longer is known not offered; a provider that lists nothing says nothing", () => {
+  assert.equal(modelNotOffered(choices, "one"), false);
+  assert.equal(modelNotOffered(choices, "glm-exl3"), true, "the provider lists models, not this one");
+  assert.equal(modelNotOffered({ ...choices, models: [] }, "glm-exl3"), false, "a provider not ready lists nothing: nothing is known");
+  assert.equal(modelNotOffered({ ...choices, adaptive: true }, "glm-exl3"), false, "Adaptive chooses the model of each turn");
+  assert.equal(modelNotOffered(choices, null), false);
+  assert.equal(modelNotOffered(undefined, "glm-exl3"), false);
+  // The composer takes choices read again only when their models differ.
+  assert.equal(sameModels(choices, { models: [...choices.models] }), true);
+  assert.equal(sameModels(choices, { ...choices, models: choices.models.slice(1) }), false);
+  assert.equal(sameModels(choices, { models: [{ ...choices.models[0], imageInput: true }, ...choices.models.slice(1)] }), false, "a model that reads images now");
+  assert.equal(sameModels(choices, undefined), false);
 });
 
 test("a model that lists no effort takes the one the session holds, or none", () => {

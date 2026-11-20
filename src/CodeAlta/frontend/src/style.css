@@ -3505,6 +3505,10 @@ dialog.mcp-session-dialog[open] > .app-window > .app-window-body { padding: 0; }
 .composer-selection-model-unit { flex: 0 1 auto; min-width: 0; }
 .composer-selection-provider { flex: none; }
 .composer-selection-model-name { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
+/* A model its provider does not offer now: its warning and its name in the color of a warning, on the chip and the button of the list. */
+.composer-selection-model[data-missing] .composer-selection-model-name, .composer-selection-missing,
+.composer-model-select[data-missing], .composer-model-select[data-missing] .bp6-button-text, .composer-model-select[data-missing] svg { color: var(--orange, #d9822b); }
+.composer-selection-missing { flex: none; margin-right: 3px; vertical-align: -2px; }
 .composer-selection-fast { margin-right: 2px; }
 /* Fast mode was chosen, but the provider ran the last turn at standard speed. */
 .composer-selection-fast[data-standard] { filter: grayscale(1); opacity: 0.55; }

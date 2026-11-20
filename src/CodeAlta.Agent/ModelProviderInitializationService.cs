@@ -22,6 +22,10 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     // The registration of the registry each state was last prepared from: a provider registered again (its plugin
     // reloaded, its settings applied) has another runtime, whose models are read again (#296).
     private readonly Dictionary<string, long> _preparedRegistrations = new(StringComparer.OrdinalIgnoreCase);
+    // The providers whose running refresh is quiet (RevalidateProviderAsync): it keeps the list it had when it fails.
+    private readonly HashSet<string> _quietRefreshes = new(StringComparer.OrdinalIgnoreCase);
+    // When the models of each provider were last asked again, so that a provider that does not answer is not asked at each look.
+    private readonly Dictionary<string, DateTimeOffset> _revalidations = new(StringComparer.OrdinalIgnoreCase);
     private Task? _drainTask;
     private bool _closed;
     private readonly Channel<ModelProviderStateChanged> _changes = Channel.CreateUnbounded<ModelProviderStateChanged>(
@@ -210,6 +214,57 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         await StartRefreshAsync(GetProviderDescriptor(providerId), cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Reads the models of a provider again when what is known of them is older than <paramref name="maxAge"/>: an
+    /// endpoint can add or drop models while CodeAlta runs. A ready provider stays ready, with its models, while they are
+    /// read, and keeps them when the read fails (the log says why, and Test provider shows it); a provider that is not
+    /// ready is prepared as <see cref="RefreshProviderAsync"/> does. A read already running is joined first, whatever the
+    /// age: its answer is newer than the list. A provider is asked again at most once per <paramref name="maxAge"/>, also
+    /// when it does not answer.
+    /// </summary>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="maxAge">How old its models may be; <see cref="TimeSpan.Zero"/> reads them now.</param>
+    /// <param name="cancellationToken">Stops waiting; a read that started goes on.</param>
+    /// <returns>The state of the provider after the read; null when it has none.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxAge"/> is negative.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a read that started goes on.</exception>
+    /// <exception cref="KeyNotFoundException">The provider is not registered.</exception>
+    /// <exception cref="ObjectDisposedException">Original preparation admission has closed for shutdown.</exception>
+    /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses new preparation.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A provider preparation retains unconfirmed dependencies.</exception>
+    public async Task<ModelProviderStateSnapshot?> RevalidateProviderAsync(ModelProviderId providerId, TimeSpan maxAge, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxAge, TimeSpan.Zero);
+        cancellationToken.ThrowIfCancellationRequested();
+        var descriptor = GetProviderDescriptor(providerId);
+        var key = ModelProviderId.NormalizeValue(descriptor.ProviderId.Value);
+        var prepared = IsPreparedFromCurrentRegistration(key, descriptor.ProviderId);
+        var state = TryGetState(key);
+        if (!descriptor.IsEnabled) return state;
+        var now = DateTimeOffset.UtcNow;
+        bool running;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            running = _refreshTasks.TryGetValue(key, out var task) && !task.IsCompleted;
+            if (!running && prepared && (_revalidations.TryGetValue(key, out var asked) && now - asked < maxAge
+                || state is { Availability: ModelProviderAvailability.Ready } && now - state.ObservedAt < maxAge))
+            {
+                return state;
+            }
+        }
+
+        // A read that runs is joined (StartRefreshAsync joins it); otherwise one starts, and only an admitted read counts as asked.
+        var reading = StartRefreshAsync(descriptor, cancellationToken, quiet: prepared && state is { Availability: ModelProviderAvailability.Ready });
+        if (!running)
+        {
+            lock (_gate) _revalidations[key] = now;
+        }
+
+        await reading.ConfigureAwait(false);
+        return TryGetState(key);
+    }
+
     /// <inheritdoc />
     /// <exception cref="ObjectDisposedException">A required preparation cannot start after admission closes.</exception>
     /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses required preparation.</exception>
@@ -275,45 +330,72 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         return model;
     }
 
-    private Task StartRefreshAsync(ModelProviderDescriptor descriptor, CancellationToken cancellationToken)
+    private Task StartRefreshAsync(ModelProviderDescriptor descriptor, CancellationToken cancellationToken, bool quiet = false)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         cancellationToken.ThrowIfCancellationRequested();
 
         var key = ModelProviderId.NormalizeValue(descriptor.ProviderId.Value);
-        Task refreshTask;
-        TaskCompletionSource completion;
-        IDisposable? admission;
+        Task? refreshTask = null, join = null, afterQuiet = null;
+        TaskCompletionSource? completion = null;
+        IDisposable? admission = null;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
-            if (_refreshTasks.TryGetValue(key, out refreshTask!)
-                && (!refreshTask.IsCompleted || refreshTask.Exception is { } failure && AgentDependencyRetentionException.Contains(failure)))
+            if (_refreshTasks.TryGetValue(key, out var existing))
             {
-                return refreshTask.WaitAsync(cancellationToken);
+                // One reading of its state decides: a refresh that completes meanwhile is not taken for one that runs.
+                var running = !existing.IsCompleted;
+                // A quiet read keeps the old list when it fails: a refresh that must report the state of the provider
+                // (Test provider, a change) does not take its outcome, it starts once the quiet one ends.
+                if (running && !quiet && _quietRefreshes.Contains(key)) afterQuiet = existing;
+                else if (running || existing.Exception is { } failure && AgentDependencyRetentionException.Contains(failure)) join = existing;
             }
 
-            // Admission precedes publication and the provider factory, and belongs to the shared original
-            // refresh rather than any caller's cancelable WaitAsync below.
-            admission = _retentionAdmission is null ? null : _retentionAdmission.TryProtectAll()
-                ?? throw new InvalidOperationException("Provider preparation cannot start during session retirement.");
-            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            refreshTask = completion.Task;
-            _refreshTasks[key] = refreshTask;
+            if (join is null && afterQuiet is null)
+            {
+                // Admission precedes publication and the provider factory, and belongs to the shared original
+                // refresh rather than any caller's cancelable WaitAsync below.
+                admission = _retentionAdmission is null ? null : _retentionAdmission.TryProtectAll()
+                    ?? throw new InvalidOperationException("Provider preparation cannot start during session retirement.");
+                completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                refreshTask = completion.Task;
+                _refreshTasks[key] = refreshTask;
+                if (quiet) _quietRefreshes.Add(key);
+                else _quietRefreshes.Remove(key);
+            }
         }
 
+        // Outside the lock: what follows may reach the registry, whose factories may reenter DrainAsync.
+        if (afterQuiet is not null) return RefreshAfterQuietAsync(descriptor.ProviderId, afterQuiet, cancellationToken);
+        if (join is not null) return join.WaitAsync(cancellationToken);
         // Publish first and invoke external callbacks outside the lock. A synchronous provider callback
         // may reenter DrainAsync; its snapshot must already include this original, even before an await.
-        _ = CompleteRefreshAsync(descriptor, admission, completion);
-        return refreshTask.WaitAsync(cancellationToken);
+        _ = CompleteRefreshAsync(descriptor, admission, completion!, quiet);
+        return refreshTask!.WaitAsync(cancellationToken);
     }
 
-    private async Task CompleteRefreshAsync(ModelProviderDescriptor descriptor, IDisposable? admission, TaskCompletionSource completion)
+    private async Task RefreshAfterQuietAsync(ModelProviderId providerId, Task quiet, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await quiet.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Its outcome is replaced by the refresh below; a retained one is reported by it.
+        }
+
+        // Read again: the provider may have been registered again (its settings applied) while the quiet read ran.
+        await StartRefreshAsync(GetProviderDescriptor(providerId), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CompleteRefreshAsync(ModelProviderDescriptor descriptor, IDisposable? admission, TaskCompletionSource completion, bool quiet)
     {
         Task? original = null;
         try
         {
-            original = RefreshProviderCoreAsync(descriptor, admission);
+            original = RefreshProviderCoreAsync(descriptor, admission, quiet);
             await original.ConfigureAwait(false);
             completion.TrySetResult();
         }
@@ -346,7 +428,8 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         }
     }
 
-    private async Task RefreshProviderCoreAsync(ModelProviderDescriptor descriptor, IDisposable? admission)
+    // `quiet`: the provider was ready; it stays ready with its models while they are read, and keeps them when the read fails.
+    private async Task RefreshProviderCoreAsync(ModelProviderDescriptor descriptor, IDisposable? admission, bool quiet)
     {
         var retained = false;
         Task? original = null;
@@ -373,15 +456,18 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                 return;
             }
 
-            PublishState(new ModelProviderStateSnapshot
+            if (!quiet)
             {
-                Descriptor = descriptor,
-                Availability = ModelProviderAvailability.Probing,
-                StatusMessage = "Detecting provider...",
-                SelectedModelId = descriptor.DefaultModelId,
-                SelectedReasoningEffort = descriptor.DefaultReasoningEffort,
-                ObservedAt = DateTimeOffset.UtcNow,
-            });
+                PublishState(new ModelProviderStateSnapshot
+                {
+                    Descriptor = descriptor,
+                    Availability = ModelProviderAvailability.Probing,
+                    StatusMessage = "Detecting provider...",
+                    SelectedModelId = descriptor.DefaultModelId,
+                    SelectedReasoningEffort = descriptor.DefaultReasoningEffort,
+                    ObservedAt = DateTimeOffset.UtcNow,
+                });
+            }
 
             // The original and retention claim are already published, so Drain includes this acquisition.
             // Never take the registry lock under _gate: factories may synchronously reenter DrainAsync.
@@ -404,6 +490,12 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
             var availability = probe.Availability is ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing
                 ? ModelProviderAvailability.Ready
                 : probe.Availability;
+            if (quiet && availability != ModelProviderAvailability.Ready)
+            {
+                KeepModels(descriptor, probe.StatusMessage ?? availability.ToString());
+                return;
+            }
+
             // The models its configuration hides are kept apart: no list offers them, and the provider page shows what its rules hide.
             var (models, hidden) = descriptor.ModelVisibility.Apply(ModelOrdering.Apply(probe.Models ?? [], descriptor.ModelOrder));
 
@@ -431,12 +523,14 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         }
         catch (OperationCanceledException)
         {
-            PublishFailureState(descriptor, ModelProviderAvailability.Failed, $"Provider probe timed out after {probeTimeout}.", "Timeout");
+            if (quiet) KeepModels(descriptor, $"no answer after {probeTimeout}");
+            else PublishFailureState(descriptor, ModelProviderAvailability.Failed, $"Provider probe timed out after {probeTimeout}.", "Timeout");
         }
         catch (Exception ex)
         {
             var (availability, message, category) = ClassifyFailure(ex);
-            PublishFailureState(descriptor, availability, message, category);
+            if (quiet) KeepModels(descriptor, message);
+            else PublishFailureState(descriptor, availability, message, category);
         }
         finally
         {
@@ -514,6 +608,14 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         {
             return _states.TryGetValue(key, out var state) ? state : null;
         }
+    }
+
+    // A quiet read that failed: the provider keeps the models it listed, so that an endpoint that does not answer for a
+    // moment does not empty the lists of the window. The log keeps why; Test provider shows it.
+    private static void KeepModels(ModelProviderDescriptor descriptor, string reason)
+    {
+        if (LogManager.IsInitialized)
+            LogManager.GetLogger(LoggerName).Info($"The models of the provider {descriptor.ProviderId.Value} could not be read again; its list is kept: {reason}");
     }
 
     private void PublishFailureState(

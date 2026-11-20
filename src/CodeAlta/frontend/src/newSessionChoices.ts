@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPermissionModeChoice, type SessionPromptChoice } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
 import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTier, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
@@ -44,9 +44,14 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
       }).catch(() => { if (!controller.signal.aborted) setPrompts({ key, rows: [], defaultId: null, loading: false, failed: true }); });
     return () => controller.abort();
   }, [epoch, projectId, projectPath, spaceId, key, enabled, capability, revision]);
+  // The reads of the models, the first one and those the list asks for again (refreshModels): only the latest may apply
+  // its rows or end the turning of the button.
+  const modelReads = useRef<{ generation: number; refresh: AbortController | null }>({ generation: 0, refresh: null });
   useEffect(() => {
     if (!enabled || !epoch || !provider || !capability?.canMutate()) return;
     const controller = new AbortController();
+    modelReads.current.generation++;
+    modelReads.current.refresh?.abort();
     setModels({ key, rows: [], loading: true, failed: false });
     void modelCatalog.models({ expectedEpoch: epoch, providerId: provider }, { signal: controller.signal, timeoutMilliseconds: 15000 })
       .then(reply => {
@@ -57,6 +62,35 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
       }).catch(() => { if (!controller.signal.aborted) setModels({ key, rows: [], loading: false, failed: true }); });
     return () => controller.abort();
   }, [epoch, provider, key, enabled, capability, revision]);
+  // The models read again from the list of the composer (refreshModels): the list keeps what it shows meanwhile.
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  async function refreshModels(maxAgeSeconds: number) {
+    if (!enabled || !epoch || !provider || !capability?.canMutate()) return;
+    const reads = modelReads.current;
+    reads.refresh?.abort();
+    const controller = new AbortController();
+    reads.refresh = controller;
+    const generation = reads.generation;
+    const current = () => !controller.signal.aborted && reads.generation === generation && capability.canMutate();
+    setRefreshingModels(true);
+    try {
+      const reply = await modelCatalog.revalidate({ expectedEpoch: epoch, providerId: provider, maxAgeSeconds }, { signal: controller.signal });
+      capability.observe(reply);
+      // The models are read also when the provider was read before: the host reads it after a run failed on its model.
+      if (!current() || reply.status !== "ok" || reply.epoch !== epoch) return;
+      const listed = await modelCatalog.models({ expectedEpoch: epoch, providerId: provider }, { signal: controller.signal });
+      capability.observe(listed);
+      if (!current() || listed.status !== "ok" || listed.epoch !== epoch || listed.providerId !== provider) return;
+      const ready = listed.availability === "Ready";
+      const rows = ready ? listed.models : [];
+      setModels(shown => shown?.key !== key || !shown.failed === ready && JSON.stringify(shown.rows) === JSON.stringify(rows)
+        ? shown : { key, rows, order: ready ? listed.modelsOrder : null, loading: false, failed: !ready });
+    } catch {
+      // The list stays as it was; its button asks again.
+    } finally {
+      if (reads.refresh === controller) { reads.refresh = null; setRefreshingModels(false); }
+    }
+  }
   // The permission modes the session can be started in, as the composer of a session of that provider offers them.
   const [permissions, setPermissions] = useState<{ key: string; modes: readonly SessionPermissionModeChoice[]; defaultMode: string | null }>();
   useEffect(() => {
@@ -127,5 +161,9 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
       setDraftPrompts(current => { if (!current.has(created)) return current; const map = new Map(current); map.delete(created); return map; });
     },
     refresh: () => setRevision(previous => previous + 1),
+    /** Reads the models of the provider again when older than `maxAgeSeconds`, keeping the list shown meanwhile. */
+    refreshModels,
+    /** Whether the models are being read again. */
+    refreshingModels,
   };
 }

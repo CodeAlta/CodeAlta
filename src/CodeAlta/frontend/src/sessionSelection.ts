@@ -17,6 +17,23 @@ export function validSelection(choices: SessionChoicesResponse, value: SessionSe
 }
 
 /**
+ * Whether the provider says it does not offer a model now: it lists its models, and this one is not among them. A
+ * provider that lists none (not ready, still read) says nothing, nor does a session on Adaptive, whose model each turn chooses.
+ */
+export function modelNotOffered(choices: Pick<SessionChoicesResponse, "models" | "adaptive"> | null | undefined, modelId: string | null | undefined): boolean {
+  return !!modelId && !!choices && !choices.adaptive && choices.models.length > 0 && !choices.models.some(model => model.id === modelId);
+}
+
+/**
+ * Whether two readings of the choices of a session list the same models, in the same order and with the same
+ * abilities (efforts, image input, options): an endpoint can change what a model does without changing its id.
+ */
+export function sameModels(a: Pick<SessionChoicesResponse, "models"> | null | undefined, b: Pick<SessionChoicesResponse, "models"> | null | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.models.length === b.models.length && JSON.stringify(a.models) === JSON.stringify(b.models);
+}
+
+/**
  * A selection kept without a model or without an effort takes what the session runs with: its own model and
  * effort, or the effort its model starts with.
  */

@@ -29,7 +29,9 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
   /** Whether the last turn of a session in fast mode ran at standard speed, as its provider reported: the lightning is dimmed. */
   fastModeFellBack?: boolean;
   /** What the tooltip says of the reasoning when the chip shows none ("Haiku 4.5 has no reasoning effort"). */
-  reasoningNote?: string | null }>;
+  reasoningNote?: string | null;
+  /** Whether the provider lists its models and not this one: the chip and the form say it, before a send. */
+  modelMissing?: boolean }>;
 
 /**
  * The switch at the top of the form of a session that does not exist yet and is started elsewhere than in a composer
@@ -84,7 +86,9 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     <FormGroup label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}>{agent}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}
       intent={notice ? "danger" : "none"} helperText={notice ? <span className="composer-selection-notice" role="alert">{notice}</span> : undefined}>{provider}</FormGroup>
-    <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
+    <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}
+      intent={summary.modelMissing ? "warning" : "none"}
+      helperText={summary.modelMissing ? <span className="composer-selection-notice" role="alert">{t("The provider does not offer this model now. Choose another one.")}</span> : undefined}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
     {modelOptions}
     {permission && <FormGroup label={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Permissions")}</span>}
@@ -106,7 +110,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     canEscapeKeyClose={!locked} isOpen={!disabled && (locked || open)} disabled={disabled}
     onInteraction={(next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (locked && !next) { event?.preventDefault(); return; } setOpen(next); }}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")} disabled={disabled} data-defaults={defaults?.on || undefined}
-      title={[defaults?.on && t("Use the defaults"), `${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`, `${t("Model")}: ${summary.model}`,
+      title={[defaults?.on && t("Use the defaults"), `${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`,
+        `${t("Model")}: ${summary.model}` + (summary.modelMissing ? ` · ${t("Not offered")}` : ""),
         summary.fastMode && `${t("Fast mode")}: ${t("On")}` + (summary.fastModeFellBack ? ` · ${t("The last turn ran at standard speed.")}` : ""),
         summary.reasoning ? `${t("Reasoning")}: ${summary.reasoning}` : summary.reasoningNote,
         summary.permission && `${t("Permissions")}: ${summary.permission.name}`,
@@ -119,11 +124,13 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
           told apart by their names. The line is drawn in reverse and wraps: a provider without room goes whole, logo and
           name, to a second line the chip does not show, and the model keeps the room. A model without a logo of its own
           has the provider's, drawn once: outside the line, where it stays when the name of the provider goes. */}
-      <span className="composer-selection-part composer-selection-model">
+      <span className="composer-selection-part composer-selection-model" data-missing={summary.modelMissing || undefined}>
         {!modelLogo && <ProviderIcon providerKey={summary.providerKey} size={14} />}
         <span className="composer-selection-model-line">
           <span className="composer-selection-model-unit">{modelLogo && <ModelIcon modelId={summary.modelId} size={14} />}
             {/* Fast mode costs more: the lightning keeps its color, right before the name it stays with. */}
+            {/* A model the provider does not offer now: a warning before its name, which takes the color of a warning. */}
+            {summary.modelMissing && <AppIcon name="warning" size={14} className="composer-selection-missing" />}
             <span className="composer-selection-model-name">{summary.fastMode && <span className="composer-selection-fast" aria-hidden="true"
               data-standard={summary.fastModeFellBack || undefined}>{"⚡️"}</span>}
               {summary.model}</span></span>

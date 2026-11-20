@@ -2,9 +2,22 @@
 // every other service is the inert one of the browser demo.
 export * from "./demo-api";
 import { modelCatalog as demoCatalog } from "./demo-api";
+/**
+ * What a test of a model its provider no longer lists sets on the window: the session runs `gone-model`, which the provider
+ * lists only while `listed` is true; `reads` counts the reads of the models asked again, which wait for `gate` when set.
+ */
+type GoneFixture = { listed: boolean; reads: number; gate: Promise<void> | null };
+const goneModel = () => (window as Window & { fixtureGone?: GoneFixture }).fixtureGone;
 // As the host answers for a provider it does not know, such as one removed from the configuration.
 export const modelCatalog = { ...demoCatalog,
-  models: async ({ expectedEpoch }: { expectedEpoch: string }) => ({ status: "not_found", epoch: expectedEpoch, providerId: null, availability: "Unknown", models: [], truncated: false }) };
+  models: async ({ expectedEpoch }: { expectedEpoch: string }) => ({ status: "not_found", epoch: expectedEpoch, providerId: null, availability: "Unknown", models: [], truncated: false }),
+  revalidate: async ({ expectedEpoch, providerId }: { expectedEpoch: string; providerId: string }) => {
+    const fixture = goneModel();
+    if (!fixture) return { status: "not_found", epoch: expectedEpoch, providerId: null, availability: "Unknown", current: false };
+    fixture.reads++;
+    if (fixture.gate) await fixture.gate;
+    return { status: "ok", epoch: expectedEpoch, providerId, availability: "Ready", current: true };
+  } };
 /**
  * What a test of the permission mode sets on the window before the page loads: the provider then offers modes, and
  * the session holds `effort` (one its model may not list) and `mode` (null for the one of its provider). The host
@@ -66,14 +79,15 @@ export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "u
     ? { status: "read_failed", current: null, prompts: [], models: [] }
     : gone ? { status: "ok", current: { providerKey: "fixture-removed", agentPromptId: "default", modelId: "removed-model", reasoningEffort: "medium" },
       prompts: [{ id: "default", name: "Default agent" }], models: [], providerUnavailable: true, replacementProvider: removed()!.replacement }
-    : { status: "ok", current: { providerKey: "fixture-provider", agentPromptId: "default", modelId: "fixture-model", reasoningEffort: modes?.effort ?? "medium",
+    : { status: "ok", current: { providerKey: "fixture-provider", agentPromptId: "default", modelId: goneModel() ? "gone-model" : "fixture-model", reasoningEffort: modes?.effort ?? "medium",
         ...(modes ? { permissionMode: modes.mode } : {}) },
       prompts: [{ id: "default", name: "Default agent" }, ...(modes ? [{ id: "plan", name: "Plan agent" }] : [])],
       // A model whose provider says it has no reasoning effort (Haiku of Claude Code), when the test asks for one.
       models: [(window as Window & { fixtureNoReasoning?: boolean }).fixtureNoReasoning
         ? { id: "fixture-model", name: "Fixture model", efforts: [], effortsComplete: true, imageInput: null, startEffort: null }
         : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high",
-          ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}), ...(sessionOptions() ? { fastMode: false } : {}) }],
+          ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}), ...(sessionOptions() ? { fastMode: false } : {}) },
+        ...(goneModel()?.listed ? [{ id: "gone-model", name: "Gone model", efforts: ["medium"], imageInput: null, startEffort: "medium" }] : [])],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.
       ...((window as Window & { fixtureOutsideSpace?: boolean }).fixtureOutsideSpace ? { providerOutsideSpace: true, providerName: "Fixture Business" } : {}) }),

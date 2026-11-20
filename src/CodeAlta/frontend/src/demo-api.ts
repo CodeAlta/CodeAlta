@@ -86,6 +86,7 @@ export const configuration = Object.freeze({ snapshot: async (): Promise<Configu
 export const modelCatalog = Object.freeze({
   providers: async () => ({ status: "unconfigured", epoch: null, providers: [], truncated: false }),
   probe: async () => ({ status: "unconfigured", epoch: null, providerId: null, availability: "Unknown" }),
+  revalidate: async () => ({ status: "unconfigured", epoch: null, providerId: null, availability: "Unknown", current: false }),
   models: async () => ({ status: "unconfigured", epoch: null, providerId: null, availability: "Unknown", models: [], truncated: false }),
 });
 export const workspace = Object.freeze({
