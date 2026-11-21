@@ -17,7 +17,7 @@ public sealed partial record SessionInfo
     /// <summary>Unique identifier for the session</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>Additional workspace roots reported for this session. Each path must be absolute.  When present, this is the complete ordered additional-root list reported by the Agent. Omitted and empty values are equivalent: the response reports no additional roots.</summary>
+    /// <summary>Additional workspace roots reported for this session. Each path MUST be absolute.  When present, this is the complete ordered additional-root list reported by the Agent. Omitted and empty values are equivalent: the response reports no additional roots.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the session is archived.  Optional. Omitted and `null` are equivalent and mean the archive state is not reported. Agents that advertise the `sessionCapabilities.archive` capability MUST include it on every listed session.</summary>

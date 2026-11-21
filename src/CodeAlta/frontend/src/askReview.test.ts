@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { questionTabTitle, selectedChoice, submitStep } from "./askReview";
+import { questionTabTitle, selectedChoice, selectedChoices, submitStep, toggleChoice } from "./askReview";
 import { captureAskAction, parseAskPage } from "./sessionAsks";
 
 test("question tabs point onwards and the last one closes", () => {
@@ -15,6 +15,19 @@ test("a choice question answers with the picked choice, or with its first", () =
   assert.equal(selectedChoice({ choices }, [1]), 1);
   assert.equal(selectedChoice({ choices }, [9]), 0, "a choice that does not exist is not an answer");
   assert.equal(selectedChoice({ choices: [] }, [0]), null);
+});
+
+test("a multi-select question toggles multiple choices and defaults to none selected", () => {
+  const choices = [{ title: "Red", description: null }, { title: "Green", description: null }, { title: "Blue", description: null }];
+  const multi = { choices, allowMultiSelect: true };
+  assert.deepEqual(selectedChoices(multi, undefined), []);
+  const first = toggleChoice(undefined, 2, true);
+  assert.deepEqual(first, [2]);
+  const both = toggleChoice(first, 0, true);
+  assert.deepEqual(both, [0, 2]);
+  assert.deepEqual(toggleChoice(both, 2, true), [0]);
+  assert.deepEqual(selectedChoices(multi, [2, 0, 2, 9]), [0, 2]);
+  assert.deepEqual(selectedChoices({ choices, allowMultiSelect: false }, undefined), [0]);
 });
 
 test("submit shows every question once before it sends", () => {
@@ -44,6 +57,9 @@ test("a request may ask to review a file: a relative path below the checkout", (
   // A review needs no question; a plain question does.
   assert.equal(parseAskPage(page({ kind: "changes", path: null }, []), epoch, "session").head!.request.review!.kind, "changes");
   assert.throws(() => parseAskPage(page(null, []), epoch, "session"));
+  const multiParsed = parseAskPage(page(null, [{ ...question, allowMultiSelect: true }]), epoch, "session");
+  assert.equal(multiParsed.head!.request.questions[0].allowMultiSelect, true);
+  assert.equal(parseAskPage(page(null, [question]), epoch, "session").head!.request.questions[0].allowMultiSelect, false);
 });
 
 test("the answer of a review carries its verdict, the comments being in the review store", () => {

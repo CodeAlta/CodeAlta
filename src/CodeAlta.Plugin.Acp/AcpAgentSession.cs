@@ -160,6 +160,12 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
                 messages.AddRange(_unsent);
                 messages.AddRange(newMessages);
                 _unsent.Clear();
+                if (messages.Count == 0 && _connection is { UnexpectedExit: { } unexpectedExit })
+                {
+                    await CloseConnectionAsync().ConfigureAwait(false);
+                    throw new AgentProviderFailureException(unexpectedExit, new AgentFailureInfo(AgentFailureKind.Unavailable));
+                }
+
                 await EnsureConnectionAsync(request, onSessionUpdate, cancellationToken).ConfigureAwait(false);
                 await ApplyModelAsync(request, cancellationToken).ConfigureAwait(false);
                 if (messages.Count == 0)
@@ -252,9 +258,10 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
     public async Task InterruptAsync()
     {
         var connection = _connection;
-        CancelPermissionRequests(connection);
+        var wasActive = connection is { PromptActive: true };
+        RetirePrompt(connection);
         _bridge.FailOutstanding("The tool call was interrupted.");
-        if (connection is null || !connection.PromptActive)
+        if (connection is null || !wasActive)
         {
             return;
         }
@@ -277,6 +284,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         }
 
         DrainEvents(connection);
+        RetirePrompt(connection);
     }
 
     public async ValueTask DisposeAsync()
@@ -608,8 +616,18 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
                             cancellationToken)
                         .ConfigureAwait(false);
                     break;
+                case SessionUpdateEvent updateEvent:
+                    await onSessionUpdate(
+                            new AgentTurnSessionUpdate
+                            {
+                                Kind = updateEvent.Kind,
+                                Message = updateEvent.Message,
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
                 case PromptEndedEvent ended:
-                    connection.EndPrompt();
+                    RetirePrompt(connection);
                     // A tool call without a result when the prompt ends will never have one.
                     _bridge.FailOutstanding($"{_options.AgentName} ended its turn before the tool call completed.");
                     if (ended.Failure is { } failure)
@@ -649,6 +667,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
             ProviderState = _agentSessionId is { } sessionId
                 ? new AcpProviderState(sessionId, _syncedUsers, _syncedAssistants, _instructionsHash, InstructionsChannel).ToJson()
                 : null,
+            Title = connection?.SessionTitle,
         };
     }
 
@@ -707,7 +726,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         {
             if (turnEvent is PromptEndedEvent)
             {
-                connection.EndPrompt();
+                RetirePrompt(connection);
             }
         }
     }
@@ -768,6 +787,14 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         {
             Interlocked.CompareExchange(ref _idle, null, idle);
             idle.Dispose();
+        }
+    }
+
+    private bool HasInteractiveQuestionHandler()
+    {
+        lock (_gate)
+        {
+            return _run is { OnInteractiveAsk: not null } or { OnUserInputRequest: not null };
         }
     }
 

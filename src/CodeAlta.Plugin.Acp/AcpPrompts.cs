@@ -180,6 +180,10 @@ internal static class AcpPrompts
                     break;
                 case "terminal":
                     break;
+                case "session":
+                    var sessionId = AcpJson.GetString(item, "sessionId");
+                    AppendLine(builder, string.IsNullOrWhiteSpace(sessionId) ? "Session" : $"Session {sessionId}");
+                    break;
             }
         }
 

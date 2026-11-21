@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Capability marker for exposing reusable child sessions as restricted ACP sessions.
 /// 
 /// Supplying `{}` advertises support for child association and state updates,

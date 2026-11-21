@@ -22,7 +22,7 @@ public sealed partial record Implementation
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>Intended for UI and end-user contexts and optimized to be human-readable and easily understood.  If not provided, the name should be used for display.</summary>
+    /// <summary>Intended for UI and end-user contexts and optimized to be human-readable and easily understood.  If not provided, the name SHOULD be used for display.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 }

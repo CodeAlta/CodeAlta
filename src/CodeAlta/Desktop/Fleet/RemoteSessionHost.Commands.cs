@@ -267,6 +267,7 @@ internal sealed partial class RemoteSessionHost
         {
             Title = question.Title, Question = question.Question, Description = question.Description,
             Choices = [.. question.Choices.Select(static choice => new AltaAskChoice { Title = choice.Title, Description = choice.Description })],
+            AllowMultiSelect = question.AllowMultiSelect,
             Freeform = question.AllowsText ? new AltaAskFreeform { Title = question.FreeformTitle, Placeholder = question.FreeformPlaceholder } : null,
         })],
     };

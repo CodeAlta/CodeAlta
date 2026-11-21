@@ -24,6 +24,9 @@ internal sealed record AcpConnectionRequest(
 
     /// <summary>Gets what the agent needs from the computer when <see cref="Host"/> starts it.</summary>
     public AcpAgentNeeds Needs { get; init; } = AcpAgentNeeds.None;
+
+    /// <summary>Gets whether the client advertises form-based <c>elicitation/create</c> support for this connection.</summary>
+    public bool EnableElicitationForm { get; init; }
 }
 
 /// <summary>
@@ -86,7 +89,7 @@ internal sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
                     RemovedEnvironmentVariables = [.. RemovedVariables, .. OpenTelemetryEnvironment.VariablesHiddenFromAgents()],
                 },
                 ClientInfo = AcpClientInfo.Implementation,
-                ClientCapabilities = AcpClientInfo.CreateCapabilities(),
+                ClientCapabilities = AcpClientInfo.CreateCapabilities(request.EnableElicitationForm),
                 InitializeTimeout = request.InitializeTimeout,
                 MessageHandler = messageHandler,
             },
@@ -126,7 +129,7 @@ internal sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
         var process = await host.StartAsync(launch, cancellationToken).ConfigureAwait(false);
         var hosted = new AcpHostedProcess(Path.GetFileNameWithoutExtension(request.FileName), process.StandardOutput, process.StandardInput, process.StandardError,
             process.Exited, process.DisposeAsync);
-        return await AcpClient.ConnectAsync(hosted, AcpClientInfo.CreateInitializeRequest(), messageHandler, request.InitializeTimeout, cancellationToken).ConfigureAwait(false);
+        return await AcpClient.ConnectAsync(hosted, AcpClientInfo.CreateInitializeRequest(request.EnableElicitationForm), messageHandler, request.InitializeTimeout, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -142,19 +145,24 @@ internal static class AcpClientInfo
 
     /// <summary>
     /// The capabilities of CodeAlta as a client: no file system and no terminal of its own (the agent uses its own
-    /// tools, and asks before it runs them); a sign-in in a terminal; the notices and compactions the agent reports.
+    /// tools, and asks before it runs them); a sign-in in a terminal; structured plans, boolean config options, notices
+    /// and compactions; and form elicitation when the session can present live questions to the user.
     /// Cursor offers its models with their parameters (effort, context, fast) as options of their own, the way the
     /// protocol names them, to a client that says <c>parameterizedModelPicker</c>; else one fixed variant of each model.
     /// </summary>
-    public static ClientCapabilities CreateCapabilities()
+    /// <param name="elicitationForm">Whether to advertise <c>elicitation.form</c>.</param>
+    public static ClientCapabilities CreateCapabilities(bool elicitationForm = false)
         => new()
         {
             Fs = new FileSystemCapabilities { ReadTextFile = false, WriteTextFile = false },
             Terminal = false,
             Auth = new AuthCapabilities { Terminal = true },
+            Elicitation = elicitationForm ? new ElicitationCapabilities { Form = new ElicitationFormCapabilities() } : null,
+            Plan = new PlanCapabilities(),
             Session = new ClientSessionCapabilities
             {
                 Compaction = new CompactionCapabilities(),
+                ConfigOptions = new SessionConfigOptionsCapabilities { Boolean = new BooleanConfigOptionCapabilities() },
                 Notices = new NoticeCapabilities(),
             },
             Meta = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
@@ -164,11 +172,12 @@ internal static class AcpClientInfo
         };
 
     /// <summary>The initialize request of a client connected to streams, as <see cref="AcpProcessConnectionFactory"/> sends it.</summary>
-    public static InitializeRequest CreateInitializeRequest()
+    /// <param name="elicitationForm">Whether to advertise <c>elicitation.form</c>.</param>
+    public static InitializeRequest CreateInitializeRequest(bool elicitationForm = false)
         => new()
         {
             ClientInfo = Implementation,
-            ClientCapabilities = CreateCapabilities(),
+            ClientCapabilities = CreateCapabilities(elicitationForm),
             ProtocolVersion = new ProtocolVersion { Value = JsonSerializer.SerializeToElement(1, AcpPluginJsonContext.Default.Int32) },
         };
 }

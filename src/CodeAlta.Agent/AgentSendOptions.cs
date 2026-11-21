@@ -57,6 +57,13 @@ public sealed class AgentSendOptions
     /// </summary>
     public AgentConversationHeldHandler? OnConversationHeld { get; init; }
 
+    /// <summary>
+    /// Gets the optional interactive question handler for providers that request structured user input while a turn
+    /// runs (such as ACP <c>elicitation/create</c>). Null falls back to
+    /// <see cref="AgentSessionCreateOptions.OnInteractiveAsk"/>.
+    /// </summary>
+    public AgentInteractiveAskHandler? OnInteractiveAsk { get; init; }
+
     /// <summary>Gets explicit activation of the user-input built-in for this send; defaults to false.</summary>
     /// <remarks>Requires a selected callback and respects provider profile opt-out. Neither callback presence
     /// nor a profile override activates the tool. Other providers must explicitly support this option.</remarks>
@@ -96,6 +103,8 @@ public sealed class AgentSendOptions
             Provenance = Provenance,
             OnPermissionRequest = OnPermissionRequest,
             OnUserInputRequest = OnUserInputRequest,
+            OnConversationHeld = OnConversationHeld,
+            OnInteractiveAsk = OnInteractiveAsk,
             EnableUserInputTool = EnableUserInputTool,
             RunLifecycle = RunLifecycle,
             AdditionalTools = AdditionalTools,

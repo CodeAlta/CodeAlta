@@ -8,11 +8,11 @@ namespace CodeAlta.Acp;
 public sealed partial class AcpClient
 {
     public const string CompiledAgainstSchemaSourceKind = "github-archive";
-    public const string CompiledAgainstSchemaSource = "https://github.com/agentclientprotocol/agent-client-protocol/tree/schema-v1.33.0";
+    public const string CompiledAgainstSchemaSource = "https://github.com/agentclientprotocol/agent-client-protocol/tree/schema-v1.34.1";
     public const string CompiledAgainstRepository = "https://github.com/agentclientprotocol/agent-client-protocol";
     public const string CompiledAgainstSurface = "unstable";
     public const string CompiledAgainstSchemaPath = "schema/v1/schema.unstable.json";
-    public const string CompiledAgainstGitRef = "schema-v1.33.0";
-    public static DateTimeOffset CompiledAtUtc { get; } = DateTimeOffset.Parse("2026-11-19T22:09:24.1122839+00:00", null, System.Globalization.DateTimeStyles.RoundtripKind);
+    public const string CompiledAgainstGitRef = "schema-v1.34.1";
+    public static DateTimeOffset CompiledAtUtc { get; } = DateTimeOffset.Parse("2026-11-21T22:36:00.9570014+00:00", null, System.Globalization.DateTimeStyles.RoundtripKind);
     public const int CompiledAgainstMethodMapVersion = 1;
 }

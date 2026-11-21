@@ -2776,6 +2776,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         AdditionalTools = sendOptions.AdditionalTools,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
                         OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permissionExecution),
+                        OnConversationHeld = sendOptions.OnConversationHeld,
+                        OnInteractiveAsk = sendOptions.OnInteractiveAsk,
                         EnableUserInputTool = permissionExecution.EnableUserInput,
                         RunLifecycle = OwnedSessionAskExecution.Combine(sendOptions.RunLifecycle, Permissions.CreateOwnedRunLifecycle(permissionExecution)),
                     };

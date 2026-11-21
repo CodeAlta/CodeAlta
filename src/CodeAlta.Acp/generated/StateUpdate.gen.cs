@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Current foreground-work state of a reusable child session.
 /// 
 /// Each update is a whole-object snapshot. Idle does not terminate the child.

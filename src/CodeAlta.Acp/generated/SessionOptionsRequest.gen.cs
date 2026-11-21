@@ -26,7 +26,7 @@ public sealed partial record SessionOptionsRequest
     /// <summary>The working directory to resolve options for. Must be an absolute path.</summary>
     [JsonPropertyName("cwd")]
     public string Cwd { get; set; } = string.Empty;
-    /// <summary>Additional workspace roots to resolve options for. Each path must be absolute.  Optional. Omitted and `null` are equivalent to an empty list.</summary>
+    /// <summary>Additional workspace roots to resolve options for. Each path MUST be absolute.  Optional. Omitted and `null` are equivalent to an empty list.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>

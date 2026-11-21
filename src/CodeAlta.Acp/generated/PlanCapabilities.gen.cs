@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Capabilities for receiving `plan_update` and `plan_removed` session updates.
 /// </summary>
 public sealed partial record PlanCapabilities

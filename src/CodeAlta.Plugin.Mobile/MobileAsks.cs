@@ -93,6 +93,7 @@ internal sealed class MobileAsks(IPluginAskService asks, MobileSessions sessions
             questions.Add(new JsonObject
             {
                 ["title"] = question.Title, ["question"] = question.Question, ["description"] = question.Description, ["choices"] = choices,
+                ["allowMultiSelect"] = question.AllowMultiSelect,
                 ["freeform"] = question.Freeform is { } freeform ? new JsonObject { ["title"] = freeform.Title, ["placeholder"] = freeform.Placeholder } : null,
             });
         }

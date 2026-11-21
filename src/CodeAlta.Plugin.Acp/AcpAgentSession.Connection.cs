@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -25,9 +26,58 @@ internal sealed partial class AcpAgentSession
 
     private sealed record NoticeEvent(string Text, bool Warning) : TurnEvent;
 
+    private sealed record SessionUpdateEvent(AgentSessionUpdateKind Kind, string Message) : TurnEvent;
+
     private sealed record PromptEndedEvent(PromptResponse? Response, Exception? Failure) : TurnEvent;
 
     private sealed record ClosedEvent(string Message) : TurnEvent;
+
+    /// <summary>An in-flight agent-to-client request (permission or elicitation) cancellable locally, on prompt retirement, or by <c>$/cancel_request</c>.</summary>
+    private sealed class PendingClientRequest : IDisposable
+    {
+        private readonly CancellationTokenSource _source;
+        private int _cancelledByAgent;
+
+        public PendingClientRequest(CancellationToken lifetimeToken, CancellationToken promptToken)
+        {
+            _source = promptToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken, promptToken)
+                : CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+        }
+
+        public CancellationToken Token => _source.Token;
+
+        public bool CancelledByAgent => Volatile.Read(ref _cancelledByAgent) != 0;
+
+        public void Cancel(bool byAgent)
+        {
+            if (byAgent)
+            {
+                Volatile.Write(ref _cancelledByAgent, 1);
+            }
+
+            try
+            {
+                _source.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        public void Dispose() => _source.Dispose();
+    }
+
+    private sealed record CachedToolCall(
+        string? Title,
+        string? Name,
+        string? Kind,
+        JsonElement? RawInput,
+        JsonElement? Locations,
+        JsonElement? Content,
+        JsonElement? RawOutput);
+
+    private const int CompactionSummaryLimit = 4000;
 
     /// <summary>The parts of the assistant message being read, and the content identifier of each.</summary>
     private sealed class Segment(int id)
@@ -59,8 +109,11 @@ internal sealed partial class AcpAgentSession
     private sealed class Connection
     {
         private readonly Channel<TurnEvent> _events = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+        private readonly Lock _promptGate = new();
+        private CancellationTokenSource? _promptCts;
         private int _segments;
         private int _promptActive;
+        private int _closed;
 
         public Connection(AcpClient client, AcpAgentCapabilities capabilities, string workingDirectory, string launchKey)
         {
@@ -85,6 +138,9 @@ internal sealed partial class AcpAgentSession
         /// <summary>Gets whether the agent runs in the sandbox of the session, without the sign-in of the user.</summary>
         public bool InSandbox { get; init; }
 
+        /// <summary>Gets whether this connection advertised <c>elicitation.form</c> during <c>initialize</c>.</summary>
+        public bool ElicitationFormEnabled { get; init; }
+
         /// <summary>Gets or sets whether the session of the agent was started for this connection, and was given nothing yet.</summary>
         public bool NewSession { get; set; }
 
@@ -97,7 +153,20 @@ internal sealed partial class AcpAgentSession
 
         public ChannelReader<TurnEvent> Events => _events.Reader;
 
-        public ConcurrentDictionary<string, CancellationTokenSource> PermissionRequests { get; } = new(StringComparer.Ordinal);
+        public ConcurrentDictionary<string, PendingClientRequest> PendingRequests { get; } = new(StringComparer.Ordinal);
+
+        public ConcurrentDictionary<string, CachedToolCall> ToolCalls { get; } = new(StringComparer.Ordinal);
+
+        public OrderedDictionary<string, string> Plans { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, StringBuilder> CompactionSummaries { get; } = new(StringComparer.Ordinal);
+
+        public HashSet<string> ActiveCompactions { get; } = new(StringComparer.Ordinal);
+
+        public string? SessionTitle { get; set; }
+
+        /// <summary>Gets or sets the exit description when the agent process stopped unexpectedly during an active prompt.</summary>
+        public string? UnexpectedExit { get; set; }
 
         public HashSet<string> Commands { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -115,9 +184,54 @@ internal sealed partial class AcpAgentSession
 
         public int NextSegmentId() => Interlocked.Increment(ref _segments);
 
-        public void BeginPrompt() => Volatile.Write(ref _promptActive, 1);
+        public void BeginPrompt()
+        {
+            lock (_promptGate)
+            {
+                _promptCts?.Dispose();
+                _promptCts = new CancellationTokenSource();
+                Volatile.Write(ref _promptActive, 1);
+            }
+        }
 
-        public void EndPrompt() => Volatile.Write(ref _promptActive, 0);
+        public void EndPrompt()
+        {
+            CancellationTokenSource? previous;
+            lock (_promptGate)
+            {
+                Volatile.Write(ref _promptActive, 0);
+                previous = _promptCts;
+                _promptCts = null;
+            }
+
+            if (previous is not null)
+            {
+                try { previous.Cancel(); }
+                catch (ObjectDisposedException) { }
+                previous.Dispose();
+            }
+        }
+
+        public void MarkClosed()
+        {
+            Volatile.Write(ref _closed, 1);
+            EndPrompt();
+        }
+
+        public PendingClientRequest CreatePendingRequest(CancellationToken lifetimeToken)
+        {
+            lock (_promptGate)
+            {
+                if (Volatile.Read(ref _closed) != 0 || Volatile.Read(ref _promptActive) == 0 || _promptCts is null || _promptCts.IsCancellationRequested)
+                {
+                    var alreadyCancelled = new PendingClientRequest(lifetimeToken, CancellationToken.None);
+                    alreadyCancelled.Cancel(byAgent: false);
+                    return alreadyCancelled;
+                }
+
+                return new PendingClientRequest(lifetimeToken, _promptCts.Token);
+            }
+        }
 
         public void Post(TurnEvent turnEvent) => _events.Writer.TryWrite(turnEvent);
 
@@ -137,9 +251,10 @@ internal sealed partial class AcpAgentSession
     {
         var workingDirectory = WorkingDirectoryOf(request);
         var environment = CreateEnvironment(request);
+        var enableElicitationForm = !Standalone && HasInteractiveQuestionHandler();
 
-        // A process in another sandbox, or out of one, is another process.
-        var launchKey = string.Join('\u001f', [workingDirectory, request.ProcessHost?.Key ?? "-",
+        // A process in another sandbox, with different elicitation capability, or out of one, is another process.
+        var launchKey = string.Join('\u001f', [workingDirectory, request.ProcessHost?.Key ?? "-", enableElicitationForm ? "elicitation-form" : "-",
             .. environment.OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => $"{pair.Key}={pair.Value}")]);
         if (_connection is { } running && !running.Client.HasExited && !running.Client.Completion.IsCompleted &&
             string.Equals(running.LaunchKey, launchKey, StringComparison.Ordinal) && running.AgentSessionId.Length > 0)
@@ -172,6 +287,7 @@ internal sealed partial class AcpAgentSession
                     {
                         Host = request.ProcessHost,
                         Needs = needs,
+                        EnableElicitationForm = enableElicitationForm,
                     },
                     launchKey,
                     cancellationToken)
@@ -246,19 +362,43 @@ internal sealed partial class AcpAgentSession
         var initialize = JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions());
         var capabilities = _options.Quirks.Capabilities(AcpAgentCapabilities.Read(initialize), initialize);
         _options.Profile.Capabilities = capabilities;
-        connection = new Connection(client, capabilities, start.WorkingDirectory ?? Environment.CurrentDirectory, launchKey) { InSandbox = start.Host is not null };
+        connection = new Connection(client, capabilities, start.WorkingDirectory ?? Environment.CurrentDirectory, launchKey)
+        {
+            InSandbox = start.Host is not null,
+            ElicitationFormEnabled = start.EnableElicitationForm,
+        };
         _ = client.Completion.ContinueWith(
             static (_, state) =>
             {
-                var connection = (Connection)state!;
-                connection.Post(new ClosedEvent(connection.DescribeExit()));
+                var (session, completedConnection) = ((AcpAgentSession, Connection))state!;
+                session.OnConnectionClosed(completedConnection);
             },
-            connection,
+            (this, connection),
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
         _connection = connection;
         return connection;
+    }
+
+    private void OnConnectionClosed(Connection connection)
+    {
+        var exitMessage = connection.DescribeExit();
+        var wasActive = connection.PromptActive;
+        connection.MarkClosed();
+        RetirePrompt(connection);
+        if (ReferenceEquals(_connection, connection))
+        {
+            if (wasActive)
+            {
+                connection.UnexpectedExit = exitMessage;
+            }
+
+            // Unblock any tool-call wait in AgentSession immediately instead of waiting for the event loop to read ClosedEvent.
+            _bridge.FailOutstanding(exitMessage);
+        }
+
+        connection.Post(new ClosedEvent(exitMessage));
     }
 
     // Appended to the system prompt of the agent, for an agent that takes one from its client: in the systemPrompt of
@@ -399,7 +539,8 @@ internal sealed partial class AcpAgentSession
             return;
         }
 
-        CancelPermissionRequests(connection);
+        connection.MarkClosed();
+        RetirePrompt(connection);
         _bridge.FailOutstanding($"{_options.AgentName} stopped before the tool call completed.");
         if (connection.Endpoint is { } endpoint)
         {
@@ -444,6 +585,15 @@ internal sealed partial class AcpAgentSession
                 break;
             case "session/request_permission" when message.RequestId is { } requestId:
                 _ = AnswerPermissionAsync(connection, requestId, message.Params);
+                break;
+            case "elicitation/create" when message.RequestId is { } elicitationId:
+                _ = AnswerElicitationAsync(connection, elicitationId, message.Params);
+                break;
+            case "elicitation/complete":
+                // URL-mode completion notification: clients MUST ignore unknown or completed IDs.
+                break;
+            case "$/cancel_request":
+                OnCancelRequest(connection, message.Params);
                 break;
             default:
                 if (message.RequestId is { } other)
@@ -493,12 +643,45 @@ internal sealed partial class AcpAgentSession
                 }
                 else
                 {
-                    OnToolCallUpdate(update);
+                    OnToolCallUpdate(connection, update);
                 }
 
                 break;
             case "plan":
                 connection.Post(new PlanEvent(AcpToolCalls.RenderPlan(update)));
+                break;
+            case "plan_update":
+                if (AcpJson.TryGetObject(update, "plan", out var planObject) &&
+                    AcpJson.GetString(planObject, "planId") is { Length: > 0 } planId)
+                {
+                    connection.Plans[planId] = AcpToolCalls.RenderPlanUpdate(planObject);
+                    connection.Post(new PlanEvent(RenderAllPlans(connection.Plans)));
+                }
+
+                break;
+            case "plan_removed":
+                if (AcpJson.GetString(update, "planId") is { Length: > 0 } removedPlanId &&
+                    connection.Plans.Remove(removedPlanId))
+                {
+                    connection.Post(new PlanEvent(connection.Plans.Count == 0 ? "Plan cleared." : RenderAllPlans(connection.Plans)));
+                }
+
+                break;
+            case "session_info_update":
+                if (update.TryGetProperty("title", out var titleProp))
+                {
+                    connection.SessionTitle = titleProp.ValueKind == JsonValueKind.String
+                        ? (string.IsNullOrWhiteSpace(titleProp.GetString()) ? null : titleProp.GetString()!.Trim())
+                        : null;
+                }
+
+                break;
+            case "current_mode_update":
+                if (AcpJson.GetString(update, "currentModeId") is { Length: > 0 } modeId)
+                {
+                    connection.Post(new SessionUpdateEvent(AgentSessionUpdateKind.ModeChanged, $"{_options.AgentName} switched to mode '{modeId}'."));
+                }
+
                 break;
             case "usage_update":
                 connection.Post(new UsageEvent(AcpJson.GetInt64(update, "used"), AcpJson.GetInt64(update, "size"),
@@ -528,16 +711,14 @@ internal sealed partial class AcpAgentSession
                 }
 
                 break;
+            case "compaction_summary_chunk":
+                OnCompactionSummaryChunk(connection, update);
+                break;
             case "compaction_update":
-                // The agent compacted its context: the block of the instructions may be gone with it.
-                if (AcpJson.GetString(update, "status") is null or "completed")
-                {
-                    _instructionsLost = true;
-                }
-
+                OnCompactionUpdate(connection, update);
                 break;
             case "notice":
-                if (AcpJson.GetString(update, "message") is { Length: > 0 } notice)
+                if (FormatNotice(update) is { Length: > 0 } notice)
                 {
                     connection.Post(new NoticeEvent(notice, AcpJson.GetString(update, "severity") is "warning" or "error"));
                 }
@@ -558,10 +739,11 @@ internal sealed partial class AcpAgentSession
             EndToolCallsLeftBehind();
         }
 
-        var (name, arguments, codeAlta) = AcpToolCalls.Map(update, ExposedTools, connection.WorkingDirectory);
+        CacheToolCall(connection, callId, update);
+        var (name, arguments, codeAlta) = AcpToolCalls.Map(update, connection.Endpoint is not null ? ExposedTools : EmptyTools, connection.WorkingDirectory);
         _bridge.Register(callId, name, arguments, codeAlta);
         connection.Post(new ToolCallEvent(callId, name, arguments));
-        OnToolCallUpdate(update);
+        OnToolCallUpdate(connection, update);
     }
 
     // An agent that reports the end of its tool calls only with its prompt went on: the calls of its own tools it
@@ -574,26 +756,279 @@ internal sealed partial class AcpAgentSession
         }
     }
 
-    private void OnToolCallUpdate(JsonElement update)
+    private void OnToolCallUpdate(Connection connection, JsonElement update)
     {
         if (AcpJson.GetString(update, "toolCallId") is not { Length: > 0 } callId)
         {
             return;
         }
 
+        CacheToolCall(connection, callId, update);
         switch (AcpJson.GetString(update, "status"))
         {
             case "in_progress":
                 _bridge.MarkStarted(callId);
                 break;
             case "completed":
-                _bridge.Complete(callId, AcpToolCalls.CreateResult(update, success: true));
+                var completed = MergeToolCall(connection, update);
+                connection.ToolCalls.TryRemove(callId, out _);
+                _bridge.Complete(callId, AcpToolCalls.CreateResult(completed, success: true));
                 break;
             case "failed":
-                _bridge.Complete(callId, AcpToolCalls.CreateResult(update, success: false));
+                var failed = MergeToolCall(connection, update);
+                connection.ToolCalls.TryRemove(callId, out _);
+                _bridge.Complete(callId, AcpToolCalls.CreateResult(failed, success: false));
                 break;
         }
     }
+
+    private static void CacheToolCall(Connection connection, string callId, JsonElement update)
+    {
+        if (update.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        connection.ToolCalls.AddOrUpdate(
+            callId,
+            _ => MergeCached(null, update),
+            (_, existing) => MergeCached(existing, update));
+
+        static CachedToolCall MergeCached(CachedToolCall? existing, JsonElement patch)
+            => new(
+                Title: AcpJson.GetString(patch, "title") ?? existing?.Title,
+                Name: AcpJson.GetString(patch, "name") ?? existing?.Name,
+                Kind: AcpJson.GetString(patch, "kind") ?? existing?.Kind,
+                RawInput: patch.TryGetProperty("rawInput", out var rawInput) && rawInput.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                    ? rawInput.Clone()
+                    : existing?.RawInput,
+                Locations: AcpJson.TryGetArray(patch, "locations", out var locations)
+                    ? locations.Clone()
+                    : existing?.Locations,
+                Content: AcpJson.TryGetArray(patch, "content", out var content)
+                    ? content.Clone()
+                    : existing?.Content,
+                RawOutput: patch.TryGetProperty("rawOutput", out var rawOutput) && rawOutput.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                    ? rawOutput.Clone()
+                    : existing?.RawOutput);
+    }
+
+    private static JsonElement MergeToolCall(Connection connection, JsonElement toolCall)
+    {
+        if (toolCall.ValueKind != JsonValueKind.Object ||
+            AcpJson.GetString(toolCall, "toolCallId") is not { Length: > 0 } callId ||
+            !connection.ToolCalls.TryGetValue(callId, out var cached))
+        {
+            return toolCall;
+        }
+
+        return AcpJson.Build(writer =>
+        {
+            writer.WriteStartObject();
+            var hasTitle = false;
+            var hasName = false;
+            var hasKind = false;
+            var hasRawInput = false;
+            var hasLocations = false;
+            var hasContent = false;
+            var hasRawOutput = false;
+
+            foreach (var property in toolCall.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+
+                switch (property.Name)
+                {
+                    case "title": hasTitle = true; break;
+                    case "name": hasName = true; break;
+                    case "kind": hasKind = true; break;
+                    case "rawInput": hasRawInput = true; break;
+                    case "locations": hasLocations = true; break;
+                    case "content": hasContent = true; break;
+                    case "rawOutput": hasRawOutput = true; break;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            if (!hasTitle && cached.Title is not null) writer.WriteString("title", cached.Title);
+            if (!hasName && cached.Name is not null) writer.WriteString("name", cached.Name);
+            if (!hasKind && cached.Kind is not null) writer.WriteString("kind", cached.Kind);
+            if (!hasRawInput && cached.RawInput is { } rawInput) { writer.WritePropertyName("rawInput"); rawInput.WriteTo(writer); }
+            if (!hasLocations && cached.Locations is { } locations) { writer.WritePropertyName("locations"); locations.WriteTo(writer); }
+            if (!hasContent && cached.Content is { } content) { writer.WritePropertyName("content"); content.WriteTo(writer); }
+            if (!hasRawOutput && cached.RawOutput is { } rawOutput) { writer.WritePropertyName("rawOutput"); rawOutput.WriteTo(writer); }
+            writer.WriteEndObject();
+        });
+    }
+
+    private void OnCompactionSummaryChunk(Connection connection, JsonElement update)
+    {
+        var compactionId = AcpJson.GetString(update, "compactionId") ?? string.Empty;
+        if (compactionId.Length > 0 && connection.ActiveCompactions.Add(compactionId))
+        {
+            connection.Post(new SessionUpdateEvent(AgentSessionUpdateKind.CompactionStarted, $"{_options.AgentName} is compacting its context…"));
+        }
+
+        if (!AcpJson.TryGetObject(update, "content", out var block))
+        {
+            return;
+        }
+
+        var text = AcpPrompts.RenderContentBlock(block);
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        if (!connection.CompactionSummaries.TryGetValue(compactionId, out var builder))
+        {
+            builder = new StringBuilder();
+            connection.CompactionSummaries[compactionId] = builder;
+        }
+
+        var remaining = CompactionSummaryLimit - builder.Length;
+        if (remaining > 0)
+        {
+            builder.Append(text.Length <= remaining ? text : text[..remaining]);
+        }
+    }
+
+    private void OnCompactionUpdate(Connection connection, JsonElement update)
+    {
+        var compactionId = AcpJson.GetString(update, "compactionId") ?? string.Empty;
+        if (update.TryGetProperty("summary", out var summaryElement))
+        {
+            if (summaryElement.ValueKind == JsonValueKind.Null)
+            {
+                connection.CompactionSummaries.Remove(compactionId);
+            }
+            else if (summaryElement.ValueKind == JsonValueKind.Array)
+            {
+                var rendered = RenderSummaryBlocks(summaryElement);
+                if (rendered.Length == 0)
+                {
+                    connection.CompactionSummaries.Remove(compactionId);
+                }
+                else
+                {
+                    connection.CompactionSummaries[compactionId] = new StringBuilder(rendered.Length <= CompactionSummaryLimit ? rendered : rendered[..CompactionSummaryLimit]);
+                }
+            }
+        }
+
+        switch (AcpJson.GetString(update, "status"))
+        {
+            case "in_progress":
+                if (connection.ActiveCompactions.Add(compactionId))
+                {
+                    connection.Post(new SessionUpdateEvent(AgentSessionUpdateKind.CompactionStarted, $"{_options.AgentName} is compacting its context…"));
+                }
+
+                break;
+            case "failed":
+                connection.ActiveCompactions.Remove(compactionId);
+                connection.CompactionSummaries.Remove(compactionId);
+                var error = AcpJson.GetString(update, "error");
+                connection.Post(new NoticeEvent(
+                    string.IsNullOrWhiteSpace(error)
+                        ? $"{_options.AgentName} failed to compact its context."
+                        : $"{_options.AgentName} failed to compact its context: {error.Trim()}",
+                    Warning: true));
+                break;
+            case "cancelled":
+                connection.ActiveCompactions.Remove(compactionId);
+                connection.CompactionSummaries.Remove(compactionId);
+                break;
+            case "completed":
+                // The agent compacted its context: the block of the instructions may be gone with it.
+                _instructionsLost = true;
+                connection.ActiveCompactions.Remove(compactionId);
+                string? summary = null;
+                if (connection.CompactionSummaries.Remove(compactionId, out var builder) && builder.Length > 0)
+                {
+                    summary = builder.ToString().Trim();
+                }
+
+                connection.Post(new SessionUpdateEvent(
+                    AgentSessionUpdateKind.CompactionCompleted,
+                    string.IsNullOrEmpty(summary)
+                        ? $"{_options.AgentName} compacted its context."
+                        : $"{_options.AgentName} compacted its context.\n{summary}"));
+                break;
+        }
+    }
+
+    private static string RenderSummaryBlocks(JsonElement blocks)
+    {
+        var builder = new StringBuilder();
+        foreach (var block in blocks.EnumerateArray())
+        {
+            var text = AcpPrompts.RenderContentBlock(block);
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append('\n');
+            }
+
+            builder.Append(text);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string RenderAllPlans(OrderedDictionary<string, string> plans)
+        => plans.Count == 0
+            ? "Plan updated."
+            : string.Join("\n\n", plans.Values.Where(static text => !string.IsNullOrWhiteSpace(text)));
+
+    private static string? FormatNotice(JsonElement update)
+    {
+        var title = AcpJson.GetString(update, "title")?.Trim();
+        var description = AcpJson.GetString(update, "description")?.Trim();
+        if (string.IsNullOrEmpty(title))
+        {
+            // Compatibility fallback for older/custom agents that emit a `message` field.
+            title = AcpJson.GetString(update, "message")?.Trim();
+        }
+
+        if (string.IsNullOrEmpty(title))
+        {
+            return string.IsNullOrEmpty(description) ? null : description;
+        }
+
+        return string.IsNullOrEmpty(description) ? title : $"{title}: {description}";
+    }
+
+    private void OnCancelRequest(Connection connection, JsonElement parameters)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object || !parameters.TryGetProperty("requestId", out var requestId))
+        {
+            return;
+        }
+
+        if (connection.PendingRequests.TryGetValue(RequestIdKey(requestId), out var pending))
+        {
+            pending.Cancel(byAgent: true);
+        }
+    }
+
+    private static string RequestIdKey(RequestId requestId) => RequestIdKey(requestId.Value);
+
+    private static string RequestIdKey(JsonElement value)
+        => value.ValueKind switch
+        {
+            JsonValueKind.String => "s:" + value.GetString(),
+            JsonValueKind.Number when value.TryGetInt64(out var number) => "n:" + number.ToString(CultureInfo.InvariantCulture),
+            _ => "r:" + value.GetRawText(),
+        };
 
     private void SetConfigOptions(Connection connection, JsonElement? options)
     {
@@ -610,22 +1045,31 @@ internal sealed partial class AcpAgentSession
         }
     }
 
-    private void CancelPermissionRequests(Connection? connection)
+    private static readonly IReadOnlyDictionary<string, AgentToolDefinition> EmptyTools =
+        System.Collections.Frozen.FrozenDictionary<string, AgentToolDefinition>.Empty;
+
+    private static void RetirePrompt(Connection? connection)
     {
         if (connection is null)
         {
             return;
         }
 
-        foreach (var (_, prompt) in connection.PermissionRequests)
+        connection.EndPrompt();
+        CancelPendingRequests(connection);
+        connection.ToolCalls.Clear();
+    }
+
+    private static void CancelPendingRequests(Connection? connection)
+    {
+        if (connection is null)
         {
-            try
-            {
-                prompt.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-            }
+            return;
+        }
+
+        foreach (var (_, pending) in connection.PendingRequests)
+        {
+            pending.Cancel(byAgent: false);
         }
     }
 

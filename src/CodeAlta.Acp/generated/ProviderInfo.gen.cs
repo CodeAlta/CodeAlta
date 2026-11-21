@@ -18,7 +18,7 @@ public sealed partial record ProviderInfo
     /// <summary>Provider identifier, for example "main" or "openai".</summary>
     [JsonPropertyName("providerId")]
     public ProviderId ProviderId { get; set; } = default!;
-    /// <summary>Whether this provider is mandatory and cannot be disabled via `providers/disable`. If true, clients must not call `providers/disable` for this provider ID.</summary>
+    /// <summary>Whether this provider is mandatory and cannot be disabled via `providers/disable`. If true, clients MUST NOT call `providers/disable` for this provider ID.</summary>
     [JsonPropertyName("required")]
     public bool Required { get; set; }
     /// <summary>Supported protocol types for this provider.</summary>

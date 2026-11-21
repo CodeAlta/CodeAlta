@@ -106,6 +106,7 @@ internal static class OwnedSessionAskTool
             {
                 Title = Bounded(question.Title, 120), Question = Bounded(question.Question, 4000), Description = Bounded(question.Description, 4000),
                 Choices = choices.AsReadOnly(),
+                AllowMultiSelect = question.AllowMultiSelect && choices.Count > 0,
                 Freeform = question.Freeform is null ? null
                     : new() { Title = Bounded(question.Freeform.Title, 120), Placeholder = Bounded(question.Freeform.Placeholder, 500) },
             });
@@ -128,7 +129,9 @@ internal static class OwnedSessionAskTool
                 throw new ArgumentException("Invalid answer index or choices.");
             var question = request.Questions[answer.QuestionIndex];
             var choices = answer.SelectedChoiceIndexes.ToArray();
-            if (choices.Distinct().Count() != choices.Length || choices.Any(index => index < 0 || index >= question.Choices.Count))
+            if ((!question.AllowMultiSelect && choices.Length > 1)
+                || choices.Distinct().Count() != choices.Length
+                || choices.Any(index => index < 0 || index >= question.Choices.Count))
                 throw new ArgumentException("Invalid choice.");
             if (answer.FreeformText is { } text)
             {

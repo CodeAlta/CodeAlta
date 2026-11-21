@@ -7,9 +7,9 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// The child is ready to process another prompt.
+/// Foreground work is not in progress. The parent can give the child more work.
 /// 
-/// An omitted, `null`, or malformed `stopReason` means not reported.
+/// An omitted or `null` `stopReason` means not reported.
 /// </summary>
 public partial struct IdleStateUpdate
 {

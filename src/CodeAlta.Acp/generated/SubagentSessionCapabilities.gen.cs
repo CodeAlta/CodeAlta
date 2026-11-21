@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Client-initiated session mutations permitted for a specific subagent session.
 /// 
 /// A mutation requires an explicit per-child capability. Support for the method

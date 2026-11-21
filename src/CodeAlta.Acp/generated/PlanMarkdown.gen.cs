@@ -7,15 +7,11 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
-/// A plan represented as raw markdown content.
+/// A plan represented as Markdown.
 /// </summary>
 public sealed partial record PlanMarkdown
 {
-    /// <summary>Markdown content for the plan.</summary>
+    /// <summary>The complete plan as Markdown, not just the text that changed.</summary>
     [JsonPropertyName("content")]
     public string Content { get; set; } = string.Empty;
     /// <summary>The plan ID to update.</summary>
@@ -24,7 +20,7 @@ public sealed partial record PlanMarkdown
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>The absolute path of the file that holds this plan.  This field is optional. Omitting it or sending `null` both mean that the plan has no file. `content` is the plan to display whether or not `path` is set. Clients can use `path` to open the file.</summary>
+    /// <summary>The absolute path of the file that holds this plan.  Omitted and `null` both mean the plan has no file. A supplied path MUST be absolute. `content` is the plan to display whether or not `path` is set. Clients can use `path` to open the file.</summary>
     [JsonPropertyName("path")]
     public string? Path { get; set; }
 }

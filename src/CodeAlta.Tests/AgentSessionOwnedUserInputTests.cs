@@ -25,8 +25,169 @@ public sealed class AgentSessionOwnedUserInputTests
             var defaults = new AgentSendOptions { Input = options.Input };
             Assert.IsNull(defaults.OnUserInputRequest); Assert.IsFalse(defaults.EnableUserInputTool);
             Assert.IsFalse(execution.Compose(defaults).EnableUserInputTool);
+            Assert.IsNull(execution.Compose(defaults).OnInteractiveAsk, "disabled ask owner does not wire interactive asks");
         }
         finally { execution.Close(); }
+    }
+
+    [TestMethod]
+    public async Task AskComposition_WiresImmediateInteractiveAskWithMultiSelect_AndCancelsOnClose()
+    {
+        var owner = new OwnedSessionAskService(enabled: true, (_, _) => throw new AssertFailedException("Immediate ask must not dispatch a prompt send."));
+        var execution = owner.CreateExecution(Guid.NewGuid(), "session-acp", default);
+        execution.Bind(Guid.NewGuid(), 1, new ModelProviderId("acp:agy"));
+        await execution.StartedAsync(new AgentRunId("run-1"), CancellationToken.None);
+        try
+        {
+            var composed = execution.Compose(new AgentSendOptions { Input = AgentInput.Text("ask") });
+            Assert.IsNotNull(composed.OnInteractiveAsk);
+
+            var request = new AgentInteractiveAskRequest(
+                new ModelProviderId("acp:agy"),
+                "session-acp",
+                new AgentRunId("run-1"),
+                "req-1",
+                DateTimeOffset.UtcNow,
+                "Please choose:",
+                [
+                    new AgentInteractiveAskQuestion(
+                        "Colors",
+                        "Pick colors",
+                        "Select all that apply",
+                        [new("Red"), new("Green"), new("Blue")],
+                        AllowMultiSelect: true,
+                        Freeform: new("Other", "Custom color")),
+                ]);
+
+            var askTask = composed.OnInteractiveAsk!(request, CancellationToken.None);
+            var page = owner.List("session-acp");
+            Assert.IsNotNull(page.Head);
+            Assert.IsTrue(page.Head.Immediate);
+            Assert.IsTrue(page.Head.Request.Questions[0].AllowMultiSelect);
+
+            var disposition = await owner.AnswerAsync(
+                new OwnedAskAction(
+                    Guid.NewGuid(),
+                    page.Head.Handle,
+                    [new CodeAlta.LiveTool.AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [0, 2], FreeformText = "Violet" }]),
+                CancellationToken.None);
+            Assert.AreEqual("admitted", disposition.Status);
+
+            var response = await askTask.WithinAsync(TestTime.Seconds(5));
+            Assert.IsFalse(response.Cancelled);
+            Assert.AreEqual(1, response.Answers.Count);
+            CollectionAssert.AreEqual(new[] { 0, 2 }, response.Answers[0].SelectedChoiceIndexes.ToArray());
+            Assert.AreEqual("Violet", response.Answers[0].FreeformText);
+
+            // Caller cancellation withdraws the ask and propagates OperationCanceledException.
+            using var callerCts = new CancellationTokenSource();
+            var cancelledByCaller = composed.OnInteractiveAsk!(request, callerCts.Token);
+            Assert.IsNotNull(owner.List("session-acp").Head);
+            await callerCts.CancelAsync();
+            await Assert.ThrowsAsync<OperationCanceledException>(async () => await cancelledByCaller.WithinAsync(TestTime.Seconds(5)));
+            Assert.IsNull(owner.List("session-acp").Head, "withdrawn on caller cancel");
+
+            // An unanswered interactive ask is withdrawn and returns Cancelled when the execution closes.
+            var dangling = composed.OnInteractiveAsk!(request, CancellationToken.None);
+            Assert.IsNotNull(owner.List("session-acp").Head);
+            execution.Close();
+            var closedResponse = await dangling.WithinAsync(TestTime.Seconds(5));
+            Assert.IsTrue(closedResponse.Cancelled);
+            Assert.IsNull(owner.List("session-acp").Head, "withdrawn on execution close");
+        }
+        finally
+        {
+            execution.Close();
+        }
+    }
+
+    [TestMethod]
+    public async Task ImmediateInteractiveAsk_SurfacesAheadOfDeferredAsk_PreservesChoiceIndexes_AndEnforcesSingleSelect()
+    {
+        var owner = new OwnedSessionAskService(enabled: true, (_, _) => throw new AssertFailedException("Deferred ask should not dispatch during this test."));
+        var execution = owner.CreateExecution(Guid.NewGuid(), "session-order", default);
+        execution.Bind(Guid.NewGuid(), 1, new ModelProviderId("acp:agy"));
+        await execution.StartedAsync(new AgentRunId("run-1"), CancellationToken.None);
+        try
+        {
+            // 1. Queue a deferred ask first (simulating `alta ask` during a turn).
+            var deferred = owner.QueueFromSession("session-order", new CodeAlta.LiveTool.AltaAskRequest
+            {
+                Questions = [new CodeAlta.LiveTool.AltaAskQuestion { Title = "Deferred", Question = "Later?", Choices = [new() { Title = "A" }, new() { Title = "B" }] }],
+            });
+            Assert.IsNotNull(deferred);
+            Assert.IsFalse(owner.List("session-order").Head!.Immediate);
+
+            // 2. Now start an immediate interactive ask while the deferred ask is queued: immediate MUST surface as Head.
+            var composed = execution.Compose(new AgentSendOptions { Input = AgentInput.Text("ask") });
+            var interactiveRequest = new AgentInteractiveAskRequest(
+                new ModelProviderId("acp:agy"),
+                "session-order",
+                new AgentRunId("run-1"),
+                "req-2",
+                DateTimeOffset.UtcNow,
+                "Live question",
+                [
+                    new AgentInteractiveAskQuestion(
+                        "Pick",
+                        "Choose one",
+                        null,
+                        // First choice has whitespace-only label: must NOT be dropped and shift index 1 -> 0.
+                        [new("   "), new("Second")],
+                        AllowMultiSelect: false),
+                ]);
+
+            var askTask = composed.OnInteractiveAsk!(interactiveRequest, CancellationToken.None);
+            var page = owner.List("session-order");
+            Assert.IsNotNull(page.Head);
+            Assert.IsTrue(page.Head.Immediate, "immediate ask must surface ahead of deferred ask");
+            Assert.IsTrue(page.HasMore);
+            Assert.AreEqual(2, page.Head.Request.Questions[0].Choices.Count, "whitespace choice must keep its slot");
+            Assert.AreEqual("Second", page.Head.Request.Questions[0].Choices[1].Title);
+
+            // Single-select question rejects multiple choice indexes.
+            await Assert.ThrowsAsync<ArgumentException>(() => owner.AnswerAsync(
+                new OwnedAskAction(
+                    Guid.NewGuid(),
+                    page.Head.Handle,
+                    [new CodeAlta.LiveTool.AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [0, 1] }]),
+                CancellationToken.None));
+
+            // Answering index 1 maps back to index 1.
+            var disposition = await owner.AnswerAsync(
+                new OwnedAskAction(
+                    Guid.NewGuid(),
+                    page.Head.Handle,
+                    [new CodeAlta.LiveTool.AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [1] }]),
+                CancellationToken.None);
+            Assert.AreEqual("admitted", disposition.Status);
+
+            var response = await askTask.WithinAsync(TestTime.Seconds(5));
+            Assert.IsFalse(response.Cancelled);
+            CollectionAssert.AreEqual(new[] { 1 }, response.Answers[0].SelectedChoiceIndexes.ToArray());
+
+            // Deferred ask returns to Head after the immediate ask settles.
+            var after = owner.List("session-order");
+            Assert.IsNotNull(after.Head);
+            Assert.IsFalse(after.Head.Immediate);
+            Assert.AreEqual(deferred.AskId, after.Head.Handle.AskId);
+
+            // Forms exceeding 12 questions are cancelled rather than silently truncated.
+            var tooMany = new AgentInteractiveAskRequest(
+                new ModelProviderId("acp:agy"),
+                "session-order",
+                new AgentRunId("run-1"),
+                "req-3",
+                DateTimeOffset.UtcNow,
+                null,
+                [.. Enumerable.Range(1, 13).Select(static i => new AgentInteractiveAskQuestion($"Q{i}", $"Question {i}", null, [], Freeform: new(null, null)))]);
+            var truncatedResult = await composed.OnInteractiveAsk!(tooMany, CancellationToken.None);
+            Assert.IsTrue(truncatedResult.Cancelled);
+        }
+        finally
+        {
+            execution.Close();
+        }
     }
 
     [TestMethod]

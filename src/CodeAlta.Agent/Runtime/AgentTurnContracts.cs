@@ -62,7 +62,14 @@ public sealed record AgentProviderRunContext(
     AgentPermissionRequestHandler OnPermissionRequest,
     AgentUserInputRequestHandler? OnUserInputRequest,
     bool ProviderInitiated = false,
-    AgentConversationHeldHandler? OnConversationHeld = null);
+    AgentConversationHeldHandler? OnConversationHeld = null)
+{
+    /// <summary>
+    /// Gets or initializes a handler that presents an interactive question form while the run is active
+    /// (such as ACP <c>elicitation/create</c>); <see langword="null"/> when the host cannot show live questions.
+    /// </summary>
+    public AgentInteractiveAskHandler? OnInteractiveAsk { get; init; }
+}
 
 /// <summary>
 /// A turn executor whose provider can start a turn by itself while its session has no run (an agent CLI whose

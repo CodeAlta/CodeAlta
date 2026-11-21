@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Notification that the enclosing parent session created and owns a child session.
 /// 
 /// Later updates modify the existing association's metadata, not its ownership.
@@ -38,7 +34,7 @@ public sealed partial record SubagentUpdate
     /// <summary>The opaque session ID identifying the child in all ACP messages.</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>Additional workspace roots for the child. Each path must be absolute.  Optional and nullable. Omitted means unchanged. `null` clears the reported value. While unset, the child inherits its immediate parent's effective additional directories, independently of `cwd`. A concrete array replaces the whole list. `[]` reports no additional directories. Clients use these values for the child's root set.</summary>
+    /// <summary>Additional workspace roots for the child. Each path MUST be absolute.  Optional and nullable. Omitted means unchanged. `null` clears the reported value. While unset, the child inherits its immediate parent's effective additional directories, independently of `cwd`. A concrete array replaces the whole list. `[]` reports no additional directories. Clients use these values for the child's root set.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>Client-initiated session mutations permitted for this subagent session.  Omitted means unchanged. `null` clears the capability set and disables child mutations. If never supplied, no session mutations are permitted. Read-only operations retain their normal protocol semantics and capability requirements. A concrete object replaces the whole capability set.</summary>

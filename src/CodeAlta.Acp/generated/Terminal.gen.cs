@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Embed a terminal created with `terminal/create` by its id.
 /// 
-/// The terminal must be added before calling `terminal/release`.
+/// The terminal MUST be added before calling `terminal/release`.
 /// 
 /// See protocol docs: [Terminal](https://agentclientprotocol.com/protocol/v1/draft/terminals)
 /// </summary>

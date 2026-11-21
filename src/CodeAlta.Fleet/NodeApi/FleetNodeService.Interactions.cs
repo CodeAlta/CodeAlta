@@ -49,7 +49,7 @@ public sealed partial class FleetNodeService
         var ask = page.Head is { } head
             ? new FleetAsk(head.Handle.AskId, head.Handle.RunId, head.State, [.. head.Request.Questions.Select(static question => new FleetAskQuestion(question.Title,
                 question.Question, question.Description, [.. question.Choices.Select(static choice => new FleetAskChoice(choice.Title, choice.Description))],
-                question.Freeform is not null) { FreeformTitle = question.Freeform?.Title, FreeformPlaceholder = question.Freeform?.Placeholder })])
+                question.Freeform is not null) { FreeformTitle = question.Freeform?.Title, FreeformPlaceholder = question.Freeform?.Placeholder, AllowMultiSelect = question.AllowMultiSelect })])
             {
                 // A review request is answered with a verdict, which this API does not carry: it says so, and is not a question.
                 Kind = head.Request.Review is null ? FleetAsk.KindQuestions : FleetAsk.KindReview,

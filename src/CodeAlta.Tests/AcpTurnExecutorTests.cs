@@ -852,10 +852,12 @@ public sealed class AcpTurnExecutorTests
 
         Assert.AreEqual("effort", AcpJson.GetString(AcpConfigOptions.EffortOption(options)!.Value, "id"), "the thought level whose values are efforts");
         var read = AcpConfigOptions.ReadModelOptions(options);
-        // A setting of another category belongs to the session, and a boolean option is not offered by this client.
-        CollectionAssert.AreEqual(new[] { "thinking", "context" }, read.Select(static option => option.Id).ToArray());
+        // A setting of another category belongs to the session; select and boolean model_config options are included.
+        CollectionAssert.AreEqual(new[] { "thinking", "context", "speed" }, read.Select(static option => option.Id).ToArray());
         Assert.AreEqual("Context", read[1].Name);
         Assert.AreEqual("thinking", read[0].Name, "an option without a name is named by its id");
+        Assert.IsTrue(read[2].IsToggle);
+        Assert.AreEqual("true", read[2].Value);
     }
 
     [TestMethod]
@@ -1231,6 +1233,820 @@ public sealed class AcpTurnExecutorTests
         Assert.IsNull(AcpAgentSession.ChooseReadOnlyMode([("code", "Code"), ("yolo", "Yolo")]));
     }
 
+    [TestMethod]
+    public async Task Elicitation_FormCapability_IsAdvertisedOnlyWhenInteractiveHandlerPresent()
+    {
+        var withoutHandler = new AcpFakeAgent();
+        await using (var fixture = new Fixture(withoutHandler))
+        {
+            await fixture.RunAsync([User("hello")]);
+            Assert.IsNull(withoutHandler.ClientCapabilities?["elicitation"], "do not advertise elicitation without a UI handler");
+            Assert.IsNotNull(withoutHandler.ClientCapabilities?["plan"], "plan capability is advertised");
+            Assert.IsNotNull(withoutHandler.ClientCapabilities?["session"]?["configOptions"]?["boolean"], "boolean config options capability is advertised");
+        }
+
+        var withHandler = new AcpFakeAgent();
+        await using (var fixture = new Fixture(withHandler)
+        {
+            OnInteractiveAsk = static (_, _) => Task.FromResult(new AgentInteractiveAskResponse(Cancelled: true, [])),
+        })
+        {
+            await fixture.RunAsync([User("hello")]);
+            Assert.IsNotNull(withHandler.ClientCapabilities?["elicitation"]?["form"], "form elicitation capability is advertised when interactive asks are available");
+            Assert.IsNull(withHandler.ClientCapabilities?["elicitation"]?["url"], "url elicitation is not advertised");
+
+            // Standalone turns never advertise elicitation.
+            await fixture.RunStandaloneAsync("side question");
+            Assert.IsNull(withHandler.ClientCapabilities?["elicitation"], "standalone turns must not advertise elicitation");
+        }
+    }
+
+    [TestMethod]
+    public async Task Elicitation_SingleAndMultiSelectWithOther_AnswersAndContinuesTurn()
+    {
+        JsonNode? firstAnswer = null;
+        JsonNode? secondAnswer = null;
+        var seenRequests = new List<AgentInteractiveAskRequest>();
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.StartToolAsync("call-ask-1", "Run ask_question", "other", name: "ask_question");
+                firstAnswer = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["toolCallId"] = "call-ask-1",
+                    ["message"] = "Please answer the following questions:",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["q1"] = new JsonObject
+                            {
+                                ["type"] = "string",
+                                ["title"] = "Pick a beverage",
+                                ["oneOf"] = new JsonArray(
+                                    new JsonObject { ["const"] = "1", ["title"] = "Coffee" },
+                                    new JsonObject { ["const"] = "2", ["title"] = "Tea" }),
+                            },
+                            ["q1_other"] = new JsonObject
+                            {
+                                ["type"] = "string",
+                                ["title"] = "Other",
+                                ["description"] = "Custom beverage",
+                            },
+                            ["q2"] = new JsonObject
+                            {
+                                ["type"] = "array",
+                                ["title"] = "Pick colors",
+                                ["items"] = new JsonObject
+                                {
+                                    ["anyOf"] = new JsonArray(
+                                        new JsonObject { ["const"] = "1", ["title"] = "Red" },
+                                        new JsonObject { ["const"] = "2", ["title"] = "Green" },
+                                        new JsonObject { ["const"] = "3", ["title"] = "Blue" }),
+                                },
+                            },
+                            ["q2_other"] = new JsonObject
+                            {
+                                ["type"] = "string",
+                                ["title"] = "Other",
+                                ["description"] = "Another color",
+                            },
+                        },
+                    },
+                });
+                await prompt.EndToolAsync("call-ask-1", "Answered");
+
+                // Second elicitation: user provides custom "Other" text on a single-select question.
+                secondAnswer = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "Favorite snack?",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["snack"] = new JsonObject
+                            {
+                                ["type"] = "string",
+                                ["title"] = "Favorite snack",
+                                ["oneOf"] = new JsonArray(
+                                    new JsonObject { ["const"] = "a", ["title"] = "Chips" },
+                                    new JsonObject { ["const"] = "b", ["title"] = "Fruit" }),
+                            },
+                            ["snack_other"] = new JsonObject
+                            {
+                                ["type"] = "string",
+                                ["title"] = "Other",
+                                ["description"] = "Specify another snack",
+                            },
+                        },
+                    },
+                });
+
+                await prompt.SendTextAsync("Done with answers.");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            OnInteractiveAsk = (request, _) =>
+            {
+                seenRequests.Add(request);
+                if (seenRequests.Count == 1)
+                {
+                    return Task.FromResult(new AgentInteractiveAskResponse(
+                        Cancelled: false,
+                        [
+                            new AgentInteractiveAskAnswer(0, [1], null),
+                            new AgentInteractiveAskAnswer(1, [0, 2], "Purple"),
+                        ]));
+                }
+
+                return Task.FromResult(new AgentInteractiveAskResponse(
+                    Cancelled: false,
+                    [new AgentInteractiveAskAnswer(0, [0], "Popcorn")]));
+            },
+        };
+
+        var conversation = await fixture.RunAsync([User("ask me")]);
+
+        Assert.AreEqual(2, seenRequests.Count);
+        Assert.AreEqual(2, seenRequests[0].Questions.Count, "companion *_other fields are merged into their parent question");
+        Assert.IsFalse(seenRequests[0].Questions[0].AllowMultiSelect);
+        Assert.AreEqual("Other", seenRequests[0].Questions[0].Freeform?.Title);
+        Assert.IsTrue(seenRequests[0].Questions[1].AllowMultiSelect);
+        Assert.AreEqual(3, seenRequests[0].Questions[1].Choices.Count);
+        Assert.AreEqual("Other", seenRequests[0].Questions[1].Freeform?.Title);
+
+        Assert.AreEqual("accept", firstAnswer?["action"]?.GetValue<string>());
+        Assert.AreEqual("2", firstAnswer?["content"]?["q1"]?.GetValue<string>());
+        Assert.IsNull(firstAnswer?["content"]?["q1_other"]);
+        CollectionAssert.AreEqual(new[] { "1", "3" }, firstAnswer?["content"]?["q2"]?.AsArray().Select(static n => n!.GetValue<string>()).ToArray());
+        Assert.AreEqual("Purple", firstAnswer?["content"]?["q2_other"]?.GetValue<string>());
+
+        Assert.AreEqual("accept", secondAnswer?["action"]?.GetValue<string>());
+        Assert.AreEqual("Popcorn", secondAnswer?["content"]?["snack_other"]?.GetValue<string>());
+        Assert.IsNull(secondAnswer?["content"]?["snack"], "optional single-select omits choice when custom Other text is supplied");
+
+        // The tool call used the `name` field (`ask_question`) instead of sanitizing `Run ask_question`.
+        var toolCall = conversation.SelectMany(static m => m.Parts).OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("ask_question", toolCall.Name);
+        Assert.AreEqual("Done with answers.", Text(conversation[^1]));
+    }
+
+    [TestMethod]
+    public async Task Elicitation_TypedPrimitivesAndLegacyUserInputFallback_ProduceSchemaTypedValues()
+    {
+        JsonNode? answer = null;
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                answer = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "Configure deployment",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["required"] = new JsonArray("env", "confirm", "retries", "ratio", "email"),
+                        ["properties"] = new JsonObject
+                        {
+                            ["env"] = new JsonObject
+                            {
+                                ["type"] = "string",
+                                ["title"] = "Environment",
+                                ["enum"] = new JsonArray("dev", "prod"),
+                                ["enumNames"] = new JsonArray("Development", "Production"),
+                            },
+                            ["confirm"] = new JsonObject { ["type"] = "boolean", ["title"] = "Proceed?", ["default"] = false },
+                            ["retries"] = new JsonObject { ["type"] = "integer", ["title"] = "Retries", ["minimum"] = 1, ["maximum"] = 5 },
+                            ["ratio"] = new JsonObject { ["type"] = "number", ["title"] = "Rollout ratio" },
+                            ["email"] = new JsonObject { ["type"] = "string", ["title"] = "Notify", ["format"] = "email" },
+                        },
+                    },
+                });
+                await prompt.SendTextAsync("Configured");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            // No OnInteractiveAsk: verify fallback to OnUserInputRequest works too.
+            OnUserInput = static (request, _) =>
+            {
+                Assert.AreEqual(5, request.Form.Prompts.Count);
+                return Task.FromResult(new AgentUserInputResponse(new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["env"] = "Production",
+                    ["confirm"] = "Yes",
+                    ["retries"] = "3",
+                    ["ratio"] = "0.25",
+                    ["email"] = "ops@example.com",
+                }));
+            },
+        };
+
+        await fixture.RunAsync([User("deploy")]);
+
+        Assert.AreEqual("accept", answer?["action"]?.GetValue<string>());
+        Assert.AreEqual("prod", answer?["content"]?["env"]?.GetValue<string>());
+        Assert.AreEqual(true, answer?["content"]?["confirm"]?.GetValue<bool>());
+        Assert.AreEqual(3L, answer?["content"]?["retries"]?.GetValue<long>());
+        Assert.AreEqual(0.25d, answer?["content"]?["ratio"]?.GetValue<double>());
+        Assert.AreEqual("ops@example.com", answer?["content"]?["email"]?.GetValue<string>());
+    }
+
+    [TestMethod]
+    public async Task Elicitation_UnsupportedMode_UserCancel_AndAgentCancelRequest_FollowSpec()
+    {
+        JsonNode? urlError = null;
+        JsonNode? cancelledByUser = null;
+        JsonNode? cancelledByAgent = null;
+        var waitingForAgentCancel = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handlerSawCancel = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callCount = 0;
+
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                // 1. Unadvertised URL mode -> JSON-RPC -32602 InvalidParams.
+                urlError = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "url",
+                    ["elicitationId"] = "el-1",
+                    ["url"] = "https://example.com/auth",
+                    ["message"] = "Authenticate",
+                });
+
+                // 2. elicitation/complete notification is ignored cleanly.
+                await prompt.SendNotificationAsync("elicitation/complete", new JsonObject { ["elicitationId"] = "el-1" });
+
+                // 3. User cancels form -> { action: "cancel" }.
+                cancelledByUser = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "Pick one",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject { ["name"] = new JsonObject { ["type"] = "string", ["title"] = "Name" } },
+                    },
+                });
+
+                // 4. Agent cancels in-flight elicitation via $/cancel_request -> JSON-RPC -32800 RequestCancelled.
+                var (reqId, responseTask) = prompt.StartElicitation(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "Will be cancelled",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject { ["name"] = new JsonObject { ["type"] = "string", ["title"] = "Name" } },
+                    },
+                });
+                await waitingForAgentCancel.Task.WithinAsync(TestTime.Seconds(10));
+                await prompt.CancelRequestAsync(reqId);
+                cancelledByAgent = await responseTask;
+
+                await prompt.SendTextAsync("Recovered");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            OnInteractiveAsk = async (_, ct) =>
+            {
+                if (Interlocked.Increment(ref callCount) == 1)
+                {
+                    return new AgentInteractiveAskResponse(Cancelled: true, []);
+                }
+
+                waitingForAgentCancel.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                    return new AgentInteractiveAskResponse(Cancelled: true, []);
+                }
+                catch (OperationCanceledException)
+                {
+                    handlerSawCancel.TrySetResult(true);
+                    throw;
+                }
+            },
+        };
+
+        var conversation = await fixture.RunAsync([User("test cancel")]);
+
+        Assert.AreEqual(AcpErrorCodes.InvalidParams, urlError?["code"]?.GetValue<int>());
+        Assert.AreEqual("cancel", cancelledByUser?["action"]?.GetValue<string>());
+        Assert.IsTrue(await handlerSawCancel.Task.WithinAsync(TestTime.Seconds(10)));
+        Assert.AreEqual(AcpErrorCodes.RequestCancelled, cancelledByAgent?["code"]?.GetValue<int>());
+        Assert.AreEqual("Recovered", Text(conversation[^1]));
+    }
+
+    [TestMethod]
+    public async Task CancelRequest_CancelsInFlightPermissionRequest()
+    {
+        JsonNode? outcome = null;
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sawCancel = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                var (reqId, responseTask) = prompt.StartPermissionRaw(new JsonObject
+                {
+                    ["toolCallId"] = "perm-1",
+                    ["title"] = "Run build",
+                    ["kind"] = "execute",
+                    ["rawInput"] = new JsonObject { ["command"] = "dotnet build" },
+                });
+                await waiting.Task.WithinAsync(TestTime.Seconds(10));
+                await prompt.CancelRequestAsync(reqId);
+                outcome = await responseTask;
+                await prompt.SendTextAsync("Permission cancelled");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            OnPermission = async (_, ct) =>
+            {
+                waiting.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                    return new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce);
+                }
+                catch (OperationCanceledException)
+                {
+                    sawCancel.TrySetResult(true);
+                    throw;
+                }
+            },
+        };
+
+        await fixture.RunAsync([User("run")]);
+
+        Assert.IsTrue(await sawCancel.Task.WithinAsync(TestTime.Seconds(10)));
+        Assert.AreEqual("cancelled", outcome?["outcome"]?["outcome"]?.GetValue<string>());
+    }
+
+    [TestMethod]
+    public async Task MinimalPermissionToolCall_MergesCachedMetadataForHooksApprovalAndOutput()
+    {
+        JsonNode? blockedOutcome = null;
+        JsonNode? approvedOutcome = null;
+        AgentPermissionRequest? capturedApproval = null;
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                // 1. Blocked by hook even though permission request only sends toolCallId.
+                await prompt.StartToolAsync("call-blocked", "Delete temp", "execute", new JsonObject { ["command"] = "rm -rf /tmp/test" });
+                blockedOutcome = await prompt.RequestPermissionRawAsync(new JsonObject { ["toolCallId"] = "call-blocked" });
+                await prompt.EndToolAsync("call-blocked", "blocked", success: false);
+
+                // 2. Approved via user prompt with merged command + content preserved across in_progress -> completed.
+                await prompt.StartToolAsync("call-ok", "Run echo", "execute", new JsonObject { ["command"] = "echo hello" });
+                approvedOutcome = await prompt.RequestPermissionRawAsync(new JsonObject { ["toolCallId"] = "call-ok" });
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "tool_call_update",
+                    ["toolCallId"] = "call-ok",
+                    ["status"] = "in_progress",
+                    ["content"] = new JsonArray(new JsonObject { ["type"] = "content", ["content"] = AcpFakeConnection.Text("hello output") }),
+                });
+                // Final update omits content, relying on ACP patch semantics.
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "tool_call_update",
+                    ["toolCallId"] = "call-ok",
+                    ["status"] = "completed",
+                });
+
+                await prompt.SendTextAsync("Done");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            ToolInterceptor = new BlockRmHooks(),
+            OnPermission = (request, _) =>
+            {
+                capturedApproval = request;
+                return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+            },
+        };
+
+        var conversation = await fixture.RunAsync([User("run commands")]);
+
+        Assert.AreEqual("no", blockedOutcome?["outcome"]?["optionId"]?.GetValue<string>(), "tool hook must still block a minimal toolCallId-only permission request");
+        Assert.AreEqual("yes", approvedOutcome?["outcome"]?["optionId"]?.GetValue<string>());
+        var commandRequest = capturedApproval as AgentCommandPermissionRequest;
+        Assert.IsNotNull(commandRequest, "merged kind=execute must produce a command permission request");
+        Assert.AreEqual("echo hello", commandRequest.Command);
+
+        var okResult = conversation
+            .SelectMany(static m => m.Parts)
+            .OfType<AgentMessagePart.ToolResult>()
+            .Single(static r => r.CallId == "call-ok");
+        var okText = string.Concat(okResult.Result.Items.OfType<AgentToolResultItem.Text>().Select(static t => t.Value));
+        Assert.AreEqual("hello output", okText, "earlier content must be preserved when final completed update omits content");
+    }
+
+    [TestMethod]
+    public async Task ToolCall_NameField_RecognizesCodeAltaMcpToolEvenWhenTitleIsHumanReadable()
+    {
+        var toolRan = false;
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.StartToolAsync("call-mcp-1", "Run alta status", "other", new JsonObject { ["args"] = new JsonArray("status") }, name: "codealta__alta");
+                var mcpResult = await prompt.CallMcpToolAsync("alta", new JsonObject { ["args"] = new JsonArray("status") });
+                Assert.IsNotNull(mcpResult);
+                await prompt.EndToolAsync("call-mcp-1", "ok");
+                await prompt.SendTextAsync("checked");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            Tools = [Tool("alta", _ => { toolRan = true; return new AgentToolResult(true, [new AgentToolResultItem.Text("alive")]); })],
+        };
+
+        var conversation = await fixture.RunAsync([User("check")]);
+
+        Assert.IsTrue(toolRan);
+        var call = conversation.SelectMany(static m => m.Parts).OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("alta", call.Name);
+    }
+
+    [TestMethod]
+    public async Task SessionUpdates_Notice_PlanUpdate_PlanRemoved_Compaction_SessionInfo_Mode_AndErrorStop()
+    {
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                // Spec-compliant notice: title + description + severity.
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "notice",
+                    ["title"] = "Rate limit approaching",
+                    ["description"] = "Slowing requests briefly.",
+                    ["severity"] = "warning",
+                });
+
+                // Structured plan_update (items), markdown plan_update, and plan_removed (+ unknown id ignored).
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "plan_update",
+                    ["plan"] = new JsonObject
+                    {
+                        ["type"] = "items",
+                        ["planId"] = "p1",
+                        ["entries"] = new JsonArray(
+                            new JsonObject { ["content"] = "Audit protocol", ["status"] = "completed", ["priority"] = "high" },
+                            new JsonObject { ["content"] = "Ship fix", ["status"] = "in_progress", ["priority"] = "high" }),
+                    },
+                });
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "plan_update",
+                    ["plan"] = new JsonObject
+                    {
+                        ["type"] = "markdown",
+                        ["planId"] = "p2",
+                        ["content"] = "# Notes\nVerify ACP",
+                    },
+                });
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "plan_removed", ["planId"] = "unknown-id" });
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "plan_removed", ["planId"] = "p1" });
+
+                // Session info title update and current_mode_update.
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "session_info_update", ["title"] = "ACP Audit Session" });
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "current_mode_update", ["currentModeId"] = "architect" });
+
+                // Compaction lifecycle with summary chunks.
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "compaction_update",
+                    ["compactionId"] = "cmp-1",
+                    ["status"] = "in_progress",
+                });
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "compaction_summary_chunk",
+                    ["compactionId"] = "cmp-1",
+                    ["content"] = AcpFakeConnection.Text("Kept key decisions."),
+                });
+                await prompt.SendUpdateAsync(new JsonObject
+                {
+                    ["sessionUpdate"] = "compaction_update",
+                    ["compactionId"] = "cmp-1",
+                    ["status"] = "completed",
+                });
+
+                await prompt.SendTextAsync("Partial output");
+                return "error";
+            },
+        };
+
+        await using var fixture = new Fixture(agent);
+        var conversation = await fixture.RunAsync([User("audit")]);
+
+        Assert.IsTrue(fixture.SessionUpdates.Any(static u => u.Kind == AgentSessionUpdateKind.Warning && u.Message == "Rate limit approaching: Slowing requests briefly."));
+        var plans = fixture.SessionUpdates.Where(static u => u.Kind == AgentSessionUpdateKind.PlanUpdated).Select(static u => u.Message).ToArray();
+        Assert.AreEqual(3, plans.Length, "unknown plan_removed must be ignored");
+        StringAssert.Contains(plans[0], "- [x] Audit protocol");
+        StringAssert.Contains(plans[0], "- [~] Ship fix");
+        StringAssert.Contains(plans[1], "# Notes");
+        Assert.AreEqual("# Notes\nVerify ACP", plans[2], "removing p1 leaves p2");
+
+        Assert.AreEqual("ACP Audit Session", fixture.LastTitle);
+        Assert.IsTrue(fixture.SessionUpdates.Any(static u => u.Kind == AgentSessionUpdateKind.ModeChanged && u.Message.Contains("architect", StringComparison.Ordinal)));
+        Assert.IsTrue(fixture.SessionUpdates.Any(static u => u.Kind == AgentSessionUpdateKind.CompactionStarted));
+        Assert.IsTrue(fixture.SessionUpdates.Any(static u => u.Kind == AgentSessionUpdateKind.CompactionCompleted && u.Message.Contains("Kept key decisions.", StringComparison.Ordinal)));
+        StringAssert.Contains(Text(conversation[^1]), "stopped because of an error");
+
+        // Session tool content rendering.
+        var sessionContent = JsonDocument.Parse("""[{"type":"session","sessionId":"sub-42"}]""").RootElement;
+        Assert.AreEqual("Session sub-42", AcpPrompts.RenderToolContent(sessionContent));
+    }
+
+    [TestMethod]
+    public async Task BooleanConfigOption_IsReadAsToggle_AndSentWithBooleanPayload()
+    {
+        var agent = new AcpFakeAgent();
+        agent.BooleanParametersByModel["smart"] = new() { ["fast"] = false };
+        await using var fixture = new Fixture(agent) { ModelId = "smart" };
+        await fixture.Runtime.ProbeAsync();
+
+        var updated = await fixture.Runtime.SetModelOptionAsync("smart", "fast", "true");
+        Assert.IsNotNull(updated);
+        var fastOption = updated.Options!.Single(static o => o.Id == "fast");
+        Assert.IsTrue(fastOption.IsToggle);
+        Assert.AreEqual("true", fastOption.Value);
+
+        while (agent.ConfigChanges.TryDequeue(out _))
+        {
+        }
+
+        await fixture.RunAsync([User("go fast")]);
+        CollectionAssert.Contains(agent.ConfigChanges.ToArray(), "fast:bool=true", string.Join(", ", agent.ConfigChanges));
+    }
+
+    [TestMethod]
+    public async Task Elicitation_NegotiatedCapability_ScopeValidation_UnknownSchema_ValidationRetry_AndCapabilityChangeOnSameSession()
+    {
+        JsonNode? unadvertisedFormError = null;
+        JsonNode? missingScopeError = null;
+        JsonNode? unknownTypeError = null;
+        JsonNode? validatedAnswer = null;
+        var validationAttempts = 0;
+
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                if (prompt.Text.Contains("turn1", StringComparison.Ordinal))
+                {
+                    // Turn 1: connection did NOT advertise elicitation.form -> must return JSON-RPC -32602.
+                    unadvertisedFormError = await prompt.RequestElicitationAsync(new JsonObject
+                    {
+                        ["mode"] = "form",
+                        ["message"] = "Should fail",
+                        ["requestedSchema"] = new JsonObject
+                        {
+                            ["type"] = "object",
+                            ["properties"] = new JsonObject { ["x"] = new JsonObject { ["type"] = "string" } },
+                        },
+                    });
+                    await prompt.SendTextAsync("t1");
+                    return "end_turn";
+                }
+
+                // Turn 2 (same session, now with OnInteractiveAsk -> restarted with elicitation.form advertised).
+                missingScopeError = await prompt.Connection.RequestAsync("elicitation/create", new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "No scope",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject { ["x"] = new JsonObject { ["type"] = "string" } },
+                    },
+                });
+                unknownTypeError = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "Bad schema",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject { ["nested"] = new JsonObject { ["type"] = "object" } },
+                    },
+                });
+                validatedAnswer = await prompt.RequestElicitationAsync(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["message"] = "Pick retries and optional tier",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["required"] = new JsonArray("retries"),
+                        ["properties"] = new JsonObject
+                        {
+                            ["retries"] = new JsonObject { ["type"] = "integer", ["title"] = "Retries", ["minimum"] = 1, ["maximum"] = 5 },
+                            ["tier"] = new JsonObject { ["type"] = "string", ["title"] = "Tier", ["enum"] = new JsonArray("free", "pro") },
+                        },
+                    },
+                });
+                await prompt.SendTextAsync("t2");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent);
+        var firstTurn = await fixture.RunAsync([User("turn1")]);
+        Assert.IsNull(agent.ClientCapabilities?["elicitation"]);
+        Assert.AreEqual(AcpErrorCodes.InvalidParams, unadvertisedFormError?["code"]?.GetValue<int>());
+
+        // Now attach an interactive handler on the SAME session: launchKey changes, restarting with elicitation.form.
+        fixture.OnInteractiveAsk = (request, _) =>
+        {
+            validationAttempts++;
+            if (validationAttempts == 1)
+            {
+                // First attempt: invalid integer ("abc") -> triggers retry with validation message.
+                return Task.FromResult(new AgentInteractiveAskResponse(
+                    Cancelled: false,
+                    [new AgentInteractiveAskAnswer(0, [], "abc"), new AgentInteractiveAskAnswer(1, [0], null)]));
+            }
+
+            StringAssert.Contains(request.Message ?? string.Empty, "integer");
+            // Second attempt: valid integer 3, and optional enum left at index 0 ("Leave blank (skip)").
+            return Task.FromResult(new AgentInteractiveAskResponse(
+                Cancelled: false,
+                [new AgentInteractiveAskAnswer(0, [], "3"), new AgentInteractiveAskAnswer(1, [0], null)]));
+        };
+
+        await fixture.RunAsync([.. firstTurn, User("turn2")]);
+        Assert.IsNotNull(agent.ClientCapabilities?["elicitation"]?["form"]);
+        Assert.AreEqual(AcpErrorCodes.InvalidParams, missingScopeError?["code"]?.GetValue<int>());
+        Assert.AreEqual(AcpErrorCodes.InvalidParams, unknownTypeError?["code"]?.GetValue<int>());
+        Assert.AreEqual(2, validationAttempts);
+        Assert.AreEqual("accept", validatedAnswer?["action"]?.GetValue<string>());
+        Assert.AreEqual(3L, validatedAnswer?["content"]?["retries"]?.GetValue<long>());
+        Assert.IsNull(validatedAnswer?["content"]?["tier"], "skipped optional enum must be omitted");
+    }
+
+    [TestMethod]
+    public async Task AgentExitDuringToolScopedElicitation_CancelsFormAndUnblocksToolWait()
+    {
+        var formStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var formCancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.StartToolAsync("call-ask-eof", "Run ask_question", "other", name: "ask_question");
+                _ = prompt.StartElicitation(new JsonObject
+                {
+                    ["mode"] = "form",
+                    ["toolCallId"] = "call-ask-eof",
+                    ["message"] = "Waiting before crash",
+                    ["requestedSchema"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject { ["q"] = new JsonObject { ["type"] = "string", ["title"] = "Answer" } },
+                    },
+                });
+                await formStarted.Task.WithinAsync(TestTime.Seconds(10));
+                prompt.Connection.Exit();
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            OnInteractiveAsk = async (_, ct) =>
+            {
+                formStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                    return new AgentInteractiveAskResponse(Cancelled: true, []);
+                }
+                catch (OperationCanceledException)
+                {
+                    formCancelled.TrySetResult(true);
+                    throw;
+                }
+            },
+        };
+
+        await Assert.ThrowsAsync<AgentProviderFailureException>(async () => await fixture.RunAsync([User("crash mid-ask")]).WithinAsync(TestTime.Seconds(10)));
+        Assert.IsTrue(await formCancelled.Task.WithinAsync(TestTime.Seconds(5)), "pending form must be cancelled when the agent exits");
+    }
+
+    [TestMethod]
+    public async Task SpoofedCodeAltaToolName_CannotBypassToolHooksOrUserApproval()
+    {
+        JsonNode? executeOutcome = null;
+        JsonNode? otherOutcome = null;
+        var approvalRequested = false;
+        var agent = new AcpFakeAgent
+        {
+            McpHttp = false,
+            OnPrompt = async prompt =>
+            {
+                // 1. Shell command spoofing `name: "alta"` with kind="execute" must still hit hooks and be blocked.
+                await prompt.StartToolAsync("spoof-exec", "Run alta", "execute", new JsonObject { ["command"] = "rm -rf /tmp/x" }, name: "alta");
+                executeOutcome = await prompt.RequestPermissionRawAsync(new JsonObject { ["toolCallId"] = "spoof-exec" });
+                await prompt.EndToolAsync("spoof-exec", "blocked", success: false);
+
+                // 2. Unmatched kind="other" claiming `name: "codealta__alta"` must NOT auto-allow without approval.
+                await prompt.StartToolAsync("spoof-other", "Run alta", "other", new JsonObject { ["args"] = new JsonArray("status") }, name: "codealta__alta");
+                otherOutcome = await prompt.RequestPermissionRawAsync(new JsonObject { ["toolCallId"] = "spoof-other" });
+                await prompt.EndToolAsync("spoof-other", "denied", success: false);
+
+                await prompt.SendTextAsync("done");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent)
+        {
+            ToolInterceptor = new BlockRmHooks(),
+            OnPermission = (_, _) =>
+            {
+                approvalRequested = true;
+                return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny));
+            },
+            Tools = [Tool("alta", _ => new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))],
+        };
+
+        await fixture.RunAsync([User("spoof")]);
+
+        Assert.AreEqual("no", executeOutcome?["outcome"]?["optionId"]?.GetValue<string>());
+        Assert.IsTrue(approvalRequested, "agent-supplied tool name must never bypass user approval");
+        Assert.AreEqual("no", otherOutcome?["outcome"]?["optionId"]?.GetValue<string>());
+    }
+
+    [TestMethod]
+    public async Task CompactionUpdate_CancelledAndMissingStatus_DoNotEmitCompletedOrLoseInstructions()
+    {
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "compaction_update", ["compactionId"] = "c1", ["status"] = "in_progress" });
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "compaction_summary_chunk", ["compactionId"] = "c1", ["content"] = AcpFakeConnection.Text("draft") });
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "compaction_update", ["compactionId"] = "c1", ["status"] = "cancelled" });
+                await prompt.SendUpdateAsync(new JsonObject { ["sessionUpdate"] = "compaction_update", ["compactionId"] = "c2" });
+                await prompt.SendTextAsync("ok");
+                return "end_turn";
+            },
+        };
+
+        await using var fixture = new Fixture(agent);
+        await fixture.RunAsync([User("hello")]);
+
+        Assert.IsTrue(fixture.SessionUpdates.Any(static u => u.Kind == AgentSessionUpdateKind.CompactionStarted));
+        Assert.IsFalse(fixture.SessionUpdates.Any(static u => u.Kind == AgentSessionUpdateKind.CompactionCompleted), "cancelled or missing status must not emit CompactionCompleted");
+    }
+
+    private sealed class BlockRmHooks : CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor
+    {
+        public override ValueTask<CodeAlta.Agent.Runtime.Tools.AgentToolCallDecision> BeforeToolCallAsync(
+            CodeAlta.Agent.Runtime.Tools.AgentToolHookCall call,
+            CancellationToken cancellationToken)
+        {
+            if (call.ShellCommand?.Command.Contains("rm -rf", StringComparison.Ordinal) == true)
+            {
+                return ValueTask.FromResult(CodeAlta.Agent.Runtime.Tools.AgentToolCallDecision.Block("rm -rf is blocked."));
+            }
+
+            return ValueTask.FromResult(CodeAlta.Agent.Runtime.Tools.AgentToolCallDecision.Allow);
+        }
+    }
+
     private static AgentConversationMessage User(string text) => new(AgentConversationRole.User, [new AgentMessagePart.Text(text)]);
 
     private static string Text(AgentConversationMessage message) => string.Concat(message.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value));
@@ -1314,6 +2130,14 @@ public sealed class AcpTurnExecutorTests
 
         public AgentPermissionRequestHandler OnPermission { get; init; } = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
 
+        public AgentUserInputRequestHandler? OnUserInput { get; init; }
+
+        public AgentInteractiveAskHandler? OnInteractiveAsk { get; set; }
+
+        public List<AgentTurnSessionUpdate> SessionUpdates { get; } = [];
+
+        public string? LastTitle { get; private set; }
+
         public Action<List<AgentConversationMessage>>? BeforeNextTurn { get; init; }
 
         /// <summary>Gets what is told each text the executor streams, as the window shows it.</summary>
@@ -1324,7 +2148,10 @@ public sealed class AcpTurnExecutorTests
         public async Task<List<AgentConversationMessage>> RunAsync(IReadOnlyList<AgentConversationMessage> start, CancellationToken cancellationToken = default)
         {
             var conversation = new List<AgentConversationMessage>(start);
-            Executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-1"), OnPermission, null));
+            Executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-1"), OnPermission, OnUserInput)
+            {
+                OnInteractiveAsk = OnInteractiveAsk,
+            });
             var steered = false;
             while (true)
             {
@@ -1335,7 +2162,17 @@ public sealed class AcpTurnExecutorTests
                         OnDelta?.Invoke(delta);
                         return ValueTask.CompletedTask;
                     },
+                    (update, _) =>
+                    {
+                        lock (SessionUpdates)
+                        {
+                            SessionUpdates.Add(update);
+                        }
+
+                        return ValueTask.CompletedTask;
+                    },
                     cancellationToken);
+                LastTitle = response.Title;
                 conversation.Add(response.AssistantMessage);
                 if (response.ProviderState is { } providerState)
                 {

@@ -10,6 +10,7 @@ export type AskActionRequest = Readonly<{ expectedHostEpoch: string; action: Rea
 export type AskDisposition = Readonly<{ actionId: string; handle: AskHandle; status: string; runId: string | null }>;
 export type AskQuestion = Readonly<{ title: string; question: string; description: string | null;
   choices: readonly Readonly<{ title: string; description: string | null }>[];
+  allowMultiSelect?: boolean;
   freeform: Readonly<{ title: string | null; placeholder: string | null }> | null }>;
 /**
  * What a review request asks the user to review: a file (a path relative to the checkout, with forward slashes),
@@ -181,7 +182,8 @@ export function parseAskPage(value: unknown, epoch: string, session: string): As
         freeform = Object.freeze({ title: field(q.freeform.title, 120), placeholder: field(q.freeform.placeholder, 500) });
       }
       if (!choices.length && !freeform) throw new Error("No answer route");
-      return Object.freeze({ title, question, description, choices: Object.freeze(choices), freeform });
+      const allowMultiSelect = q.allowMultiSelect === true && choices.length > 0;
+      return Object.freeze({ title, question, description, choices: Object.freeze(choices), allowMultiSelect, freeform });
     });
     head = Object.freeze({ handle: Object.freeze(askWireHandle(h.handle)), request: Object.freeze({ review, questions: Object.freeze(questions) }), state: h.state as string,
       immediate: h.immediate === true });

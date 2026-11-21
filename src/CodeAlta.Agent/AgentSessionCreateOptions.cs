@@ -278,6 +278,12 @@ public class AgentSessionCreateOptions
     /// message that says how to go on.
     /// </summary>
     public AgentConversationHeldHandler? OnConversationHeld { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the interactive question handler for providers that request structured user input while a
+    /// turn runs (optional). A send may give its own (<see cref="AgentSendOptions.OnInteractiveAsk"/>).
+    /// </summary>
+    public AgentInteractiveAskHandler? OnInteractiveAsk { get; init; }
 }
 
 /// <summary>

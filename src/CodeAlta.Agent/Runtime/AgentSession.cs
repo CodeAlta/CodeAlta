@@ -845,7 +845,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools)));
             providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
                 options.EnableUserInputTool ? userInputRequestHandler : null, options.IsProviderInitiated,
-                options.OnConversationHeld ?? _options.OnConversationHeld));
+                options.OnConversationHeld ?? _options.OnConversationHeld)
+            {
+                OnInteractiveAsk = options.OnInteractiveAsk ?? _options.OnInteractiveAsk,
+            });
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
             var runTools = new AgentRunTools(toolMap.Keys, allTools.Where(static tool => tool.Spec.Deferred).Select(static tool => tool.Spec));

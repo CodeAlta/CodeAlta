@@ -15,7 +15,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record InitializeProxyResponse
 {
-    /// <summary>The protocol version the client specified if supported by the agent, or the latest protocol version supported by the agent.  The client should disconnect, if it doesn't support this version.</summary>
+    /// <summary>The protocol version the client specified if supported by the agent, or the latest protocol version supported by the agent.  The client SHOULD disconnect, if it doesn't support this version.</summary>
     [JsonPropertyName("protocolVersion")]
     public ProtocolVersion ProtocolVersion { get; set; } = default!;
     /// <summary>Capabilities supported by the agent.</summary>

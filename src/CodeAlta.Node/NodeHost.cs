@@ -258,6 +258,7 @@ public sealed class NodeHost : IAsyncDisposable
             //   starts has at most the mode of its parent (FleetNodeService);
             // - a session another session creates asks what its creator asks.
             FullTrust = false,
+            EnableOwnedAsks = true,
             ReviewOwnedPermissionsPolicy = () => FleetSessionDefaults.AsksByDefault(catalog.FleetRoot),
             SessionPermissionModes = true,
             InheritPermissionModePolicy = static () => true,

@@ -50,7 +50,7 @@ internal sealed partial class AcpAgentSession
         {
             if (FindOption(connection.ConfigOptions, optionId) is { } option &&
                 AcpConfigOptions.Values(option).Any(offered => string.Equals(offered.Value, chosen, StringComparison.Ordinal)) &&
-                !string.Equals(AcpJson.GetString(option, "currentValue"), chosen, StringComparison.Ordinal))
+                !string.Equals(AcpConfigOptions.CurrentValue(option), chosen, StringComparison.Ordinal))
             {
                 await SetOptionAsync(connection, optionId, chosen, cancellationToken).ConfigureAwait(false);
             }
@@ -75,7 +75,11 @@ internal sealed partial class AcpAgentSession
 
     private async Task SetOptionAsync(Connection connection, string configId, string value, CancellationToken cancellationToken)
     {
-        var request = AcpConfigOptions.CreateSetRequest(connection.AgentSessionId, configId, value);
+        var isBoolean = FindOption(connection.ConfigOptions, configId) is { } option &&
+            string.Equals(AcpJson.GetString(option, "type"), "boolean", StringComparison.Ordinal);
+        var request = isBoolean && bool.TryParse(value, out var boolValue)
+            ? AcpConfigOptions.CreateSetBooleanRequest(connection.AgentSessionId, configId, boolValue)
+            : AcpConfigOptions.CreateSetRequest(connection.AgentSessionId, configId, value);
         try
         {
             var response = await connection.Client.SessionSetConfigOptionAsync(request, Timeout(cancellationToken)).ConfigureAwait(false);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  askAnswer, askBadge, askChoice, askCommentsText, askElsewhere, askGo, askLimits, askMarkElsewhere, askMarkKey, askMode, askPrimaryLabel, askReviewWhat, askSendable, askSettled, askStep, askTextRoom,
+  askAnswer, askBadge, askChoice, askChoices, askCommentsText, askElsewhere, askGo, askLimits, askMarkElsewhere, askMarkKey, askMode, askPrimaryLabel, askReviewWhat, askSendable, askSettled, askStep, askTextRoom,
   askVerdict, askWaiting, newAskDraft, newAskLocal,
 } from "./ask";
 import { maximumReviewText } from "../review/ReviewThreadCard";
@@ -94,6 +94,19 @@ test("a question answers with its first choice until another is picked, and its 
     { question: 1, choices: [], text: "parser" },
   ]);
   assert.equal(askAnswer(pending, draft, "action").review, undefined, "questions carry no verdict");
+});
+
+test("a multi-select question on mobile submits all checked choices and defaults to none", () => {
+  const multi: AskQuestion = { ...question("Colors", ["Red", "Green", "Blue"], true), allowMultiSelect: true };
+  const pending = ask([multi]);
+  const draft = newAskDraft();
+  assert.deepEqual(askChoices(pending, draft, 0), []);
+  draft.multiChoices.set(0, [2, 0]);
+  draft.text.set(0, "Purple");
+  assert.deepEqual(askChoices(pending, draft, 0), [0, 2]);
+  assert.deepEqual(askAnswer(pending, draft, "action").answers, [
+    { question: 0, choices: [0, 2], text: "Purple" },
+  ]);
 });
 
 test("Submit shows the questions not seen yet before it sends, as on the desktop", () => {
