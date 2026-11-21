@@ -35,6 +35,9 @@ internal sealed class AcpFakeAgent
 
     public bool McpHttp { get; set; } = true;
 
+    /// <summary>Gets or sets the <c>_meta</c> of the capabilities, where an agent says what the protocol has no place for; none when null.</summary>
+    public JsonObject? CapabilitiesMeta { get; set; }
+
     public bool Images { get; set; } = true;
 
     /// <summary>Gets or sets the error code <c>session/new</c> answers with, or null to start sessions.</summary>
@@ -251,16 +254,18 @@ internal sealed class AcpFakeConnection
         if (_agent.DeleteSession) session["delete"] = new JsonObject();
         if (_agent.ResumeSession) session["resume"] = new JsonObject();
         if (_agent.SystemPrompt) session["systemPrompt"] = new JsonObject();
+        var capabilities = new JsonObject
+        {
+            ["loadSession"] = _agent.LoadSession,
+            ["mcpCapabilities"] = new JsonObject { ["http"] = _agent.McpHttp, ["sse"] = false },
+            ["promptCapabilities"] = new JsonObject { ["image"] = _agent.Images, ["embeddedContext"] = true },
+            ["sessionCapabilities"] = session,
+        };
+        if (_agent.CapabilitiesMeta is { } meta) capabilities["_meta"] = meta.DeepClone();
         return new JsonObject
         {
             ["protocolVersion"] = 1,
-            ["agentCapabilities"] = new JsonObject
-            {
-                ["loadSession"] = _agent.LoadSession,
-                ["mcpCapabilities"] = new JsonObject { ["http"] = _agent.McpHttp, ["sse"] = false },
-                ["promptCapabilities"] = new JsonObject { ["image"] = _agent.Images, ["embeddedContext"] = true },
-                ["sessionCapabilities"] = session,
-            },
+            ["agentCapabilities"] = capabilities,
             ["agentInfo"] = new JsonObject { ["name"] = "fake-agent", ["title"] = "Fake Agent", ["version"] = "0.1.0" },
             ["authMethods"] = _agent.AuthMethods.DeepClone(),
         };

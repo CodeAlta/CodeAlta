@@ -9,7 +9,7 @@ const provider: GlobalConfigProvider = { key: "copilot", type: "acp", enabled: t
   reasoningEffort: null, apiUrl: null, effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false,
   defaults: { displayName: "Copilot", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null,
   permissionMode: null, configDir: null, command: null, environment: null, modelsOrder: null, plugin: { iconData: null, tag: null, values: [] } };
-const state = { probes: 0, details: 0 };
+const state = { probes: 0, details: 0, updated: false };
 const result = { status: "ok", message: null, revision: "revision", line: null, column: null, providersApplied: 1, key: null };
 const config = {
   providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "copilot", startingProvider: "copilot", providers: [provider],
@@ -18,9 +18,16 @@ const config = {
   saveProvider: async () => result, deleteProvider: async () => result, addBuiltInProvider: async () => result, duplicateProvider: async () => result,
 };
 const plugins = {
-  pluginProviderDetails: async () => { state.details++; return { status: "ok", summary: "copilot --acp", detail: null, update: "1.0.2", signInMethods: [] }; },
+  pluginProviderDetails: async () => {
+    state.details++;
+    return { status: "ok", summary: state.updated ? "copilot-1.0.2 --acp" : "copilot --acp", detail: null, update: state.updated ? null : "1.0.2", signInMethods: [] };
+  },
   savePluginProvider: async () => result, pluginCatalog: async () => { throw new Error("Not in this page."); },
-  installPluginProvider: async () => { throw new Error("Not in this page."); }, updatePluginProvider: async () => { throw new Error("Not in this page."); },
+  installPluginProvider: async () => { throw new Error("Not in this page."); },
+  updatePluginProvider: async () => (async function* () {
+    state.updated = true;
+    yield { state: "done", message: null, received: null, total: null, key: "copilot", status: "ok" };
+  })(),
   pluginProviderSignIn: async () => { throw new Error("Not in this page."); },
 } as unknown as NonNullable<Parameters<typeof ProviderSettings>[0]["plugins"]>;
 Object.assign(window, { pluginSettingsFixture: state });

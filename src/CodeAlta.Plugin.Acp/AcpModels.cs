@@ -95,6 +95,11 @@ internal class AcpAgentQuirks
             return AntigravityAcpQuirks.Instance;
         }
 
+        if (AntigravityCliQuirks.Runs(agent))
+        {
+            return AntigravityCliQuirks.Instance;
+        }
+
         return CopilotAcpQuirks.Runs(agent) ? CopilotAcpQuirks.Instance : Protocol;
     }
 
@@ -106,6 +111,21 @@ internal class AcpAgentQuirks
     /// tools that waits for its end is then ended when the agent goes on, with a new tool call or with text.
     /// </summary>
     public virtual bool EndsToolCallsWithThePrompt => false;
+
+    /// <summary>
+    /// Returns what the agent can do, from what it said when it was initialized: an agent may do more than the protocol
+    /// lets it say, or say it in a place of its own.
+    /// </summary>
+    /// <param name="announced">What its answer says as the protocol reads it.</param>
+    /// <param name="initialize">Its whole answer to <c>initialize</c>.</param>
+    public virtual AcpAgentCapabilities Capabilities(AcpAgentCapabilities announced, JsonElement initialize) => announced;
+
+    /// <summary>
+    /// Returns the <c>_meta</c> of a request that opens a session (<c>session/new</c>, <c>session/resume</c>,
+    /// <c>session/load</c>) which appends a text to the system prompt of the agent, for an agent that takes it there;
+    /// <see langword="null"/> for an agent that takes the <c>systemPrompt</c> of the protocol.
+    /// </summary>
+    public virtual Dictionary<string, JsonElement>? SystemPromptMeta(string text) => null;
 
     /// <summary>
     /// Returns what the agent needs from the computer in the sandbox of a session, the same for every agent: a home
@@ -315,18 +335,66 @@ internal sealed class CursorAcpQuirks : AcpAgentQuirks
 }
 
 /// <summary>
-/// Google Antigravity reports its reads (<c>view_file</c>) as they start, but their end only when its prompt ends, with
-/// no output: a session that waited for it would show nothing of a long turn after its first read.
+/// The ACP server of Google Antigravity that the ACP registry has (<c>agy_acp_server</c>) reports its reads
+/// (<c>view_file</c>) as they start, but their end only when its prompt ends, with no output: a session that waited
+/// for it would show nothing of a long turn after its first read. The Antigravity CLI (<c>agy acp</c>), which CodeAlta
+/// installs for the agent (<see cref="AntigravityCliReleases"/>), reports each end as it happens.
 /// </summary>
 internal sealed class AntigravityAcpQuirks : AcpAgentQuirks
 {
     public static AntigravityAcpQuirks Instance { get; } = new();
 
     public static bool Runs(AcpAgentSettings agent)
-        => string.Equals(agent.AgentId, "antigravity-acp", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(Path.GetFileNameWithoutExtension(CommandFileName(agent.Command)), "agy_acp_server", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(Path.GetFileNameWithoutExtension(CommandFileName(agent.Command)), "agy_acp_server", StringComparison.OrdinalIgnoreCase);
 
     public override bool EndsToolCallsWithThePrompt => true;
+}
+
+/// <summary>
+/// The Antigravity CLI (<c>agy acp</c>), as of 1.5.14:
+/// <list type="bullet">
+/// <item>connects to the MCP servers its client gives over HTTP, as the server of the registry does, but does not say
+/// so when it is initialized (no <c>mcpCapabilities</c>): without this, its sessions would run without the tools of
+/// CodeAlta;</item>
+/// <item>takes a text appended to its system prompt in the <c>_meta</c> of the requests that open a session
+/// (<c>antigravity.systemPrompt.append</c>), which it announces in the <c>_meta</c> of its capabilities, where the
+/// protocol has <c>sessionCapabilities.systemPrompt</c> and the <c>systemPrompt</c> of the request.</item>
+/// </list>
+/// </summary>
+internal sealed class AntigravityCliQuirks : AcpAgentQuirks
+{
+    public static AntigravityCliQuirks Instance { get; } = new();
+
+    /// <summary>The CLI by its executable (<c>agy</c>, or <c>antigravity</c> as its archive names it) started as an ACP server.</summary>
+    public static bool Runs(AcpAgentSettings agent)
+        => Path.GetFileNameWithoutExtension(CommandFileName(agent.Command)).ToLowerInvariant() is "agy" or "antigravity" &&
+           agent.Arguments.Contains("acp", StringComparer.OrdinalIgnoreCase);
+
+    public override AcpAgentCapabilities Capabilities(AcpAgentCapabilities announced, JsonElement initialize)
+    {
+        ArgumentNullException.ThrowIfNull(announced);
+        AcpJson.TryGetObject(initialize, "agentCapabilities", out var agent);
+        AcpJson.TryGetObject(agent, "_meta", out var meta);
+        AcpJson.TryGetObject(meta, "antigravity", out var antigravity);
+        AcpJson.TryGetObject(antigravity, "systemPrompt", out var systemPrompt);
+        return announced with { McpHttp = true, SystemPrompt = announced.SystemPrompt || AcpJson.GetBoolean(systemPrompt, "append") };
+    }
+
+    public override Dictionary<string, JsonElement>? SystemPromptMeta(string text)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartObject("systemPrompt");
+            writer.WriteString("append", text);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(buffer.ToArray());
+        return new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["antigravity"] = document.RootElement.Clone() };
+    }
 }
 
 /// <summary>

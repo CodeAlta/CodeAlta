@@ -97,6 +97,27 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task TheAntigravityCli_IsGivenTheInstructionsInItsSystemPrompt_AndTheToolsOfCodeAlta()
+    {
+        // As agy acp answers: its system prompt in the _meta of its capabilities, and no word of MCP over HTTP.
+        var agent = new AcpFakeAgent
+        {
+            McpHttp = false,
+            CapabilitiesMeta = new JsonObject { ["antigravity"] = new JsonObject { ["systemPrompt"] = new JsonObject { ["append"] = true } } },
+        };
+        await using var fixture = new Fixture(agent, quirks: AntigravityCliQuirks.Instance);
+
+        await fixture.RunAsync([User("hello")]);
+
+        var created = agent.RequestsOf("session/new").Single()!;
+        StringAssert.Contains(created["_meta"]!["antigravity"]!["systemPrompt"]!["append"]!.GetValue<string>(), "Be brief.");
+        Assert.IsNull(created["systemPrompt"], "not the systemPrompt of the protocol, which it does not announce");
+        Assert.AreEqual("http", created["mcpServers"]!.AsArray().Single()!["type"]!.GetValue<string>(), "the MCP server of the session, with the tools of CodeAlta");
+        Assert.IsFalse(PromptText(agent.RequestsOf("session/prompt").Single()).Contains(AcpPrompts.HarnessOpening, StringComparison.Ordinal));
+        Assert.AreEqual("acp-system-prompt", fixture.Executor.GetInstructionsChannel("session-1"));
+    }
+
+    [TestMethod]
     public async Task ToolOfCodeAlta_IsRunByTheSessionWhenTheAgentCallsItThroughMcp()
     {
         JsonNode? mcpResult = null;
@@ -292,8 +313,7 @@ public sealed class AcpTurnExecutorTests
                 return "end_turn";
             },
         };
-        var settings = new AcpAgentSettings("dotnet", [], new Dictionary<string, string>(), "antigravity-acp", "1.4.3");
-        await using var fixture = new Fixture(agent, settings, AcpAgentQuirks.For(settings))
+        await using var fixture = new Fixture(agent, quirks: AntigravityAcpQuirks.Instance)
         {
             OnDelta = delta =>
             {
@@ -930,7 +950,34 @@ public sealed class AcpTurnExecutorTests
         Assert.IsInstanceOfType<CopilotAcpQuirks>(AcpAgentQuirks.For(Agent("npx", "github-copilot-cli")));
         Assert.IsInstanceOfType<AntigravityAcpQuirks>(AcpAgentQuirks.For(Agent("C:\\agents\\antigravity-acp\\1.4.3\\windows-x86_64\\agy_acp_server.exe", null)));
         Assert.IsInstanceOfType<AntigravityAcpQuirks>(AcpAgentQuirks.For(Agent("./agy_acp_server", "antigravity-acp")));
+        Assert.IsInstanceOfType<AntigravityCliQuirks>(AcpAgentQuirks.For(Agent("C:\\agents\\antigravity-acp\\1.5.14\\windows-x86_64\\agy.exe", "antigravity-acp", "acp")), "the Antigravity CLI has not the ways of the server of the registry");
+        Assert.IsInstanceOfType<AntigravityCliQuirks>(AcpAgentQuirks.For(Agent("/home/me/.alta/cache/acp/agents/antigravity-acp/1.5.14/linux-x86_64/antigravity", "antigravity-acp", "acp")));
+        Assert.AreSame(AcpAgentQuirks.Protocol, AcpAgentQuirks.For(Agent("agy", null, "--print", "hello")), "only its ACP server");
         Assert.AreSame(AcpAgentQuirks.Protocol, AcpAgentQuirks.For(Agent("npx", "gemini", "@google/gemini-cli", "--experimental-acp")));
+    }
+
+    [TestMethod]
+    public void TheAntigravityCli_TakesTheToolsAndTheInstructionsOfCodeAlta_ThoughItSaysSoInAPlaceOfItsOwn()
+    {
+        // What agy acp 1.5.14 answers to initialize: no mcpCapabilities, and its system prompt in _meta.
+        var initialize = JsonDocument.Parse("""
+            {"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},
+            "sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}},
+            "_meta":{"antigravity":{"tier":true,"systemPrompt":{"append":true}}}},
+            "agentInfo":{"name":"Antigravity ACP Server","version":"1.5.14"}}
+            """).RootElement;
+        var announced = AcpAgentCapabilities.Read(initialize);
+
+        var capabilities = AntigravityCliQuirks.Instance.Capabilities(announced, initialize);
+
+        Assert.IsFalse(announced.McpHttp);
+        Assert.IsFalse(announced.SystemPrompt);
+        Assert.IsTrue(capabilities.McpHttp);
+        Assert.IsTrue(capabilities.SystemPrompt);
+        Assert.IsTrue(capabilities.ResumeSession, "the rest is what it said");
+        Assert.AreSame(announced, AcpAgentQuirks.Protocol.Capabilities(announced, initialize), "another agent is taken at its word");
+        Assert.IsNull(AcpAgentQuirks.Protocol.SystemPromptMeta("Be brief."), "and takes the systemPrompt of the protocol");
+        Assert.AreEqual("""{"systemPrompt":{"append":"Be brief."}}""", AntigravityCliQuirks.Instance.SystemPromptMeta("Be brief.")!["antigravity"].GetRawText());
     }
 
     [TestMethod]

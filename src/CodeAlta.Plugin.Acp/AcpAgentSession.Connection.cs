@@ -243,7 +243,8 @@ internal sealed partial class AcpAgentSession
             throw new AgentProviderFailureException($"{_options.AgentName} could not be started. {ex.Message}", new AgentFailureInfo(AgentFailureKind.Unavailable), ex);
         }
 
-        var capabilities = AcpAgentCapabilities.Read(JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions()));
+        var initialize = JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions());
+        var capabilities = _options.Quirks.Capabilities(AcpAgentCapabilities.Read(initialize), initialize);
         _options.Profile.Capabilities = capabilities;
         connection = new Connection(client, capabilities, start.WorkingDirectory ?? Environment.CurrentDirectory, launchKey) { InSandbox = start.Host is not null };
         _ = client.Completion.ContinueWith(
@@ -260,16 +261,19 @@ internal sealed partial class AcpAgentSession
         return connection;
     }
 
-    // Appended to the system prompt of the agent, for an agent that takes one from its client.
-    private static SystemPrompt CreateSystemPrompt(string text)
-        => new() { Mode = new SystemPromptMode { Value = JsonSerializer.SerializeToElement("append", AcpPluginJsonContext.Default.String) }, Content = [AcpPrompts.Text(text)] };
+    // Appended to the system prompt of the agent, for an agent that takes one from its client: in the systemPrompt of
+    // the protocol, or in the _meta of the request for an agent that takes it there.
+    private (SystemPrompt? Prompt, Dictionary<string, JsonElement>? Meta) CreateSystemPrompt(string text)
+        => _options.Quirks.SystemPromptMeta(text) is { } meta
+            ? (null, meta)
+            : (new SystemPrompt { Mode = new SystemPromptMode { Value = JsonSerializer.SerializeToElement("append", AcpPluginJsonContext.Default.String) }, Content = [AcpPrompts.Text(text)] }, null);
 
     private async Task OpenSessionAsync(AgentTurnRequest request, Connection connection, CancellationToken cancellationToken)
     {
         var capabilities = connection.Capabilities;
         var mcpServers = CreateMcpServers(connection);
         var instructions = CreateInstructions(request, connection);
-        var systemPrompt = capabilities.SystemPrompt ? CreateSystemPrompt(instructions) : null;
+        var (systemPrompt, systemPromptMeta) = capabilities.SystemPrompt ? CreateSystemPrompt(instructions) : default;
 
         if (_agentSessionId is { } recorded && (capabilities.ResumeSession || capabilities.LoadSession))
         {
@@ -285,6 +289,7 @@ internal sealed partial class AcpAgentSession
                                 Cwd = connection.WorkingDirectory,
                                 McpServers = mcpServers,
                                 SystemPrompt = systemPrompt,
+                                Meta = systemPromptMeta,
                             },
                             Timeout(cancellationToken))
                         .ConfigureAwait(false);
@@ -303,6 +308,7 @@ internal sealed partial class AcpAgentSession
                                     Cwd = connection.WorkingDirectory,
                                     McpServers = mcpServers,
                                     SystemPrompt = systemPrompt,
+                                    Meta = systemPromptMeta,
                                 },
                                 Timeout(cancellationToken))
                             .ConfigureAwait(false);
@@ -316,7 +322,7 @@ internal sealed partial class AcpAgentSession
 
                 connection.AgentSessionId = recorded;
                 SetConfigOptions(connection, options);
-                if (systemPrompt is not null)
+                if (capabilities.SystemPrompt)
                 {
                     _instructions = instructions;
                     _instructionsHash = HarnessInstructions.Hash(instructions);
@@ -343,7 +349,7 @@ internal sealed partial class AcpAgentSession
         try
         {
             created = await connection.Client.SessionNewAsync(
-                    new NewSessionRequest { Cwd = connection.WorkingDirectory, McpServers = mcpServers, SystemPrompt = systemPrompt },
+                    new NewSessionRequest { Cwd = connection.WorkingDirectory, McpServers = mcpServers, SystemPrompt = systemPrompt, Meta = systemPromptMeta },
                     Timeout(cancellationToken))
                 .ConfigureAwait(false);
         }
@@ -356,7 +362,7 @@ internal sealed partial class AcpAgentSession
         connection.NewSession = true;
         _agentSessionId = created.SessionId.Value;
         SetConfigOptions(connection, Serialize(created.ConfigOptions));
-        if (systemPrompt is not null)
+        if (capabilities.SystemPrompt)
         {
             _instructions = instructions;
             _instructionsHash = HarnessInstructions.Hash(instructions);

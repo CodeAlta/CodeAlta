@@ -14,6 +14,7 @@ A session of an ACP agent is a CodeAlta session like the others: you can continu
 2. Choose **Add** on an agent.
    - An agent that comes as a program is downloaded into `~/.alta/cache/acp`, with its progress.
    - One that comes as a package runs with `npx` (Node.js) or `uvx` (uv), which fetch it when it first starts.
+   - Google Antigravity is installed as its command-line program, `agy`, from Google's releases: it starts faster than the program of the registry and shows the thoughts of the model.
    - An agent that cannot run on your computer says why, for example when Node.js is missing.
 3. Choose **Open**, then **Test selected provider**. The test starts the agent and reads its models without calling one.
 4. Start a session with it, and choose its model and reasoning below the prompt, as for any other provider.
@@ -61,7 +62,7 @@ An ACP agent runs its own loop with its own tools, context and account: CodeAlta
 
 ## Update or turn off
 
-- **Update** in the form of an agent installs the version the registry has now.
+- **Update** in the form of an agent installs the version the registry has now, or the latest `agy` for Google Antigravity. An Antigravity provider added with an earlier version of CodeAlta moves to `agy` with its update; [sign in](#sign-in) again when its card says **Signed out**.
 - The agents come from the built-in **ACP agents** plugin of **Settings > Plugins**. Turning it off while a session of an agent is at work asks first: the turn is stopped, and the session can go on later.
 
 ## Write one by hand

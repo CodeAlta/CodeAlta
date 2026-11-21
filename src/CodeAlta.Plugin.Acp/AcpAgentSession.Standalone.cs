@@ -104,6 +104,7 @@ internal sealed partial class AcpAgentSession
                 cancellationToken)
             .ConfigureAwait(false);
 
+        var (systemPrompt, systemPromptMeta) = connection.Capabilities.SystemPrompt && !string.IsNullOrWhiteSpace(request.SystemMessage) ? CreateSystemPrompt(request.SystemMessage) : default;
         NewSessionResponse created;
         try
         {
@@ -112,7 +113,8 @@ internal sealed partial class AcpAgentSession
                     {
                         Cwd = workingDirectory,
                         McpServers = [],
-                        SystemPrompt = connection.Capabilities.SystemPrompt && !string.IsNullOrWhiteSpace(request.SystemMessage) ? CreateSystemPrompt(request.SystemMessage) : null,
+                        SystemPrompt = systemPrompt,
+                        Meta = systemPromptMeta,
                     },
                     Timeout(cancellationToken))
                 .ConfigureAwait(false);

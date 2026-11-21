@@ -103,7 +103,12 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
       for await (const event of events) {
         if (!alive.current) return;
         if (event.state === "progress") setProgress({ message: event.message, received: event.received, total: event.total });
-        else if (event.state === "done") { setNotice({ text: t("Updated to {version}.", { version }), intent: "success" }); onChanged(); }
+        else if (event.state === "done") {
+          setNotice({ text: t("Updated to {version}.", { version }), intent: "success" }); onChanged();
+          // The update changed what the provider runs and what it can be updated to.
+          void api.pluginProviderDetails({ expectedEpoch: epoch, key: providerKey, signIn: false }, { timeoutMilliseconds: 30000 })
+            .then(reply => { if (alive.current) setDetails(reply); }, () => undefined);
+        }
         else setNotice({ text: t("The update did not complete: {reason}", { reason: event.message ?? event.status ?? "failed" }), intent: "danger" });
       }
     } catch { if (alive.current) setNotice({ text: t("The update did not complete: {reason}", { reason: "failed" }), intent: "danger" }); }
