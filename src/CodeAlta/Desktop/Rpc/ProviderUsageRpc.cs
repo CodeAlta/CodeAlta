@@ -7,7 +7,7 @@ using NeoAstra.Rpc;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Reads the usage of the subscription behind a configured provider (Codex, Copilot, Claude Code) for the Providers
+/// Reads the usage of the subscription behind a configured provider (Codex, Copilot, Claude Code, Antigravity) for the Providers
 /// page of Settings and for the context usage of a session: the limits of the plan, how much of each is used and
 /// when each starts over.
 /// </summary>
@@ -65,7 +65,7 @@ internal sealed class ProviderUsageService : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         var http = _http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         _operations = new(
-            // The providers of a built-in plugin whose usage is read too (Codex CLI) are sections of their own type.
+            // The providers of a built-in plugin whose usage is read too (Codex CLI, the Antigravity CLI) are sections of their own type.
             () => [.. store.LoadGlobalProviderDefinitions(includeDisabled: true),
                 .. store.LoadGlobalExternalProviders().Select(ConfiguredProviderUsage.DescribePluginProvider).OfType<CodeAltaProviderDocument>()],
             (definition, cancellationToken) => ConfiguredProviderUsage.ReadAsync(definition, stateRoot, http, cancellationToken));
@@ -182,6 +182,7 @@ internal sealed class ProviderUsageService : IDisposable
     {
         "codex" or "codex-cli" => "Codex CLI",
         "claude-code" => "Claude Code",
+        "acp" => "Antigravity CLI",
         _ => null,
     };
 

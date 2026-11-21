@@ -10,6 +10,9 @@ export type UsageLimit = Readonly<{ id: string; name: string | null; usedPercent
 /** The provider types that are a subscription whose usage the host can read. */
 export const hasSubscriptionUsage = (type: string | null | undefined) => type === "codex" || type === "codex-cli" || type === "copilot" || type === "claude-code";
 
+/** The provider types of which the host says, provider by provider, whether it has a usage: an ACP agent has one when it is the Antigravity CLI. */
+export const mayHaveSubscriptionUsage = (type: string | null | undefined) => type === "acp";
+
 const minute = 60 * 1000;
 const near = (minutes: number, expected: number) => minutes >= expected * .95 && minutes <= expected * 1.05;
 

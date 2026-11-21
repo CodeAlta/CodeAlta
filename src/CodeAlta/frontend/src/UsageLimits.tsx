@@ -50,8 +50,11 @@ export function UsageLimitList({ limits, now = Date.now() }: { limits: readonly 
   })}</div>;
 }
 
-/** Reads the usage of a provider when asked: on the first render that is `active`, and again on `refresh`. */
-export function useProviderUsage(epoch: string | null, providerKey: string | null, active: boolean, api: Api = providerUsage) {
+/**
+ * Reads the usage of a provider when asked: on the first render that is `active`, and again on `refresh`. A host that
+ * does not answer leaves the provider as one that has a usage, unless `knownToHaveOne` is false.
+ */
+export function useProviderUsage(epoch: string | null, providerKey: string | null, active: boolean, api: Api = providerUsage, knownToHaveOne = true) {
   const [response, setResponse] = useState<ProviderUsageResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [request, setRequest] = useState(0);
@@ -65,10 +68,10 @@ export function useProviderUsage(epoch: string | null, providerKey: string | nul
     setLoading(true);
     void api.read({ expectedEpoch: epoch, key: providerKey, refresh }, { signal: abort.signal, timeoutMilliseconds: 60000 })
       .then(value => { if (!abort.signal.aborted) setResponse(value.key === providerKey || value.key === providerKey.toLowerCase() ? value : { ...value, status: "failed" }); },
-        () => { if (!abort.signal.aborted) setResponse({ status: "failed", key: providerKey, supported: true, plan: null, limits: [], observedAt: null, tool: null }); })
+        () => { if (!abort.signal.aborted) setResponse({ status: "failed", key: providerKey, supported: knownToHaveOne, plan: null, limits: [], observedAt: null, tool: null }); })
       .finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
-  }, [api, epoch, providerKey, active, request]);
+  }, [api, epoch, providerKey, active, request, knownToHaveOne]);
   const refresh = useCallback(() => { refreshing.current = true; setRequest(value => value + 1); }, []);
   return { response, loading, refresh };
 }
@@ -89,11 +92,14 @@ export function usageNote(response: ProviderUsageResponse | null): { key: Messag
   }
 }
 
-/** The Usage section of a subscription provider on the Providers page: its plan, its limits, and a way to read them again. */
-export function ProviderUsagePanel({ epoch, providerKey, api }: { epoch: string; providerKey: string; api?: Api }) {
+/**
+ * The Usage section of a subscription provider on the Providers page: its plan, its limits, and a way to read them
+ * again. With `whenSupported`, for a provider that may have no usage at all, nothing shows until the host says it has one.
+ */
+export function ProviderUsagePanel({ epoch, providerKey, api, whenSupported = false }: { epoch: string; providerKey: string; api?: Api; whenSupported?: boolean }) {
   const { t, locale } = useShellLanguage();
-  const { response, loading, refresh } = useProviderUsage(epoch, providerKey, true, api);
-  if (response && !response.supported) return null;
+  const { response, loading, refresh } = useProviderUsage(epoch, providerKey, true, api, !whenSupported);
+  if (response ? !response.supported : whenSupported) return null;
   const note = usageNote(response);
   const observed = response?.observedAt && !Number.isNaN(new Date(response.observedAt).getTime())
     ? new Date(response.observedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) : null;

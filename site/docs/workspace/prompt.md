@@ -356,7 +356,7 @@ Open it with the context ring below the prompt, or `Ctrl+G Ctrl+U`. It shows the
 
 - **Last operation**: the tokens of the last request (cache reads, cache writes, other input, output, reasoning), with its cost in AI credits for Copilot. See [Prompt caching](../model-providers/readme.md#prompt-caching).
 - **Current session** (desktop): the same for the whole session, with the time and the cost; a fork counts from the fork. **Copy as Markdown** copies it.
-- **Subscription usage** (desktop; Codex, Copilot and Claude Code): the limits of your plan and when they reset. See [Usage of a subscription](../model-providers/readme.md#subscription-usage).
+- **Subscription usage** (desktop; Codex, Copilot, Claude Code and Google Antigravity): the limits of your plan and when they reset. See [Usage of a subscription](../model-providers/readme.md#subscription-usage).
 - **Sign-in** (desktop; Claude Code signed in to claude.ai): when the [sign-in](#below-the-editor) ends.
 
 When the provider reports no token usage, as some [ACP agents](../model-providers/acp-agents.md#limitations) do, CodeAlta estimates the context from the conversation: the count starts with `~` and the window says **Estimated**.

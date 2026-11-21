@@ -367,8 +367,7 @@ internal sealed class AntigravityCliQuirks : AcpAgentQuirks
 
     /// <summary>The CLI by its executable (<c>agy</c>, or <c>antigravity</c> as its archive names it) started as an ACP server.</summary>
     public static bool Runs(AcpAgentSettings agent)
-        => Path.GetFileNameWithoutExtension(CommandFileName(agent.Command)).ToLowerInvariant() is "agy" or "antigravity" &&
-           agent.Arguments.Contains("acp", StringComparer.OrdinalIgnoreCase);
+        => AntigravityCli.IsAcpServer(agent.Command, agent.Arguments);
 
     public override AcpAgentCapabilities Capabilities(AcpAgentCapabilities announced, JsonElement initialize)
     {

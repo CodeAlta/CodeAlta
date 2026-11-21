@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ProviderUsageResponse } from "#neoastra";
 import { locales, translate } from "./localization";
 import { ShellLanguageContext } from "./shellLanguage";
-import { elapsedPercent, hasSubscriptionUsage, limitAmount, limitIntent, limitLabel, limitsMarkdown, planLabel,
+import { elapsedPercent, hasSubscriptionUsage, limitAmount, limitIntent, limitLabel, limitsMarkdown, mayHaveSubscriptionUsage, planLabel,
   resetMoment, sessionLimits, timeLeft, withLiveWindows, type UsageLimit } from "./subscriptionUsage";
 import { UsageLimitList, usageNote } from "./UsageLimits";
 
@@ -32,7 +32,12 @@ test("a limit is named after its window, or after what the provider counts", () 
   assert.equal(limitLabel(limit({ id: "extra_usage" })).key, "Usage credits");
   assert.equal(limitLabel(limit({ id: "credits" })).key, "Credits");
   for (const type of ["codex", "copilot", "claude-code"]) assert.equal(hasSubscriptionUsage(type), true);
-  for (const type of ["xai", "openai-chat", "", null, undefined]) assert.equal(hasSubscriptionUsage(type), false);
+  for (const type of ["xai", "openai-chat", "acp", "", null, undefined]) assert.equal(hasSubscriptionUsage(type), false);
+  // An ACP agent has a usage when it is the Antigravity CLI, which the host says: its limits are named by their group of models.
+  assert.equal(mayHaveSubscriptionUsage("acp"), true);
+  assert.equal(mayHaveSubscriptionUsage("codex"), false);
+  assert.deepEqual(limitLabel(limit({ id: "gemini-5h", name: "Gemini Models" })), { key: "5-hour limit", scope: "Gemini Models" });
+  assert.deepEqual(limitLabel(limit({ id: "3p-weekly", name: "Claude and GPT models", windowMinutes: 10080 })), { key: "Weekly limit", scope: "Claude and GPT models" });
 });
 
 test("the time before a limit starts over, how far its period has gone, and its color", () => {
