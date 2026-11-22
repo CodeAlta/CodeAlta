@@ -58,8 +58,59 @@ public sealed class AutomationPlacementTests
 
         // After a restart the claim is read from its file: the same time does not run again.
         var reopened = new AutomationClaimStore(claimsPath, "node-a");
-        Assert.IsFalse(reopened.TryClaim(First, occurrence, "another-run", clock.Now));
-        Assert.IsTrue(reopened.TryClaim(First, "hourly:30/1@2026-10-06T13:30:00Z", "next-run", clock.Now), "The next due time is free.");
+        Assert.AreEqual(AutomationClaimOutcome.Taken, reopened.TryClaim(First, occurrence, "another-run", clock.Now));
+        Assert.AreEqual(AutomationClaimOutcome.Granted, reopened.TryClaim(First, "hourly:30/1@2026-10-06T13:30:00Z", "next-run", clock.Now),
+            "The next due time is free.");
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Claims_DoNotStartWithoutReadableWritableStorage(bool unreadableAtOpen)
+    {
+        using var root = new AutomationTempRoot();
+        var global = Path.Combine(root.Path, "config.toml");
+        File.WriteAllText(global, $$"""
+            [automations.{{First}}]
+            name = "Half past"
+            prompt = "hello"
+            triggers = [{ type = "hourly", minute = 30 }]
+            """);
+        var claimsPath = Path.Combine(root.Path, "automation-claims.json");
+        const string malformed = "{ not json";
+        if (unreadableAtOpen) File.WriteAllText(claimsPath, malformed);
+        var claims = new AutomationClaimStore(claimsPath, "node-a");
+        // Keep the destination unwritable even though the store opened before anything was there.
+        if (!unreadableAtOpen) Directory.CreateDirectory(claimsPath);
+        var clock = new AutomationClock { Now = Noon };
+        var runner = new FakeAutomationRunner();
+        await using var service = Create(root.Path, "state", global, runner, clock, claims);
+        await service.RefreshAsync();
+
+        clock.Now = Noon.AddMinutes(30).AddSeconds(5);
+        service.Tick(clock.Now);
+
+        Assert.AreEqual(0, runner.Starts.Count);
+        var skipped = service.Runs(First, 10).Single();
+        Assert.AreEqual(AutomationRun.Skipped, skipped.Status);
+        StringAssert.Contains(skipped.Message, "claim storage is unavailable");
+        if (unreadableAtOpen)
+        {
+            Assert.AreEqual(malformed, File.ReadAllText(claimsPath), "Do not replace a claim file whose contents are unknown.");
+            return;
+        }
+
+        // Once the write works, the unclaimed occurrence can run and is then refused across restart.
+        Directory.Delete(claimsPath);
+        var entry = service.Snapshot.Find(First)!;
+        var trigger = entry.Definition.Triggers.Single();
+        var occurrence = AutomationService.Occurrence(trigger, Noon.AddMinutes(30));
+        Assert.IsTrue(service.Trigger(entry, trigger.KindName, null, entry.Definition.Prompt, occurrence: occurrence));
+        var started = await runner.NextAsync();
+        var reopened = new AutomationClaimStore(claimsPath, "node-a");
+        Assert.AreEqual(started.RunId, reopened.Find(First, occurrence)?.RunId);
+        Assert.AreEqual(AutomationClaimOutcome.Taken, reopened.TryClaim(First, occurrence, "another-run", clock.Now));
+        started.Complete(new(AutomationRun.Completed));
     }
 
     [TestMethod]

@@ -218,6 +218,13 @@ public sealed class NodeServerAutomationTests
         };
         var claims = automations.Claims!;
         const string Event = "event:issue:0123456789abcdef#42";
+        var claimsPath = Path.Combine(node.Host.CatalogOptions.FleetRoot, NodeAutomations.ClaimsFileName);
+        Directory.CreateDirectory(claimsPath);
+        var blocked = await claims.ClaimEventAsync(Id, Event, "unwritten-run", clock.Now, token);
+        Directory.Delete(claimsPath);
+        Assert.AreEqual(AutomationPoolClaim.Later, blocked.Outcome, "An event whose local claim could not be saved is not marked seen.");
+        Assert.IsFalse(held.ContainsKey(Event), "The event is not claimed at the server before the local claim is written.");
+
         Assert.AreEqual(AutomationPoolClaim.Later, (await claims.ClaimEventAsync(Id, Event, "run-1", clock.Now, token)).Outcome, "no answer: looked at again later");
         var again = await claims.ClaimEventAsync(Id, Event, "run-2", clock.Now, token);
         Assert.AreEqual((AutomationPoolClaim.Granted, "run-1"), (again.Outcome, again.RunId), "the grant whose answer was lost is asked again by the same run, and runs");
@@ -225,7 +232,7 @@ public sealed class NodeServerAutomationTests
         // Another machine runs an event: the claim of this one ends, and still says it was seen.
         held["event:issue:0123456789abcdef#43"] = ("other-node", "run-x");
         Assert.AreEqual(AutomationPoolClaim.Taken, (await claims.ClaimEventAsync(Id, "event:issue:0123456789abcdef#43", "run-3", clock.Now, token)).Outcome);
-        var file = new AutomationClaimStore(Path.Combine(node.Host.CatalogOptions.FleetRoot, NodeAutomations.ClaimsFileName), "test");
+        var file = new AutomationClaimStore(claimsPath, "test");
         Assert.IsNotNull(file.Find(Id, "event:issue:0123456789abcdef#43")?.EndedAt, "a claim lost to another machine is not left unfinished");
         Assert.AreEqual(AutomationPoolClaim.Taken, (await claims.ClaimEventAsync(Id, "event:issue:0123456789abcdef#43", "run-4", clock.Now, token)).Outcome);
 

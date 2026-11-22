@@ -794,14 +794,15 @@ internal sealed partial class AutomationService : IAsyncDisposable
         }
 
         var runId = claimedRunId ?? NewRunId();
-        if (claimedRunId is null && occurrence is not null && _claims is not null && !_claims.TryClaim(entry.Id, occurrence, runId, _time.GetUtcNow()))
+        var claim = claimedRunId is null && occurrence is not null ? _claims?.TryClaim(entry.Id, occurrence, runId, _time.GetUtcNow()) : null;
+        if (claim is not null and not AutomationClaimOutcome.Granted)
         {
-            // Another run took this time already (fired twice, or caught up after a restart): it runs once.
             var now = _time.GetUtcNow();
             _state.Add(new AutomationRun(runId, entry.Id, now, trigger)
             {
                 Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail, Status = AutomationRun.Skipped,
-                Message = "This time was already claimed by another run.", EndedAt = now,
+                Message = claim == AutomationClaimOutcome.Taken ? "This time was already claimed by another run." : AutomationClaimAnswers.StorageUnavailable,
+                EndedAt = now,
             });
             Changed?.Invoke();
             return false;
