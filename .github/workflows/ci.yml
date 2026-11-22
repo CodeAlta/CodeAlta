@@ -71,7 +71,7 @@ jobs:
           filter=$(sed 's/.*/FullyQualifiedName~.&./' <<< "$classes" | paste -sd '|' -)
           [ -n "$filter" ] || { echo "::error::No test class to filter on"; exit 1; }
           echo "$(wc -l <<< "$classes") classes"
-          echo "TEST_FILTER=$filter" >> "$GITHUB_ENV"
+          echo "TEST_FILTER=$filter|Name=Dot_EveryKernelOfThisMachine_EqualsTheScalarReference" >> "$GITHUB_ENV"
       - name: "Build"
         run: dotnet build src/CodeAlta.slnx -c Release
       - name: "Test"
