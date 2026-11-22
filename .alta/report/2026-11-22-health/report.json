@@ -18,8 +18,8 @@
     },
     {
       "label": "writers of the provider list that skip the store's locked update",
-      "value": "14",
-      "note": "in the desktop, the node and the TUI; 2 of them write defaults into `config.toml`",
+      "value": "13",
+      "note": "in the desktop, the node and the TUI; 2 of them read the definitions with their defaults filled in",
       "tone": "bad"
     },
     {
@@ -244,7 +244,9 @@
       "files": [
         "src/CodeAlta.Automations/AutomationState.cs",
         "src/CodeAlta.Automations/AutomationService.Autonomy.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits f9052d5ed, 5d5d94eac)"
     },
     {
       "id": "F02",
@@ -315,7 +317,9 @@
       "files": [
         "src/CodeAlta.Automations/AutomationClaims.cs",
         "src/CodeAlta.Automations/AutomationService.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 225b1b527)"
     },
     {
       "id": "F03",
@@ -327,7 +331,7 @@
       "impact": "high",
       "effort": "M",
       "risk": "medium",
-      "claim": "Fourteen call sites in the desktop, the node and the TUI read and rewrite the whole provider list of `config.toml` by themselves: none holds the file lock from the read to the write, and two read the definitions with their defaults filled in, so adding a model server writes defaults into every other provider.",
+      "claim": "Thirteen call sites in the desktop, the node and the TUI read and rewrite the whole provider list of `config.toml` by themselves: none holds the file lock from the read to the write, so two writers from one revision both succeed and one edit is lost; and the model-server and node paths read the definitions with their defaults filled in, which wrote an implicit `api_url` into an untouched, disabled llama.cpp provider.",
       "candidates": [
         "C10",
         "C13"
@@ -343,7 +347,7 @@
           "command": "git grep -n '.UpdateGlobal(' -- 'src/*.cs' ':!src/*Tests*'"
         },
         {
-          "text": "The 14 callers of the whole-list save, outside the store.",
+          "text": "The 13 callers of the whole-list save, outside the store (the 14th line of this search is the store's own declaration).",
           "command": "git grep -n 'SaveGlobalProviderDefinitions(' -- 'src/*.cs' ':!src/*Tests*'"
         },
         {
@@ -427,7 +431,7 @@
           }
         ]
       },
-      "firstStep": "Add the store method and move the model-server path to it, with a test: a config with a minimal Codex provider keeps no `api_url`, `max_concurrent_requests` or `model_discovery` after a model server is added.",
+      "firstStep": "Add the store method and move the model-server path to it, with a test: a config with an untouched, disabled llama.cpp provider gets no `api_url` when a model server is added, and an unknown provider section stays as it is.",
       "steps": [
         "Move the structured form and check two writers on one revision: one `ok`, one `conflict`.",
         "Move the node paths (`NodeScopeProviders`, `NodeProviders`).",
@@ -453,7 +457,9 @@
         "src/CodeAlta/Desktop/DesktopApplication.cs",
         "src/CodeAlta.Node/NodeScopeProviders.cs",
         "src/CodeAlta.Node/NodeProviders.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits c07d4a9ea..45b02dc95, 3d2cfd9d1)"
     },
     {
       "id": "F04",
@@ -524,7 +530,9 @@
       },
       "files": [
         "src/CodeAlta.Tui/ViewModels/ModelProviderEditorItemViewModel.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 796efb76e)"
     },
     {
       "id": "F05",
@@ -631,7 +639,9 @@
       "files": [
         "src/CodeAlta.Catalog/SessionJournalSqliteCache.cs"
       ],
-      "dissent": "One analyst would keep the version gate and add a test that opens a fixture of the last shipped schema at its real version, refreshed with each release. It catches a missed bump; the column list removes the bump itself and the nine methods, for one read of `pragma_table_info` at open. Kept: the column list."
+      "dissent": "One analyst would keep the version gate and add a test that opens a fixture of the last shipped schema at its real version, refreshed with each release. It catches a missed bump; the column list removes the bump itself and the nine methods, for one read of `pragma_table_info` at open. Kept: the column list.",
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 65e391009, d8bcbf6da)"
     },
     {
       "id": "F06",
@@ -717,7 +727,9 @@
         "src/CodeAlta/Desktop/Rpc/McpServersRpc.cs",
         "src/CodeAlta/Desktop/Rpc/AgentPromptsRpc.cs",
         "src/CodeAlta/Desktop/Rpc/PluginsRpc.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 4eadf247e..4cafd030f)"
     },
     {
       "id": "F07",
@@ -829,7 +841,7 @@
         "A type shared by two services is declared once.",
         "The demo answers some reads with empty data on purpose (`labels.list`): those stay explicit."
       ],
-      "dissent": "One analyst proposed one JSON context per RPC file, combined at start: `[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]` names a single context for NeoAstra, so the partial declarations are the cure kept. Another showed that `export *` in the fixtures would lose the choices they make on purpose: they stay explicit.",
+      "dissent": "One analyst proposed one JSON context per RPC file, combined at start: `[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]` names a single context for NeoAstra, so the partial declarations are the cure kept. Another showed that `export *` in the fixtures would lose the choices they make on purpose: they stay explicit. Landing showed that the System.Text.Json source generator refuses `[JsonSerializable]` spread over partial declarations: `CS8785`, \"The hintName 'DesktopJsonContext.Boolean.g.cs' of the added source file must be unique within a generator\". With NeoAstra taking one context, `BootRpc.cs` keeps its list until NeoAstra accepts several.",
       "votes": {
         "opus": "found",
         "gemini": "found",
@@ -839,7 +851,9 @@
         "src/CodeAlta/Desktop/Rpc/BootRpc.cs",
         "src/CodeAlta/frontend/src/demo-api.ts",
         "src/CodeAlta/frontend/src/projectFocus.neoastra.mount.ts"
-      ]
+      ],
+      "status": "deferred",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md: the stubs of demo-api.ts through one helper landed (98fb7800a) with a contract test (2ca18fe53); the JSON part did not"
     },
     {
       "id": "F08",
@@ -905,7 +919,9 @@
       "files": [
         "src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs"
       ],
-      "dissent": "The analyst who found it proposed one contributor per domain; the registry recognizes the built-in contributor by its type (`AltaCommandRegistry.cs:49`, `:141`), so the split was left for when that code changes. Kept: the one-line fix."
+      "dissent": "The analyst who found it proposed one contributor per domain; the registry recognizes the built-in contributor by its type (`AltaCommandRegistry.cs:49`, `:141`), so the split was left for when that code changes. Kept: the one-line fix.",
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 2ec6b3406)"
     },
     {
       "id": "F09",
@@ -977,7 +993,9 @@
       "files": [
         "src/CodeAlta.Catalog/Skills/RawSkillCandidateReader.cs",
         "src/CodeAlta.Catalog/Skills/SkillMetadataParser.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits cf1a8fd56, f6ef02003)"
     },
     {
       "id": "F10",
@@ -1050,7 +1068,9 @@
         "src/CodeAlta/Desktop/DesktopApplication.cs",
         "src/CodeAlta/Desktop/DesktopCommandLine.cs"
       ],
-      "dissent": "One analyst rejects the deletion: the mode is a documented capability for tests and development, it registers fewer services on purpose, and different counts do not prove drift. Open: it is the owner's choice whether the capability stays."
+      "dissent": "One analyst rejects the deletion: the mode is a documented capability for tests and development, it registers fewer services on purpose, and different counts do not prove drift. Open: it is the owner's choice whether the capability stays.",
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits d090089dd, 0b006153a, 29944ad37, 5d53c5bda)"
     },
     {
       "id": "F11",
@@ -1205,7 +1225,9 @@
       },
       "files": [
         "src/CodeAlta/frontend/src/main.tsx"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 3bb1ead88..ff211b621 for the drafts, d61602f01..a2fb148a0 for the dialogs; the tab switch stays with task wtvm)"
     },
     {
       "id": "F12",
@@ -1217,7 +1239,7 @@
       "impact": "medium",
       "effort": "S",
       "risk": "low",
-      "claim": "33 test deadlines written `UtcNow.AddSeconds(…)` escape `TestTime` and its four-fold CI factor, some of 2 s, and three browser test files wait 39 fixed delays, 11.4 s per run, each time acting, sleeping and asserting once.",
+      "claim": "36 test deadlines written `UtcNow.AddSeconds(…)` escape `TestTime` and its four-fold CI factor, some of 2 s, and three browser test files wait 45 fixed delays, 12.7 s per run, each time acting, sleeping and asserting once.",
       "candidates": [
         "C09"
       ],
@@ -1256,14 +1278,14 @@
       "change": "Write the 33 deadlines with `TestTime`. Replace the fixed delays by waits for the state or the completion of the operation the test asserts, through one helper under `TestTime`; the pauses inside polling loops stay.",
       "balance": {
         "removes": [
-          "33 limits without the CI factor",
-          "39 fixed delays, 11.4 s of every run"
+          "36 limits without the CI factor",
+          "45 fixed delays, 12.7 s of every run"
         ],
         "adds": [
           "one polling helper"
         ],
         "delta": {
-          "seconds": -11
+          "seconds": -12
         }
       },
       "before": {
@@ -1318,7 +1340,9 @@
         "src/CodeAlta.Browser.Tests/BrowserAnnotationsTests.cs",
         "src/CodeAlta.Browser.Tests/BrowserPluginTests.cs",
         "src/CodeAlta.Tests/AltaLiveToolTests.cs"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 6dd1e7a3f, 3ace59e32, bce11c85e)"
     },
     {
       "id": "F13",
@@ -1393,7 +1417,9 @@
       "files": [
         "src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs"
       ],
-      "ifNot": "On a machine whose antivirus holds the index copy, a review can approve a tree that lacks the edit of a tracked, ignored file."
+      "ifNot": "On a machine whose antivirus holds the index copy, a review can approve a tree that lacks the edit of a tracked, ignored file.",
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 87e802f5e, 9aa74dde9)"
     },
     {
       "id": "F14",
@@ -1454,7 +1480,9 @@
       },
       "files": [
         ".github/workflows/ci.yml"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 18725408f)"
     },
     {
       "id": "F15",
@@ -1557,7 +1585,9 @@
       },
       "files": [
         "src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits b3b22a965, 67bba2f38)"
     },
     {
       "id": "F16",
@@ -1626,7 +1656,9 @@
       "files": [
         "AGENTS.md",
         "doc/architecture.md"
-      ]
+      ],
+      "status": "done",
+      "task": ".alta/plans/2026-11-22-health-review-landing.md (commits 7b69770ee, f2fa6fc39, 1fc10d0e8)"
     }
   ],
   "roadmap": [
@@ -1844,7 +1876,7 @@
     }
   ],
   "method": {
-    "text": "Three models reviewed the repository at `2a3fd8388`: Claude Opus 5.5 drove; Gemini 4 Neon and GPT 6.2 Astra analyzed. The owner asked for `antigravity-mcp:gemini-4-neon@high`, a provider this installation does not have: the same model ran through its only Antigravity provider, `antigravity-acp`. Each analyzed alone from the same brief and signals, the driver first, without reading the others. Their 21 findings were merged into `analysis/candidates.md` without authors, and each analyst tried to refute the candidates it had not raised. The driver opened the code of every finding kept here and settled each question of fact by reading or searching; no build or test was run. The owner chose to keep all 16 findings and to decide their priorities from the order of work.",
+    "text": "Three models reviewed the repository at `2a3fd8388`: Claude Opus 5.5 drove; Gemini 4 Neon and GPT 6.2 Astra analyzed. The owner asked for `antigravity-mcp:gemini-4-neon@high`, a provider this installation does not have: the same model ran through its only Antigravity provider, `antigravity-acp`. Each analyzed alone from the same brief and signals, the driver first, without reading the others. Their 21 findings were merged into `analysis/candidates.md` without authors, and each analyst tried to refute the candidates it had not raised. The driver opened the code of every finding kept here and settled each question of fact by reading or searching; no build or test was run. The owner chose to keep all 16 findings and to decide their priorities from the order of work. While landing, three numbers of this report were measured again and corrected: 13 callers of the whole-list provider save (the 14th match was the store's declaration), 36 unscaled test deadlines (not 33), and 45 fixed delays of 12.7 s in the browser test files (not 39 of 11.4 s); the defaults that F03's model-server path wrote were an implicit `api_url` of a disabled llama.cpp provider, the Codex defaults being already pruned on save.",
     "notExamined": [
       "the provider protocols (`CodeAlta.Agent.*`)",
       "the TUI beyond its provider editor",

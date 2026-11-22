@@ -5,7 +5,7 @@ CodeAlta · at 2a3fd8388 · 2026-11-22 · whole repository at `feature50`: .NET 
 The core rules hold: one writer per session, clean low layers, guardrail tests that catch regressions. The cost is in how state is saved and decisions repeated: stores whose saves their readers refuse, provider edits that bypass the store's lock, decisions kept in two places, and one 6,700-line component every feature edits. Most cures delete or merge code.
 
 - **13 of 16** strong findings (found or confirmed by two analysts, checked in the code)
-- **14** writers of the provider list that skip the store's locked update (in the desktop, the node and the TUI; 2 of them write defaults into `config.toml`)
+- **13** writers of the provider list that skip the store's locked update (in the desktop, the node and the TUI; 2 of them read the definitions with their defaults filled in)
 - **134** `useState` in the `App` component (6,741 lines; `main.tsx` changed in 144 of 1,702 commits in four weeks)
 - **3 in 6 days** session lists broken by a column without a version bump (2026-10-26 to 2026-10-31, each an existing database)
 - **8,958** words an agent loads with the plugin skill (about 12,000 tokens per activation; the next built-in skill has 2,096)
@@ -100,12 +100,12 @@ If we leave it: Rare, but when it happens the side effects of an automation run 
 
 `merge` · strong · impact high · effort M · risk medium · `provider settings` · opus confirmed, gemini confirmed, astra found
 
-Fourteen call sites in the desktop, the node and the TUI read and rewrite the whole provider list of `config.toml` by themselves: none holds the file lock from the read to the write, and two read the definitions with their defaults filled in, so adding a model server writes defaults into every other provider.
+Thirteen call sites in the desktop, the node and the TUI read and rewrite the whole provider list of `config.toml` by themselves: none holds the file lock from the read to the write, so two writers from one revision both succeed and one edit is lost; and the model-server and node paths read the definitions with their defaults filled in, which wrote an implicit `api_url` into an untouched, disabled llama.cpp provider.
 
 Evidence:
 - `src/CodeAlta.Catalog/CodeAltaConfigStore.cs:275` The store already has a read-and-save under the lock of the file, which nine settings writers use and no provider edit does.
 - The callers of `UpdateGlobal`: settings only. (`git grep -n '.UpdateGlobal(' -- 'src/*.cs' ':!src/*Tests*'`)
-- The 14 callers of the whole-list save, outside the store. (`git grep -n 'SaveGlobalProviderDefinitions(' -- 'src/*.cs' ':!src/*Tests*'`)
+- The 13 callers of the whole-list save, outside the store (the 14th line of this search is the store's own declaration). (`git grep -n 'SaveGlobalProviderDefinitions(' -- 'src/*.cs' ':!src/*Tests*'`)
 - `src/CodeAlta/Desktop/Rpc/GlobalConfigRpc.cs:124` The text editor holds the file lock across its revision check and its save.
 - `src/CodeAlta/Desktop/Rpc/GlobalConfigRpc.cs:943` The structured form checks the revision under an in-process lock only; the store takes the file lock at the save.
 - `src/CodeAlta/Desktop/DesktopApplication.cs:909-917` Adding a model server reads the completed definitions and saves them all back.
@@ -118,7 +118,7 @@ Change: Give the store one provider edit: under `ConfigFileLock`, read the raw d
 Removes: 14 hand-written read-modify-write loops; defaults written into untouched providers; edits lost between two writers (the developer instance shares `config.toml`)  
 Adds: one store method of about 20 lines; a two-writer test and a raw round-trip test
 
-First step: Add the store method and move the model-server path to it, with a test: a config with a minimal Codex provider keeps no `api_url`, `max_concurrent_requests` or `model_discovery` after a model server is added.
+First step: Add the store method and move the model-server path to it, with a test: a config with an untouched, disabled llama.cpp provider gets no `api_url` when a model server is added, and an unknown provider section stays as it is.
 
 Then: Move the structured form and check two writers on one revision: one `ok`, one `conflict`.; Move the node paths (`NodeScopeProviders`, `NodeProviders`).; Move the TUI coordinator; the whole-list save remains for the store only.
 
@@ -240,7 +240,7 @@ Verify: `BootRpc.cs` holds the boot types only.; A new service edits its own fil
 
 Risks: A type shared by two services is declared once.; The demo answers some reads with empty data on purpose (`labels.list`): those stay explicit.
 
-Disagreement: One analyst proposed one JSON context per RPC file, combined at start: `[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]` names a single context for NeoAstra, so the partial declarations are the cure kept. Another showed that `export *` in the fixtures would lose the choices they make on purpose: they stay explicit.
+Disagreement: One analyst proposed one JSON context per RPC file, combined at start: `[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]` names a single context for NeoAstra, so the partial declarations are the cure kept. Another showed that `export *` in the fixtures would lose the choices they make on purpose: they stay explicit. Landing showed that the System.Text.Json source generator refuses `[JsonSerializable]` spread over partial declarations: `CS8785`, "The hintName 'DesktopJsonContext.Boolean.g.cs' of the added source file must be unique within a generator". With NeoAstra taking one context, `BootRpc.cs` keeps its list until NeoAstra accepts several.
 
 #### F08 Remove the early return that drops the credential policies of the `alta` commands
 
@@ -368,7 +368,7 @@ Every other change of this review is judged by the suite.
 
 `fix` · strong · impact medium · effort S · risk low · `tests` · opus found, gemini found, astra refined
 
-33 test deadlines written `UtcNow.AddSeconds(…)` escape `TestTime` and its four-fold CI factor, some of 2 s, and three browser test files wait 39 fixed delays, 11.4 s per run, each time acting, sleeping and asserting once.
+36 test deadlines written `UtcNow.AddSeconds(…)` escape `TestTime` and its four-fold CI factor, some of 2 s, and three browser test files wait 45 fixed delays, 12.7 s per run, each time acting, sleeping and asserting once.
 
 Evidence:
 - `src/CodeAlta.Tests/TestTimeGuardTests.cs:118` The guard catches `UtcNow + TimeSpan.From…` but not `UtcNow.AddSeconds(…)`.
@@ -380,7 +380,7 @@ Evidence:
 
 Change: Write the 33 deadlines with `TestTime`. Replace the fixed delays by waits for the state or the completion of the operation the test asserts, through one helper under `TestTime`; the pauses inside polling loops stay.
 
-Removes: 33 limits without the CI factor; 39 fixed delays, 11.4 s of every run  
+Removes: 36 limits without the CI factor; 45 fixed delays, 12.7 s of every run  
 Adds: one polling helper
 
 First step: Convert the two 2-second deadlines of `AltaLiveToolTests.cs`, and add the polling helper to `BrowserDrawingTests.cs`.
