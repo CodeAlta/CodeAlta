@@ -134,7 +134,7 @@ Click **Review** in the header of the Changes tab to comment on lines of the dif
 CodeAlta Desktop has terminals: your own shell, in a tab under your sessions.
 
 - Open one in the folder of the project with its terminal button in the Explorer, or ``Ctrl+` ``. The terminal button of the **Workspace** chip, or **Open terminal** in its popover, opens one where the session works.
-- A terminal keeps running when you close its tab. The terminals of a project are listed under its sessions, with their folder and a spinner while a command runs: click one to show it, rename it or end it.
+- A terminal keeps running when you close its tab. The terminals of a project are listed under its sessions, with their folder and a spinner while a command runs: click one to show it, rename it or end it. Clear the title and click **Rename** to restore the terminal's own title.
 - `Ctrl+C` copies the selection, or interrupts when nothing is selected. `Ctrl+V` pastes and `Ctrl+F` finds text.
 - The options button sets the cursor, the text size, **Copy on select**, the lines kept and the shell of new terminals.
 

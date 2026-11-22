@@ -12,25 +12,28 @@ type RenameDraft = { initialValue: string; value?: never; onChange?: never }
  * a terminal clearing its error, supplies `value` and `onChange` instead.
  * Enter renames; Escape, Cancel or a click elsewhere leaves the name as it is.
  */
-export function RenamePopover({ label, initialValue, value, onChange, onSubmit, onCancel, busy, disabled = false, error = null }: RenameDraft & {
+export function RenamePopover({ label, initialValue, value, onChange, onSubmit, onCancel, busy, disabled = false, allowBlank = false, error = null }: RenameDraft & {
   label: string;
   onSubmit: (draft: string) => void; onCancel: () => void;
   /** A rename is on its way: the form waits for it and cannot be dismissed. */
   busy: boolean;
   /** The name cannot be changed now (for example after an unconfirmed rename). */
   disabled?: boolean;
+  /** An empty or whitespace-only draft can be submitted, for example to restore a default title. */
+  allowBlank?: boolean;
   error?: string | null;
 }) {
   const { t } = useShellLanguage();
   const id = useId();
   const [draft, setDraft] = useState(initialValue ?? "");
   const text = value ?? draft;
+  const canSubmit = !disabled && (allowBlank || text.trim() !== "");
   const input = useRef<HTMLInputElement>(null);
   // The whole name is selected, ready to be replaced or refined.
   useEffect(() => { const timer = setTimeout(() => { input.current?.focus(); input.current?.select(); }); return () => clearTimeout(timer); }, []);
   const form = <form className="rename-form" onSubmit={event => {
     event.preventDefault();
-    if (!busy && !disabled && text.trim()) onSubmit(text);
+    if (!busy && canSubmit) onSubmit(text);
   }}>
     <FormGroup label={label} labelFor={id} intent={error ? "danger" : "none"} helperText={error ? <span role="alert">{error}</span> : undefined}>
       <InputGroup id={id} inputRef={input} value={text} maxLength={256} disabled={busy || disabled} intent={error ? "danger" : "none"}
@@ -38,7 +41,7 @@ export function RenamePopover({ label, initialValue, value, onChange, onSubmit, 
     </FormGroup>
     <div className="rename-actions">
       <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={onCancel} />
-      <Button type="submit" intent="primary" size="small" text={t("Rename")} loading={busy} disabled={disabled || !text.trim()} />
+      <Button type="submit" intent="primary" size="small" text={t("Rename")} loading={busy} disabled={!canSubmit} />
     </div>
   </form>;
   return <PopoverNext isOpen content={form} placement="right-start" popoverClassName="rename-popover" className="rename-anchor" targetTagName="span"
