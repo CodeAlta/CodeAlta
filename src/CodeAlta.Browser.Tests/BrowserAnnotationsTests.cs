@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using CodeAlta.Browser.Annotations;
+using CodeAlta.Browser.Cdp;
 using CodeAlta.Browser.Discovery;
 using CodeAlta.Browser.Drivers;
 using CodeAlta.Browser.Toolbar;
@@ -110,11 +112,12 @@ public sealed class BrowserAnnotationsTests
 
         // Shift+click gathers the first two cards; a click on the third adds it and opens the one note for all. The clicks
         // are the browser's input, as a person's are: events the page made up would choose nothing.
+        var chosen = 0;
         foreach (var id in new[] { "c1", "c2" })
         {
             var center = await CenterAsync(session, "#" + id);
             await ((CodeAlta.Browser.Drivers.Cdp.CdpPage)state.Page).ClickWithModifiersAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), 8, timeout.Token);
-            await Task.Delay(100, timeout.Token);
+            await BrowserWait.ToolbarAsync(page, ready.ContextId, $"state().chosen === {++chosen}", timeout.Token);
         }
         var group = await AnnotateAsync(session, state, "#c3", "The same spacing for all three", messages, timeout.Token);
         var cards = group.Elements!;
@@ -133,7 +136,7 @@ public sealed class BrowserAnnotationsTests
         var start = box.IndexOf("box=", StringComparison.Ordinal) + 4;
         var edges = box[start..box.IndexOf(';', start)].Split(',').Select(static value => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         await state.Page.DragAsync(BrowserPoint.OfPage(state.Page.MainFrame, edges[2], edges[3]), BrowserPoint.OfPage(state.Page.MainFrame, edges[0], edges[1]), timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Less space between these two", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
         var area = Next(messages, "annotation", timeout.Token, message => message.Note == "Less space between these two");
@@ -269,8 +272,7 @@ public sealed class BrowserAnnotationsTests
         // opens the Send popup on its message, and Tab reaches the switch, which Space turns on.
         await session.OkAsync("evaluate_script", """{"function":"() => { const start = document.createElement('button'); start.textContent = 'start'; document.body.prepend(start); start.focus(); return 'focused'; }"}""");
         foreach (var key in new[] { "Tab", "Tab", "Tab", "Enter" }) await session.OkAsync("press_key", $$"""{"key":"{{key}}"}""");
-        await Task.Delay(100, timeout.Token);
-        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting", timeout.Token), "the Send popup is open");
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await session.OkAsync("press_key", """{"key":"Tab"}""");
         await session.OkAsync("press_key", """{"key":" "}""");
         Assert.IsTrue(Next(messages, "details", timeout.Token).Details);
@@ -383,7 +385,10 @@ public sealed class BrowserAnnotationsTests
     }
 
     private static async Task<bool> OnBarAsync(BrowserSession session, double x, double y)
-        => (await session.OkAsync("evaluate_script", $$"""{"function":"() => 'on=' + (document.elementFromPoint({{x.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, {{y.ToString(System.Globalization.CultureInfo.InvariantCulture)}})?.hasAttribute('data-codealta-toolbar') === true)"}""")).Contains("on=true", StringComparison.Ordinal);
+        => (await session.OkAsync("evaluate_script", $$"""{"function":"() => 'on=' + ({{BarHitAt(x, y)}})"}""")).Contains("on=true", StringComparison.Ordinal);
+
+    private static string BarHitAt(double x, double y)
+        => FormattableString.Invariant($"document.elementFromPoint({x}, {y})?.hasAttribute('data-codealta-toolbar') === true");
 
     [TestMethod]
     public async Task TheAnnotationsAPromptTook_LeaveThePage_AndOneSavedMeanwhileKeepsItsMark()
@@ -423,7 +428,8 @@ public sealed class BrowserAnnotationsTests
 
         var seen = await session.OkAsync("evaluate_script", """{"function":"() => [typeof globalThis.__codealtaToolbarMessage, typeof globalThis.__codealtaToolbar].join(',')"}""");
         StringAssert.Contains(seen, "undefined,undefined");
-        await Task.Delay(300);
+        // The page has no reporting channel, so there is no completion to observe for a stray binding message.
+        await Task.Delay(50, timeout.Token); // not a limit
         Assert.IsFalse(messages.Any(static message => message.Type == "annotation"));
     }
 
@@ -440,7 +446,7 @@ public sealed class BrowserAnnotationsTests
         var ready = Next(messages, "ready", timeout.Token, message => message.Url?.EndsWith("/hostile", StringComparison.Ordinal) == true);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
-        await Task.Delay(200);
+        await BrowserWait.ToolbarAsync(page, ready.ContextId, "state().picking", timeout.Token);
 
         // The bar is no element the page can define: the page gets neither its internals nor its shadow root.
         var reach = await session.OkAsync("evaluate_script", """{"function":"() => { const host = document.querySelector('[data-codealta-toolbar]'); return 'captured=' + window.__captured.filter(internals => internals.shadowRoot).length + ';host=' + !!host + ';open=' + !!(host && host.shadowRoot) + ';'; }"}""");
@@ -448,7 +454,7 @@ public sealed class BrowserAnnotationsTests
 
         // Clicks and keys the page makes up choose nothing, while the user annotates.
         await session.OkAsync("evaluate_script", """{"function":"() => { const target = document.getElementById('target'); const at = { bubbles: true, cancelable: true, composed: true, clientX: 60, clientY: 60 }; for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) target.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, at)); target.dispatchEvent(new MouseEvent('click', { ...at, shiftKey: true })); target.click(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'sent'; }"}""");
-        await Task.Delay(300);
+        // dispatchEvent finishes its listeners before the evaluation returns.
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().chosen === 0", timeout.Token), "no element was chosen");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting === false", timeout.Token), "no note was opened");
         Assert.IsFalse(messages.Any(static message => message.Type == "annotation"));
@@ -512,7 +518,7 @@ public sealed class BrowserAnnotationsTests
 
         var center = await CenterAsync(session, "#c1");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Which font is this?", timeout.Token);
         foreach (var key in new[] { "Tab", "Tab", "Enter", "Control+Enter" }) await session.OkAsync("press_key", $$"""{"key":"{{key}}"}""");
         var question = Next(messages, "annotation", timeout.Token, message => message.Note == "Which font is this?");
@@ -523,8 +529,7 @@ public sealed class BrowserAnnotationsTests
         var corner = await session.OkAsync("evaluate_script", """{"function":"() => { const r = document.getElementById('c1').getBoundingClientRect(); return [r.left + 4, r.top + 4]; }"}""");
         var at = corner[(corner.IndexOf('[') + 1)..corner.IndexOf(']')].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, at[0], at[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
-        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting", timeout.Token), "the mark opened the note");
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         foreach (var key in new[] { "Tab", "ArrowRight", "Control+Enter" }) await session.OkAsync("press_key", $$"""{"key":"{{key}}"}""");
         var edit = Next(messages, "edit", timeout.Token);
         Assert.AreEqual(question.Id, edit.Id);
@@ -558,7 +563,7 @@ public sealed class BrowserAnnotationsTests
         // waits for the images being read.
         var center = await CenterAsync(session, "#c1");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Like this mockup", timeout.Token);
         var corner = await session.OkAsync("evaluate_script", """{"function":"() => { const r = document.getElementById('c1').getBoundingClientRect(); return [r.left + 60, r.bottom + 60]; }"}""");
         var at = corner[(corner.IndexOf('[') + 1)..corner.IndexOf(']')].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
@@ -594,25 +599,26 @@ public sealed class BrowserAnnotationsTests
         var ready = Next(messages, "ready", timeout.Token, message => message.Url?.EndsWith("/cards", StringComparison.Ordinal) == true);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
-        var large = Path.Combine(folder.Path, "photo.png");
-        await File.WriteAllBytesAsync(large, Png(2400, 2400, noise: true), timeout.Token);
+        var image = Path.Combine(folder.Path, "photo.png");
+        await File.WriteAllBytesAsync(image, Png(8, 8, noise: false), timeout.Token);
+        await HoldNextImageReadAsync(state.Page, ready.ContextId, timeout.Token);
 
-        // A large image takes a while to be made smaller: the note is saved, and cancelled, while it is read.
+        // Save and cancel while the image read is held, even on a fast machine.
         var center = await CenterAsync(session, "#c1");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Cancelled note", timeout.Token);
         var corner = await session.OkAsync("evaluate_script", """{"function":"() => { const r = document.getElementById('c1').getBoundingClientRect(); return [r.left + 60, r.bottom + 60]; }"}""");
         var at = corner[(corner.IndexOf('[') + 1)..corner.IndexOf(']')].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-        await DropAsync(state.Page, at[0], at[1], [large], timeout.Token);
-        await SaveThenCancelAsync(state.Page, timeout.Token);
+        await DropAsync(state.Page, at[0], at[1], [image], timeout.Token);
+        await SaveThenCancelAsync(session, state, ready.ContextId, timeout.Token);
 
         // A newer note is opened before the image is read; the save of the cancelled one never comes, and closes nothing.
         center = await CenterAsync(session, "#c3");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Newer note", timeout.Token);
-        await Task.Delay(2000, timeout.Token);
+        await FinishImageReadAsync(state.Page, ready.ContextId, timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type is "annotation" or "image"), "the cancelled note was saved");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting", timeout.Token), "the newer note stays open");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().marks === 0", timeout.Token));
@@ -621,7 +627,7 @@ public sealed class BrowserAnnotationsTests
         var newer = Next(messages, "annotation", timeout.Token);
         Assert.AreEqual("Newer note", newer.Note);
         Assert.AreEqual("c3", newer.Elements!.Single().Id);
-        await Task.Delay(300, timeout.Token);
+        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting === false", timeout.Token));
         Assert.IsFalse(messages.Any(static message => message.Type == "image"), "the image went with the cancelled note");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "clear()", timeout.Token));
     }
@@ -649,20 +655,22 @@ public sealed class BrowserAnnotationsTests
         // desktop, all with the browser's own input.
         var center = await CenterAsync(session, "#c1");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Like this ", timeout.Token);
         StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"async () => { await navigator.clipboard.writeText('and these words'); return 'copied'; }"}"""), "copied");
         await EditAsync(state.Page, "v", "paste", timeout.Token);
+        await BrowserWait.ToolbarRootAsync(state.Page, "this.activeElement?.value === 'Like this and these words'", timeout.Token);
         StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"async () => { const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8; const context = canvas.getContext('2d'); context.fillStyle = '#0a0'; context.fillRect(0, 0, 8, 8); const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png')); await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); return 'copied'; }"}"""), "copied");
         await EditAsync(state.Page, "v", "paste", timeout.Token);
+        await BrowserWait.ToolbarRootAsync(state.Page, "this.querySelectorAll('.images .image').length === 1", timeout.Token);
         var corner = await session.OkAsync("evaluate_script", """{"function":"() => { const r = document.getElementById('c1').getBoundingClientRect(); return [r.left + 60, r.bottom + 60]; }"}""");
         var at = corner[(corner.IndexOf('[') + 1)..corner.IndexOf(']')].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         await DropAsync(state.Page, at[0], at[1], [dropped], timeout.Token);
-        await Task.Delay(300, timeout.Token);
+        await BrowserWait.ToolbarRootAsync(state.Page, "this.querySelectorAll('.images .image').length === 2", timeout.Token);
         // The note copied, as the user may before saving it.
         await EditAsync(state.Page, "a", "selectAll", timeout.Token);
         await EditAsync(state.Page, "c", "copy", timeout.Token);
-        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"async () => 'copied=' + await navigator.clipboard.readText() + ';'"}"""), "copied=Like this and these words;");
+        await BrowserWait.PageAsync(state.Page, "(async () => await navigator.clipboard.readText() === 'Like this and these words')()", timeout.Token);
         // The page heard of none of it, though it listened first, on the window, as the events started.
         StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => 'snooped=' + JSON.stringify(window.__snooped) + ';'"}"""), "snooped=[];");
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
@@ -706,31 +714,55 @@ public sealed class BrowserAnnotationsTests
         var keyCode = (int)char.ToUpperInvariant(letter[0]);
         await session.Input.DispatchKeyEventAsync(new CodeAlta.Browser.Cdp.InputDispatchKeyEventParams { Type = "rawKeyDown", Key = letter, Code = code, WindowsVirtualKeyCode = keyCode, Modifiers = 2, Commands = [command] }, cancellationToken);
         await session.Input.DispatchKeyEventAsync(new CodeAlta.Browser.Cdp.InputDispatchKeyEventParams { Type = "keyUp", Key = letter, Code = code, WindowsVirtualKeyCode = keyCode, Modifiers = 2 }, cancellationToken);
-        await Task.Delay(200, cancellationToken);
     }
 
-    // Saves a note with Ctrl+Enter and cancels it with Esc at once, as the user's keys, without waiting between them.
-    internal static async Task SaveThenCancelAsync(IBrowserPage page, CancellationToken cancellationToken)
+    // Hold one read in the toolbar's own world, so tests don't rely on a large image taking long enough to decode.
+    internal static async Task HoldNextImageReadAsync(IBrowserPage page, int contextId, CancellationToken cancellationToken)
     {
-        var session = CdpSessionOf(page);
-        const int Control = 2;
-        foreach (var (type, key, code, modifiers) in new[]
-        {
-            ("rawKeyDown", "Control", 17, Control), ("rawKeyDown", "Enter", 13, Control), ("keyUp", "Enter", 13, Control), ("keyUp", "Control", 17, 0),
-            ("rawKeyDown", "Escape", 27, 0), ("keyUp", "Escape", 27, 0),
-        })
-        {
-            await session.Input.DispatchKeyEventAsync(new CodeAlta.Browser.Cdp.InputDispatchKeyEventParams
-            {
-                Type = type, Key = key, Code = key == "Control" ? "ControlLeft" : key, WindowsVirtualKeyCode = code, Modifiers = modifiers,
-            }, cancellationToken);
-        }
+        Assert.IsTrue(await EvaluateInToolbarAsync(page, contextId, """
+            (() => {
+              const read = FileReader.prototype.readAsDataURL;
+              FileReader.prototype.readAsDataURL = function (blob) {
+                FileReader.prototype.readAsDataURL = read;
+                globalThis.__testFinishImageRead = () => new Promise(resolve => {
+                  // Resolve after the load handlers and the toolbar's queued save have run.
+                  this.addEventListener('loadend', () => setTimeout(() => resolve(!this.error), 0), { once: true });
+                  read.call(this, blob);
+                });
+              };
+              return true;
+            })()
+            """, cancellationToken));
     }
 
-    private static CodeAlta.Browser.Cdp.CdpSession CdpSessionOf(IBrowserPage page)
+    internal static async Task SaveThenCancelAsync(BrowserSession session, BrowserPageState state, int contextId, CancellationToken cancellationToken)
+    {
+        const string ReadStarted = "typeof globalThis.__testFinishImageRead === 'function'";
+        await BrowserWait.UntilAsync(token => EvaluateInToolbarAsync(state.Page, contextId, ReadStarted, token), ReadStarted, cancellationToken);
+        var page = (IAnnotatablePage)state.Page;
+        await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
+        Assert.IsTrue(await page.CallToolbarAsync(contextId, "state().noting", cancellationToken), "the save waits for the held image read");
+        await session.OkAsync("press_key", """{"key":"Escape"}""");
+        Assert.IsTrue(await page.CallToolbarAsync(contextId, "state().noting === false", cancellationToken), "the user cancelled the note");
+    }
+
+    internal static async Task FinishImageReadAsync(IBrowserPage page, int contextId, CancellationToken cancellationToken)
+        => Assert.IsTrue(await EvaluateInToolbarAsync(page, contextId, "globalThis.__testFinishImageRead()", cancellationToken), "the cancelled note's image read finished");
+
+    private static async Task<bool> EvaluateInToolbarAsync(IBrowserPage page, int contextId, string expression, CancellationToken cancellationToken)
+    {
+        var result = await CdpSessionOf(page).Runtime.EvaluateAsync(new RuntimeEvaluateParams
+        {
+            Expression = expression, ContextId = contextId, AwaitPromise = true, ReturnByValue = true,
+        }, cancellationToken);
+        Assert.IsNull(result.ExceptionDetails, expression);
+        return result.Result.Value is { ValueKind: JsonValueKind.True };
+    }
+
+    internal static CdpSession CdpSessionOf(IBrowserPage page)
     {
         var field = typeof(CodeAlta.Browser.Drivers.Cdp.CdpPage).GetField("_session", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        return (CodeAlta.Browser.Cdp.CdpSession)field.GetValue(page)!;
+        return (CdpSession)field.GetValue(page)!;
     }
 
     // Drops files on a point of the page, as the user drags them from the desktop: the browser's input, trusted as a person's.
@@ -808,15 +840,13 @@ public sealed class BrowserAnnotationsTests
         var start = size.IndexOf("size=", StringComparison.Ordinal) + 5;
         var center = await CenterAsync(session, "[data-k=two]");
         await state.Page.MouseMoveAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), timeout.Token);
-        await Task.Delay(100, timeout.Token);
         var expected = "li.menu__item · listitem · \"Two\" · " + size[start..size.IndexOf(';', start)];
-        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"state().hover === {System.Text.Json.JsonSerializer.Serialize(expected)}", timeout.Token), expected);
+        await BrowserWait.ToolbarAsync(page, ready.ContextId, $"state().hover === {JsonSerializer.Serialize(expected)}", timeout.Token);
 
         // A button says no role beside its tag, which says it already.
         center = await CenterAsync(session, "[data-k=buy2]");
         await state.Page.MouseMoveAsync(BrowserPoint.OfPage(state.Page.MainFrame, center[0], center[1]), timeout.Token);
-        await Task.Delay(100, timeout.Token);
-        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().hover.startsWith('button.buy · \"Buy two\" · ')", timeout.Token));
+        await BrowserWait.ToolbarAsync(page, ready.ContextId, "state().hover.startsWith('button.buy · \"Buy two\" · ')", timeout.Token);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(false)", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().hover === ''", timeout.Token), "the label goes with the Annotate mode");
     }
@@ -836,11 +866,11 @@ public sealed class BrowserAnnotationsTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         var (left, y) = await BarAsync(session);
         Assert.IsTrue(left > 0, "the bar is at the bottom right");
+        var barIsOnTop = BarHitAt(left + 20, y);
 
         // A popover of the page over the whole window, shown after the bar: the bar is shown again above it, and its handle still moves it.
         await session.OkAsync("evaluate_script", """{"function":"() => { document.getElementById('pop').showPopover(); return 'shown'; }"}""");
-        await Task.Delay(100, timeout.Token);
-        Assert.IsTrue(await OnBarAsync(session, left + 20, y), "the bar is above the popover of the page");
+        await BrowserWait.PageAsync(state.Page, $"document.getElementById('pop').matches(':popover-open') && ({barIsOnTop})", timeout.Token);
         await state.Page.DragAsync(BrowserPoint.OfPage(state.Page.MainFrame, left + 20, y), BrowserPoint.OfPage(state.Page.MainFrame, left - 80, y - 60), timeout.Token);
         var moved = Next(messages, "position", timeout.Token);
         Assert.AreEqual(16 + 100, moved.Position!.Value.Right, 2);
@@ -848,9 +878,10 @@ public sealed class BrowserAnnotationsTests
         await session.OkAsync("evaluate_script", """{"function":"() => { document.getElementById('pop').hidePopover(); return 'hidden'; }"}""");
 
         // A modal dialog of the page: the user annotates what is in it, and writes the note in the popup of the bar above it.
+        const string ToolbarParent = "document.querySelector('[data-codealta-toolbar]')?.parentElement";
+        var inDialog = $"{ToolbarParent}?.id === 'dialog'";
         await session.OkAsync("evaluate_script", """{"function":"() => { document.getElementById('dialog').showModal(); return 'open'; }"}""");
-        await Task.Delay(100, timeout.Token);
-        Assert.IsTrue(await OnBarAsync(session, left + 20, y), "the bar is above the modal dialog of the page");
+        await BrowserWait.PageAsync(state.Page, $"({inDialog}) && ({barIsOnTop})", timeout.Token);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
         var inside = await AnnotateAsync(session, state, "#inside", "Inside the dialog, larger", messages, timeout.Token);
         Assert.AreEqual("inside", inside.Elements!.Single().Id);
@@ -858,15 +889,13 @@ public sealed class BrowserAnnotationsTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "clear()", timeout.Token));
 
         // Once the dialog closes, or the page takes it out of the document while it is open, the bar is back at the root of the document.
-        const string Home = """{"function":"() => 'home=' + (document.querySelector('[data-codealta-toolbar]')?.parentElement === document.documentElement)"}""";
+        var backAtRoot = $"{ToolbarParent} === document.documentElement && ({barIsOnTop})";
         await session.OkAsync("evaluate_script", """{"function":"() => { document.getElementById('dialog').close(); return 'closed'; }"}""");
-        await Task.Delay(100, timeout.Token);
-        StringAssert.Contains(await session.OkAsync("evaluate_script", Home), "home=true");
-        Assert.IsTrue(await OnBarAsync(session, left + 20, y));
-        await session.OkAsync("evaluate_script", """{"function":"() => { const dialog = document.getElementById('dialog'); dialog.showModal(); setTimeout(() => dialog.remove(), 50); return 'removed'; }"}""");
-        await Task.Delay(300, timeout.Token);
-        StringAssert.Contains(await session.OkAsync("evaluate_script", Home), "home=true");
-        Assert.IsTrue(await OnBarAsync(session, left + 20, y), "the bar is still shown");
+        await BrowserWait.PageAsync(state.Page, backAtRoot, timeout.Token);
+        await session.OkAsync("evaluate_script", """{"function":"() => { document.getElementById('dialog').showModal(); return 'open'; }"}""");
+        await BrowserWait.PageAsync(state.Page, inDialog, timeout.Token);
+        await session.OkAsync("evaluate_script", """{"function":"() => { document.getElementById('dialog').remove(); return 'removed'; }"}""");
+        await BrowserWait.PageAsync(state.Page, backAtRoot, timeout.Token);
     }
 
     [TestMethod]
@@ -886,10 +915,9 @@ public sealed class BrowserAnnotationsTests
         var ready = Next(messages, "ready", timeout.Token, message => message.Url?.EndsWith("/modal-open", StringComparison.Ordinal) == true);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "mode(true)", timeout.Token));
-        await Task.Delay(100, timeout.Token);
 
         // The bar is in the dialog, where the rest of the document is inert: the note can be written.
-        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => 'in=' + (document.querySelector('[data-codealta-toolbar]')?.parentElement?.id)"}"""), "in=dialog");
+        await BrowserWait.PageAsync(state.Page, "document.querySelector('[data-codealta-toolbar]')?.parentElement?.id === 'dialog'", timeout.Token);
         var inside = await AnnotateAsync(session, state, "#inside", "Inside the dialog open at load", messages, timeout.Token);
         Assert.AreEqual("inside", inside.Elements!.Single().Id);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "clear()", timeout.Token));
@@ -907,7 +935,7 @@ public sealed class BrowserAnnotationsTests
     {
         var numbers = await CenterAsync(session, selector);
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, numbers[0], numbers[1]), 1, cancellationToken);
-        await Task.Delay(200, cancellationToken);
+        await BrowserWait.EditorAsync(state.Page, cancellationToken);
         await state.Page.InsertTextAsync(note, cancellationToken);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
         return Next(messages, "annotation", cancellationToken, message => message.Note == note);

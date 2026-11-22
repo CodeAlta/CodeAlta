@@ -136,7 +136,7 @@ public sealed class BrowserDrawingTests
         var at = end[(end.IndexOf('[') + 1)..end.IndexOf(']')].Split(',').Select(static value => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         Assert.IsTrue(at[0] > 0, "the bar is at the bottom right");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, at[0] - 20, at[1]), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        Next(messages, "theme", timeout.Token);
         StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => 'active=' + (document.activeElement && document.activeElement.hasAttribute('data-codealta-toolbar')) + ';'"}"""), "active=false;", "the button clicked keeps no focus");
     }
 
@@ -172,7 +172,6 @@ public sealed class BrowserDrawingTests
         // A click with a shape tool draws nothing: too small to mean anything.
         await session.OkAsync("press_key", """{"key":"r"}""");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, 500, 300), 1, timeout.Token);
-        await Task.Delay(100, timeout.Token);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"drawState().shapes === {shapes}", timeout.Token));
 
         // Text goes where the user clicks, in the color picked by its digit, once Enter ends it.
@@ -180,7 +179,7 @@ public sealed class BrowserDrawingTests
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().color === '#f59e0b'", timeout.Token));
         await session.OkAsync("press_key", """{"key":"t"}""");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, 480, 120), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token, "input.sketch-text");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().typing", timeout.Token));
         await state.Page.InsertTextAsync("Here", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Enter"}""");
@@ -191,11 +190,9 @@ public sealed class BrowserDrawingTests
         // The eraser removes the rectangle it touches, its outline; Ctrl+Z brings it back.
         await session.OkAsync("press_key", """{"key":"e"}""");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, 375, 150), 1, timeout.Token);
-        await Task.Delay(100, timeout.Token);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"drawState().shapes === {shapes}", timeout.Token), "inside a rectangle is the page, not the rectangle");
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, 300, 150), 1, timeout.Token);
-        await Task.Delay(100, timeout.Token);
-        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"drawState().shapes === {shapes - 1}", timeout.Token), "the eraser removes the rectangle");
+        await BrowserWait.ToolbarAsync(page, ready.ContextId, $"drawState().shapes === {shapes - 1}", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+z"}""");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"drawState().shapes === {shapes}", timeout.Token));
     }
@@ -214,12 +211,12 @@ public sealed class BrowserDrawingTests
         var ready = Next(messages, "ready", timeout.Token, message => message.Url?.EndsWith("/hostile", StringComparison.Ordinal) == true);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "draw(true)", timeout.Token));
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.ToolbarAsync(page, ready.ContextId, "drawState().drawing", timeout.Token);
 
         // Strokes, keys and clicks the page makes up, on the element it sees at the point (the host of the bar) and on
         // the document, draw nothing, undo nothing and open no note.
         await session.OkAsync("evaluate_script", """{"function":"() => { const at = (x, y) => ({ bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: 1, pointerId: 1, isPrimary: true }); for (const target of [document.elementFromPoint(200, 200), document.body, document]) { target.dispatchEvent(new PointerEvent('pointerdown', at(100, 100))); for (let x = 100; x < 300; x += 20) target.dispatchEvent(new PointerEvent('pointermove', at(x, x))); target.dispatchEvent(new PointerEvent('pointerup', at(300, 300))); target.dispatchEvent(new MouseEvent('click', at(300, 300))); } for (const key of ['Enter', 'z', 'Escape']) document.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: key === 'z', bubbles: true, composed: true })); const host = document.querySelector('[data-codealta-toolbar]'); return 'open=' + !!(host && host.shadowRoot) + ';'; }"}""");
-        await Task.Delay(300, timeout.Token);
+        // dispatchEvent finishes its listeners before the evaluation returns.
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().shapes === 0", timeout.Token), "nothing was drawn");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().drawing", timeout.Token), "Draw is still on: Esc made up by the page does nothing");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting === false", timeout.Token), "no note was opened");
@@ -245,16 +242,15 @@ public sealed class BrowserDrawingTests
             new SourceLocator((_, _) => Task.FromResult<string?>(null), _ => ValueTask.FromResult(browserFiles)), _ => ValueTask.FromResult<string?>(null), pictures,
             () => { }, () => { }, () => "dark", _ => Task.CompletedTask, () => null, _ => Task.CompletedTask, _ => Task.FromResult(false), () => true, _ => false));
         annotations.Attach(state.Page);
-        await Task.Delay(500, timeout.Token);
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/cards")}}"}""");
-        Assert.IsTrue(await annotations.DrawAsync(state.Page, TimeSpan.FromSeconds(10), timeout.Token), "the toolbar of the page takes the Draw tool");
+        Assert.IsTrue(await annotations.DrawAsync(state.Page, TestTime.Seconds(10), timeout.Token), "the toolbar of the page takes the Draw tool");
         await session.OkAsync("evaluate_script", CountEvents);
         // A page scrolled down: the drawing stays on what it was drawn over, and its picture shows it there.
         StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => { document.body.style.height = '3000px'; scrollTo(0, 200); return 'y=' + scrollY + ';'; }"}"""), "y=200;");
 
         await DrawAsync(state, (150, 120), (350, 220), timeout.Token);
         await session.OkAsync("press_key", """{"key":"Enter"}""");
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Move this up", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
         for (var wait = DateTime.UtcNow + TestTime.Seconds(20); (annotations.Pending.Count == 0 || annotations.Pending[0].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
@@ -299,28 +295,27 @@ public sealed class BrowserDrawingTests
             new SourceLocator((_, _) => Task.FromResult<string?>(null), _ => ValueTask.FromResult(browserFiles)), _ => ValueTask.FromResult<string?>(null), pictures,
             () => { }, () => { }, () => "dark", _ => Task.CompletedTask, () => null, _ => Task.CompletedTask, _ => Task.FromResult(false), () => true, _ => false));
         annotations.Attach(state.Page);
-        await Task.Delay(500, timeout.Token);
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/cards")}}"}""");
         // Cards of a known place, in a list no wider than them: One at 40-240 by 50-90, Two at 100-140, Three at 150-190.
         StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => { for (const card of document.querySelectorAll('.card')) card.style.width = '200px'; const wrap = document.getElementById('wrap'); wrap.style.width = '200px'; wrap.style.margin = '20px'; return 'bottom=' + Math.ceil(wrap.getBoundingClientRect().bottom) + ';'; }"}"""), "bottom=");
 
         // The second card is annotated first: its mark stays on the page.
-        Assert.IsTrue(await annotations.AnnotateAsync(state.Page, TimeSpan.FromSeconds(10), timeout.Token));
+        Assert.IsTrue(await annotations.AnnotateAsync(state.Page, TestTime.Seconds(10), timeout.Token));
         await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, 140, 120), 1, timeout.Token);
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Bolder", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
         for (var wait = DateTime.UtcNow + TestTime.Seconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
         await session.OkAsync("press_key", """{"key":"Escape"}""");
 
         // A rectangle around the list and an arrow that points at the third card in it.
-        Assert.IsTrue(await annotations.DrawAsync(state.Page, TimeSpan.FromSeconds(10), timeout.Token));
+        Assert.IsTrue(await annotations.DrawAsync(state.Page, TestTime.Seconds(10), timeout.Token));
         await session.OkAsync("press_key", """{"key":"r"}""");
         await DrawAsync(state, (6, 6), (320, 330), timeout.Token);
         await session.OkAsync("press_key", """{"key":"a"}""");
         await DrawAsync(state, (440, 230), (140, 170), timeout.Token);
         await session.OkAsync("press_key", """{"key":"Enter"}""");
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Swap these", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
         for (var wait = DateTime.UtcNow + TestTime.Seconds(20); (annotations.Pending.Count < 2 || annotations.Pending[1].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
@@ -355,24 +350,24 @@ public sealed class BrowserDrawingTests
         var ready = Next(messages, "ready", timeout.Token, message => message.Url?.EndsWith("/cards", StringComparison.Ordinal) == true);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "enable({})", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "draw(true)", timeout.Token));
-        var large = Path.Combine(folder.Path, "photo.png");
-        // The largest image kept at its size: its read outlasts the keys that save and cancel the note, on a fast machine too.
-        await File.WriteAllBytesAsync(large, BrowserAnnotationsTests.Png(2400, 2400, noise: true), timeout.Token);
+        var image = Path.Combine(folder.Path, "photo.png");
+        await File.WriteAllBytesAsync(image, BrowserAnnotationsTests.Png(8, 8, noise: false), timeout.Token);
+        await BrowserAnnotationsTests.HoldNextImageReadAsync(state.Page, ready.ContextId, timeout.Token);
 
-        // The note of the drawing opens under it; a large image is dropped on it, and the note is saved and cancelled
-        // while the image is read.
+        // The note of the drawing opens under it; an image is dropped on it, and the note is saved and cancelled
+        // while the image read is held.
         await DrawAsync(state, (100, 150), (300, 250), timeout.Token);
         await session.OkAsync("press_key", """{"key":"Enter"}""");
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Cancelled drawing", timeout.Token);
-        await BrowserAnnotationsTests.DropAsync(state.Page, 160, 250 + Margin + 60, [large], timeout.Token);
-        await BrowserAnnotationsTests.SaveThenCancelAsync(state.Page, timeout.Token);
+        await BrowserAnnotationsTests.DropAsync(state.Page, 160, 250 + Margin + 60, [image], timeout.Token);
+        await BrowserAnnotationsTests.SaveThenCancelAsync(session, state, ready.ContextId, timeout.Token);
 
         // A newer note of the same drawing is opened before the image is read; the save of the cancelled one never comes.
         await session.OkAsync("press_key", """{"key":"Enter"}""");
-        await Task.Delay(200, timeout.Token);
+        await BrowserWait.EditorAsync(state.Page, timeout.Token);
         await state.Page.InsertTextAsync("Newer drawing", timeout.Token);
-        await Task.Delay(2000, timeout.Token);
+        await BrowserAnnotationsTests.FinishImageReadAsync(state.Page, ready.ContextId, timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type is "drawing" or "image"), "the cancelled drawing was saved");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting", timeout.Token), "the newer note stays open");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().saving === false", timeout.Token));
@@ -381,7 +376,7 @@ public sealed class BrowserDrawingTests
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
         var drawing = Next(messages, "drawing", timeout.Token);
         Assert.AreEqual("Newer drawing", drawing.Note);
-        await Task.Delay(300, timeout.Token);
+        Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"drawn({BrowserSession.JsonText(drawing.Id!)})", timeout.Token));
         Assert.IsFalse(messages.Any(static message => message.Type == "image"), "the image went with the cancelled note");
     }
 
@@ -426,11 +421,8 @@ public sealed class BrowserDrawingTests
     }
 
     // A stroke of the left button from one point of the viewport to another, as the browser's own input.
-    private static async Task DrawAsync(BrowserPageState state, (double X, double Y) from, (double X, double Y) to, CancellationToken cancellationToken)
-    {
-        await state.Page.DragAsync(BrowserPoint.OfPage(state.Page.MainFrame, from.X, from.Y), BrowserPoint.OfPage(state.Page.MainFrame, to.X, to.Y), cancellationToken);
-        await Task.Delay(100, cancellationToken);
-    }
+    private static Task DrawAsync(BrowserPageState state, (double X, double Y) from, (double X, double Y) to, CancellationToken cancellationToken)
+        => state.Page.DragAsync(BrowserPoint.OfPage(state.Page.MainFrame, from.X, from.Y), BrowserPoint.OfPage(state.Page.MainFrame, to.X, to.Y), cancellationToken);
 
     private static ToolbarMessage Next(BlockingCollection<ToolbarMessage> messages, string type, CancellationToken cancellationToken, Func<ToolbarMessage, bool>? accept = null)
     {

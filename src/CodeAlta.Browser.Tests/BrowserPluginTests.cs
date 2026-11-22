@@ -467,7 +467,7 @@ public sealed class BrowserPluginTests
         var snapshot = Text(await CallAsync(tools, "s1", "take_snapshot", "{}"));
         var button = BrowserToolTesting.Uid(snapshot, "button \"Start recording\"");
         Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{button}}"}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync((await session.SelectedPageAsync(CancellationToken.None))!);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Make it bigger"}""")).Success);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
         var annotations = session.Annotations!;
@@ -592,7 +592,7 @@ public sealed class BrowserPluginTests
         Assert.IsTrue(annotate.Records[^1].GetProperty("annotating").GetBoolean(), annotate.Records[^1].ToString());
         var save = BrowserToolTesting.Uid(Text(await CallAsync(tools, "s1", "take_snapshot", "{}")), "button \"Save the day\"");
         Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{save}}"}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync((await session.SelectedPageAsync(CancellationToken.None))!);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Say it louder"}""")).Success);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
         for (var wait = DateTime.UtcNow + TestTime.Seconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
@@ -866,7 +866,7 @@ public sealed class BrowserPluginTests
         var start = box.IndexOf("at=", StringComparison.Ordinal) + 3;
         var at = box[start..box.IndexOf(';', start)].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         Assert.IsTrue((await CallAsync(tools, "s1", "click_at", $$"""{"x":{{at[0]}},"y":{{at[1]}}}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync(tab);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Like this mockup"}""")).Success);
         var png = BrowserAnnotationsTests.Png(8, 8, noise: false);
         var dropped = System.IO.Path.Combine(folder.Path, "mockup.png");
@@ -986,10 +986,10 @@ public sealed class BrowserPluginTests
             "http://localhost:5173|https://example.com:8080/path?x=1|http://127.0.0.1:3000|http://[::1]:8080|http://localhost|https://example.com|http://example.com:81|https://localhost:5173/|about:blank|mailto:a@example.com");
         Assert.IsTrue((await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{other.Url("/styled")}}"}""")).Success);
         var tab = (await session.SelectedPageAsync(CancellationToken.None))!;
-        Assert.IsTrue(await session.Annotations!.AnnotateAsync(tab, TimeSpan.FromSeconds(10), CancellationToken.None), "the toolbar of a page that is not of the project");
+        Assert.IsTrue(await session.Annotations!.AnnotateAsync(tab, TestTime.Seconds(10), CancellationToken.None), "the toolbar of a page that is not of the project");
         var button = BrowserToolTesting.Uid(Text(await CallAsync(tools, "s1", "take_snapshot", "{}")), "button \"Start recording\"");
         Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{button}}"}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync(tab);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Like this, but blue"}""")).Success);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
         for (var wait = DateTime.UtcNow + TestTime.Seconds(20); session.Annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
