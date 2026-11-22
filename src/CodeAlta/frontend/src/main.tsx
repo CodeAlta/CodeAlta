@@ -343,7 +343,7 @@ import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { QueuedSessionNotice } from "./machines/QueuedSessionNotice";
 import { newSessionProblem, noRemoteSelection, offersProviderSetup, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
-import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
+import { useMoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
@@ -1119,8 +1119,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
     conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview,
     conversations: workspace.claudeCodeConversations }));
-  // The session Move to machine… moves, while its window is open.
-  const [machineMove, setMachineMove] = useState<WorkspaceSession | null>(null);
   // The window of the sessions below a session; `deleting` when Delete led to it.
   const [childrenView, setChildrenView] = useState<Readonly<{ id: string; title: string; deleting: boolean }> | null>(null);
   // The row of a session dragged onto the row of another project, and that project; a Claude Code conversation dragged
@@ -3071,6 +3069,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const machineMoveDialog = useMoveToMachineDialog(owned ? status!.hostEpoch! : null, (result, machine) => {
+    showToast({ message: t("The session runs on {machine} now.", { machine }), intent: "success", icon: "tick", timeout: 4000 });
+    // The session opens where it runs now: the list says so once read again.
+    void refreshProjects(creationRefresh.current.signal).then(fresh => {
+      const moved = fresh?.sessions.find(value => value.id === result.sessionId && (value.machineId ?? null) === (result.machineId ?? null));
+      if (moved) revealSession(moved);
+    });
+  });
   // At startup, the release notes open once after an update, unless the person chose not to see them; never in the
   // developer instance, nor for a build of the repository.
   const releaseNotesChecked = useRef(false);
@@ -4948,7 +4954,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A session of a project goes to a paired machine, or from one to this computer or another machine.
   const sessionMachineEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && pairedMachines.length > 0 && !session.archived && !inCloud(session)
     && session.scopeKind === "project" && (!!session.machineId || !!session.projectId)
-    ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => setMachineMove(session) }] : [];
+    ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => machineMoveDialog.open(session) }] : [];
   // The code editor on the folder a session works in, as the code editor of its prompt opens it: its worktree while the
   // folder is there, else the project. A session of a paired machine works in a folder of that machine.
   const sessionEditorEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
@@ -7083,16 +7089,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }} onClose={() => setDialog(null)} />}
     {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
       style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
-    {machineMove && owned && <MoveToMachineDialog epoch={status!.hostEpoch!} session={machineMove} onClose={() => setMachineMove(null)}
-      onMoved={(result, machine) => {
-        setMachineMove(null);
-        showToast({ message: t("The session runs on {machine} now.", { machine }), intent: "success", icon: "tick", timeout: 4000 });
-        // The session opens where it runs now: the list says so once read again.
-        void refreshProjects(creationRefresh.current.signal).then(fresh => {
-          const moved = fresh?.sessions.find(value => value.id === result.sessionId && (value.machineId ?? null) === (result.machineId ?? null));
-          if (moved) revealSession(moved);
-        });
-      }} />}
+    {machineMoveDialog.dialog}
     {spaceMoveDialog.dialog}
     {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}
       read={() => readSessionChildren(workspace.sessionChildren, status?.hostEpoch, childrenView.id)}
