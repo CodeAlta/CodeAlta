@@ -75,7 +75,7 @@ public sealed class HealthSkillScriptTests
 
         using var process = Process.Start(info) ?? throw new InvalidOperationException("dotnet did not start.");
         // The first run compiles the script: a deadline for a machine under load, not a wait.
-        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using var deadline = new CancellationTokenSource(TestTime.Seconds(300));
         try
         {
             var output = process.StandardOutput.ReadToEndAsync(deadline.Token);
