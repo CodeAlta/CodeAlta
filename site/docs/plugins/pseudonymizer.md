@@ -45,7 +45,7 @@ The same menu item, **Pseudonymization…**, changes these choices later or stop
 
 ## Languages and models
 
-Each project chooses the language of its documents, which chooses the model that finds names. A model is downloaded once, the first time a project needs it, and runs on your computer.
+Each project chooses the language of its documents, which chooses the model that finds names. A model is downloaded once, the first time a project needs it, and runs on your computer. The engine that runs the models (about 10 MB) comes with the first one; a new version of CodeAlta may download a newer engine as it starts, and a request sent meanwhile waits for it.
 
 {.table}
 | Language | What it finds |

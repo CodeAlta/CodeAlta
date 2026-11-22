@@ -497,6 +497,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             void Mark(string step) => LogManager.GetLogger("CodeAlta.Desktop").Info($"Startup: {step} at {startupClock.ElapsedMilliseconds} ms");
             var startedWindow = window;
             var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot ?? options.CatalogRoot };
+            // The native libraries speech, search by meaning and the Pseudonymizer run on: one owner, so that one download serves them all.
+            var sherpaRuntime = new Speech.SherpaRuntime(catalog.RuntimeRoot, catalog.SpeechRoot, Speech.SpeechModelCatalog.FindEngine(Speech.SpeechModelCatalog.CurrentRuntimeIdentifier()), handler: null);
             var startupScratchpadCleanup = new ScratchpadStartupCleanup(
                 CodeAltaInstanceProfile.Create(options.CatalogRoot, options.Developer), _lease);
             // Plugins read the user's profile (the MCP servers and their sign-ins, the provider CLIs): they
@@ -614,7 +616,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost, options.Profile,
-                    _pseudonymizerModels ??= new CodeAlta.Plugin.Pseudonymizer.PseudonymizerModelStore(new DesktopPseudonymizerModels(catalog))), PluginSafeMode = DesktopPlugins.SafeMode,
+                    _pseudonymizerModels ??= new CodeAlta.Plugin.Pseudonymizer.PseudonymizerModelStore(new DesktopPseudonymizerModels(catalog, sherpaRuntime))), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore,
                     privateNetworks, pluginMachines),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
@@ -663,6 +665,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "speech", async () => { if (speech is not null) await speech.CloseAsync(); }); // A download of a speech model stops, and the speech worker ends.
                 await CloseStepAsync(closing, "Claude Code CLI", async () => { if (claudeCli is not null) await claudeCli.CloseAsync(); }); // So does a download of the Claude Code CLI.
                 await CloseStepAsync(closing, "search", async () => { if (search is not null) await search.DisposeAsync(); }); // The indexer stops at the end of a line, and the index is closed.
+                await CloseStepAsync(closing, "native runtime", async () => await sherpaRuntime.CloseAsync()); // Its download stops once speech, search and the Pseudonymizer no longer wait for it.
                 await CloseStepAsync(closing, "MCP servers", async () => { if (mcpServers is not null) await mcpServers.CloseAsync(); }); // So is a running MCP authorization.
                 await CloseStepAsync(closing, "plugin commands", async () => { if (pluginCommands is not null) await pluginCommands.CloseAsync(); }); // Plugin commands still waiting in a dialog end.
                 await CloseStepAsync(closing, "canvases", () => { canvases?.Dispose(); return ValueTask.CompletedTask; }); // The tabs of plugins end with the application.
@@ -1054,8 +1057,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (roots.Home is null)
                 {
                     var searchLog = static (string line) => LogManager.GetLogger("CodeAlta.Search").Info(line);
-                    var embeddingInstaller = new Search.Embedding.EmbeddingInstaller(host.CatalogOptions.SearchCacheRoot, host.CatalogOptions.RuntimeRoot, host.CatalogOptions.SpeechRoot,
-                        Speech.SpeechModelCatalog.FindEngine(Speech.SpeechModelCatalog.CurrentRuntimeIdentifier()), handler: null);
+                    var embeddingInstaller = new Search.Embedding.EmbeddingInstaller(host.CatalogOptions.SearchCacheRoot, sherpaRuntime, handler: null);
                     var workerFolder = Directory.CreateDirectory(host.CatalogOptions.SearchCacheRoot).FullName;
                     search.AttachMeaning(new Search.DesktopSearchMeaning(search.Host, search.Indexer, embeddingInstaller, new Search.StoreMeaningVectors(search.Store, searchLog),
                         load => new Search.Embedding.EmbeddingClient(() =>
@@ -1310,7 +1312,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddManagedPolicyService(new ManagedPolicyService(host.RuntimeService.ManagedPolicies, _copilotPolicies, epoch));
                     builder.AddSandboxSettingsService(new SandboxSettingsService(configStore, host.RuntimeService, host.Commands, host.ProjectCatalog, host.SpaceCatalog, epoch));
                     // An instance on explicit roots is automation and stays off the network: it downloads no model.
-                    speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
+                    speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch, sherpaRuntime);
                     speech.DictatingChanged += dictating => search?.Meaning?.SetDictating(dictating);
                     builder.AddSpeechService(speech);
                     builder.AddPseudonymizerService(roots.Home is null && _pseudonymizerModels is { } pseudonymizerModels ? new PseudonymizerService(pseudonymizerModels, epoch) : new PseudonymizerService());

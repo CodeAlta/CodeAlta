@@ -11,7 +11,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// Speech to prompt: its settings, the speech models in the cache and their download, and dictation. The page
 /// records the microphone and sends the audio here; a local model, in a worker process, turns it into text.
-/// Nothing is downloaded before <c>install</c> is called.
+/// No model is downloaded before <c>install</c> is called.
 /// </summary>
 [NeoRpcService("speech", Version = 1)]
 internal sealed class SpeechService
@@ -32,25 +32,25 @@ internal sealed class SpeechService
     internal SpeechService() { }
 
     /// <summary>Creates the service on the network and on worker processes of this executable.</summary>
-    internal SpeechService(CatalogOptions options, string epoch)
-        : this(options, epoch, null, SpeechWorkerProcess.Start, TimeProvider.System, SpeechModelCatalog.CurrentRuntimeIdentifier()) { }
+    internal SpeechService(CatalogOptions options, string epoch, SherpaRuntime runtime)
+        : this(options, epoch, runtime, null, SpeechWorkerProcess.Start, TimeProvider.System) { }
 
     /// <summary>Creates the service on given parts.</summary>
     /// <param name="options">The catalog, for the configuration and the cache folder.</param>
     /// <param name="epoch">The epoch of the host.</param>
-    /// <param name="handler">The handler of the downloads, or null for the network.</param>
+    /// <param name="runtime">The engine, which the application shares and closes.</param>
+    /// <param name="handler">The handler of the downloads of models, or null for the network.</param>
     /// <param name="start">Starts a speech worker in a folder.</param>
     /// <param name="time">The clock of the idle time of the worker.</param>
-    /// <param name="runtimeIdentifier">The platform the engine is installed for, or null when it has none.</param>
-    internal SpeechService(CatalogOptions options, string epoch, HttpMessageHandler? handler, Func<string, ISpeechWorkerProcess> start,
-        TimeProvider time, string? runtimeIdentifier)
+    internal SpeechService(CatalogOptions options, string epoch, SherpaRuntime runtime, HttpMessageHandler? handler, Func<string, ISpeechWorkerProcess> start,
+        TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         _config = new(options);
         _epoch = epoch;
         _worker = new(start, time, IdleTime);
-        _installer = new(options.SpeechRoot, options.RuntimeRoot, handler, SpeechModelCatalog.FindEngine(runtimeIdentifier), SpeechModelCatalog.VoiceDetector)
+        _installer = new(options.SpeechRoot, runtime, handler, SpeechModelCatalog.VoiceDetector)
         {
             // A model the engine refuses is known when its download ends, not at the first dictation.
             Validate = (model, cancellationToken) => _worker.ProbeAsync(_installer!.LoadFor(model), cancellationToken),
@@ -171,7 +171,10 @@ internal sealed class SpeechService
     /// <summary>Raised when a dictation starts (true) and when it ends (false).</summary>
     internal event Action<bool>? DictatingChanged;
 
-    /// <summary>Starts a dictation with the chosen model, when it is in the cache.</summary>
+    /// <summary>
+    /// Starts a dictation with the chosen model, when it is in the cache. A model that is there without its engine (a
+    /// version of the application that runs on another engine) gets it now: the answer is <c>installing</c>.
+    /// </summary>
     [NeoRpcMethod("start")]
     public async Task<SpeechStartResponse> StartAsync(SpeechRequest request, CancellationToken cancellationToken)
     {
@@ -184,7 +187,15 @@ internal sealed class SpeechService
             if (!settings.Enabled) return new("disabled", null);
             var id = SpeechModelSource.ModelIdOf(settings.Model);
             if (_installer.Current is { IsRunning: true } running && running.ModelId == id) return new("installing", null);
-            if (!_installer.IsEngineInstalled || _installer.Find(id) is not { } installed) return new("model_missing", null);
+            if (_installer.Find(id) is not { } installed) return new("model_missing", null);
+            if (!_installer.IsEngineInstalled)
+            {
+                // The engine is downloaded without asking, as a part of the model the user chose to download. When another
+                // download runs, it brings the engine with it.
+                _installer.TryStart(settings.Model);
+                return new("installing", null);
+            }
+
             var dictation = _worker!.Start(_installer.LoadFor(installed));
             // Other work of the computer (the indexing of search by meaning) waits while someone dictates.
             DictatingChanged?.Invoke(true);

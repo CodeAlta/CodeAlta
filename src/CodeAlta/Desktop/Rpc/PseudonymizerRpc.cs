@@ -7,7 +7,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// The models that find names in the documents of secure projects, for the window: the languages a project chooses
 /// with the size of their model and whether it is downloaded, the download that runs, and the deletion of a model. The
 /// Pseudonymizer plugin runs the same models: a download started here shows in the status line of its sessions.
-/// Nothing is downloaded before <c>install</c> is called.
+/// No model is downloaded before <c>install</c> is called.
 /// </summary>
 [NeoRpcService("pseudonymizer", Version = 1)]
 internal sealed class PseudonymizerService
@@ -90,7 +90,7 @@ internal sealed record PseudonymizerLanguageRequest(string? ExpectedEpoch, strin
 /// <param name="Id">The language.</param>
 /// <param name="Model">The name of its model; null for identifiers only.</param>
 /// <param name="SizeMegabytes">The megabytes of its download.</param>
-/// <param name="Installed">Whether it can run now.</param>
+/// <param name="Installed">Whether its model is there.</param>
 internal sealed record PseudonymizerLanguageEntry(string Id, string? Model, int SizeMegabytes, bool Installed);
 
 /// <param name="State"><c>idle</c>, <c>downloading</c>, <c>done</c> or <c>failed</c>.</param>

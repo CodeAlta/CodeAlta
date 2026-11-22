@@ -275,7 +275,7 @@ public sealed class DesktopSearchMeaningTests
     {
         var model = EmbeddingModelCatalog.Find("granite-97m-multilingual-r2")!;
         var engine = SpeechModelCatalog.FindEngine(SpeechModelCatalog.CurrentRuntimeIdentifier())!;
-        var installer = new EmbeddingInstaller(Path.Combine(root, "search"), Path.Combine(root, "runtime"), Path.Combine(root, "speech"), engine, handler: null);
+        var installer = new EmbeddingInstaller(Path.Combine(root, "search"), new SherpaRuntime(Path.Combine(root, "runtime"), Path.Combine(root, "speech"), engine, handler: null), handler: null);
         var folder = Directory.CreateDirectory(installer.DirectoryOf(model)).FullName;
         foreach (var file in model.Files)
         {

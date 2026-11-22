@@ -8,7 +8,8 @@ namespace CodeAlta.Plugin.Pseudonymizer;
 
 /// <summary>
 /// What the application gives the plugin to run its models: where they are kept, the ONNX Runtime that speech and search
-/// share (downloaded when none of them has it yet), and the worker process the models run in.
+/// share (downloaded when none of them has it yet, and again when a version of the application runs on another one), and
+/// the worker process the models run in.
 /// </summary>
 public interface IPseudonymizerModelHost
 {
@@ -19,18 +20,36 @@ public interface IPseudonymizerModelHost
     /// <returns>The path, or null.</returns>
     string? OnnxRuntimeLibrary();
 
-    /// <summary>Downloads the ONNX Runtime; does nothing when it is there.</summary>
-    /// <param name="downloads">What downloads it.</param>
-    /// <param name="progress">Where the progress goes.</param>
-    /// <param name="cancellationToken">Stops the download.</param>
+    /// <summary>
+    /// Downloads the ONNX Runtime; does nothing when it is there. A call made while it is downloaded waits for that
+    /// download.
+    /// </summary>
+    /// <param name="cancellationToken">Stops the wait.</param>
     /// <returns>The download.</returns>
     /// <exception cref="PinnedDownloadException">The download failed.</exception>
     /// <exception cref="PlatformNotSupportedException">This platform has no ONNX Runtime.</exception>
-    Task InstallOnnxRuntimeAsync(PinnedDownloader downloads, IPinnedDownloadProgress progress, CancellationToken cancellationToken);
+    Task InstallOnnxRuntimeAsync(CancellationToken cancellationToken);
 
     /// <summary>Starts a worker process for the models (<see cref="NerWorker.Option"/>).</summary>
     /// <returns>The worker.</returns>
     IWorkerProcess StartWorker();
+}
+
+/// <summary>What a model that finds names runs with, and a download brings.</summary>
+internal enum NerModelPart
+{
+    /// <summary>The files of the model.</summary>
+    Model,
+
+    /// <summary>The ONNX Runtime the model runs on.</summary>
+    Runtime,
+}
+
+/// <summary>Thrown when a model cannot run for want of a part a download brings.</summary>
+internal sealed class NerModelMissingException(NerModelPart missing, string message) : InvalidOperationException(message)
+{
+    /// <summary>Gets what is missing.</summary>
+    public NerModelPart Missing { get; } = missing;
 }
 
 /// <summary>
@@ -62,41 +81,46 @@ internal sealed class NerModels : IDisposable
             && preset.Files.All(file => new FileInfo(Path.Combine(directory, file.Name)) is { Exists: true } info && info.Length == file.Size);
     }
 
-    /// <summary>
-    /// Downloads the ONNX Runtime and models of the catalog that are not there yet. A model that is there and not whole (a
-    /// file cut short or missing) is removed first, and downloaded again.
-    /// </summary>
-    /// <exception cref="PinnedDownloadException">A download failed.</exception>
-    /// <exception cref="IOException">A damaged model cannot be removed.</exception>
-    /// <exception cref="UnauthorizedAccessException">A damaged model cannot be removed.</exception>
-    public async Task InstallAsync(IReadOnlyList<NerModelPreset> presets, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
-    {
-        // The download takes a folder that has its marker for an installation, and would leave a damaged one as it is.
-        foreach (var preset in presets)
-        {
-            var directory = DirectoryOf(preset);
-            if (IsInstalled(preset) || !Directory.Exists(directory)) continue;
-            Unload(directory);
-            Directory.Delete(directory, recursive: true);
-        }
+    /// <summary>Gets whether the ONNX Runtime the models run on is installed.</summary>
+    public bool HasRuntime => _host.OnnxRuntimeLibrary() is not null;
 
+    /// <summary>Downloads the ONNX Runtime the models run on; does nothing when it is there.</summary>
+    /// <exception cref="PinnedDownloadException">The download failed.</exception>
+    /// <exception cref="PlatformNotSupportedException">This platform has no ONNX Runtime.</exception>
+    public Task InstallRuntimeAsync(CancellationToken cancellationToken) => _host.InstallOnnxRuntimeAsync(cancellationToken);
+
+    /// <summary>
+    /// Removes a model of the catalog that is there and not whole (a file cut short or missing), before it is downloaded
+    /// again: the download takes a folder that has its marker for an installation, and would leave a damaged one as it is.
+    /// </summary>
+    /// <exception cref="IOException">The damaged model cannot be removed.</exception>
+    /// <exception cref="UnauthorizedAccessException">The damaged model cannot be removed.</exception>
+    public void RemoveDamaged(NerModelPreset preset)
+    {
+        var directory = DirectoryOf(preset);
+        if (IsInstalled(preset) || !Directory.Exists(directory)) return;
+        Unload(directory);
+        Directory.Delete(directory, recursive: true);
+    }
+
+    /// <summary>Downloads a model of the catalog; does nothing when it is there.</summary>
+    /// <exception cref="PinnedDownloadException">The download failed.</exception>
+    public async Task InstallAsync(NerModelPreset preset, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
+    {
+        if (IsInstalled(preset)) return;
         using var downloads = new PinnedDownloader(null, new ProductInfoHeaderValue("CodeAlta", typeof(NerModels).Assembly.GetName().Version?.ToString(3) ?? "1.0"));
-        if (_host.OnnxRuntimeLibrary() is null) await _host.InstallOnnxRuntimeAsync(downloads, progress, cancellationToken).ConfigureAwait(false);
-        foreach (var preset in presets)
-        {
-            if (IsInstalled(preset)) continue;
-            Directory.CreateDirectory(_host.ModelsRoot);
-            var marker = System.Text.Encoding.UTF8.GetBytes($"{{\"id\":\"{preset.Id}\",\"folder\":\"{preset.FolderName}\"}}");
-            await downloads.InstallFolderAsync(DirectoryOf(preset), Marker, [.. preset.Files.Select(static file => (file.Pinned, file.Address))],
-                (directory, _) => WriteDescriptionAsync(directory, preset), marker, progress, cancellationToken).ConfigureAwait(false);
-        }
+        Directory.CreateDirectory(_host.ModelsRoot);
+        var marker = System.Text.Encoding.UTF8.GetBytes($"{{\"id\":\"{preset.Id}\",\"folder\":\"{preset.FolderName}\"}}");
+        await downloads.InstallFolderAsync(DirectoryOf(preset), Marker, [.. preset.Files.Select(static file => (file.Pinned, file.Address))],
+            (directory, _) => WriteDescriptionAsync(directory, preset), marker, progress, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Gets the recognizer of a model: one of the catalog by its id, or the folder of a model of the user. A model that is
     /// not installed, or does not load, fails: the request sends nothing.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The model is not installed, or cannot be run.</exception>
+    /// <exception cref="NerModelMissingException">The model is not downloaded, or the ONNX Runtime that runs it is not.</exception>
+    /// <exception cref="InvalidOperationException">The model cannot be run.</exception>
     public PiiRecognizer Recognizer(string id, string? customFolder)
     {
         string directory;
@@ -112,13 +136,13 @@ internal sealed class NerModels : IDisposable
             directory = DirectoryOf(preset);
             // A loaded model answers each request without its files being checked again: deleting it unloads it first.
             if (_loaded.TryGetValue(directory, out var running)) return running.Recognizer;
-            if (!IsInstalled(preset)) throw new InvalidOperationException($"The model {preset.Name} is not downloaded.");
+            if (!IsInstalled(preset)) throw new NerModelMissingException(NerModelPart.Model, $"The model {preset.Name} is not downloaded.");
         }
 
         lock (_gate)
         {
             if (_loaded.TryGetValue(directory, out var loaded)) return loaded.Recognizer;
-            var runtime = _host.OnnxRuntimeLibrary() ?? throw new InvalidOperationException("The ONNX Runtime is not installed.");
+            var runtime = _host.OnnxRuntimeLibrary() ?? throw new NerModelMissingException(NerModelPart.Runtime, "The ONNX Runtime is not installed.");
             NerModelDescription description;
             NerTokenizer tokenizer;
             try

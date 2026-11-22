@@ -153,14 +153,7 @@ public sealed class ProviderBoundaryTests
     {
         using var temp = TestTempDirectory.Create();
         var registry = new PluginContributionRegistry();
-        var activation = await new PluginRuntimeActivator(registry).ActivateAsync(
-            new DiscoveredPluginType { Type = typeof(BoundaryPlugin), Descriptor = PluginDescriptorFactory.FromType(typeof(BoundaryPlugin)) }, null, null,
-            new PluginActivationOptions
-            {
-                HostInfo = new PluginHostInfo { ApplicationName = "CodeAlta.Tests", Version = "1.0.0", HostApiVersion = "1.0.0", UserDataDirectory = temp.Path, IsHeadless = true },
-            });
-        Assert.IsTrue(activation.Succeeded, string.Join(Environment.NewLine, activation.Diagnostics.Select(static diagnostic => diagnostic.Message)));
-        var global = activation.ActivePlugin!;
+        var global = await ActivateAsync(typeof(BoundaryPlugin), registry, temp.Path);
         // The same plugin as one of the project "project-a" only.
         using var lifetime = new PluginActivationLifetime(default);
         var scoped = new ActivePluginInstance(global.Instance!, global.Descriptor, null, null,
@@ -181,6 +174,26 @@ public sealed class ProviderBoundaryTests
         Assert.IsNotNull(bridge.GetProviderBoundary(new SessionToolHookScope("session-a", "project-a", temp.Path, null)));
         Assert.IsNull(bridge.GetProviderBoundary(new SessionToolHookScope("session-b", "project-b", temp.Path, null)), "A plugin of another project does not answer for the session.");
         await global.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task WhatAPluginRefuses_KeepsItsMessage_AndAPluginThatFailsIsNamed()
+    {
+        using var temp = TestTempDirectory.Create();
+        foreach (var (type, message) in new[]
+        {
+            (typeof(RefusingPlugin), RefusingPlugin.Message),
+            (typeof(FailingPlugin), "The plugin Failing fixture could not prepare the pseudonymization of this session: nothing was sent."),
+        })
+        {
+            var registry = new PluginContributionRegistry();
+            var active = await ActivateAsync(type, registry, temp.Path);
+            var bridge = new PluginOrchestrationBridge(new PluginContributionAdapterService(registry), () => [active]);
+
+            var refused = Assert.ThrowsExactly<AgentProviderBoundaryException>(() => bridge.GetProviderBoundary(new SessionToolHookScope("session", "project", temp.Path, null)));
+            Assert.AreEqual(message, refused.Message);
+            await active.DeactivateAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [TestMethod]
@@ -248,6 +261,19 @@ public sealed class ProviderBoundaryTests
         StringAssert.Contains(inner.LastRequest!.Conversation[0].ToJson(), Name);
     }
 
+    // Starts a plugin in a host that gives it a folder and nothing else.
+    private static async Task<ActivePluginInstance> ActivateAsync(Type plugin, PluginContributionRegistry registry, string userDataDirectory)
+    {
+        var activation = await new PluginRuntimeActivator(registry).ActivateAsync(
+            new DiscoveredPluginType { Type = plugin, Descriptor = PluginDescriptorFactory.FromType(plugin) }, null, null,
+            new PluginActivationOptions
+            {
+                HostInfo = new PluginHostInfo { ApplicationName = "CodeAlta.Tests", Version = "1.0.0", HostApiVersion = "1.0.0", UserDataDirectory = userDataDirectory, IsHeadless = true },
+            });
+        Assert.IsTrue(activation.Succeeded, string.Join(Environment.NewLine, activation.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        return activation.ActivePlugin!;
+    }
+
     private static AgentTurnRequest CreateRequest(string text)
     {
         var provider = Descriptor();
@@ -294,6 +320,22 @@ public sealed class ProviderBoundaryTests
     public sealed class BoundaryPlugin : PluginBase
     {
         public override IAgentProviderBoundary? GetProviderBoundary(PluginProviderBoundaryContext context) => new ReplacingBoundary();
+    }
+
+    // A plugin that refuses a session, and tells the user why.
+    [Plugin("refusing-fixture", DisplayName = "Refusing fixture")]
+    public sealed class RefusingPlugin : PluginBase
+    {
+        public const string Message = "The model of this project is not downloaded yet: download it from the status line. Nothing was sent.";
+
+        public override IAgentProviderBoundary? GetProviderBoundary(PluginProviderBoundaryContext context) => throw new AgentProviderBoundaryException(Message);
+    }
+
+    // A plugin that fails where it should give a boundary.
+    [Plugin("failing-fixture", DisplayName = "Failing fixture")]
+    public sealed class FailingPlugin : PluginBase
+    {
+        public override IAgentProviderBoundary? GetProviderBoundary(PluginProviderBoundaryContext context) => throw new InvalidOperationException("A fault of the plugin.");
     }
 
     // A source at fault: it says the session is confidential and gives no boundary.

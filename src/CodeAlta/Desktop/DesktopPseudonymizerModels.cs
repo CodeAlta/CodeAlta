@@ -9,41 +9,31 @@ namespace CodeAlta.Desktop;
 
 /// <summary>
 /// What the window gives the Pseudonymizer plugin to run its models: they are kept in <c>cache/pseudonymizer/models</c>,
-/// run on the ONNX Runtime that speech and search share (<c>cache/runtime</c>), in a worker process of this executable.
+/// run on the ONNX Runtime that speech and search share (<see cref="SherpaRuntime"/>), in a worker process of this executable.
 /// </summary>
 internal sealed class DesktopPseudonymizerModels : IPseudonymizerModelHost
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Pseudonymizer");
 
     private readonly CatalogOptions _catalog;
-    private readonly SpeechEngineDefinition? _engine = SpeechModelCatalog.FindEngine(SpeechModelCatalog.CurrentRuntimeIdentifier());
+    private readonly SherpaRuntime _runtime;
 
-    public DesktopPseudonymizerModels(CatalogOptions catalog)
+    public DesktopPseudonymizerModels(CatalogOptions catalog, SherpaRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(runtime);
         _catalog = catalog;
+        _runtime = runtime;
     }
 
     /// <inheritdoc />
     public string ModelsRoot => Path.Combine(_catalog.CacheRoot, "pseudonymizer", "models");
 
     /// <inheritdoc />
-    public string? OnnxRuntimeLibrary()
-    {
-        if (_engine is null) return null;
-        var directory = SherpaRuntime.Resolve(_catalog.RuntimeRoot, _catalog.SpeechRoot, _engine);
-        return SherpaRuntime.IsInstalled(directory, _engine) ? SherpaRuntime.OnnxRuntimePathOf(directory, _engine) : null;
-    }
+    public string? OnnxRuntimeLibrary() => _runtime.OnnxRuntimeLibrary();
 
     /// <inheritdoc />
-    public Task InstallOnnxRuntimeAsync(PinnedDownloader downloads, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(downloads);
-        ArgumentNullException.ThrowIfNull(progress);
-        if (_engine is null) throw new PlatformNotSupportedException("This platform has no ONNX Runtime for the models of the Pseudonymizer.");
-        return OnnxRuntimeLibrary() is not null ? Task.CompletedTask
-            : SherpaRuntime.InstallAsync(downloads, _catalog.RuntimeRoot, _engine, progress, installing: null, cancellationToken);
-    }
+    public Task InstallOnnxRuntimeAsync(CancellationToken cancellationToken) => _runtime.InstallAsync(progress: null, cancellationToken);
 
     /// <inheritdoc />
     public IWorkerProcess StartWorker()

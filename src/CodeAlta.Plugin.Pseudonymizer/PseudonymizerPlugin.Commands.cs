@@ -35,7 +35,7 @@ public sealed partial class PseudonymizerPlugin
     {
         var text = await context.Ui.EditTextAsync("Pseudonymizer: paste a text to try", string.Empty, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(text)) return PluginCommandResult.Cancelled;
-        var (recognizers, problems) = TryRecognizers(context.ProjectId);
+        var (recognizers, problems) = await TryRecognizersAsync(context.ProjectId, cancellationToken).ConfigureAwait(false);
         var table = new PseudonymTable();
         var boundary = new PseudonymizingBoundary(new PiiAnalyzer(recognizers), table, new PseudonymCache(), Options(context.ProjectId));
         string hidden;
@@ -83,11 +83,17 @@ public sealed partial class PseudonymizerPlugin
     }
 
     // The recognizers of a try: those of the language of the project, or the identifiers alone with a note when its
-    // model cannot run.
-    private (List<PiiRecognizer> Recognizers, List<string> Problems) TryRecognizers(string? projectId)
+    // model cannot run. A model that only waits for its ONNX Runtime gets it first, as a request does.
+    private async ValueTask<(List<PiiRecognizer> Recognizers, List<string> Problems)> TryRecognizersAsync(string? projectId, CancellationToken cancellationToken)
     {
         var language = LanguageOf(projectId);
         var recognizers = RecognizersOf(language, out var failure);
+        if (IsRuntimeMissing(failure))
+        {
+            await _models!.InstallRuntimeAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+            recognizers = RecognizersOf(language, out failure);
+        }
+
         List<string> problems = failure is not null
             ? [$"The model that finds names cannot run ({failure.Message}): names are not found in this try, and a session of a pseudonymized project would send nothing."]
             : language == PseudonymizerLanguages.Identifiers ? ["This project hides identifiers only: names are not looked for."] : [];
