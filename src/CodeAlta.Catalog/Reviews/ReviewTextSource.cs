@@ -261,16 +261,41 @@ public static class GitSnapshot
                 return Finish(null, firstFailure, new SnapshotFailure(stage, "git did not return an empty tree id"));
             }
 
-            // A two-tree merge with identical trees carries the copied index forward without checking the work tree.
+            // A two-tree reset with identical trees carries stage-0 entries forward, but drops conflict stages.
+            // Save them so add still knows about conflicted paths, including those under ignore rules.
+            // Git's quoted index-info format preserves path bytes through the text runner.
+            stage = "git ls-files";
+            var unmerged = await GitWorktreeService.RunGitAsync(checkoutRoot, ["-c", "core.quotepath=on", "ls-files", "--unmerged"],
+                Timeout, environment, cancellationToken).ConfigureAwait(false);
+            if (!unmerged.Succeeded)
+            {
+                return Finish(null, firstFailure, GitFailure(stage, unmerged));
+            }
+            if (unmerged.Output.Length >= GitWorktreeService.MaximumOutputCharacters)
+            {
+                return Finish(null, firstFailure, new SnapshotFailure(stage, "unmerged index entries exceeded the output limit"));
+            }
+
             // Git renames its lock to the fresh output, not over the file a filter is holding. Starting from HEAD
             // instead would lose staged additions (and restore staged removals) under an ignore rule.
-            var seed = await Git(["read-tree", "-m", "-i", "--no-sparse-checkout", $"--index-output={fallbackIndex}", emptyId, emptyId]).ConfigureAwait(false);
+            var seed = await Git(["read-tree", "--reset", "-i", "--no-sparse-checkout", $"--index-output={fallbackIndex}", emptyId, emptyId]).ConfigureAwait(false);
             if (!seed.Succeeded)
             {
                 return Finish(null, firstFailure, GitFailure(stage, seed));
             }
 
             environment["GIT_INDEX_FILE"] = fallbackIndex;
+            if (unmerged.Output.Length > 0)
+            {
+                stage = "git update-index";
+                var restored = await GitWorktreeService.RunGitAsync(checkoutRoot, ["update-index", "--index-info"],
+                    Timeout, environment, unmerged.Output, cancellationToken).ConfigureAwait(false);
+                if (!restored.Succeeded)
+                {
+                    return Finish(null, firstFailure, GitFailure(stage, restored));
+                }
+            }
+
             var (retried, fallbackFailure) = await WriteTreeAsync().ConfigureAwait(false);
             return Finish(retried, firstFailure, fallbackFailure);
         }
