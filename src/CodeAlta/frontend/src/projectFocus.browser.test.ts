@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
-test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: testLimit(60_000) }, async () => {
+const appRender = "project-focus-app-render";
+test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: testLimit(60_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-project-focus-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -20,6 +21,13 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
       bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-project-focus", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./projectFocus.neoastra.mount.ts", import.meta.url)) }));
+        bundle.onLoad({ filter: /[/\\]src[/\\]main\.tsx$/ }, async ({ path }) => {
+          const source = await readFile(path, "utf8");
+          const app = /^function App\(.*\) \{$/m;
+          assert.match(source, app);
+          // Count committed renders of App itself, not its children or StrictMode's extra render attempts.
+          return { loader: "tsx", contents: source.replace(app, `$&\n  useLayoutEffect(() => { performance.mark("${appRender}"); });`) };
+        });
         bundle.onResolve({ filter: /^monaco-editor\/.*\?worker$/ }, args => ({ path: args.path, namespace: "fixture-worker" }));
         bundle.onLoad({ filter: /.*/, namespace: "fixture-worker" }, async () => {
           const worker = await build({ entryPoints: [fileURLToPath(new URL("../node_modules/monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url))],
@@ -66,6 +74,19 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({focus:document.activeElement?.outerHTML.slice(0,300),promptText:document.querySelector('#catalog-prompt .view-lines')?.textContent,project:document.querySelector('.welcome-subtitle')?.textContent,errors:window.projectFocusErrors});else setTimeout(tick,20)};tick()})`);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true)))))");
+    const resetAppRenders = () => evaluate(`performance.clearMarks("${appRender}")`);
+    const appRenders = () => evaluate(`performance.getEntriesByName("${appRender}", "mark").length`);
+    const keystrokeRenders = async (text: string) => {
+      await frames();
+      const renders: number[] = [];
+      for (const character of text) {
+        await resetAppRenders();
+        await command("Input.insertText", { text: character });
+        await frames();
+        renders.push(await appRenders());
+      }
+      return renders;
+    };
     const key = async (key: string, code: string, virtual: number, ctrl = false) => {
       for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: virtual, modifiers: ctrl ? 2 : 0 });
     };
@@ -99,6 +120,32 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     const expanded = () => evaluate(`['project','other'].map(id=>${scope("'+id+'")}.getAttribute('aria-expanded')).join()`);
     const otherSession = `document.querySelector('#project-list .session-row > button[title="other-session"]')`;
     assert.equal(await expanded(), "true,false", "with nothing remembered the selected project is the one open");
+    await t.test("typing a session title does not render App", async t => {
+      const input = `document.querySelector('.rename-popover input')`;
+      const openRename = async () => {
+        await evaluate(`document.querySelector('.session-row[data-session-id="one"] > button').focus()`);
+        await key("F2", "F2", 113);
+        assert.equal(await wait(`${input} && document.activeElement===${input} && ${input}.selectionEnd===3`), true);
+        assert.equal(await evaluate(`${input}.value`), "one", "each rename starts from the current title");
+      };
+      await openRename();
+      const renders = await keystrokeRenders("new");
+      assert.equal(await evaluate(`${input}.value`), "new");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${input}`), true);
+      assert.equal(await evaluate("settingsShellFixture.renameRequests.length"), 0, "cancel sends no rename");
+      await openRename();
+      await command("Input.insertText", { text: "submitted title" });
+      await evaluate("document.querySelector('.rename-popover button[type=submit]').click()");
+      assert.equal(await wait(`settingsShellFixture.renameRequests[0]?.title==='submitted title' && ${input}?.disabled`), true);
+      await evaluate("settingsShellFixture.releaseMutation('rename')");
+      assert.equal(await wait(`${input}?.disabled && !!document.querySelector('.rename-popover [role=alert]')`), true, "an unconfirmed rename keeps its draft locked");
+      assert.equal(await evaluate(`${input}.value`), "submitted title");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${input}`), true);
+      t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
+      assert.deepEqual(renders, [0, 0, 0]);
+    });
     await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
     assert.equal(await wait(`!!${otherSession}`), true);
     assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");
@@ -338,6 +385,6 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
-    socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+    socket?.close(); await endBrowser(browser); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }
 });

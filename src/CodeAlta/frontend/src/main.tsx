@@ -1152,7 +1152,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The archived session whose info the saved sessions show, by its id: the catalog is read again meanwhile.
   const [archivedInfo, setArchivedInfo] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renamingTitle, setRenamingTitle] = useState("");
   const [renamingBusy, setRenamingBusy] = useState(false);
   const [renamingMessage, setRenamingMessage] = useState<WorkflowNotice>("");
   const renamingPending = useRef(false);
@@ -4837,7 +4836,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   function beginSessionRename(row: WorkspaceSession) {
     setRenamingId(row.id);
-    setRenamingTitle(row.title);
     setRenamingMessage(renameLocked ? { key: "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." } : "");
   }
 
@@ -6009,7 +6007,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   branchActions.current = { fork: forkSessionOfPane, rewind: rewindSessionOfPane };
 
-  async function renameSelectedSession() {
+  async function renameSelectedSession(title: string) {
     const session = selectedSession;
     if (!session || session.id !== renamingId || selectedSessionId.current !== session.id
       || selectedScope.current !== (selectedProject?.id ?? null) || renamingPending.current
@@ -6023,7 +6021,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path }
       : { scope: "global", projectPath: session.workspacePath };
     const capability = mutation.capability;
-    const title = renamingTitle;
     renamingPending.current = true;
     setRenamingBusy(true);
     setRenamingMessage("");
@@ -6036,7 +6033,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         if (fresh && renamedSessionVisible(fresh, result) && capability.canMutate()
           && renameSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
           setRenamingId(null);
-          setRenamingTitle("");
         } else {
           uncertainRename.current = { id: session.id, title, target };
           setRenameLocked(true);
@@ -6686,9 +6682,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", endNode: <KeyGesture gesture="Delete" />, danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
-              {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
+              {renamingId === session.id && <RenamePopover key={session.id} label={t("Session title")} initialValue={session.title}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
-                onSubmit={() => void renameSelectedSession()} onCancel={() => setRenamingId(null)} />}
+                onSubmit={title => void renameSelectedSession(title)} onCancel={() => setRenamingId(null)} />}
               {deletingId === session.id && (() => {
                 // A session that works in a worktree leaves it, with its branch: the question says where, and can remove it.
                 const found = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
