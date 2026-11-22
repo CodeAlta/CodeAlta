@@ -86,6 +86,7 @@ CodeAlta Desktop brings together:
 - **Session titles**: a title you give stays; other sessions are titled from the first prompt, the last message or by the model, as you choose.
 - **Work items**: review agent-proposed tasks and plans in an Inbox; start them, keep them in the Backlog or dismiss them; [tag tasks](https://codealta.io/docs/work-items/#tags) and name them by their short id; follow the reviews in flight.
 - **[Reviews](https://codealta.io/docs/reviews/)**: comment on the lines of a plan, a file or an agent's changes, send them with a verdict, and have agents wait for your approval before they commit.
+- **Codebase health reviews**: ask an agent to [review the health of a codebase](https://codealta.io/docs/workspace/settings/#health-review-of-a-codebase): the models you choose analyze it alone and challenge each other's findings, and you get a report with the evidence, what each change removes, an order of work and a first step per finding.
 - **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues, with views of your filters (on Azure DevOps, the PRs that wait for your review, also through nested groups); start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events, Jira, Slack, incident.io and signed webhooks, or on demand, and write the answer back where the event came from.
