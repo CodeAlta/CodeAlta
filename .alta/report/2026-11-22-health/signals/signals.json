@@ -1,0 +1,3225 @@
+{
+  "generated": "2026-11-22T09:50Z",
+  "repo": "CodeAlta",
+  "head": "2a3fd8388",
+  "since": "4 weeks ago",
+  "scope": null,
+  "excluded": [
+    "src/CodeAlta.Acp/generated/*",
+    "src/CodeAlta.CodexAppServer/generated/*",
+    "src/CodeAlta.Browser/Cdp/*",
+    "site/img/*",
+    "*.webp",
+    "*.png",
+    ".alta/*",
+    "*.lock",
+    "*-lock.json",
+    "*.lock.json",
+    "pnpm-lock.yaml",
+    "*.min.*",
+    "*.map",
+    "*.snap",
+    "*.svg",
+    "*.designer.cs",
+    "*.g.cs",
+    "*.generated.*",
+    "*.pb.go",
+    "*_pb2.py",
+    "node_modules/*",
+    "dist/*",
+    "vendor/*",
+    "third_party/*",
+    "*/node_modules/*",
+    "*/dist/*",
+    "*/vendor/*",
+    "*/third_party/*"
+  ],
+  "settings": {
+    "fixPattern": "\\b(fix(es|ed)?|bug(fix)?|regress\\w*|revert\\w*|hotfix|crash\\w*|broken)\\b",
+    "areaDepth": 2,
+    "maxCommitFiles": 30,
+    "minCoupling": 5
+  },
+  "totals": {
+    "files": 6123,
+    "filesExcluded": 858,
+    "uncommitted": 18,
+    "loc": 1355472,
+    "commits": 1702,
+    "fixCommits": 902,
+    "fixCommitsWithoutTest": 56,
+    "filesChanged": 3908,
+    "commitsLeftOutOfCoupling": 84,
+    "docWords": 326536
+  },
+  "areas": [
+    {
+      "area": "src/CodeAlta",
+      "files": 2194,
+      "loc": 337672,
+      "commits": 722,
+      "churn": 158460,
+      "fixes": 326,
+      "fixesWithoutTest": 23
+    },
+    {
+      "area": "site/docs",
+      "files": 65,
+      "loc": 11722,
+      "commits": 443,
+      "churn": 6615,
+      "fixes": 138,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Desktop.Tests",
+      "files": 277,
+      "loc": 73615,
+      "commits": 398,
+      "churn": 28192,
+      "fixes": 184,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Tests",
+      "files": 398,
+      "loc": 159539,
+      "commits": 335,
+      "churn": 34779,
+      "fixes": 158,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Orchestration",
+      "files": 211,
+      "loc": 56238,
+      "commits": 276,
+      "churn": 28381,
+      "fixes": 132,
+      "fixesWithoutTest": 5
+    },
+    {
+      "area": "src/CodeAlta.Fleet",
+      "files": 135,
+      "loc": 32725,
+      "commits": 247,
+      "churn": 37744,
+      "fixes": 149,
+      "fixesWithoutTest": 4
+    },
+    {
+      "area": "src/CodeAlta.Server.Tests",
+      "files": 55,
+      "loc": 15538,
+      "commits": 205,
+      "churn": 16251,
+      "fixes": 128,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Catalog",
+      "files": 339,
+      "loc": 74433,
+      "commits": 193,
+      "churn": 25917,
+      "fixes": 62,
+      "fixesWithoutTest": 1
+    },
+    {
+      "area": "src/CodeAlta.Node",
+      "files": 52,
+      "loc": 12713,
+      "commits": 178,
+      "churn": 15298,
+      "fixes": 75,
+      "fixesWithoutTest": 3
+    },
+    {
+      "area": "doc",
+      "files": 18,
+      "loc": 3751,
+      "commits": 169,
+      "churn": 1853,
+      "fixes": 49,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "doc/fleet",
+      "files": 19,
+      "loc": 4162,
+      "commits": 167,
+      "churn": 5550,
+      "fixes": 63,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Orchestration.Tests",
+      "files": 121,
+      "loc": 34671,
+      "commits": 165,
+      "churn": 14487,
+      "fixes": 89,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Server",
+      "files": 125,
+      "loc": 26277,
+      "commits": 164,
+      "churn": 28505,
+      "fixes": 87,
+      "fixesWithoutTest": 5
+    },
+    {
+      "area": "src/CodeAlta.Node.Tests",
+      "files": 51,
+      "loc": 10605,
+      "commits": 159,
+      "churn": 11459,
+      "fixes": 77,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.LiveTool",
+      "files": 113,
+      "loc": 37282,
+      "commits": 156,
+      "churn": 17977,
+      "fixes": 54,
+      "fixesWithoutTest": 3
+    },
+    {
+      "area": "src/CodeAlta.Agent",
+      "files": 220,
+      "loc": 49078,
+      "commits": 143,
+      "churn": 12206,
+      "fixes": 61,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Catalog.Tests",
+      "files": 110,
+      "loc": 26972,
+      "commits": 98,
+      "churn": 10009,
+      "fixes": 42,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Fleet.Protocol",
+      "files": 43,
+      "loc": 10816,
+      "commits": 98,
+      "churn": 11241,
+      "fixes": 34,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Fleet.Tests",
+      "files": 35,
+      "loc": 5654,
+      "commits": 81,
+      "churn": 5794,
+      "fixes": 52,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Automations",
+      "files": 32,
+      "loc": 10158,
+      "commits": 72,
+      "churn": 7801,
+      "fixes": 27,
+      "fixesWithoutTest": 1
+    },
+    {
+      "area": "src/CodeAlta.Cli",
+      "files": 29,
+      "loc": 5151,
+      "commits": 61,
+      "churn": 6682,
+      "fixes": 24,
+      "fixesWithoutTest": 1
+    },
+    {
+      "area": "src/CodeAlta.Cli.Tests",
+      "files": 16,
+      "loc": 3739,
+      "commits": 53,
+      "churn": 4061,
+      "fixes": 34,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Sandbox",
+      "files": 23,
+      "loc": 4200,
+      "commits": 51,
+      "churn": 4802,
+      "fixes": 36,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": ".",
+      "files": 8,
+      "loc": 921,
+      "commits": 49,
+      "churn": 275,
+      "fixes": 2,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Hosting",
+      "files": 28,
+      "loc": 7703,
+      "commits": 46,
+      "churn": 3284,
+      "fixes": 10,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Sandbox.Tests",
+      "files": 12,
+      "loc": 2208,
+      "commits": 46,
+      "churn": 2474,
+      "fixes": 36,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Plugins.Abstractions",
+      "files": 37,
+      "loc": 10464,
+      "commits": 42,
+      "churn": 3068,
+      "fixes": 7,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Browser.Tests",
+      "files": 23,
+      "loc": 6484,
+      "commits": 38,
+      "churn": 6878,
+      "fixes": 31,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Fleet.Update",
+      "files": 27,
+      "loc": 5239,
+      "commits": 38,
+      "churn": 6029,
+      "fixes": 26,
+      "fixesWithoutTest": 4
+    },
+    {
+      "area": "src/CodeAlta.Agent.OpenAI",
+      "files": 50,
+      "loc": 14221,
+      "commits": 37,
+      "churn": 2062,
+      "fixes": 16,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Tui",
+      "files": 330,
+      "loc": 66129,
+      "commits": 37,
+      "churn": 746,
+      "fixes": 5,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Agent.Claude",
+      "files": 38,
+      "loc": 15772,
+      "commits": 35,
+      "churn": 2228,
+      "fixes": 10,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Plugin.Mobile.Tests",
+      "files": 15,
+      "loc": 4293,
+      "commits": 34,
+      "churn": 3338,
+      "fixes": 12,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Plugin.Mobile",
+      "files": 26,
+      "loc": 5539,
+      "commits": 33,
+      "churn": 4453,
+      "fixes": 10,
+      "fixesWithoutTest": 1
+    },
+    {
+      "area": "src",
+      "files": 6,
+      "loc": 247,
+      "commits": 32,
+      "churn": 214,
+      "fixes": 3,
+      "fixesWithoutTest": 1
+    },
+    {
+      "area": "src/CodeAlta.CodeMode",
+      "files": 19,
+      "loc": 5076,
+      "commits": 32,
+      "churn": 5446,
+      "fixes": 8,
+      "fixesWithoutTest": 2
+    },
+    {
+      "area": "src/CodeAlta.Plugins",
+      "files": 53,
+      "loc": 13345,
+      "commits": 32,
+      "churn": 3024,
+      "fixes": 7,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Fleet.Update.Tests",
+      "files": 8,
+      "loc": 2034,
+      "commits": 29,
+      "churn": 2194,
+      "fixes": 21,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Hosting.Tests",
+      "files": 20,
+      "loc": 6480,
+      "commits": 29,
+      "churn": 1819,
+      "fixes": 7,
+      "fixesWithoutTest": 0
+    },
+    {
+      "area": "src/CodeAlta.Plugin.Mcp",
+      "files": 41,
+      "loc": 12981,
+      "commits": 28,
+      "churn": 1979,
+      "fixes": 12,
+      "fixesWithoutTest": 0
+    }
+  ],
+  "hotspots": [
+    {
+      "path": "src/CodeAlta/frontend/src/main.tsx",
+      "commits": 144,
+      "churn": 3145,
+      "fixes": 38,
+      "loc": 8080,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1869.2
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/localization.ts",
+      "commits": 113,
+      "churn": 515,
+      "fixes": 16,
+      "loc": 3240,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1317.8
+    },
+    {
+      "path": "src/CodeAlta/Desktop/DesktopApplication.cs",
+      "commits": 115,
+      "churn": 836,
+      "fixes": 24,
+      "loc": 1934,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 1255.6
+    },
+    {
+      "path": "src/CodeAlta/Desktop/Rpc/BootRpc.cs",
+      "commits": 109,
+      "churn": 409,
+      "fixes": 9,
+      "loc": 1173,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1111.5
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs",
+      "commits": 81,
+      "churn": 1818,
+      "fixes": 35,
+      "loc": 7170,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 1037.4
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/style.css",
+      "commits": 87,
+      "churn": 1120,
+      "fixes": 23,
+      "loc": 3671,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1030.3
+    },
+    {
+      "path": "src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs",
+      "commits": 63,
+      "churn": 1619,
+      "fixes": 15,
+      "loc": 8526,
+      "last": "2026-11-19",
+      "test": false,
+      "score": 822.6
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Hosting/CodeAltaHost.cs",
+      "commits": 72,
+      "churn": 989,
+      "fixes": 26,
+      "loc": 1608,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 766.9
+    },
+    {
+      "path": "src/CodeAlta.Node/NodeFleet.cs",
+      "commits": 57,
+      "churn": 871,
+      "fixes": 15,
+      "loc": 603,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 526.6
+    },
+    {
+      "path": "src/CodeAlta.Agent/Runtime/AgentSession.cs",
+      "commits": 42,
+      "churn": 1111,
+      "fixes": 18,
+      "loc": 5859,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 525.7
+    },
+    {
+      "path": "src/CodeAlta.Fleet/NodeApi/FleetNodeService.cs",
+      "commits": 51,
+      "churn": 976,
+      "fixes": 17,
+      "loc": 790,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 491
+    },
+    {
+      "path": "src/CodeAlta.Fleet/NodeApi/FleetNodeContracts.cs",
+      "commits": 42,
+      "churn": 1420,
+      "fixes": 11,
+      "loc": 1344,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 436.5
+    },
+    {
+      "path": "src/CodeAlta.Node/NodeAutomations.cs",
+      "commits": 43,
+      "churn": 1332,
+      "fixes": 13,
+      "loc": 1092,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 434
+    },
+    {
+      "path": "src/CodeAlta.Tests/CodeModeToolTests.cs",
+      "commits": 39,
+      "churn": 2173,
+      "fixes": 14,
+      "loc": 1817,
+      "last": "2026-11-22",
+      "test": true,
+      "score": 422.3
+    },
+    {
+      "path": "src/CodeAlta.Server/Hosting/CoordinatorServer.cs",
+      "commits": 45,
+      "churn": 774,
+      "fixes": 12,
+      "loc": 644,
+      "last": "2026-11-13",
+      "test": false,
+      "score": 420
+    },
+    {
+      "path": "src/CodeAlta.Catalog/CodeAltaConfigStore.cs",
+      "commits": 34,
+      "churn": 1182,
+      "fixes": 4,
+      "loc": 4423,
+      "last": "2026-11-17",
+      "test": false,
+      "score": 411.8
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/demo-api.ts",
+      "commits": 45,
+      "churn": 123,
+      "fixes": 3,
+      "loc": 435,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 394.6
+    },
+    {
+      "path": "src/CodeAlta/Desktop/Fleet/DesktopFleetServers.cs",
+      "commits": 37,
+      "churn": 1159,
+      "fixes": 10,
+      "loc": 1047,
+      "last": "2026-11-11",
+      "test": false,
+      "score": 371.2
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/OwnedSessionPanel.tsx",
+      "commits": 34,
+      "churn": 1208,
+      "fixes": 14,
+      "loc": 1855,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 369.2
+    },
+    {
+      "path": "src/CodeAlta.Fleet/Server/FleetConnector.cs",
+      "commits": 36,
+      "churn": 1341,
+      "fixes": 15,
+      "loc": 1199,
+      "last": "2026-11-13",
+      "test": false,
+      "score": 368.2
+    },
+    {
+      "path": "src/CodeAlta.Tests/AltaLiveToolTests.cs",
+      "commits": 27,
+      "churn": 1356,
+      "fixes": 13,
+      "loc": 8003,
+      "last": "2026-11-19",
+      "test": true,
+      "score": 350.1
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/mobile/app.ts",
+      "commits": 31,
+      "churn": 1545,
+      "fixes": 10,
+      "loc": 2013,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 340.3
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SystemPrompts/SystemPromptBuilder.cs",
+      "commits": 30,
+      "churn": 423,
+      "fixes": 7,
+      "loc": 1840,
+      "last": "2026-11-18",
+      "test": false,
+      "score": 325.4
+    },
+    {
+      "path": "src/CodeAlta.LiveTool/Scripts/CodeModeToolFactory.cs",
+      "commits": 34,
+      "churn": 1014,
+      "fixes": 11,
+      "loc": 656,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 318.2
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SessionRuntimeService.SandboxTools.cs",
+      "commits": 33,
+      "churn": 881,
+      "fixes": 18,
+      "loc": 703,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 312.2
+    },
+    {
+      "path": "src/CodeAlta.Orchestration.Tests/SessionSandboxTests.cs",
+      "commits": 30,
+      "churn": 1263,
+      "fixes": 16,
+      "loc": 1193,
+      "last": "2026-11-22",
+      "test": true,
+      "score": 306.6
+    },
+    {
+      "path": "src/CodeAlta.Node/NodeApplication.cs",
+      "commits": 33,
+      "churn": 752,
+      "fixes": 9,
+      "loc": 557,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 301.1
+    },
+    {
+      "path": "src/CodeAlta.Desktop.Tests/AutomationHostTests.cs",
+      "commits": 27,
+      "churn": 779,
+      "fixes": 5,
+      "loc": 1846,
+      "last": "2026-11-20",
+      "test": true,
+      "score": 293
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/Scripts/CodeModeRunRegistry.cs",
+      "commits": 28,
+      "churn": 1617,
+      "fixes": 9,
+      "loc": 1275,
+      "last": "2026-11-18",
+      "test": false,
+      "score": 288.9
+    },
+    {
+      "path": "src/CodeAlta.Node.Tests/NodeServerAutomationTests.cs",
+      "commits": 29,
+      "churn": 995,
+      "fixes": 10,
+      "loc": 951,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 286.9
+    },
+    {
+      "path": "src/CodeAlta.Fleet/Client/FleetNodeClient.cs",
+      "commits": 28,
+      "churn": 1189,
+      "fixes": 4,
+      "loc": 1142,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 284.4
+    },
+    {
+      "path": "src/CodeAlta.Fleet/Server/FleetServerConnections.cs",
+      "commits": 30,
+      "churn": 652,
+      "fixes": 9,
+      "loc": 608,
+      "last": "2026-11-09",
+      "test": false,
+      "score": 277.5
+    },
+    {
+      "path": "src/CodeAlta.Cli/CliHost.cs",
+      "commits": 31,
+      "churn": 786,
+      "fixes": 11,
+      "loc": 480,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 276.2
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/OwnedSessionCommandService.cs",
+      "commits": 26,
+      "churn": 609,
+      "fixes": 2,
+      "loc": 1562,
+      "last": "2026-11-19",
+      "test": false,
+      "score": 275.9
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/mobile/mobile.css",
+      "commits": 28,
+      "churn": 573,
+      "fixes": 5,
+      "loc": 882,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 274
+    },
+    {
+      "path": "src/CodeAlta.Server.Tests/SignIn/SignInTests.cs",
+      "commits": 25,
+      "churn": 1593,
+      "fixes": 13,
+      "loc": 1503,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 263.9
+    },
+    {
+      "path": "src/CodeAlta.Automations/AutomationRunner.cs",
+      "commits": 27,
+      "churn": 917,
+      "fixes": 7,
+      "loc": 805,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 260.7
+    },
+    {
+      "path": "src/CodeAlta/Desktop/Fleet/DesktopAutomationPlacement.cs",
+      "commits": 25,
+      "churn": 1679,
+      "fixes": 8,
+      "loc": 1355,
+      "last": "2026-11-10",
+      "test": false,
+      "score": 260.1
+    },
+    {
+      "path": "src/CodeAlta.Automations/AutomationService.cs",
+      "commits": 25,
+      "churn": 520,
+      "fixes": 8,
+      "loc": 1309,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 258.9
+    },
+    {
+      "path": "src/CodeAlta/Desktop/Rpc/AutomationsRpc.cs",
+      "commits": 25,
+      "churn": 959,
+      "fixes": 4,
+      "loc": 1243,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 257
+    }
+  ],
+  "fixDense": [
+    {
+      "path": "src/CodeAlta/frontend/src/main.tsx",
+      "commits": 144,
+      "churn": 3145,
+      "fixes": 38,
+      "loc": 8080,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1869.2
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs",
+      "commits": 81,
+      "churn": 1818,
+      "fixes": 35,
+      "loc": 7170,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 1037.4
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Hosting/CodeAltaHost.cs",
+      "commits": 72,
+      "churn": 989,
+      "fixes": 26,
+      "loc": 1608,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 766.9
+    },
+    {
+      "path": "src/CodeAlta/Desktop/DesktopApplication.cs",
+      "commits": 115,
+      "churn": 836,
+      "fixes": 24,
+      "loc": 1934,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 1255.6
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/style.css",
+      "commits": 87,
+      "churn": 1120,
+      "fixes": 23,
+      "loc": 3671,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1030.3
+    },
+    {
+      "path": "src/CodeAlta.Fleet/Server/FleetBudgetGate.cs",
+      "commits": 21,
+      "churn": 912,
+      "fixes": 20,
+      "loc": 695,
+      "last": "2026-11-05",
+      "test": false,
+      "score": 198.3
+    },
+    {
+      "path": "src/CodeAlta.Agent/Runtime/AgentSession.cs",
+      "commits": 42,
+      "churn": 1111,
+      "fixes": 18,
+      "loc": 5859,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 525.7
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SessionRuntimeService.SandboxTools.cs",
+      "commits": 33,
+      "churn": 881,
+      "fixes": 18,
+      "loc": 703,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 312.2
+    },
+    {
+      "path": "src/CodeAlta.Fleet/NodeApi/FleetNodeService.cs",
+      "commits": 51,
+      "churn": 976,
+      "fixes": 17,
+      "loc": 790,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 491
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/localization.ts",
+      "commits": 113,
+      "churn": 515,
+      "fixes": 16,
+      "loc": 3240,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 1317.8
+    },
+    {
+      "path": "src/CodeAlta.Orchestration.Tests/SessionSandboxTests.cs",
+      "commits": 30,
+      "churn": 1263,
+      "fixes": 16,
+      "loc": 1193,
+      "last": "2026-11-22",
+      "test": true,
+      "score": 306.6
+    },
+    {
+      "path": "src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs",
+      "commits": 63,
+      "churn": 1619,
+      "fixes": 15,
+      "loc": 8526,
+      "last": "2026-11-19",
+      "test": false,
+      "score": 822.6
+    },
+    {
+      "path": "src/CodeAlta.Node/NodeFleet.cs",
+      "commits": 57,
+      "churn": 871,
+      "fixes": 15,
+      "loc": 603,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 526.6
+    },
+    {
+      "path": "src/CodeAlta.Fleet/Server/FleetConnector.cs",
+      "commits": 36,
+      "churn": 1341,
+      "fixes": 15,
+      "loc": 1199,
+      "last": "2026-11-13",
+      "test": false,
+      "score": 368.2
+    },
+    {
+      "path": "src/CodeAlta.Tests/CodeModeToolTests.cs",
+      "commits": 39,
+      "churn": 2173,
+      "fixes": 14,
+      "loc": 1817,
+      "last": "2026-11-22",
+      "test": true,
+      "score": 422.3
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/OwnedSessionPanel.tsx",
+      "commits": 34,
+      "churn": 1208,
+      "fixes": 14,
+      "loc": 1855,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 369.2
+    },
+    {
+      "path": "src/CodeAlta.Fleet/NodeApi/FleetNodeService.Budgets.cs",
+      "commits": 17,
+      "churn": 484,
+      "fixes": 14,
+      "loc": 364,
+      "last": "2026-11-18",
+      "test": false,
+      "score": 144.7
+    },
+    {
+      "path": "src/CodeAlta.Server.Tests/FleetSecretsTests.cs",
+      "commits": 16,
+      "churn": 944,
+      "fixes": 14,
+      "loc": 912,
+      "last": "2026-11-05",
+      "test": true,
+      "score": 157.4
+    },
+    {
+      "path": "src/CodeAlta.Node/NodeAutomations.cs",
+      "commits": 43,
+      "churn": 1332,
+      "fixes": 13,
+      "loc": 1092,
+      "last": "2026-11-20",
+      "test": false,
+      "score": 434
+    },
+    {
+      "path": "src/CodeAlta.Tests/AltaLiveToolTests.cs",
+      "commits": 27,
+      "churn": 1356,
+      "fixes": 13,
+      "loc": 8003,
+      "last": "2026-11-19",
+      "test": true,
+      "score": 350.1
+    },
+    {
+      "path": "src/CodeAlta.Server.Tests/SignIn/SignInTests.cs",
+      "commits": 25,
+      "churn": 1593,
+      "fixes": 13,
+      "loc": 1503,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 263.9
+    },
+    {
+      "path": "src/CodeAlta.Fleet.Tests/FleetUpdateAgentTests.cs",
+      "commits": 13,
+      "churn": 830,
+      "fixes": 13,
+      "loc": 822,
+      "last": "2026-11-04",
+      "test": true,
+      "score": 125.9
+    },
+    {
+      "path": "src/CodeAlta.Server.Tests/UpdateCampaignServerTests.cs",
+      "commits": 13,
+      "churn": 731,
+      "fixes": 13,
+      "loc": 677,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 122.3
+    },
+    {
+      "path": "src/CodeAlta.Server/Hosting/CoordinatorServer.cs",
+      "commits": 45,
+      "churn": 774,
+      "fixes": 12,
+      "loc": 644,
+      "last": "2026-11-13",
+      "test": false,
+      "score": 420
+    },
+    {
+      "path": "src/CodeAlta.Server/ServerApplication.cs",
+      "commits": 22,
+      "churn": 1230,
+      "fixes": 12,
+      "loc": 1132,
+      "last": "2026-11-13",
+      "test": false,
+      "score": 223.2
+    },
+    {
+      "path": "src/CodeAlta.Sandbox/SandboxPolicyBuilder.cs",
+      "commits": 18,
+      "churn": 616,
+      "fixes": 12,
+      "loc": 558,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 164.3
+    },
+    {
+      "path": "src/CodeAlta.Sandbox.Tests/SandboxPolicyBuilderTests.cs",
+      "commits": 17,
+      "churn": 585,
+      "fixes": 12,
+      "loc": 571,
+      "last": "2026-11-15",
+      "test": true,
+      "score": 155.7
+    },
+    {
+      "path": "src/CodeAlta.Fleet/Server/FleetUpdateAgent.cs",
+      "commits": 15,
+      "churn": 1736,
+      "fixes": 12,
+      "loc": 1350,
+      "last": "2026-11-07",
+      "test": false,
+      "score": 156
+    },
+    {
+      "path": "src/CodeAlta.Server.Tests/BudgetTests.cs",
+      "commits": 13,
+      "churn": 812,
+      "fixes": 12,
+      "loc": 770,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 124.7
+    },
+    {
+      "path": "src/CodeAlta.Fleet/NodeApi/FleetNodeContracts.cs",
+      "commits": 42,
+      "churn": 1420,
+      "fixes": 11,
+      "loc": 1344,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 436.5
+    },
+    {
+      "path": "src/CodeAlta.LiveTool/Scripts/CodeModeToolFactory.cs",
+      "commits": 34,
+      "churn": 1014,
+      "fixes": 11,
+      "loc": 656,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 318.2
+    },
+    {
+      "path": "src/CodeAlta.Cli/CliHost.cs",
+      "commits": 31,
+      "churn": 786,
+      "fixes": 11,
+      "loc": 480,
+      "last": "2026-11-22",
+      "test": false,
+      "score": 276.2
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/fleet/fleetServerSettings.browser.test.ts",
+      "commits": 25,
+      "churn": 562,
+      "fixes": 11,
+      "loc": 502,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 224.4
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Hosting/HeadlessSessionDriver.cs",
+      "commits": 23,
+      "churn": 1043,
+      "fixes": 11,
+      "loc": 841,
+      "last": "2026-11-18",
+      "test": false,
+      "score": 223.5
+    },
+    {
+      "path": "src/CodeAlta.Tests/OpenAIRawApiModelProviderRuntimeTests.cs",
+      "commits": 18,
+      "churn": 1718,
+      "fixes": 11,
+      "loc": 8621,
+      "last": "2026-11-19",
+      "test": true,
+      "score": 235.3
+    },
+    {
+      "path": "src/CodeAlta.Server/Services/UpdateCampaignService.cs",
+      "commits": 13,
+      "churn": 961,
+      "fixes": 11,
+      "loc": 813,
+      "last": "2026-11-04",
+      "test": false,
+      "score": 125.7
+    },
+    {
+      "path": "src/CodeAlta/Desktop/Fleet/DesktopFleetServers.cs",
+      "commits": 37,
+      "churn": 1159,
+      "fixes": 10,
+      "loc": 1047,
+      "last": "2026-11-11",
+      "test": false,
+      "score": 371.2
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/mobile/app.ts",
+      "commits": 31,
+      "churn": 1545,
+      "fixes": 10,
+      "loc": 2013,
+      "last": "2026-11-16",
+      "test": false,
+      "score": 340.3
+    },
+    {
+      "path": "src/CodeAlta.Node.Tests/NodeServerAutomationTests.cs",
+      "commits": 29,
+      "churn": 995,
+      "fixes": 10,
+      "loc": 951,
+      "last": "2026-11-10",
+      "test": true,
+      "score": 286.9
+    },
+    {
+      "path": "src/CodeAlta.Server.Tests/AccessControlTests.cs",
+      "commits": 25,
+      "churn": 842,
+      "fixes": 10,
+      "loc": 810,
+      "last": "2026-11-05",
+      "test": true,
+      "score": 241.6
+    }
+  ],
+  "largest": [
+    {
+      "path": "src/CodeAlta.Pseudonymization.Tests/Presidio/presidio-cases.json",
+      "loc": 10700,
+      "commits": 1
+    },
+    {
+      "path": "src/CodeAlta.Catalog/SR.yml",
+      "loc": 9544,
+      "commits": 5
+    },
+    {
+      "path": "src/CodeAlta.Tests/OpenAIRawApiModelProviderRuntimeTests.cs",
+      "loc": 8621,
+      "commits": 18
+    },
+    {
+      "path": "src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs",
+      "loc": 8526,
+      "commits": 63
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/main.tsx",
+      "loc": 8080,
+      "commits": 144
+    },
+    {
+      "path": "src/CodeAlta.Tests/AltaLiveToolTests.cs",
+      "loc": 8003,
+      "commits": 27
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs",
+      "loc": 7170,
+      "commits": 81
+    },
+    {
+      "path": "src/CodeAlta.Tests/AgentSessionTests.cs",
+      "loc": 6417,
+      "commits": 13
+    },
+    {
+      "path": "src/CodeAlta.Agent/Runtime/AgentSession.cs",
+      "loc": 5859,
+      "commits": 42
+    },
+    {
+      "path": "src/CodeAlta.Agent.OpenAI/OpenAIResponsesTurnExecutor.cs",
+      "loc": 4680,
+      "commits": 17
+    },
+    {
+      "path": "src/CodeAlta.Catalog/CodeAltaConfigStore.cs",
+      "loc": 4423,
+      "commits": 34
+    },
+    {
+      "path": "src/CodeAlta.Tests/CodeAltaAppTests.cs",
+      "loc": 3692,
+      "commits": 0
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/style.css",
+      "loc": 3671,
+      "commits": 87
+    },
+    {
+      "path": "src/CodeAlta.Orchestration.Tests/OwnedSessionCommandServiceTests.cs",
+      "loc": 3339,
+      "commits": 13
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/localization.ts",
+      "loc": 3240,
+      "commits": 113
+    },
+    {
+      "path": "src/CodeAlta.Tests/ClaudeCodeSessionTests.cs",
+      "loc": 2991,
+      "commits": 11
+    },
+    {
+      "path": "src/CodeAlta.Tests/AgentToolsTests.cs",
+      "loc": 2640,
+      "commits": 14
+    },
+    {
+      "path": "src/CodeAlta.Plugin.Statistics/Journal/JournalPayloadParser.cs",
+      "loc": 2579,
+      "commits": 4
+    },
+    {
+      "path": "src/CodeAlta.Tui/Views/ModelProvidersDialog.cs",
+      "loc": 2546,
+      "commits": 2
+    },
+    {
+      "path": "src/CodeAlta.Catalog/SessionJournalSqliteCache.cs",
+      "loc": 2528,
+      "commits": 6
+    },
+    {
+      "path": "src/CodeAlta.Tests/OpenAICodexSubscriptionPipelineTests.cs",
+      "loc": 2505,
+      "commits": 8
+    },
+    {
+      "path": "src/CodeAlta.Agent/Runtime/Tools/AgentBuiltInToolFactory.cs",
+      "loc": 2407,
+      "commits": 16
+    },
+    {
+      "path": "src/CodeAlta.Browser/Toolbar/codealta-toolbar.js",
+      "loc": 2343,
+      "commits": 2
+    },
+    {
+      "path": "src/CodeAlta.Tests/CopilotDirectProviderTests.cs",
+      "loc": 2316,
+      "commits": 6
+    },
+    {
+      "path": "src/CodeAlta.Plugin.Mcp/McpRuntimeService.cs",
+      "loc": 2279,
+      "commits": 10
+    },
+    {
+      "path": "src/CodeAlta.Tests/AcpTurnExecutorTests.cs",
+      "loc": 2262,
+      "commits": 15
+    },
+    {
+      "path": "src/CodeAlta.Tui/Plugins/Mcp/McpServersDialog.cs",
+      "loc": 2260,
+      "commits": 0
+    },
+    {
+      "path": "src/CodeAlta.Credentials/CredentialBroker.cs",
+      "loc": 2068,
+      "commits": 14
+    },
+    {
+      "path": "src/CodeAlta.Tests/McpRuntimeServiceTests.cs",
+      "loc": 2017,
+      "commits": 6
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/mobile/app.ts",
+      "loc": 2013,
+      "commits": 31
+    },
+    {
+      "path": "src/CodeAlta/Desktop/DesktopApplication.cs",
+      "loc": 1934,
+      "commits": 115
+    },
+    {
+      "path": "src/CodeAlta.Tests/ClaudeCodeTurnExecutorTests.cs",
+      "loc": 1930,
+      "commits": 8
+    },
+    {
+      "path": "src/CodeAlta/frontend/src/OwnedSessionPanel.tsx",
+      "loc": 1855,
+      "commits": 34
+    },
+    {
+      "path": "src/CodeAlta.Desktop.Tests/AutomationHostTests.cs",
+      "loc": 1846,
+      "commits": 27
+    },
+    {
+      "path": "src/CodeAlta.Orchestration/Runtime/SystemPrompts/SystemPromptBuilder.cs",
+      "loc": 1840,
+      "commits": 30
+    },
+    {
+      "path": "src/CodeAlta.Hosting/ConfiguredModelProviderRegistryBuilder.cs",
+      "loc": 1838,
+      "commits": 19
+    },
+    {
+      "path": "src/CodeAlta.Plugin.Mcp/McpManagementService.cs",
+      "loc": 1837,
+      "commits": 5
+    },
+    {
+      "path": "src/CodeAlta.Agent/Runtime/FileSystemAgentSessionStore.cs",
+      "loc": 1829,
+      "commits": 3
+    },
+    {
+      "path": "src/CodeAlta.Tests/CodeModeToolTests.cs",
+      "loc": 1817,
+      "commits": 39
+    },
+    {
+      "path": "src/CodeAlta.Tests/RuntimePluginLiveEventTests.cs",
+      "loc": 1810,
+      "commits": 2
+    }
+  ],
+  "coupling": [
+    {
+      "a": "src/CodeAlta/frontend/src/explorer/projectRail.ts",
+      "b": "src/CodeAlta/frontend/src/explorer/projectRailGroups.test.ts",
+      "shared": 7,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Server/Storage/IAccessStore.cs",
+      "b": "src/CodeAlta.Server/Storage/Sqlite/SqliteCoordinatorStore.Access.cs",
+      "shared": 6,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/providerForm.test.ts",
+      "b": "src/CodeAlta/frontend/src/providerForm.ts",
+      "shared": 6,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/machines/addMachine.test.ts",
+      "b": "src/CodeAlta/frontend/src/machines/addMachine.ts",
+      "shared": 5,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/machines/machineProviderNames.test.ts",
+      "b": "src/CodeAlta/frontend/src/machines/machineProviderNames.ts",
+      "shared": 5,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/mobile/workflowRun.test.ts",
+      "b": "src/CodeAlta/frontend/src/mobile/workflowRun.ts",
+      "shared": 5,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/modelTiers.test.ts",
+      "b": "src/CodeAlta/frontend/src/modelTiers.ts",
+      "shared": 5,
+      "degree": 1,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/automations/automations.test.ts",
+      "b": "src/CodeAlta/frontend/src/automations/automations.ts",
+      "shared": 15,
+      "degree": 0.94,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Node.Tests/NodeScopeProvidersTests.cs",
+      "b": "src/CodeAlta.Node/NodeScopeProviders.cs",
+      "shared": 8,
+      "degree": 0.94,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Server/Storage/IAutomationStore.cs",
+      "b": "src/CodeAlta.Server/Storage/Sqlite/SqliteCoordinatorStore.Automations.cs",
+      "shared": 7,
+      "degree": 0.93,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugin.Mobile/MobileServer.cs",
+      "b": "src/CodeAlta/frontend/src/mobile/api.ts",
+      "shared": 11,
+      "degree": 0.92,
+      "ofSmaller": 0.92,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "benchmarks/harbor/README.md",
+      "b": "benchmarks/harbor/locked_codealta.py",
+      "shared": 6,
+      "degree": 0.92,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugin.Statistics/Facts/SessionFactsReducer.cs",
+      "b": "src/CodeAlta.Plugin.Statistics/Facts/SessionFactsState.cs",
+      "shared": 6,
+      "degree": 0.92,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Server/Storage/ISignInStore.cs",
+      "b": "src/CodeAlta.Server/Storage/Sqlite/SqliteCoordinatorStore.SignIn.cs",
+      "shared": 6,
+      "degree": 0.92,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Catalog.Tests/SubProjectCatalogTests.cs",
+      "b": "src/CodeAlta.Catalog/ProjectCatalog.SubProjects.cs",
+      "shared": 10,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "benchmarks/harbor/locked_codealta.py",
+      "b": "benchmarks/harbor/test_locked_codealta.py",
+      "shared": 5,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "site/docs/issues.md",
+      "b": "src/CodeAlta/Desktop/Rpc/IssuesRpc.cs",
+      "shared": 5,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Agent/ModelProviderInitializationService.cs",
+      "b": "src/CodeAlta.Tests/ModelProviderInitializationServiceTests.cs",
+      "shared": 5,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Catalog.Tests/ProxySettingsTests.cs",
+      "b": "src/CodeAlta.Catalog/Network/NetworkProxy.cs",
+      "shared": 5,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/promptMath.browser.test.ts",
+      "b": "src/CodeAlta/frontend/src/promptMath.mount.tsx",
+      "shared": 5,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/fleet/FleetSignInSettings.tsx",
+      "b": "src/CodeAlta/frontend/src/fleet/signInMessages.ts",
+      "shared": 14,
+      "degree": 0.9,
+      "ofSmaller": 0.93,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Desktop.Tests/SshServerInstallerTests.cs",
+      "b": "src/CodeAlta/Desktop/Fleet/MachineSetup/SshServerInstaller.cs",
+      "shared": 9,
+      "degree": 0.9,
+      "ofSmaller": 0.9,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Update/Service/ServiceManager.cs",
+      "b": "src/CodeAlta.Node.Tests/NodeServiceTests.cs",
+      "shared": 9,
+      "degree": 0.9,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Server.Tests/UpdateCampaignServerTests.cs",
+      "b": "src/CodeAlta.Server/Services/UpdateCampaignService.cs",
+      "shared": 11,
+      "degree": 0.88,
+      "ofSmaller": 0.92,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/Desktop/Rpc/FleetServerRpc.Local.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/CreateServerDialog.tsx",
+      "shared": 7,
+      "degree": 0.88,
+      "ofSmaller": 0.88,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/MarkdownContent.tsx",
+      "b": "src/CodeAlta/frontend/src/markdownBoundary.ts",
+      "shared": 7,
+      "degree": 0.88,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Agent.OpenAI/OpenAIResponsesTurnExecutor.cs",
+      "b": "src/CodeAlta.Tests/OpenAIRawApiModelProviderRuntimeTests.cs",
+      "shared": 13,
+      "degree": 0.87,
+      "ofSmaller": 0.87,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/Desktop/Fleet/DesktopFleetServers.SignIn.cs",
+      "b": "src/CodeAlta/Desktop/Rpc/FleetServerRpc.SignIn.cs",
+      "shared": 10,
+      "degree": 0.87,
+      "ofSmaller": 0.91,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Automations/AutomationConfig.cs",
+      "b": "src/CodeAlta.Automations/AutomationModel.cs",
+      "shared": 12,
+      "degree": 0.86,
+      "ofSmaller": 0.92,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/mobile/timeline.ts",
+      "b": "src/CodeAlta/frontend/src/mobile/timelineView.ts",
+      "shared": 6,
+      "degree": 0.86,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugin.Mobile.Tests/MobileServerTests.cs",
+      "b": "src/CodeAlta.Plugin.Mobile/MobileServer.cs",
+      "shared": 11,
+      "degree": 0.85,
+      "ofSmaller": 0.92,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Server.Tests/SignIn/SignInTests.cs",
+      "b": "src/CodeAlta.Server/Services/SignInService.cs",
+      "shared": 18,
+      "degree": 0.84,
+      "ofSmaller": 0.95,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/automations/automationsHub.test.ts",
+      "b": "src/CodeAlta/frontend/src/automations/automationsHub.ts",
+      "shared": 8,
+      "degree": 0.84,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/fleet/fleetServerSettings.browser.test.ts",
+      "b": "src/CodeAlta/frontend/src/fleet/fleetServerSettings.mount.tsx",
+      "shared": 17,
+      "degree": 0.83,
+      "ofSmaller": 0.89,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/machines/machinePage.browser.test.ts",
+      "b": "src/CodeAlta/frontend/src/machines/machinePage.mount.tsx",
+      "shared": 15,
+      "degree": 0.83,
+      "ofSmaller": 0.83,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol.Tests/FleetAccessDocumentsTests.cs",
+      "b": "src/CodeAlta.Fleet.Protocol/FleetAccessDocuments.cs",
+      "shared": 10,
+      "degree": 0.83,
+      "ofSmaller": 0.91,
+      "crossArea": true,
+      "codeAndTest": true
+    },
+    {
+      "a": "src/CodeAlta/frontend/src/secrets/SecretsSettings.tsx",
+      "b": "src/CodeAlta/frontend/src/secrets/secrets.css",
+      "shared": 10,
+      "degree": 0.83,
+      "ofSmaller": 0.91,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "benchmarks/harbor/README.md",
+      "b": "benchmarks/harbor/test_locked_codealta.py",
+      "shared": 5,
+      "degree": 0.83,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": true
+    },
+    {
+      "a": "doc/fleet/readme.md",
+      "b": "doc/fleet/roadmap.md",
+      "shared": 5,
+      "degree": 0.83,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Browser/Tools/BrowserSession.cs",
+      "b": "src/CodeAlta.Browser/Tools/BrowserTools.cs",
+      "shared": 5,
+      "degree": 0.83,
+      "ofSmaller": 1,
+      "crossArea": false,
+      "codeAndTest": false
+    }
+  ],
+  "crossAreaCoupling": [
+    {
+      "a": "src/CodeAlta.Plugin.Mobile/MobileServer.cs",
+      "b": "src/CodeAlta/frontend/src/mobile/api.ts",
+      "shared": 11,
+      "degree": 0.92,
+      "ofSmaller": 0.92,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/issues.md",
+      "b": "src/CodeAlta/Desktop/Rpc/IssuesRpc.cs",
+      "shared": 5,
+      "degree": 0.91,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugin.Mobile/MobileServer.cs",
+      "b": "src/CodeAlta/frontend/src/mobile/fixtureServer.ts",
+      "shared": 10,
+      "degree": 0.8,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta.Server/Identity/SignIn/SignInAttempts.cs",
+      "shared": 8,
+      "degree": 0.8,
+      "ofSmaller": 0.89,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet/Server/FleetServerClient.SignIn.cs",
+      "b": "src/CodeAlta/Desktop/Fleet/DesktopFleetServers.SignIn.cs",
+      "shared": 8,
+      "degree": 0.8,
+      "ofSmaller": 0.89,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugins.Abstractions/PluginContributions.cs",
+      "b": "src/CodeAlta.Plugins/PluginRuntimeLifecycle.cs",
+      "shared": 5,
+      "degree": 0.77,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta/Desktop/Rpc/FleetServerRpc.SignIn.cs",
+      "shared": 8,
+      "degree": 0.76,
+      "ofSmaller": 0.89,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet/Server/FleetServerClient.SignIn.cs",
+      "b": "src/CodeAlta/Desktop/Rpc/FleetServerRpc.SignIn.cs",
+      "shared": 8,
+      "degree": 0.76,
+      "ofSmaller": 0.89,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetAccessDocuments.cs",
+      "b": "src/CodeAlta.Server/Services/AccessDocumentService.cs",
+      "shared": 9,
+      "degree": 0.75,
+      "ofSmaller": 0.82,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.LiveTool/AltaAutomations.cs",
+      "b": "src/CodeAlta/Desktop/DesktopAltaAutomations.cs",
+      "shared": 6,
+      "degree": 0.75,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/plugins/mobile.md",
+      "b": "src/CodeAlta/frontend/src/mobile/app.ts",
+      "shared": 20,
+      "degree": 0.71,
+      "ofSmaller": 0.77,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetAccessApiContracts.cs",
+      "b": "src/CodeAlta.Fleet/Server/FleetGrantKeys.cs",
+      "shared": 5,
+      "degree": 0.71,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetAccessApiContracts.cs",
+      "b": "src/CodeAlta.Server/Storage/IAccessStore.cs",
+      "shared": 5,
+      "degree": 0.71,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetAccessApiContracts.cs",
+      "b": "src/CodeAlta.Server/Storage/Sqlite/SqliteCoordinatorStore.Access.cs",
+      "shared": 5,
+      "degree": 0.71,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.LiveTool/IAltaFleet.cs",
+      "b": "src/CodeAlta/Desktop/Fleet/DesktopAltaFleet.cs",
+      "shared": 5,
+      "degree": 0.71,
+      "ofSmaller": 0.71,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugin.Mobile/MobileServer.cs",
+      "b": "src/CodeAlta/frontend/mobile.html",
+      "shared": 8,
+      "degree": 0.7,
+      "ofSmaller": 0.73,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Server/Services/SignInService.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/signInMessages.ts",
+      "shared": 12,
+      "degree": 0.69,
+      "ofSmaller": 0.75,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/plugins/mobile.md",
+      "b": "src/CodeAlta/frontend/src/mobile/mobile.css",
+      "shared": 18,
+      "degree": 0.68,
+      "ofSmaller": 0.78,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Node/NodeAutomations.Server.cs",
+      "b": "src/CodeAlta.Server/Services/FleetAutomationService.cs",
+      "shared": 16,
+      "degree": 0.68,
+      "ofSmaller": 0.73,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/plugins/developers.md",
+      "b": "src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md",
+      "shared": 10,
+      "degree": 0.67,
+      "ofSmaller": 0.71,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Plugin.Mobile/MobileServer.cs",
+      "b": "src/CodeAlta/frontend/src/mobile/contract.ts",
+      "shared": 9,
+      "degree": 0.67,
+      "ofSmaller": 0.75,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/FleetSignInSettings.tsx",
+      "shared": 8,
+      "degree": 0.67,
+      "ofSmaller": 0.89,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/signIn.ts",
+      "shared": 7,
+      "degree": 0.67,
+      "ofSmaller": 0.78,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/work-items.md",
+      "b": "src/CodeAlta/frontend/src/workItems/WorkItemsPanel.tsx",
+      "shared": 5,
+      "degree": 0.67,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/work-items.md",
+      "b": "src/CodeAlta/frontend/src/workItems/workItems.css",
+      "shared": 5,
+      "degree": 0.67,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Update.Tests/FakeServiceMachine.cs",
+      "b": "src/CodeAlta.Node.Tests/NodeServiceTests.cs",
+      "shared": 5,
+      "degree": 0.67,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Server/Services/SignInService.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/FleetSignInSettings.tsx",
+      "shared": 11,
+      "degree": 0.65,
+      "ofSmaller": 0.73,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Server/Services/SignInService.cs",
+      "b": "src/CodeAlta/Desktop/Rpc/FleetServerRpc.SignIn.cs",
+      "shared": 10,
+      "degree": 0.65,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Server/Services/SignInService.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/signIn.ts",
+      "shared": 10,
+      "degree": 0.65,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "doc/fleet/identity.md",
+      "b": "src/CodeAlta.Server/Services/SignInService.cs",
+      "shared": 14,
+      "degree": 0.64,
+      "ofSmaller": 0.74,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta.Server/Services/SignInService.cs",
+      "shared": 9,
+      "degree": 0.64,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta/frontend/src/fleet/signInMessages.ts",
+      "shared": 8,
+      "degree": 0.64,
+      "ofSmaller": 0.89,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetAccessApiContracts.cs",
+      "b": "src/CodeAlta.Server/Services/AccessService.cs",
+      "shared": 7,
+      "degree": 0.64,
+      "ofSmaller": 0.88,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.Automations.cs",
+      "b": "src/CodeAlta/Desktop/DesktopAltaAutomations.cs",
+      "shared": 6,
+      "degree": 0.63,
+      "ofSmaller": 0.67,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.Fleet.cs",
+      "b": "src/CodeAlta/Desktop/Fleet/DesktopAltaFleet.cs",
+      "shared": 6,
+      "degree": 0.63,
+      "ofSmaller": 0.86,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/plugins/mobile.md",
+      "b": "src/CodeAlta/frontend/src/mobile/contract.ts",
+      "shared": 14,
+      "degree": 0.62,
+      "ofSmaller": 0.93,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "site/docs/work-items.md",
+      "b": "src/CodeAlta/frontend/src/workItems/WorkItemCards.tsx",
+      "shared": 5,
+      "degree": 0.62,
+      "ofSmaller": 0.83,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs",
+      "b": "src/CodeAlta.Server/Api/SignInEndpoints.cs",
+      "shared": 5,
+      "degree": 0.62,
+      "ofSmaller": 0.71,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet/Server/FleetConnector.Automations.cs",
+      "b": "src/CodeAlta.Node/NodeServerAutomations.cs",
+      "shared": 5,
+      "degree": 0.62,
+      "ofSmaller": 1,
+      "crossArea": true,
+      "codeAndTest": false
+    },
+    {
+      "a": "src/CodeAlta.Fleet/Server/FleetServerClient.SignIn.cs",
+      "b": "src/CodeAlta.Server/Api/SignInEndpoints.cs",
+      "shared": 5,
+      "degree": 0.62,
+      "ofSmaller": 0.71,
+      "crossArea": true,
+      "codeAndTest": false
+    }
+  ],
+  "flakyCommits": [
+    {
+      "sha": "367796271",
+      "date": "2026-11-10",
+      "subject": "Fix the CLI job timeout test on a slow machine",
+      "tests": [
+        "src/CodeAlta.Cli.Tests/CliRunTests.cs"
+      ]
+    },
+    {
+      "sha": "9d381259e",
+      "date": "2026-11-04",
+      "subject": "Add autonomy to the runs of automations: waiting, timeouts, take-over, dry runs",
+      "tests": [
+        "src/CodeAlta.Desktop.Tests/AutomationHostTests.cs",
+        "src/CodeAlta.Desktop.Tests/AutomationRunGuardTests.cs"
+      ]
+    }
+  ],
+  "markers": {
+    "sleep_in_test": [
+      {
+        "path": "src/CodeAlta.Browser.Tests/BrowserAnnotationsTests.cs",
+        "count": 25
+      },
+      {
+        "path": "src/CodeAlta.Browser.Tests/BrowserDrawingTests.cs",
+        "count": 21
+      },
+      {
+        "path": "src/CodeAlta.Browser.Tests/BrowserPluginTests.cs",
+        "count": 16
+      },
+      {
+        "path": "src/CodeAlta.Tests/AltaLiveToolTests.cs",
+        "count": 14
+      },
+      {
+        "path": "src/CodeAlta.CodeMode.Tests/CodeModeSleepTests.cs",
+        "count": 12
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/FleetNodeBudgetQueueTests.cs",
+        "count": 12
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/speech/speech.browser.test.ts",
+        "count": 12
+      },
+      {
+        "path": "src/CodeAlta.Tests/ClaudeCodeSessionTests.cs",
+        "count": 10
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/sessionRetention.browser.test.ts",
+        "count": 10
+      },
+      {
+        "path": "src/CodeAlta.Fleet.Update.Tests/UpdateSwitchTests.cs",
+        "count": 9
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/markdownContent.browser.test.ts",
+        "count": 9
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/CanvasRpcEndpointTests.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/CodeModeRunStoreTests.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/OwnedSessionCommandServiceTests.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/SessionWorktreeTests.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Tests/AcpTurnExecutorTests.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/canvases/canvasPanel.browser.test.ts",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/composer.browser.test.ts",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/documentation/documentationPanel.browser.test.ts",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/providerLocalization.browser.test.ts",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/AltaSessionSelectionTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/RemoteChildSessionsTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Fleet.Protocol.Tests/FleetConnectionTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Node.Tests/NodeBudgetTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/HeadlessSessionDriverTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Tests/ClaudeCodeTurnExecutorTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Tests/CodeModeToolTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Tests/OpenAICodexSubscriptionPipelineTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/issuePicker.browser.test.ts",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/promptMath.browser.test.ts",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/DesktopTerminalsTests.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/SessionFallbackTests.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Tests/AcpAgentServerTests.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/canvases/canvasRpc.browser.test.ts",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/claudeCodeImport/claudeCodeSessions.browser.test.ts",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/mobile/mobile.browser.test.ts",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/mobile/mobileHistory.browser.test.ts",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/testTime.test.ts",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Browser.Tests/BrowserToolsTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Browser.Tests/SessionAnnotationsTests.cs",
+        "count": 4
+      }
+    ],
+    "skipped_test": [
+      {
+        "path": "src/CodeAlta.Catalog.Tests/ProjectFileSearchServiceTests.cs",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta.Hosting.Tests/HostingCompositionBoundaryTests.cs",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/demo-api.test.ts",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/fleet/fleetServerSettings.browser.test.ts",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/testReporting.test.ts",
+        "count": 1
+      }
+    ],
+    "retry_in_test": [
+      {
+        "path": "src/CodeAlta/frontend/src/workItems/workItemTags.browser.test.ts",
+        "count": 19
+      },
+      {
+        "path": "src/CodeAlta.CodeMode.Tests/CodeModeReplayTests.cs",
+        "count": 15
+      },
+      {
+        "path": "src/CodeAlta.Tests/CodeModeToolTests.cs",
+        "count": 14
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/scriptCard/scriptCard.test.ts",
+        "count": 14
+      },
+      {
+        "path": "src/CodeAlta.Catalog.Tests/WorkItemTests.cs",
+        "count": 12
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/CodeModeRunStoreTests.cs",
+        "count": 9
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/SessionCloudTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Tests/CodeModeRunGraphTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/workItems/WorkItemViews.test.tsx",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/workflows/runGraph.browser.test.ts",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/AutomationIntegrationTests.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.CodeMode.Tests/CodeModeSourceTests.cs",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/AutomationSourceConfigTests.cs",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/DesktopSearchTests.cs",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/SearchEvaluation/corpus.json",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Tests/ModelProviderInitializationServiceTests.cs",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/modelTiers.test.ts",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/workItems/workItems.test.ts",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/AutomationHostTests.cs",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/SearchEvaluation/queries.jsonl",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta.Server.Tests/HookServerTests.cs",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta.Tests/AltaScriptBindingTests.cs",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/cloudSessions/cloudSessions.browser.test.ts",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/editor/fileEditorState.test.ts",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/mobile/mobileList.browser.test.ts",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/src/workflows/runFlow.test.ts",
+        "count": 1
+      }
+    ],
+    "todo": [
+      {
+        "path": "src/CodeAlta.Catalog/BuiltinSkills/improve-codebase-health/scripts/signals.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Tests/TerminalCompactionPluginTests.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/OwnedSessionCompactionPluginTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Tests/AgentJsonSerializationTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Evals/EvalTasks.cs",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Tests/ClaudeCodeSessionTests.cs",
+        "count": 2
+      },
+      {
+        "path": "src/CodeAlta.Orchestration.Tests/SessionRuntimeServiceTests.cs",
+        "count": 1
+      },
+      {
+        "path": "src/CodeAlta/frontend/scripts/failures-reporter.mjs",
+        "count": 1
+      }
+    ],
+    "workaround": [
+      {
+        "path": "src/CodeAlta.Catalog.Tests/SkillCatalogTests.cs",
+        "count": 15
+      },
+      {
+        "path": "src/CodeAlta.Agent/Runtime/FileSystemAgentSessionStore.Branch.cs",
+        "count": 10
+      },
+      {
+        "path": "src/CodeAlta.CodexAppServer.Generator/CodexSchemaSource.cs",
+        "count": 9
+      },
+      {
+        "path": "src/CodeAlta.Agent.Claude/ClaudeCodeTranscriptRelocation.cs",
+        "count": 8
+      },
+      {
+        "path": "src/CodeAlta.Catalog/ApplicationDatabase.cs",
+        "count": 7
+      },
+      {
+        "path": "src/CodeAlta.Plugin.Browser/BrowserPool.cs",
+        "count": 7
+      },
+      {
+        "path": "benchmarks/prompt-health/score.mjs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Cli.Tests/CliSandboxWorkerTests.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Plugin.Jira/JiraCli.cs",
+        "count": 6
+      },
+      {
+        "path": "src/CodeAlta.Agent/Runtime/AgentSessionJournalFile.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Agent/Runtime/FileSystemAgentSessionStore.Import.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Catalog/SessionMoves/SessionMoveTransactionStore.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Catalog/SessionMoves/SessionRelinquishmentStore.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Fleet.Update/UpdateFeed.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Hosting/ProviderInspectionResults.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Hosting/UnixScratchpadRemoval.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Orchestration/Runtime/AttachedDocumentConverter.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Plugins/PluginFileStateStore.cs",
+        "count": 5
+      },
+      {
+        "path": "src/CodeAlta.Browser.Tests/BrowserFilesAndTraceTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Catalog.Tests/SkillCatalogCacheTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Catalog/PrivateApplicationDatabase.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Catalog/Skills/SkillCatalog.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Catalog/StartPrompts/StartPromptCatalog.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Desktop.Tests/PluginsRpcTests.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Hosting/ConfiguredProviderInspection.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Orchestration/Runtime/AdaptiveTurnCoordinator.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Orchestration/Runtime/Plugins/PluginPromptContributionScope.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Server/Hosting/ServerOwnCertificate.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Server/Hosting/SetupCodeStore.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta/Desktop/Windows/DesktopWindowsFile.cs",
+        "count": 4
+      },
+      {
+        "path": "src/CodeAlta.Agent.Copilot/CopilotDirectAuth.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Automations/AutomationService.Integrations.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Browser/Launch/BrowserProcess.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Browser/Launch/ChromiumLauncher.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Catalog.Tests/CheckoutFixture.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Catalog/BuiltinSkills/improve-codebase-health/scripts/signals.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Catalog/SR.yml",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Catalog/Secrets/LocalSecretStore.Checkpoints.cs",
+        "count": 3
+      },
+      {
+        "path": "src/CodeAlta.Catalog/Secrets/LocalSecretStore.cs",
+        "count": 3
+      }
+    ]
+  },
+  "markerTotals": {
+    "sleep_in_test": 983,
+    "skipped_test": 5,
+    "retry_in_test": 126,
+    "todo": 26,
+    "workaround": 476
+  },
+  "docs": [
+    {
+      "path": "src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md",
+      "words": 8958,
+      "lines": 730,
+      "commits": 19,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/site-screenshots.md",
+      "words": 8228,
+      "lines": 312,
+      "commits": 28,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "doc/runtime.md",
+      "words": 6298,
+      "lines": 532,
+      "commits": 24,
+      "last": "2026-11-14"
+    },
+    {
+      "path": "site/docs/fleet/machines.md",
+      "words": 6248,
+      "lines": 336,
+      "commits": 27,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/workspace/prompt.md",
+      "words": 5857,
+      "lines": 369,
+      "commits": 45,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "doc/fleet/security-and-privacy.md",
+      "words": 5854,
+      "lines": 375,
+      "commits": 30,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/plugins/developers.md",
+      "words": 5621,
+      "lines": 533,
+      "commits": 20,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/desktop.md",
+      "words": 5089,
+      "lines": 416,
+      "commits": 15,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/plugins.md",
+      "words": 5071,
+      "lines": 388,
+      "commits": 19,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/fleet/node.md",
+      "words": 5066,
+      "lines": 308,
+      "commits": 34,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/plugins/mobile.md",
+      "words": 5051,
+      "lines": 181,
+      "commits": 36,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "site/docs/fleet/server.md",
+      "words": 4795,
+      "lines": 174,
+      "commits": 17,
+      "last": "2026-11-13"
+    },
+    {
+      "path": "site/docs/workspace/settings.md",
+      "words": 4541,
+      "lines": 380,
+      "commits": 28,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "site/docs/sessions/code-mode.md",
+      "words": 4524,
+      "lines": 251,
+      "commits": 41,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "site/docs/model-providers/setup.md",
+      "words": 4478,
+      "lines": 411,
+      "commits": 20,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "site/docs/spaces.md",
+      "words": 4361,
+      "lines": 389,
+      "commits": 14,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/workspace/readme.md",
+      "words": 4208,
+      "lines": 300,
+      "commits": 21,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "doc/fleet/protocol.md",
+      "words": 4126,
+      "lines": 287,
+      "commits": 30,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "doc/fleet/deployment.md",
+      "words": 4091,
+      "lines": 250,
+      "commits": 26,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/troubleshooting.md",
+      "words": 3968,
+      "lines": 249,
+      "commits": 19,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/sessions/delegation.md",
+      "words": 3908,
+      "lines": 278,
+      "commits": 9,
+      "last": "2026-11-18"
+    },
+    {
+      "path": "doc/fleet/orchestration.md",
+      "words": 3889,
+      "lines": 270,
+      "commits": 14,
+      "last": "2026-11-18"
+    },
+    {
+      "path": "doc/providers.md",
+      "words": 3883,
+      "lines": 320,
+      "commits": 8,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/fleet/sessions.md",
+      "words": 3725,
+      "lines": 175,
+      "commits": 15,
+      "last": "2026-11-18"
+    },
+    {
+      "path": "site/docs/sessions/readme.md",
+      "words": 3701,
+      "lines": 297,
+      "commits": 18,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "site/docs/model-providers/readme.md",
+      "words": 3672,
+      "lines": 266,
+      "commits": 21,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "site/readme.md",
+      "words": 3634,
+      "lines": 348,
+      "commits": 18,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "doc/catalog-and-config.md",
+      "words": 3510,
+      "lines": 284,
+      "commits": 19,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/fleet/identity.md",
+      "words": 3462,
+      "lines": 264,
+      "commits": 26,
+      "last": "2026-11-05"
+    },
+    {
+      "path": "site/docs/automations.md",
+      "words": 3429,
+      "lines": 229,
+      "commits": 29,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/plugins/ui.md",
+      "words": 3421,
+      "lines": 351,
+      "commits": 6,
+      "last": "2026-11-17"
+    },
+    {
+      "path": "site/docs/plugins/mcp.md",
+      "words": 3402,
+      "lines": 381,
+      "commits": 9,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "doc/fleet/readme.md",
+      "words": 3400,
+      "lines": 273,
+      "commits": 6,
+      "last": "2026-11-09"
+    },
+    {
+      "path": "doc/fleet/access-control.md",
+      "words": 3241,
+      "lines": 242,
+      "commits": 16,
+      "last": "2026-11-05"
+    },
+    {
+      "path": "site/docs/browser.md",
+      "words": 3174,
+      "lines": 206,
+      "commits": 11,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/desktop-and-tui.md",
+      "words": 3125,
+      "lines": 270,
+      "commits": 12,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/secrets/vaults.md",
+      "words": 3067,
+      "lines": 220,
+      "commits": 15,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/prompts.md",
+      "words": 3063,
+      "lines": 359,
+      "commits": 2,
+      "last": "2026-11-04"
+    },
+    {
+      "path": "AGENTS.md",
+      "words": 3041,
+      "lines": 182,
+      "commits": 1,
+      "last": "2026-11-10"
+    },
+    {
+      "path": "doc/fleet/sessions-across-machines.md",
+      "words": 3012,
+      "lines": 243,
+      "commits": 10,
+      "last": "2026-11-09"
+    }
+  ],
+  "docsChanged": [
+    {
+      "path": "readme.md",
+      "words": 2873,
+      "lines": 142,
+      "commits": 47,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "site/docs/workspace/prompt.md",
+      "words": 5857,
+      "lines": 369,
+      "commits": 45,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "site/docs/sessions/code-mode.md",
+      "words": 4524,
+      "lines": 251,
+      "commits": 41,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "site/docs/plugins/mobile.md",
+      "words": 5051,
+      "lines": 181,
+      "commits": 36,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "doc/fleet/node.md",
+      "words": 5066,
+      "lines": 308,
+      "commits": 34,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/sessions/sandbox.md",
+      "words": 2915,
+      "lines": 213,
+      "commits": 33,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "doc/fleet/security-and-privacy.md",
+      "words": 5854,
+      "lines": 375,
+      "commits": 30,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "doc/fleet/protocol.md",
+      "words": 4126,
+      "lines": 287,
+      "commits": 30,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "site/docs/automations.md",
+      "words": 3429,
+      "lines": 229,
+      "commits": 29,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/site-screenshots.md",
+      "words": 8228,
+      "lines": 312,
+      "commits": 28,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "site/docs/workspace/settings.md",
+      "words": 4541,
+      "lines": 380,
+      "commits": 28,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "site/docs/fleet/machines.md",
+      "words": 6248,
+      "lines": 336,
+      "commits": 27,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "doc/fleet/deployment.md",
+      "words": 4091,
+      "lines": 250,
+      "commits": 26,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "doc/fleet/identity.md",
+      "words": 3462,
+      "lines": 264,
+      "commits": 26,
+      "last": "2026-11-05"
+    },
+    {
+      "path": "site/docs/command-line.md",
+      "words": 2515,
+      "lines": 180,
+      "commits": 25,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "doc/runtime.md",
+      "words": 6298,
+      "lines": 532,
+      "commits": 24,
+      "last": "2026-11-14"
+    },
+    {
+      "path": "site/docs/fleet/people-and-access.md",
+      "words": 1933,
+      "lines": 108,
+      "commits": 24,
+      "last": "2026-11-07"
+    },
+    {
+      "path": "site/docs/workspace/readme.md",
+      "words": 4208,
+      "lines": 300,
+      "commits": 21,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "site/docs/model-providers/readme.md",
+      "words": 3672,
+      "lines": 266,
+      "commits": 21,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "site/docs/secrets/readme.md",
+      "words": 2282,
+      "lines": 131,
+      "commits": 21,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/plugins/developers.md",
+      "words": 5621,
+      "lines": 533,
+      "commits": 20,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/model-providers/setup.md",
+      "words": 4478,
+      "lines": 411,
+      "commits": 20,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "site/docs/model-providers/configuration.md",
+      "words": 2864,
+      "lines": 318,
+      "commits": 20,
+      "last": "2026-11-12"
+    },
+    {
+      "path": "doc/sandbox.md",
+      "words": 2573,
+      "lines": 173,
+      "commits": 20,
+      "last": "2026-11-22"
+    },
+    {
+      "path": "src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md",
+      "words": 8958,
+      "lines": 730,
+      "commits": 19,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/plugins.md",
+      "words": 5071,
+      "lines": 388,
+      "commits": 19,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/troubleshooting.md",
+      "words": 3968,
+      "lines": 249,
+      "commits": 19,
+      "last": "2026-11-16"
+    },
+    {
+      "path": "doc/catalog-and-config.md",
+      "words": 3510,
+      "lines": 284,
+      "commits": 19,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/sessions/readme.md",
+      "words": 3701,
+      "lines": 297,
+      "commits": 18,
+      "last": "2026-11-19"
+    },
+    {
+      "path": "site/readme.md",
+      "words": 3634,
+      "lines": 348,
+      "commits": 18,
+      "last": "2026-11-21"
+    },
+    {
+      "path": "site/docs/fleet/server.md",
+      "words": 4795,
+      "lines": 174,
+      "commits": 17,
+      "last": "2026-11-13"
+    },
+    {
+      "path": "doc/fleet/access-control.md",
+      "words": 3241,
+      "lines": 242,
+      "commits": 16,
+      "last": "2026-11-05"
+    },
+    {
+      "path": "doc/codemode.md",
+      "words": 2911,
+      "lines": 220,
+      "commits": 16,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "src/CodeAlta.Catalog/BuiltinSkills/codealta-fleet/SKILL.md",
+      "words": 2096,
+      "lines": 89,
+      "commits": 16,
+      "last": "2026-11-10"
+    },
+    {
+      "path": "doc/fleet/server.md",
+      "words": 2043,
+      "lines": 174,
+      "commits": 16,
+      "last": "2026-11-11"
+    },
+    {
+      "path": "doc/desktop.md",
+      "words": 5089,
+      "lines": 416,
+      "commits": 15,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/fleet/sessions.md",
+      "words": 3725,
+      "lines": 175,
+      "commits": 15,
+      "last": "2026-11-18"
+    },
+    {
+      "path": "site/docs/secrets/vaults.md",
+      "words": 3067,
+      "lines": 220,
+      "commits": 15,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "doc/fleet/secrets.md",
+      "words": 1816,
+      "lines": 125,
+      "commits": 15,
+      "last": "2026-11-20"
+    },
+    {
+      "path": "site/docs/spaces.md",
+      "words": 4361,
+      "lines": 389,
+      "commits": 14,
+      "last": "2026-11-20"
+    }
+  ]
+}

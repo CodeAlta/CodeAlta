@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codebase health report</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem("health-report-theme") || "auto"; } catch (e) { /* no storage for this file: stay on auto */ }</script>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#f8f7f4, #101214);
+  --surface: light-dark(#ffffff, #181b1e);
+  --sunken: light-dark(#f1efea, #0b0d0e);
+  --ink: light-dark(#1d1c1a, #e9e7e2);
+  --muted: light-dark(#6a675f, #9b988f);
+  --line: light-dark(#e3e0d8, #2a2e33);
+  --accent: light-dark(#255f85, #7db8dc);
+  --good: light-dark(#1f7a55, #5fcf9d);
+  --good-bg: light-dark(#e3f3ea, #12301f);
+  --warn: light-dark(#9a6200, #e8b455);
+  --warn-bg: light-dark(#fbefd5, #33270c);
+  --bad: light-dark(#b3352b, #f08a7e);
+  --bad-bg: light-dark(#fbe6e2, #3a1512);
+  --info-bg: light-dark(#e4eff6, #12283a);
+  --mute-bg: light-dark(#eceae4, #22262a);
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 4rem; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--mono); font-size: .87em; }
+code { background: var(--mute-bg); padding: .08em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; margin: 0; }
+h1 { font-size: 2.3rem; letter-spacing: -.01em; }
+h2 { font-size: 1.55rem; }
+h3 { font-size: 1.15rem; }
+p { margin: 0 0 .7em; }
+p:last-child, ul:last-child { margin-bottom: 0; }
+ul { margin: 0 0 .7em; padding-left: 1.15em; }
+li { margin: .15em 0; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 1.5rem; }
+.eyebrow { font-size: .74rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+
+/* top bar */
+.bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.bar .wrap { display: flex; align-items: center; gap: 1.1rem; height: 3rem; }
+.bar nav { display: flex; gap: 1rem; flex: 1; overflow-x: auto; white-space: nowrap; font-size: .88rem; }
+.bar nav a { color: var(--muted); }
+.bar nav a:hover { color: var(--ink); text-decoration: none; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: .2rem .7rem; font-size: .8rem; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.ghost { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: .2rem .75rem; font-size: .8rem; color: var(--muted); }
+.ghost:hover { color: var(--ink); }
+
+/* header */
+header.top { padding: 3.2rem 0 1.4rem; }
+header.top h1 { margin: .5rem 0 1rem; }
+.verdict { font-family: var(--serif); font-size: 1.28rem; line-height: 1.45; max-width: 46rem; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; margin: 2rem 0 0; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .85rem 1rem; }
+.tile b { display: block; font: 600 1.7rem/1.1 var(--serif); }
+.tile span { display: block; font-size: .82rem; }
+.tile small { display: block; color: var(--muted); font-size: .76rem; margin-top: .2rem; }
+.tile.good b { color: var(--good); } .tile.warn b { color: var(--warn); } .tile.bad b { color: var(--bad); }
+
+section { padding: 2.4rem 0; border-top: 1px solid var(--line); }
+section > .wrap > h2 { margin-bottom: .35rem; }
+.lead { color: var(--muted); max-width: 46rem; margin-bottom: 1.3rem; }
+
+/* start here */
+.moves { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .8rem; counter-reset: move; }
+.move { display: block; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; color: inherit; counter-increment: move; }
+.move:hover { border-color: var(--accent); text-decoration: none; }
+.move::before { content: counter(move); font: 600 1.6rem/1 var(--serif); color: var(--accent); display: block; margin-bottom: .45rem; }
+.move b { display: block; margin-bottom: .25rem; }
+.move span { font-size: .88rem; color: var(--muted); }
+
+/* badges */
+.badge { display: inline-block; font-size: .72rem; line-height: 1; padding: .28em .6em; border-radius: 999px; background: var(--mute-bg); color: var(--muted); white-space: nowrap; }
+.badge.strong { background: var(--good-bg); color: var(--good); }
+.badge.worth-exploring { background: var(--warn-bg); color: var(--warn); }
+.badge.speculative { background: var(--mute-bg); color: var(--muted); }
+.badge.act { background: none; border: 1px solid var(--line); color: var(--ink); }
+.badge.act.delete, .badge.act.merge, .badge.act.simplify { border-color: var(--good); color: var(--good); }
+.badge.act.add { border-color: var(--warn); color: var(--warn); }
+.badge.risk-high { background: var(--bad-bg); color: var(--bad); }
+
+/* maps */
+.maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 1.2rem; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; min-width: 0; }
+.panel h3 { margin-bottom: .2rem; }
+.panel > p { font-size: .84rem; color: var(--muted); margin-bottom: .8rem; }
+table.grid { border-collapse: separate; border-spacing: 4px; width: 100%; table-layout: fixed; font-size: .8rem; }
+table.grid th { font-weight: 500; color: var(--muted); text-align: left; padding: .2rem .3rem; overflow-wrap: anywhere; }
+table.grid thead th { text-align: center; font-size: .74rem; }
+table.grid th:first-child { width: 27%; }
+table.heat th:first-child { width: 36%; }
+table.grid td { background: var(--sunken); border-radius: 6px; padding: .35rem; vertical-align: top; height: 3rem; }
+table.grid td.best { outline: 2px dashed var(--good); outline-offset: -2px; }
+table.heat td { text-align: center; vertical-align: middle; height: 2.1rem; cursor: pointer; font-weight: 600; }
+table.heat td { padding: 0; }
+table.heat button.cell { all: unset; display: block; width: 100%; line-height: 2.1rem; text-align: center; font-weight: 600; cursor: pointer; border-radius: 6px; }
+table.heat button.cell:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.chip { display: inline-block; margin: 2px; padding: .12em .5em; border-radius: 5px; font: 600 .74rem/1.5 var(--mono); background: var(--mute-bg); color: var(--ink); }
+.chip.strong { background: var(--good-bg); color: var(--good); }
+.chip.worth-exploring { background: var(--warn-bg); color: var(--warn); }
+.chip:hover { text-decoration: none; outline: 1px solid currentColor; }
+.panel.wide { grid-column: 1 / -1; }
+table.who th:first-child { width: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+table.who th a { color: var(--ink); }
+table.who thead th:not(:first-child) { width: 7.5rem; }
+table.who td { height: auto; text-align: center; vertical-align: middle; font-size: .76rem; font-weight: 600; padding: .3rem; }
+td.vote-cell.found, td.vote-cell.confirmed { background: var(--good-bg); color: var(--good); }
+td.vote-cell.refined { background: var(--warn-bg); color: var(--warn); }
+td.vote-cell.disputed { background: var(--bad-bg); color: var(--bad); }
+.scatter { width: 100%; height: auto; max-width: 780px; display: block; margin-bottom: 1rem; }
+.scatter text { font: 10px var(--sans); fill: var(--muted); }
+.scatter .axis { stroke: var(--line); }
+.scatter circle { fill: var(--muted); fill-opacity: .45; stroke: var(--surface); }
+.scatter a circle { fill: var(--accent); fill-opacity: .85; }
+.scatter .name { fill: var(--ink); }
+
+/* filters */
+.filters { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; margin: 0 0 1.4rem; }
+.filters .group { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin-right: .7rem; }
+.filters .group > span { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-right: .15rem; }
+.filters button.f { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: .15rem .65rem; font-size: .8rem; color: var(--muted); }
+.filters button.f[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.filters input { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: .22rem .8rem; font: inherit; font-size: .82rem; min-width: 11rem; }
+.count { font-size: .8rem; color: var(--muted); margin-left: auto; }
+
+/* themes and findings */
+.theme { margin: 0 0 2rem; }
+.theme > h3 { font-size: 1.25rem; }
+.theme > p { color: var(--muted); max-width: 46rem; margin: .25rem 0 .8rem; }
+details.finding { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin: .5rem 0; }
+details.finding[open] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+details.finding > summary { list-style: none; cursor: pointer; padding: .8rem 1.1rem; display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .9rem; align-items: baseline; }
+details.finding > summary::-webkit-details-marker { display: none; }
+.fid { font: 600 .8rem var(--mono); color: var(--muted); }
+.ftitle { font-weight: 600; }
+.fclaim { grid-column: 2 / 3; color: var(--muted); font-size: .9rem; }
+.fmeta { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.votes { display: inline-flex; gap: 3px; margin-left: .25rem; }
+.vote { width: 1.25rem; height: 1.25rem; border-radius: 50%; font: 700 .68rem/1.25rem var(--sans); text-align: center; background: var(--mute-bg); color: var(--muted); }
+.vote.found, .vote.confirmed { background: var(--good-bg); color: var(--good); }
+.vote.refined { background: var(--warn-bg); color: var(--warn); }
+.vote.disputed { background: var(--bad-bg); color: var(--bad); }
+.fbody { padding: .3rem 1.1rem 1.2rem; border-top: 1px solid var(--line); }
+.fbody h4 { font: 600 .74rem var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 1.2rem 0 .4rem; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 2rem; }
+.evidence { list-style: none; padding: 0; }
+.evidence li { padding: .35rem 0 .35rem .8rem; border-left: 2px solid var(--line); margin: .3rem 0; font-size: .92rem; }
+.evidence .where { display: block; font: .8rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.balance { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; }
+.balance > div { border-radius: 8px; padding: .6rem .8rem; font-size: .92rem; }
+.balance .minus { background: var(--good-bg); }
+.balance .plus { background: var(--warn-bg); }
+.balance b { display: block; font-size: .74rem; letter-spacing: .07em; text-transform: uppercase; margin-bottom: .25rem; }
+.balance .minus b { color: var(--good); } .balance .plus b { color: var(--warn); }
+.delta { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .6rem; }
+.delta span { font: 600 .78rem var(--mono); padding: .15em .55em; border-radius: 5px; background: var(--mute-bg); }
+.delta span.neg { background: var(--good-bg); color: var(--good); }
+.delta span.pos { background: var(--warn-bg); color: var(--warn); }
+.callout { border-radius: 8px; padding: .6rem .8rem; font-size: .92rem; background: var(--info-bg); margin-top: .9rem; }
+.callout.dissent { background: var(--warn-bg); }
+.callout b { font-size: .74rem; letter-spacing: .07em; text-transform: uppercase; display: block; margin-bottom: .15rem; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1.1rem; align-items: center; font-size: .82rem; color: var(--muted); }
+
+/* before / after */
+.ba { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: .8rem; }
+.ba > div { background: var(--sunken); border-radius: 8px; padding: .8rem; min-width: 0; }
+.ba .tag { font: 600 .7rem var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: .6rem; }
+.ba .after .tag { color: var(--good); }
+.dg + .dg { margin-top: .7rem; }
+.dg-note { font-size: .8rem; color: var(--muted); margin-top: .4rem; }
+.box { border: 1.5px solid var(--line); background: var(--surface); border-radius: 7px; padding: .4rem .6rem; font-size: .82rem; min-width: 0; }
+.box > b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.box > small { color: var(--muted); display: block; }
+.box.deep { border-width: 3px; border-color: var(--ink); }
+.box.good { border-color: var(--good); background: var(--good-bg); }
+.box.warn { border-color: var(--warn); background: var(--warn-bg); }
+.box.bad { border-color: var(--bad); background: var(--bad-bg); }
+.box.gone { border-style: dashed; opacity: .55; text-decoration: line-through; }
+.box.faded { opacity: .55; }
+.boxes { display: flex; flex-wrap: wrap; gap: .45rem; }
+.boxes > .box { flex: 1 1 110px; }
+.box .boxes { margin-top: .4rem; }
+.layers { display: flex; flex-direction: column; gap: 3px; }
+.layers .box { border-radius: 4px; border-left-width: 5px; }
+.layers .arrow, .flow .arrow { color: var(--muted); text-align: center; font-size: .8rem; line-height: 1; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.flow .box { flex: 0 1 auto; }
+.bars { display: grid; grid-template-columns: minmax(70px, auto) 1fr auto; gap: .3rem .6rem; align-items: center; font-size: .82rem; }
+.bars .track { background: var(--mute-bg); border-radius: 4px; height: .8rem; overflow: hidden; }
+.bars .fill { height: 100%; background: var(--muted); border-radius: 4px; }
+.bars .fill.good { background: var(--good); } .bars .fill.warn { background: var(--warn); } .bars .fill.bad { background: var(--bad); }
+.bars .num { font-family: var(--mono); font-size: .78rem; text-align: right; }
+.mass { display: flex; gap: .8rem; align-items: flex-end; flex-wrap: wrap; }
+.mass figure { margin: 0; text-align: center; font-size: .78rem; flex: 1 1 80px; }
+.mass .if { background: var(--warn); border-radius: 4px 4px 0 0; }
+.mass .im { background: var(--ink); opacity: .8; border-radius: 0 0 4px 4px; margin-top: 2px; }
+.mass figcaption { margin-top: .3rem; color: var(--muted); overflow-wrap: anywhere; }
+.text { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: .6rem .75rem; font-size: .88rem; white-space: pre-wrap; }
+.text + .dg-note { font-family: var(--mono); }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: .6rem .75rem; font: .78rem/1.5 var(--mono); overflow-x: auto; }
+.edges { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .3rem .5rem; align-items: center; }
+.edges .arrow { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+
+/* roadmap */
+.waves { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+.wave { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
+.wave > p { font-size: .84rem; color: var(--muted); margin: .2rem 0 .6rem; }
+.wave ol { margin: 0; padding-left: 1.2rem; }
+.wave li { margin: .45rem 0; font-size: .92rem; }
+.wave li small { display: block; color: var(--muted); }
+
+/* appendix */
+details.more { border-top: 1px solid var(--line); padding: .7rem 0; }
+details.more > summary { cursor: pointer; font-weight: 600; }
+details.more > div { padding: .8rem 0 .3rem; }
+table.plain { border-collapse: collapse; width: 100%; font-size: .86rem; }
+table.plain th, table.plain td { text-align: left; padding: .35rem .6rem .35rem 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+table.plain th { font-weight: 500; color: var(--muted); font-size: .78rem; }
+table.plain td.n { font-family: var(--mono); text-align: right; white-space: nowrap; }
+footer { padding: 2rem 0 3rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); }
+.hidden { display: none !important; }
+@media (max-width: 640px) {
+  h1 { font-size: 1.8rem; }
+  details.finding > summary { grid-template-columns: auto 1fr; }
+  .fmeta { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media print {
+  .bar, .filters, .actions button { display: none !important; }
+  :root, :root[data-theme] { color-scheme: light !important; }
+  details.finding { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="bar"><div class="wrap">
+  <nav id="nav"></nav>
+  <button class="ghost" id="toggle-all" type="button">Open all</button>
+  <div class="seg" role="group" aria-label="Theme">
+    <button type="button" data-theme-set="auto">Auto</button>
+    <button type="button" data-theme-set="light">Light</button>
+    <button type="button" data-theme-set="dark">Dark</button>
+  </div>
+</div></div>
+<main id="app"></main>
+<script id="report-data" type="application/json">{"title":"Health review of CodeAlta","repo":"CodeAlta","commit":"2a3fd8388","date":"2026-11-22","scope":"whole repository at \u0060feature50\u0060: .NET libraries and executables, desktop frontend, tests, CI, docs and agent instructions","links":{"root":"../../..","blob":"https://github.com/CodeAlta/CodeAlta/blob/2a3fd83883cbf71ba222b1e70bf89c5c0f9c1512/"},"verdict":"The core rules hold: one writer per session, clean low layers, guardrail tests that catch regressions. The cost is in how state is saved and decisions repeated: stores whose saves their readers refuse, provider edits that bypass the store\u0027s lock, decisions kept in two places, and one 6,700-line component every feature edits. Most cures delete or merge code.","metrics":[{"label":"strong findings","value":"11 of 16","note":"found or confirmed by two analysts, checked in the code","tone":"good"},{"label":"writers of the provider list that skip the store\u0027s locked update","value":"14","note":"in the desktop, the node and the TUI; 2 of them write defaults into \u0060config.toml\u0060","tone":"bad"},{"label":"\u0060useState\u0060 in the \u0060App\u0060 component","value":"134","note":"6,741 lines; \u0060main.tsx\u0060 changed in 144 of 1,702 commits in four weeks","tone":"bad"},{"label":"session lists broken by a column without a version bump","value":"3 in 6 days","note":"2026-10-26 to 2026-10-31, each an existing database","tone":"bad"},{"label":"words an agent loads with the plugin skill","value":"8,958","note":"about 12,000 tokens per activation; the next built-in skill has 2,096","tone":"warn"}],"analysts":[{"id":"opus","name":"Claude Opus 5.5","model":"claude-code:opus@xhigh","role":"driver","analysis":"analysis/claude-opus-5-5.md"},{"id":"gemini","name":"Gemini 4 Neon","model":"antigravity-acp:gemini-4-neon@high","role":"analyst","analysis":"analysis/gemini-4-neon.md","review":"analysis/gemini-4-neon.review.md"},{"id":"astra","name":"GPT 6.2 Astra","model":"codex:gpt-6.2-astra@max","role":"analyst","analysis":"analysis/gpt-6.2-astra.md"}],"themes":[{"id":"saves","title":"Saves that lose what they keep","thesis":"A save that succeeds and loses state costs more than one that fails: these come first.","findings":["F01","F02","F03","F04"]},{"id":"twice","title":"One decision kept in two places","thesis":"Each was fixed in one place and missed in the other; the cure makes it exist once.","findings":["F05","F06","F07","F08"]},{"id":"dead","title":"Code that only its tests reach","findings":["F09","F10"]},{"id":"window","title":"The state of the desktop window in one component","findings":["F11"]},{"id":"tests","title":"Tests and CI that say what failed","thesis":"Every other change of this review is judged by the suite.","findings":["F12","F13","F14"]},{"id":"text","title":"Text agents load in every session","findings":["F15","F16"]}],"findings":[{"id":"F01","title":"Keep the automation state within the size its own reader accepts","lens":"persistence","area":"automations","action":"fix","strength":"strong","impact":"high","effort":"S","risk":"low","claim":"The automation state can be saved larger than the 8 MiB its reader accepts; the next start then loads empty state with every automation paused, no run history and no trigger watermarks.","candidates":["C01"],"evidence":[{"text":"A try records each call it does not make, as a line of up to 2,000 characters.","file":"src/CodeAlta.Automations/AutomationService.Autonomy.cs","line":"132"},{"text":"Up to 50 such calls per run.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"51"},{"text":"100 runs kept per automation, 2,000 in all, against a reader limit of 8 MiB: one automation alone can reach 10 MB.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"190-195"},{"text":"Retention counts runs, not bytes.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"313"},{"text":"The reader returns nothing above the limit and marks the file unreadable; the store then starts empty and paused.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"444"},{"text":"The paused, empty state that replaces it.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"219"},{"text":"\u0060Save\u0060 writes the whole state whatever its size.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"467"}],"change":"Make the read limit a rule of the save: when the serialized state is over budget, drop the oldest completed runs, their calls first, until it fits. Never drop runs in progress, the pause choice, approvals or trigger watermarks; if those alone do not fit, fail the save and keep the last readable file.","balance":{"removes":["the outcome where a save succeeds and the next start loses the state of every automation"],"adds":["a size check on the bytes already serialized","one round-trip test"]},"before":{"type":"flow","items":[{"label":"tries record their calls"},{"label":"save: 9 MB","tone":"warn","note":"written without a check"},{"label":"next start: over 8 MiB","tone":"bad","note":"read as unreadable"},{"label":"all automations paused, history gone","tone":"bad"}]},"after":{"type":"flow","items":[{"label":"tries record their calls"},{"label":"save: over budget","note":"oldest completed runs dropped first"},{"label":"file under 8 MiB","tone":"good"},{"label":"next start keeps state and pause choice","tone":"good"}]},"firstStep":"A test that fills a state just under 8 MiB, adds one run that crosses the limit and reopens the store: today it starts paused and empty. Then the size check in \u0060Save\u0060.","verify":["The reopened store keeps the newest run and a watermark set before, and stays unpaused.","The automation tests of \u0060CodeAlta.Desktop.Tests\u0060 pass; the test of a malformed file still pauses."],"risks":["The limits on runs become upper bounds: 100 very large runs may not all be kept."],"ifNot":"A user who runs long tries of many automations finds them all paused one morning, with their history and trigger state gone.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":["src/CodeAlta.Automations/AutomationState.cs","src/CodeAlta.Automations/AutomationService.Autonomy.cs"]},{"id":"F02","title":"Grant an automation occurrence only once its claim is written","lens":"persistence","area":"automations","action":"fix","strength":"strong","impact":"medium","effort":"S","risk":"low","claim":"When the claim file cannot be written, \u0060TryClaim\u0060 still grants the occurrence; after a restart the claim is gone and the same occurrence can be granted and run a second time.","candidates":["C05"],"evidence":[{"text":"\u0060TryClaim\u0060 saves, then returns true whatever the save did.","file":"src/CodeAlta.Automations/AutomationClaims.cs","line":"153"},{"text":"\u0060Save\u0060 swallows I/O and access errors.","file":"src/CodeAlta.Automations/AutomationClaims.cs","line":"253"},{"text":"An unreadable claim file reads as no claims at all.","file":"src/CodeAlta.Automations/AutomationClaims.cs","line":"239"},{"text":"The grant reaches the start of the run.","file":"src/CodeAlta.Automations/AutomationService.cs","line":"797"},{"text":"Commit \u006009ee9a3ef\u0060 fixed the same assumption for the hourly call counter, whose store now returns the result of its save.","file":"src/CodeAlta.Automations/AutomationState.cs","line":"420"}],"change":"\u0060Save\u0060 returns whether it wrote, and \u0060TryClaim\u0060 grants only then. An unreadable ledger means \u0022storage unavailable\u0022, not \u0022no claims\u0022: the scheduler skips or defers the occurrence with that reason.","balance":{"removes":["a grant that no file records","the reading of an I/O error as an absence"],"adds":["a claim outcome","an error-path test"]},"firstStep":"In the placement fixture, make the claim file unwritable and check that the start is refused; keep the restart test that passes today.","verify":["Zero runner starts on a failed claim write.","After the storage recovers, a reopened store refuses the same occurrence."],"risks":["A missed or deferred occurrence is preferred to a duplicate run: a pooled event must not be marked seen when its claim failed."],"ifNot":"Rare, but when it happens the side effects of an automation run twice.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":["src/CodeAlta.Automations/AutomationClaims.cs","src/CodeAlta.Automations/AutomationService.cs"]},{"id":"F03","title":"Edit the providers of \u0060config.toml\u0060 through the store\u0027s locked update, on the raw definitions","lens":"persistence","area":"provider settings","action":"merge","strength":"strong","impact":"high","effort":"M","risk":"medium","claim":"Fourteen call sites in the desktop, the node and the TUI read and rewrite the whole provider list of \u0060config.toml\u0060 by themselves: none holds the file lock from the read to the write, and two read the definitions with their defaults filled in, so adding a model server writes defaults into every other provider.","candidates":["C10","C13"],"evidence":[{"text":"The store already has a read-and-save under the lock of the file, which nine settings writers use and no provider edit does.","file":"src/CodeAlta.Catalog/CodeAltaConfigStore.cs","line":"275"},{"text":"The callers of \u0060UpdateGlobal\u0060: settings only.","command":"git grep -n \u0027.UpdateGlobal(\u0027 -- \u0027src/*.cs\u0027 \u0027:!src/*Tests*\u0027"},{"text":"The 14 callers of the whole-list save, outside the store.","command":"git grep -n \u0027SaveGlobalProviderDefinitions(\u0027 -- \u0027src/*.cs\u0027 \u0027:!src/*Tests*\u0027"},{"text":"The text editor holds the file lock across its revision check and its save.","file":"src/CodeAlta/Desktop/Rpc/GlobalConfigRpc.cs","line":"124"},{"text":"The structured form checks the revision under an in-process lock only; the store takes the file lock at the save.","file":"src/CodeAlta/Desktop/Rpc/GlobalConfigRpc.cs","line":"943"},{"text":"Adding a model server reads the completed definitions and saves them all back.","file":"src/CodeAlta/Desktop/DesktopApplication.cs","line":"909-917"},{"text":"That read fills in the defaults of every definition.","file":"src/CodeAlta.Catalog/CodeAltaConfigStore.cs","line":"1879"},{"text":"The node does the same for the providers of a scope.","file":"src/CodeAlta.Node/NodeScopeProviders.cs","line":"143"},{"text":"The form avoids it on purpose: \u0022no defaults are filled in, so saving them back adds none\u0022.","file":"src/CodeAlta/Desktop/Rpc/GlobalConfigRpc.cs","line":"976"}],"change":"Give the store one provider edit: under \u0060ConfigFileLock\u0060, read the raw definitions, apply the caller\u0027s change, check the revision when the caller has one, save. Move the 14 call sites to it, the model-server and node paths first. Complete the definitions only to apply them to the runtime, after the write.","balance":{"removes":["14 hand-written read-modify-write loops","defaults written into untouched providers","edits lost between two writers (the developer instance shares \u0060config.toml\u0060)"],"adds":["one store method of about 20 lines","a two-writer test and a raw round-trip test"]},"before":{"type":"layers","items":[{"label":"14 callers","note":"desktop, node, TUI"},{"label":"read: completed or raw, each its own","tone":"warn"},{"label":"edit, unlocked","tone":"bad"},{"label":"SaveGlobalProviderDefinitions","note":"takes the lock only here"}]},"after":{"type":"layers","items":[{"label":"14 callers"},{"label":"the store\u0027s provider edit","tone":"deep","note":"lock, raw read, edit, revision, save"},{"label":"runtime gets completed definitions","note":"after the write"}]},"firstStep":"Add the store method and move the model-server path to it, with a test: a config with a minimal Codex provider keeps no \u0060api_url\u0060, \u0060max_concurrent_requests\u0060 or \u0060model_discovery\u0060 after a model server is added.","steps":["Move the structured form and check two writers on one revision: one \u0060ok\u0060, one \u0060conflict\u0060.","Move the node paths (\u0060NodeScopeProviders\u0060, \u0060NodeProviders\u0060).","Move the TUI coordinator; the whole-list save remains for the store only."],"verify":["No caller outside the store reads completed definitions to save them.","The two-writer test returns exactly one \u0060ok\u0060, and the winner\u0027s value is on disk."],"risks":["\u0060ConfigFileLock\u0060 is a thread-affine mutex: the edit must not span an \u0060await\u0060.","Disabled providers and providers of an unknown type stay as they are."],"ifNot":"Each new caller copies one of the 14 loops, and an edit made in the developer instance while the normal one saves is lost without a word.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":["src/CodeAlta.Catalog/CodeAltaConfigStore.cs","src/CodeAlta/Desktop/Rpc/GlobalConfigRpc.cs","src/CodeAlta/Desktop/DesktopApplication.cs","src/CodeAlta.Node/NodeScopeProviders.cs","src/CodeAlta.Node/NodeProviders.cs"]},{"id":"F04","title":"Delete the TUI\u0027s copy of a provider definition","lens":"duplication","area":"provider settings","action":"delete","strength":"strong","impact":"medium","effort":"S","risk":"low","claim":"Saving one provider in the TUI rewrites every provider through a private copier that lacks seven properties the store\u0027s copy keeps, so it removes them from untouched providers in \u0060config.toml\u0060.","candidates":["C07"],"evidence":[{"text":"The TUI copier: no \u0060ContextSize\u0060, \u0060Sandbox\u0060, \u0060CodeMode\u0060, \u0060Server\u0060, \u0060Request\u0060, \u0060ModelRequest\u0060 or \u0060Headers\u0060.","file":"src/CodeAlta.Tui/ViewModels/ModelProviderEditorItemViewModel.cs","line":"377"},{"text":"The store\u0027s copy, which has them.","file":"src/CodeAlta.Catalog/CodeAltaConfigStore.cs","line":"3920"},{"text":"The dialog rebuilds every provider to save.","file":"src/CodeAlta.Tui/Views/ModelProvidersDialog.cs","line":"1459"},{"text":"The merge removes the modeled keys a definition no longer has.","file":"src/CodeAlta.Catalog/CodeAltaConfigStore.cs","line":"2222"},{"text":"Commit \u006077da0870b\u0060 had to add the model visibility rules to both copies; a third copier exists for documents.","file":"src/CodeAlta.Catalog/CodeAltaConfigDocumentCopy.cs","line":"153"}],"change":"Use \u0060CodeAltaConfigStore.CloneProviderDefinition\u0060 in both paths of the TUI editor and delete its copier.","balance":{"removes":["a 64-line copier and its own list of fields"],"adds":["one preservation test"],"delta":{"lines":-60}},"firstStep":"Extend the round trip of \u0060ProviderFrontendCoordinatorTests\u0060 with an untouched provider that has a \u0060server\u0060 and a \u0060context_size\u0060: it fails today. Then replace the copier.","verify":["The untouched provider keeps both settings when the config is reopened.","The tests of omitted defaults still pass."],"risks":["The store\u0027s copy deep-copies nested tables: compare values, not references."],"ifNot":"A TUI user who renames one provider loses the model server or the sandbox of another.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":["src/CodeAlta.Tui/ViewModels/ModelProviderEditorItemViewModel.cs"]},{"id":"F05","title":"Add the missing columns of the session list at each open, from one list","lens":"persistence","area":"session list","action":"simplify","strength":"strong","impact":"high","effort":"S","risk":"low","claim":"Three times in six days a column added to the session list broke listing sessions on every existing database (\u0022no such column\u0022), because its migration only runs when \u0060SchemaVersion\u0060 changes and the version was not raised.","candidates":["C04"],"evidence":[{"text":"The migration is skipped when the stored version is the one asked for.","file":"src/CodeAlta.Catalog/ApplicationDatabase.cs","line":"345"},{"text":"The version of the session list.","file":"src/CodeAlta.Catalog/SessionJournalSqliteCache.cs","line":"15"},{"text":"Nine hand-written \u0060Add…ColumnAsync\u0060 methods, each a \u0060pragma_table_info\u0060 check then an \u0060ALTER TABLE\u0060.","file":"src/CodeAlta.Catalog/SessionJournalSqliteCache.cs","line":"1599-1785"},{"text":"Three fixes that only raised the version: sandbox column (\u0022no such column: c.local_sandbox\u0022), options column, cloud column.","command":"git show --stat 77e0346bd c3a5461df 8f15ae2f5"},{"text":"Every new fact about sessions is a column or a table of the database.","file":"doc/development-guide.md","line":"7"}],"change":"Declare each column once: name, type, and whether adding it invalidates the rows. At each open, read \u0060pragma_table_info\u0060 (a read) and add what is missing in one write. Keep \u0060SchemaVersion\u0060 for what a list of columns cannot express: moving large values, dropping a column.","balance":{"removes":["nine near-identical methods, about 170 lines","the rule \u0022raise the version when you add a column\u0022"],"adds":["a column table and a loop of about 30 lines"],"delta":{"lines":-140}},"before":{"type":"flow","items":[{"label":"add the column to \u0060CREATE TABLE\u0060"},{"label":"write an \u0060Add…ColumnAsync\u0060"},{"label":"forget to raise the version","tone":"bad"},{"label":"existing databases: \u0022no such column\u0022","tone":"bad"}]},"after":{"type":"flow","items":[{"label":"add the column to the list"},{"label":"open: read \u0060pragma_table_info\u0060"},{"label":"missing column added","tone":"good"}]},"firstStep":"A test that creates the session tables without one declared column, at the current version, then lists sessions: it fails today. Then the loop; the nine methods go.","verify":["That test passes, also for a column added to the list without changing the version.","\u0060CodeAlta.Catalog.Tests\u0060 pass."],"risks":["The permission-mode and space columns also clear the rows: keep that flag per column.","An up-to-date database must stay a read at open (\u0060ApplicationDatabase.cs:337\u0060)."],"ifNot":"The next column of a session breaks the session list of every user who already has a database.","votes":{"opus":"found","gemini":"confirmed","astra":"unreviewed"},"files":["src/CodeAlta.Catalog/SessionJournalSqliteCache.cs"]},{"id":"F06","title":"Give Settings the inherited project scope that sessions use","lens":"duplication","area":"settings of a sub-project","action":"merge","strength":"strong","impact":"medium","effort":"M","risk":"medium","claim":"For a sub-project, Settings and the session disagree on skills, prompts and plugins: a repository skill offered to the session is missing from Settings, a skill the parent turned off shows as on, and the Prompts and Plugins pages show the sub-project\u0027s own entries only, against the user guide.","candidates":["C16"],"evidence":[{"text":"A session takes the inherited roots, the effective folders and the disabled names of every ancestor.","file":"src/CodeAlta.Catalog/Skills/SkillCatalogQuery.cs","line":"160-175"},{"text":"The Settings listing reads the sub-project\u0027s disabled names only, with one root.","file":"src/CodeAlta.Catalog/Skills/SkillManagementService.cs","line":"92"},{"text":"Its query: one project root.","file":"src/CodeAlta.Catalog/Skills/SkillManagementService.cs","line":"149"},{"text":"The page passes \u0060SkillFolders\u0060, not \u0060EffectiveSkillFolders\u0060.","file":"src/CodeAlta/Desktop/Rpc/SkillsRpc.cs","line":"517"},{"text":"The scope of a Settings page is resolved to a root only, for every page.","file":"src/CodeAlta/Desktop/Rpc/McpServersRpc.cs","line":"688"},{"text":"The Prompts page queries that root alone.","file":"src/CodeAlta/Desktop/Rpc/AgentPromptsRpc.cs","line":"69-74"},{"text":"What the user guide says a sub-project inherits.","file":"site/docs/monorepos.md","line":"95-99"}],"change":"\u0060SettingsProjectScope.ResolveAsync\u0060 returns the project, and the Skills, Prompts and Plugins pages read through the computation of effective roots and disabled names that sessions use (\u0060ProjectResourceRoots.Inherited\u0060). Settings keeps its diagnostics; creating, deleting and configuring still write to the sub-project\u0027s own files.","balance":{"removes":["a second definition of what a sub-project inherits, in three pages"],"adds":["a sub-project fixture per page"]},"firstStep":"Skills: carry the parent\u0027s disabled names into the listing of a sub-project, with a test where a user skill is turned off by the parent only.","steps":["Skills: the inherited roots and \u0060EffectiveSkillFolders\u0060.","Prompts, then Plugins, through the same resolved project."],"verify":["The sub-project lists that skill as unavailable; a skill of the parent is listed and offered.","Prompts and Plugins of a sub-project list the repository\u0027s entries, read-only."],"risks":["An inherited entry stays read-only from the sub-project: a repository-level off must not become a setting of the sub-project."],"ifNot":"In a monorepo, Settings keeps showing a list the sessions do not use.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":["src/CodeAlta.Catalog/Skills/SkillManagementService.cs","src/CodeAlta/Desktop/Rpc/SkillsRpc.cs","src/CodeAlta/Desktop/Rpc/McpServersRpc.cs","src/CodeAlta/Desktop/Rpc/AgentPromptsRpc.cs","src/CodeAlta/Desktop/Rpc/PluginsRpc.cs"]},{"id":"F07","title":"Let a desktop RPC service declare its JSON types and fixtures in its own file","lens":"duplication","area":"desktop RPC","action":"simplify","strength":"worth-exploring","impact":"medium","effort":"M","risk":"low","claim":"A new RPC service edits its own file and five shared ones; \u0060BootRpc.cs\u0060 changed in 109 commits in four weeks, all in its list of 1,021 \u0060[JsonSerializable]\u0060 lines, and \u0060demo-api.ts\u0060 in 45, 38 of them with \u0060BootRpc.cs\u0060.","candidates":["C11"],"evidence":[{"text":"The labels service: its file, \u0060DesktopApplication.cs\u0060 (twice), \u0060BootRpc.cs\u0060, \u0060demo-api.ts\u0060 and a fixture.","command":"git show --stat c708f677b"},{"text":"One context for every RPC type of the desktop.","file":"src/CodeAlta/Desktop/Rpc/BootRpc.cs","line":"151-1173"},{"text":"NeoAstra is given that one context type.","file":"src/CodeAlta/Desktop/Rpc/BootRpc.cs","line":"5"},{"text":"A stub of \u0060unavailable\u0060 methods per service.","file":"src/CodeAlta/frontend/src/demo-api.ts","line":"281"},{"text":"A fixture that names 60 services one by one; a missing name broke the test bundles once (\u0060e66f2a618\u0060).","file":"src/CodeAlta/frontend/src/projectFocus.neoastra.mount.ts","line":"7"}],"change":"Each \u0060*Rpc.cs\u0060 declares \u0060partial class DesktopJsonContext\u0060 with the attributes of its own types, if the JSON source generator accepts them spread over partial declarations: the first step tells. The fixtures re-export \u0060demo-api\u0060 with \u0060export *\u0060 and override what they fake; \u0060demo-api\u0060 builds its \u0060unavailable\u0060 stubs through one helper. With F10, the second registration in \u0060DesktopApplication.cs\u0060 goes too.","balance":{"removes":["the central list of 1,021 attributes","the 60-name export list of the fixture","most stub methods of \u0060demo-api.ts\u0060"],"adds":["one partial declaration per RPC file","one stub helper"]},"before":{"type":"boxes","items":[{"label":"LabelsRpc.cs"},{"label":"shared lists","tone":"warn","children":[{"label":"DesktopApplication.cs ×2"},{"label":"BootRpc.cs"},{"label":"main.tsx"},{"label":"demo-api.ts"},{"label":"projectFocus mount"}]}]},"after":{"type":"boxes","items":[{"label":"LabelsRpc.cs","tone":"deep","note":"service and its JSON types"},{"label":"shared","children":[{"label":"DesktopApplication.cs"},{"label":"main.tsx"}]}]},"firstStep":"Move the attributes of one RPC file (\u0060ReleaseNotesRpc.cs\u0060) to a partial declaration in that file; build and run its RPC tests.","verify":["\u0060BootRpc.cs\u0060 holds the boot types only.","A new service edits its own file, \u0060DesktopApplication.cs\u0060 and \u0060main.tsx\u0060, nothing else."],"risks":["A type shared by two services is declared once.","Two star re-exports of one name are dropped silently in ES modules: an ambiguous name stays explicit."],"dissent":"One analyst proposed one JSON context per RPC file, combined at start: \u0060[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]\u0060 names a single context for NeoAstra, so the partial declarations are the cure kept.","votes":{"opus":"found","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta/Desktop/Rpc/BootRpc.cs","src/CodeAlta/frontend/src/demo-api.ts","src/CodeAlta/frontend/src/projectFocus.neoastra.mount.ts"]},{"id":"F08","title":"Check each service of the built-in \u0060alta\u0060 commands once, for its commands and its policies","lens":"duplication","area":"alta live tool","action":"simplify","strength":"worth-exploring","impact":"low","effort":"M","risk":"low","claim":"The built-in commands test about 20 optional services twice, once to build the commands and once to list their policies, and the two lists have drifted: the early return of the policies does not test the credential broker.","candidates":["C08"],"evidence":[{"text":"The commands, built service by service.","file":"src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs","line":"157-316"},{"text":"The policies, the same services tested again.","file":"src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs","line":"324-379"},{"text":"The early return lists 20 services but not the credential broker, whose policies come later.","file":"src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs","line":"346"},{"text":"The registry already takes several contributors.","file":"src/CodeAlta.LiveTool/AltaCommandRegistry.cs","line":"13-20"}],"change":"Each self-contained partial (credentials first) becomes its own \u0060IAltaCommandContributor\u0060 that tests its service once and returns its commands and its policies together; the router of 22 flags goes.","balance":{"removes":["the second test of every service","the drift between commands and policies"],"adds":["small contributor classes on the existing interface"]},"firstStep":"A test with only the credential broker registered asserts that the \u0060credential\u0060 policies are listed: it fails today. Then the credentials contributor.","verify":["That test passes; the help and policy tests of \u0060AltaLiveToolTests\u0060 pass with the same order."],"risks":["The order of help and policies follows the order of registration: keep it."],"ifNot":"No host found today registers the broker alone: the drift stays latent until one does.","votes":{"opus":"confirmed","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs"]},{"id":"F09","title":"Delete the raw skill-scanning code that only its tests call","lens":"dead code","area":"skills","action":"delete","strength":"strong","impact":"medium","effort":"S","risk":"low","claim":"Five files (1,074 lines) and their five test files (804 lines, 25 tests) scan, read and parse skills with no product caller, and answer differently from the live catalog: they reject the \u0060triggers\u0060 and \u0060version\u0060 fields it accepts.","candidates":["C19"],"evidence":[{"text":"\u0022never used by ordinary skill discovery or activation\u0022.","file":"src/CodeAlta.Catalog/Skills/RawSkillCandidateReader.cs","line":"65"},{"text":"The five types are named only in their own files and their tests.","command":"git grep -l -E \u0027RawSkillCandidateReader|SkillCandidateMetadataReader|SkillMetadataParser|SkillIgnoreSourceReader|SkillIgnoreSourceParser\u0027 -- ."},{"text":"The live catalog accepts \u0060triggers\u0060 and \u0060version\u0060.","file":"src/CodeAlta.Catalog/Skills/SkillCatalog.cs","line":"42"},{"text":"The raw parser rejects them.","file":"src/CodeAlta.Catalog/Skills/SkillMetadataParser.cs","line":"212"},{"text":"No change to the five files since 2026-09-26.","command":"git log -1 --format=%ad -- src/CodeAlta.Catalog/Skills/SkillMetadataParser.cs"}],"change":"Delete the ignore reader and parser with their tests, then the candidate reader and metadata parser with theirs. Keep \u0060SkillFrontmatterReader\u0060 and the shared frontmatter types.","balance":{"removes":["10 files","1,878 lines","25 tests of code nothing runs"],"adds":[],"delta":{"lines":-1878,"files":-10,"tests":-25}},"firstStep":"Delete \u0060SkillIgnoreSourceReader\u0060, \u0060SkillIgnoreSourceParser\u0060 and their two test files; build and run \u0060CodeAlta.Catalog.Tests\u0060.","verify":["The search of the five names finds nothing.","The build and the Catalog tests pass."],"risks":["The types are public in a project that is not packed: no consumer outside the repository was found."],"ifNot":"A maintainer who finds these files gets a second, wrong answer to \u0022what is a valid skill\u0022.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":["src/CodeAlta.Catalog/Skills/RawSkillCandidateReader.cs","src/CodeAlta.Catalog/Skills/SkillMetadataParser.cs"]},{"id":"F10","title":"Delete the desktop start without a host","lens":"dead code","area":"desktop host","action":"delete","strength":"worth-exploring","impact":"medium","effort":"S","risk":"medium","claim":"Every desktop RPC service is registered a second time for a start without a host that only test-harness flags reach (\u0060--data-root\u0060 without \u0060--allow-owned-host\u0060), and the two lists have drifted to 81 and 55 registrations.","candidates":["C03"],"evidence":[{"text":"The start without a host is taken only when \u0060Owned\u0060 is null.","file":"src/CodeAlta/Desktop/DesktopApplication.cs","line":"129"},{"text":"A normal start sets it.","file":"src/CodeAlta/Desktop/DesktopCommandLine.cs","line":"476"},{"text":"It is null only for explicit roots without \u0060--allow-owned-host\u0060.","file":"src/CodeAlta/Desktop/DesktopCommandLine.cs","line":"306-334"},{"text":"Its 55 registrations.","file":"src/CodeAlta/Desktop/DesktopApplication.cs","line":"1858-1913"},{"text":"Tests that start it.","file":"src/CodeAlta.Desktop.Tests/DesktopWorkspaceTests.cs","line":"121"},{"text":"The explicit roots are documented for tests and for running on a copy of a profile.","file":"src/CodeAlta/README.md","line":"101"}],"change":"Remove \u0060RunAsync\u0060, the boot state of a start without a host, its parsing branch and the stub constructors only it uses; move its tests and every procedure that uses it to \u0060--profile\u0060 or \u0060--allow-owned-host\u0060.","balance":{"removes":["about 135 lines and a second way to start","the second registration of each RPC service"],"adds":[]},"firstStep":"List the procedures that start the window without \u0060--allow-owned-host\u0060 (the screenshot recipe, the release skill, the tests) and move them to \u0060--profile\u0060.","verify":["No \u0060\u0022in-development\u0022\u0060 boot state is left under \u0060src/CodeAlta\u0060.","The desktop tests pass."],"risks":["The README offers the explicit roots to run on a copy of a profile: check that \u0060--profile\u0060 covers that use."],"votes":{"opus":"confirmed","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta/Desktop/DesktopApplication.cs","src/CodeAlta/Desktop/DesktopCommandLine.cs"]},{"id":"F11","title":"Move the state of features out of the \u0060App\u0060 component","lens":"boundaries","area":"desktop frontend","action":"move","strength":"strong","impact":"high","effort":"L","risk":"medium","claim":"\u0060App\u0060 in \u0060main.tsx\u0060 is one component of 6,741 lines with 134 \u0060useState\u0060, 95 \u0060useEffect\u0060 and 94 \u0060useRef\u0060; 144 commits changed \u0060main.tsx\u0060 in four weeks (22.7 files each on average), and four text fields re-render the whole window at each keystroke, against the development guide.","candidates":["C06"],"evidence":[{"text":"The component, from line 550 to line 7291.","file":"src/CodeAlta/frontend/src/main.tsx","line":"550"},{"text":"Keystrokes of the sidebar filter set state of \u0060App\u0060.","file":"src/CodeAlta/frontend/src/main.tsx","line":"6514"},{"text":"The project rename field.","file":"src/CodeAlta/frontend/src/main.tsx","line":"6533"},{"text":"The session rename field.","file":"src/CodeAlta/frontend/src/main.tsx","line":"6689"},{"text":"The Settings search.","file":"src/CodeAlta/frontend/src/main.tsx","line":"6980"},{"text":"The state of the rename, delete and move of sessions and projects, held by \u0060App\u0060.","file":"src/CodeAlta/frontend/src/main.tsx","line":"1099-1160"},{"text":"\u0022Keystrokes, tokens and timers never re-render the whole app\u0022.","file":"doc/development-guide.md","line":"31"},{"text":"A tab switch renders all of \u0060App\u0060: \u0022a gain needs the whole of \u0060App\u0060 not to render for a switch\u0022.","file":".alta/tasks/2026-11-19-render-the-session-panes-once-for-a-tab-switch-wtvm.md"},{"text":"144 commits in four weeks.","command":"git log --since=\u00274 weeks ago\u0027 --no-merges --oneline -- src/CodeAlta/frontend/src/main.tsx"}],"change":"Each surface owns its state in its feature folder: the rename popover keeps its draft, the sidebar filter its text, the delete, archive and move dialogs their busy and message state, then a \u0060SettingsHost\u0060 the Settings overlay with its search. \u0060App\u0060 keeps what the window shares: the workspace, the tabs, the selection.","balance":{"removes":["about 40 \u0060useState\u0060 and their effects from \u0060App\u0060 in the first steps","whole-window renders while typing"],"adds":["a component or a hook per surface, in folders that exist"]},"before":{"type":"boxes","items":[{"label":"App","tone":"warn","note":"6,741 lines","children":[{"label":"rename"},{"label":"delete"},{"label":"archive"},{"label":"move"},{"label":"sidebar filter"},{"label":"Settings"},{"label":"workspace, tabs"}]}]},"after":{"type":"boxes","items":[{"label":"App","tone":"deep","children":[{"label":"workspace, tabs, selection"}]},{"label":"RenamePopover"},{"label":"session dialogs"},{"label":"SidebarFilterBox"},{"label":"SettingsHost"}]},"firstStep":"\u0060RenamePopover\u0060 keeps the title it edits and calls back on submit; \u0060renamingTitle\u0060 leaves \u0060App\u0060. A browser test counts the renders of \u0060App\u0060 while typing a title.","steps":["The sidebar filter, then the project rename.","The delete, archive and move dialogs, one per commit.","\u0060SettingsHost\u0060, with the Settings search.","Measure the tab switch again (task \u0060wtvm\u0060) before choosing an external store."],"verify":["No render of \u0060App\u0060 per keystroke in the rename popover, the sidebar filter and the Settings search.","\u0060npm test\u0060 passes; the count of \u0060useState\u0060 in \u0060App\u0060 falls at each step."],"risks":["State two surfaces read (selection, workspace) stays shared.","Moved effects stay idempotent under StrictMode."],"outOfScope":["No state library."],"dissent":"Two analysts differ on the order: the smallest surfaces first, or Settings first. Settled: the rename popover first (one field, one test), Settings once the pattern holds; the analyst who proposed Settings first agreed in review.","votes":{"opus":"found","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta/frontend/src/main.tsx"]},{"id":"F12","title":"Give every test deadline the CI factor and replace the fixed sleeps of the browser tool tests","lens":"tests","area":"tests","action":"fix","strength":"strong","impact":"medium","effort":"S","risk":"low","claim":"33 test deadlines written \u0060UtcNow.AddSeconds(…)\u0060 escape \u0060TestTime\u0060 and its four-fold CI factor, some of 2 s, and three browser test files sleep 61 times, 14.2 s per run, each time acting, sleeping and asserting once.","candidates":["C09"],"evidence":[{"text":"The guard catches \u0060UtcNow \u002B TimeSpan.From…\u0060 but not \u0060UtcNow.AddSeconds(…)\u0060.","file":"src/CodeAlta.Tests/TestTimeGuardTests.cs","line":"118"},{"text":"A wait helper with a 2-second deadline, unscaled on CI.","file":"src/CodeAlta.Tests/AltaLiveToolTests.cs","line":"7408"},{"text":"A 30-second deadline written the same way.","file":"src/CodeAlta.Browser.Tests/BrowserPluginTests.cs","line":"413"},{"text":"Click, sleep 100 ms, check once.","file":"src/CodeAlta.Browser.Tests/BrowserDrawingTests.cs","line":"175"},{"text":"Sleep 2 s, then assert that nothing came.","file":"src/CodeAlta.Browser.Tests/BrowserAnnotationsTests.cs","line":"615"},{"text":"Every limit of a test comes from \u0060TestTime\u0060.","file":"doc/development-guide.md","line":"39-40"}],"change":"Write the 33 deadlines with \u0060TestTime\u0060. Replace the sleeps by one helper that polls the page state until it holds, under \u0060TestTime\u0060; a check of absence waits for the next message the page sends.","balance":{"removes":["33 limits without the CI factor","61 sleeps, 14 s of every run"],"adds":["one polling helper"],"delta":{"seconds":-14}},"before":{"type":"flow","items":[{"label":"click"},{"label":"sleep 100 to 2,000 ms","tone":"bad"},{"label":"check once","note":"too early on a loaded machine"}]},"after":{"type":"flow","items":[{"label":"click"},{"label":"poll the state until it holds","tone":"good","note":"\u0060TestTime\u0060 deadline"},{"label":"assert"}]},"firstStep":"Convert the two 2-second deadlines of \u0060AltaLiveToolTests.cs\u0060, and add the polling helper to \u0060BrowserDrawingTests.cs\u0060.","verify":["The search of \u0060UtcNow.AddSeconds(\u0060, \u0060AddMilliseconds(\u0060 and \u0060AddMinutes(\u0060 in the tests lists only times marked \u0060// not a limit\u0060.","The three browser files run about 14 s faster and pass ten times with two test processes."],"risks":["Some \u0060UtcNow.Add…\u0060 of the tests are data, not limits: they stay, marked \u0060// not a limit\u0060."],"dissent":"One analyst also wants the guard\u0027s pattern extended to \u0060UtcNow.Add…(\u0060, so that the mistake cannot come back. Not decided here: extending a source-text guard is the owner\u0027s call.","votes":{"opus":"found","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta.Browser.Tests/BrowserDrawingTests.cs","src/CodeAlta.Browser.Tests/BrowserAnnotationsTests.cs","src/CodeAlta.Browser.Tests/BrowserPluginTests.cs","src/CodeAlta.Tests/AltaLiveToolTests.cs"]},{"id":"F13","title":"Say why a review snapshot failed instead of returning null","lens":"failure handling","area":"review snapshots","action":"fix","strength":"worth-exploring","impact":"low","effort":"S","risk":"low","claim":"\u0060GitSnapshot.WriteTreeAsync\u0060 drops git\u0027s error and I/O exceptions and returns null; a Windows CI run failed on its first, unconstrained snapshot (run 43251505041), and its log says nothing of why.","candidates":["C20"],"evidence":[{"text":"The assertion that failed on CI: the snapshot before anything is held.","file":"src/CodeAlta.Catalog.Tests/ReviewServiceTests.cs","line":"378"},{"text":"The git error and the I/O exceptions are discarded.","file":"src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs","line":"207-237"},{"text":"The first attempts of the runs of \u0060main\u0060 that passed later.","file":".alta/report/2026-11-22-health/signals/ci-runs.md"}],"change":"Carry git\u0027s exit code and error, or the exception, to the caller and into the failure message of the test. Choose a fallback once the reason is known.","balance":{"removes":["a failure without a reason"],"adds":["a reason on the result"]},"firstStep":"Return the reason with the null result, and print it in the assertion of \u0060ReviewServiceTests.cs:378\u0060.","verify":["The next failure of this test on CI names git\u0027s error or the exception."],"risks":["The reason may hold paths: keep it out of what the user sees."],"votes":{"opus":"confirmed","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs"]},{"id":"F14","title":"Run the search kernel test on the macOS and Windows runners","lens":"tests","area":"CI","action":"fix","strength":"strong","impact":"low","effort":"S","risk":"low","claim":"The platform jobs run only the test files that mention \u0060OperatingSystem.Is…()\u0060; the test that checks the CPU-specific search kernels against the scalar one is in none of them, so the ARM kernel is never checked on CI.","candidates":["C17"],"evidence":[{"text":"The selection of the platform tests.","file":".github/workflows/ci.yml","line":"68-71"},{"text":"The test picks its kernels by CPU flags, not by system.","file":"src/CodeAlta.Tests/Search/SearchVectorTests.cs","line":"20"},{"text":"The ARM path uses another instruction.","file":"src/CodeAlta.Search/SearchVectorKernels.cs","line":"96"},{"text":"The selection run locally does not list \u0060SearchVectorTests.cs\u0060.","command":"grep -rlE \u0027OperatingSystem\\.Is(Windows|MacOS|Linux)\\(\\)\u0027 --include=\u0027*.cs\u0027 src/CodeAlta*.Tests | grep -i search"}],"change":"Add \u0060SearchVectorKernelTests\u0060 to the filter of the platform jobs by name.","balance":{"removes":["one hole in the CI selection"],"adds":["one name in the filter"]},"firstStep":"Add the class to the filter of \u0060ci.yml\u0060 and read its output on the next macOS run.","verify":["The macOS job runs \u0060SearchVectorKernelTests\u0060; its output names \u0060arm64-sdot\u0060 when the runner has it."],"risks":["Running the test does not prove the runner\u0027s CPU has the instruction."],"dissent":"Another analyst also proposed selecting by \u0060[TestClass]\u0060 or a test category, because 13 helper class names enter the filter. They match no test: the filter is \u0060FullyQualifiedName~.\u003CName\u003E.\u0060, and no test name has such a segment. Dropped.","votes":{"opus":"confirmed","gemini":"confirmed","astra":"found"},"files":[".github/workflows/ci.yml"]},{"id":"F15","title":"Cut the plugin-runtime skill to a workflow and an index","lens":"docs","area":"agent instructions","action":"rewrite","strength":"strong","impact":"medium","effort":"M","risk":"low","claim":"Each activation of \u0060codealta-plugin-runtime\u0060 loads 8,958 words (about 12,000 tokens), four times the next built-in skill; it defines a canvas twice and restates the plugin developer guide, with which it shares 10 of its 19 commits in four weeks.","candidates":["C02"],"evidence":[{"text":"\u0022A canvas is a tab that a plugin provides\u0022.","file":"src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md","line":"274"},{"text":"\u0022A canvas is a tab of CodeAlta Desktop that the plugin provides\u0022.","file":"src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md","line":"436"},{"text":"Tool hooks, \u0060alta\u0060 commands, automation triggers and credential providers, told here…","file":"src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md","line":"509-627"},{"text":"…and in the developer guide.","file":"site/docs/plugins/developers.md","line":"222-395"},{"text":"The skill already sends agents to \u0060alta plugin api\u0060 for the C# types.","file":"src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md","line":"103-115"}],"change":"Keep in \u0060SKILL.md\u0060 the work loop (create, build, reload, look at the window), the shape of a plugin, the traps (tool hooks that fail closed, the HTML sandbox) and an index of the contribution points, each with the type to read with \u0060alta plugin api\u0060 and its folder of \u0060samples/\u0060. Delete the C# prose that \u0060alta plugin api\u0060 and the developer guide already give; keep \u0060references/\u0060 for the JavaScript API, which \u0060alta plugin api\u0060 does not cover; merge the two canvas sections.","balance":{"removes":["about 6,500 words per activation","the second definition of a canvas","the co-change with the developer guide"],"adds":["pointers to \u0060alta plugin api\u0060 and \u0060samples/\u0060"],"delta":{"words":-6500}},"before":{"type":"bars","unit":"words","items":[{"label":"plugin-runtime skill","value":8958,"tone":"bad"},{"label":"next built-in skill","value":2096}]},"after":{"type":"bars","unit":"words","items":[{"label":"plugin-runtime skill","value":2400,"tone":"good"},{"label":"next built-in skill","value":2096}]},"firstStep":"Replace the sections on tool hooks, \u0060alta\u0060 commands, automation triggers and credential providers (\u0060SKILL.md:509-627\u0060) by short rules and pointers.","verify":["\u0060SKILL.md\u0060 under 2,500 words.","A fresh session with the skill alone does four tasks (a command, a canvas, a tool hook, a setting) with \u0060alta plugin api\u0060 and one sample each."],"risks":["Every \u0060samples/\u0060 path the index names must exist: the skill tests check the files it names."],"dissent":"Two cures were proposed: move each section to its own reference file, or delete what \u0060alta plugin api\u0060 and the developer guide already say. Deleting was kept: moving would keep two copies of the API to change together.","votes":{"opus":"found","gemini":"found","astra":"unreviewed"},"files":["src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md"]},{"id":"F16","title":"Move the desktop-window guide out of \u0060AGENTS.md\u0060","lens":"docs","area":"agent instructions","action":"move","strength":"worth-exploring","impact":"medium","effort":"S","risk":"medium","claim":"Every session of the project reads \u0060AGENTS.md\u0060; 1,605 of its 3,041 words are on driving the desktop window, which most sessions do not do, and several of its rules repeat \u0060doc/development-guide.md\u0060.","candidates":["C21"],"evidence":[{"text":"\u0022Working on the desktop WebApp\u0022: 1,605 words.","file":"AGENTS.md","line":"73-133"},{"text":"A rule told twice: no static mutable data.","file":"AGENTS.md","line":"146"},{"text":"The same rule in the development guide.","file":"doc/development-guide.md","line":"9"},{"text":"The project table names neither \u0060CodeAlta.Pseudonymization\u0060 nor \u0060CodeAlta.CodexAppServer\u0060.","file":"doc/architecture.md","line":"38-60"}],"change":"Move the section on the desktop window to \u0060doc/desktop.md\u0060, behind a pointer that keeps its safety rules (always \u0060--dev\u0060, never exit the user\u0027s instance); link the rules of the development guide instead of restating them; add the two missing projects to \u0060doc/architecture.md\u0060.","balance":{"removes":["about 1,600 words read by every session","rules told twice"],"adds":["a pointer of a few lines","two rows of the project table"],"delta":{"words":-1500}},"firstStep":"Add \u0060CodeAlta.Pseudonymization\u0060 and \u0060CodeAlta.CodexAppServer\u0060 to the project table, with a link to \u0060doc/fleet/architecture.md\u0060 for the fleet projects.","verify":["\u0060AGENTS.md\u0060 under 1,600 words.","A session that works on the frontend still starts and exits the developer instance as the guide says (reader test)."],"risks":["A frontend session that skips the pointer drives the wrong window: the pointer keeps the rules that prevent it."],"dissent":"The fleet projects that one analyst found missing from \u0060doc/architecture.md\u0060 are described in \u0060doc/fleet/architecture.md\u0060; only a link and two projects are missing.","votes":{"opus":"confirmed","gemini":"found","astra":"unreviewed"},"files":["AGENTS.md","doc/architecture.md"]}],"roadmap":[{"title":"Now: stop the silent losses","note":"Small fixes and a deletion, each with its test first.","items":[{"finding":"F01"},{"finding":"F04"},{"finding":"F05"},{"finding":"F02"},{"finding":"F09","note":"Pure deletion, 1,878 lines."}]},{"title":"Next: make each decision exist once","items":[{"finding":"F03","note":"Model-server and node paths first."},{"finding":"F06"},{"finding":"F12","note":"Before the frontend moves: they are judged by the suite."},{"finding":"F15"},{"finding":"F13"}]},{"title":"Then: the structural moves, in steps","items":[{"finding":"F11","note":"One surface per commit, renders measured."},{"finding":"F10","note":"List its users first."},{"finding":"F07","note":"After F10: one registration left to move."},{"finding":"F08"},{"finding":"F16"}]},{"title":"When this code is next changed","items":[{"finding":"F14"}]}],"healthy":[{"title":"One writer per session","note":"The pending model and prompt of a session are written inside \u0060actor.QueryAsync\u0060 (\u0060SessionRuntimeService.cs:1442-1457\u0060): the size of \u0060SessionRuntimeService\u0060 does not come with writes outside its actor."},{"title":"Guardrail tests and the low layers","note":"\u0060ArchitectureGuardrailTests\u0060 of the desktop and the server, and the node\u0027s guardrails, keep \u0060CodeAlta.Core\u0060, \u0060CodeAlta.CodeMode\u0060, \u0060CodeAlta.Search\u0060 and the fleet protocol free of the layers above."},{"title":"One source of test time","note":"\u0060TestTime\u0060 and \u0060testLimit\u0060, with \u0060WithinAsync\u0060 naming what was awaited: none of the failures found on CI was a timeout."},{"title":"The locks of the configuration","note":"\u0060ConfigFileLock\u0060 and \u0060UpdateGlobal\u0060 already give a locked read-and-save of \u0060config.toml\u0060; F03 moves the provider edits onto them, no new lock."},{"title":"The Fleet budget gate","note":"30 fixes landed on 2026-11-04 and 05 from a review right after the feature, two since: settled code, not a broken design."},{"title":"The mobile server and its page","note":"They change together (11 shared commits of 12) because one is the client of the other; the C# tests call the API 141 times, and the server had two fixes in eight weeks."},{"title":"The citations of the docs","note":"Of 109 paths cited in \u0060doc/\u0060, \u0060AGENTS.md\u0060 and \u0060readme.md\u0060, one is stale (\u0060doc/site-screenshots.md:125\u0060); the others are generated or example files."}],"dropped":[{"title":"Give \u0060CodeModeRunRegistry\u0060 the clock of its store","reason":"The CI failure it explained was a race with the writes of a stopped run, fixed by \u0060f535964b9\u0060 the next day; the clock cannot make the wake time null.","raisedBy":"opus"},{"title":"Check what an agent does through one path instead of at each command","reason":"The checks at each command need what only the parsed command knows: the resolved MCP tool, the plugin\u0027s policy, the lineage of the target session. Security is also outside the scope of this review.","raisedBy":"opus"},{"title":"Select the platform tests by \u0060[TestClass]\u0060 or a test category because helper names enter the filter","reason":"The helper names match no test: the filter is \u0060FullyQualifiedName~.\u003CName\u003E.\u0060, and no test name has such a segment.","raisedBy":"gemini"},{"title":"Mask secrets once, at the publish and journal boundary of \u0060AgentSession\u0060","reason":"Security is outside the scope of this review; the ten leak fixes came in one burst after the feature landed (2026-11-03 to 11-11), none since. Worth a security review of its own.","raisedBy":"gemini"},{"title":"Group the 63 host options into records with presets per host","reason":"\u0060f411ce863\u0060 moved the drifted defaults into the host; grouping adds types without a defect that remains, and the desktop registration part is in F07 and F10.","raisedBy":"gemini"},{"title":"Split \u0060SessionRuntimeService\u0060 (16,037 lines in 44 files) into services","reason":"The partial files already group by topic, and its fixes are about ordering inside one session, which one owner keeps right; a split would spread that order. Only the sandbox partials own fields of their own, if a later change needs them apart.","raisedBy":"opus"}],"signals":{"note":"The last four weeks: 1,702 commits without merges, from \u0060signals/signals.json\u0060. \u0022Fix\u0022 is a commit prefix of the release tool here: the fix counts are not defect rates.","hotspots":[{"path":"src/CodeAlta/frontend/src/main.tsx","commits":144,"loc":8080,"fixes":38,"tone":"bad"},{"path":"src/CodeAlta/Desktop/DesktopApplication.cs","commits":115,"loc":1934,"fixes":24},{"path":"src/CodeAlta/frontend/src/localization.ts","commits":113,"loc":3240,"fixes":16},{"path":"src/CodeAlta/Desktop/Rpc/BootRpc.cs","commits":109,"loc":1173,"fixes":9,"tone":"warn"},{"path":"src/CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs","commits":81,"loc":7170,"fixes":35},{"path":"src/CodeAlta.Orchestration/Hosting/CodeAltaHost.cs","commits":72,"loc":1608,"fixes":26},{"path":"src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs","commits":63,"loc":8526,"fixes":15}],"coupling":[{"a":"src/CodeAlta.Plugin.Mobile/MobileServer.cs","b":"src/CodeAlta/frontend/src/mobile/api.ts","shared":11,"degree":0.92},{"a":"site/docs/plugins/developers.md","b":"src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/SKILL.md","shared":10,"degree":0.67},{"a":"src/CodeAlta.Fleet.Protocol/FleetSignInApiContracts.cs","b":"src/CodeAlta.Server/Identity/SignIn/SignInAttempts.cs","shared":8,"degree":0.8}]},"sections":[{"title":"CI runs","text":"300 runs of the \u0060ci\u0060 workflow from 2026-11-07 to 2026-11-22: 161 succeeded, 67 failed, 69 were cancelled. 10 of the 170 runs of \u0060main\u0060 passed only when run again: three first attempts failed on a .NET test that then passed (one fixed since by \u0060f535964b9\u0060, one covered by task \u00606zpc\u0060, one in F13), three on a macOS job cancelled after 15 minutes before any step ran, the others on cancelled jobs. Details in \u0060signals/ci-runs.md\u0060."}],"method":{"text":"Three models reviewed the repository at \u00602a3fd8388\u0060: Claude Opus 5.5 drove; Gemini 4 Neon and GPT 6.2 Astra analyzed. The owner asked for \u0060antigravity-mcp:gemini-4-neon@high\u0060, a provider this installation does not have: the same model ran through its only Antigravity provider, \u0060antigravity-acp\u0060. Each analyzed alone from the same brief and signals, the driver first, without reading the others. Their 21 findings were merged into \u0060analysis/candidates.md\u0060 without authors, and each analyst tried to refute the candidates it had not raised. GPT 6.2 Astra\u0027s review of the candidates had not arrived when this report was built: its votes on the candidates it did not raise are \u0060unreviewed\u0060, and the report is updated when the review lands. The driver opened the code of every finding kept here and settled each question of fact by reading or searching; no build or test was run. The owner chose to keep all 16 findings and to decide their priorities from the order of work.","notExamined":["the provider protocols (\u0060CodeAlta.Agent.*\u0060)","the TUI beyond its provider editor","\u0060CodeAltaConfigStore.cs\u0060 beyond providers, \u0060style.css\u0060","the server and node beyond the commits named","the user guide beyond the plugin and monorepo pages","security (secret masking, tool guards) and performance","generated code"]},"path":".alta/report/2026-11-22-health"}</script>
+<script>
+"use strict";
+(function () {
+  const R = JSON.parse(document.getElementById("report-data").textContent);
+  const app = document.getElementById("app");
+  const root = document.documentElement;
+
+  /* ---------- helpers ---------- */
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => (/^(https?:|#|\.{0,2}\/|[\w-]+\/)/.test(u) ? `<a href="${u}">${t}</a>` : m));
+  /* Text with blank-line paragraphs and "- " bullets; an array is a bullet list. */
+  function block(s) {
+    if (s == null || s === "") return "";
+    if (Array.isArray(s)) return s.length ? "<ul>" + s.map((x) => "<li>" + inline(x) + "</li>").join("") + "</ul>" : "";
+    let out = "", list = [], para = [];
+    const flush = () => {
+      if (para.length) { out += "<p>" + inline(para.join(" ")) + "</p>"; para = []; }
+      if (list.length) { out += "<ul>" + list.map((x) => "<li>" + inline(x) + "</li>").join("") + "</ul>"; list = []; }
+    };
+    for (const line of String(s).split("\n")) {
+      if (/^\s*[-*]\s+/.test(line)) { if (para.length) flush(); list.push(line.replace(/^\s*[-*]\s+/, "")); }
+      else if (!line.trim()) flush();
+      else { if (list.length) flush(); para.push(line.trim()); }
+    }
+    flush();
+    return out;
+  }
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "html") el.innerHTML = v;
+      else if (k === "text") el.textContent = v;
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
+    return el;
+  }
+  const findings = R.findings || [];
+  const byId = Object.fromEntries(findings.map((f) => [f.id, f]));
+  const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const links = Object.assign({ root: "../../..", blob: "" }, R.links || {});
+  function fileLink(file, line) {
+    const label = file + (line ? ":" + line : "");
+    const href = links.blob ? links.blob.replace(/\/?$/, "/") + file + (line ? "#L" + String(line).split("-")[0] : "") : links.root.replace(/\/?$/, "/") + file;
+    return `<a class="mono" href="${esc(href)}">${esc(label)}</a>`;
+  }
+  const VOTE = { found: ["●", "found it", "found"], confirmed: ["✓", "confirmed it", "confirmed"], refined: ["~", "refined it", "simplified"], disputed: ["✕", "disputed it", "disputed"], unreviewed: ["·", "did not review it", ""] };
+  const EFFORT = { S: "small", M: "medium", L: "large" };
+
+  /* ---------- diagrams ---------- */
+  function box(item) {
+    if (typeof item === "string") item = { label: item };
+    return h("div", { class: "box " + (item.tone || "") },
+      h("b", { html: inline(item.label) }),
+      item.note ? h("small", { html: inline(item.note) }) : null,
+      item.children && item.children.length ? h("div", { class: "boxes" }, item.children.map(box)) : null);
+  }
+  function diagram(spec) {
+    if (!spec) return null;
+    if (Array.isArray(spec)) return h("div", {}, spec.map(diagram));
+    if (typeof spec === "string") spec = { type: "text", text: spec };
+    const wrap = h("div", { class: "dg" });
+    const items = spec.items || [];
+    switch (spec.type) {
+      case "boxes": wrap.append(h("div", { class: "boxes" }, items.map(box))); break;
+      case "layers": {
+        const el = h("div", { class: "layers" });
+        items.forEach((it, i) => { if (i) el.append(h("div", { class: "arrow", text: "↓" })); el.append(box(it)); });
+        wrap.append(el); break;
+      }
+      case "flow": {
+        const el = h("div", { class: "flow" });
+        items.forEach((it, i) => { if (i) el.append(h("div", { class: "arrow", text: "→" })); el.append(box(it)); });
+        wrap.append(el); break;
+      }
+      case "bars": {
+        const max = Math.max(spec.max || 0, ...items.map((it) => Number(it.value) || 0)) || 1;
+        const el = h("div", { class: "bars" });
+        for (const it of items) el.append(
+          h("div", { html: inline(it.label) }),
+          h("div", { class: "track" }, h("div", { class: "fill " + (it.tone || ""), style: `width:${Math.max(1.5, (100 * it.value) / max)}%` })),
+          h("div", { class: "num", text: Number(it.value).toLocaleString("en") + (spec.unit ? " " + spec.unit : "") }));
+        wrap.append(el); break;
+      }
+      case "mass": {
+        const max = Math.max(...items.map((it) => (it.interface || 0) + (it.implementation || 0))) || 1;
+        wrap.append(h("div", { class: "mass" }, items.map((it) => h("figure", {},
+          h("div", { class: "if", title: "interface: what a caller must know", style: `height:${Math.max(3, (130 * (it.interface || 0)) / max)}px` }),
+          h("div", { class: "im", title: "implementation", style: `height:${Math.max(3, (130 * (it.implementation || 0)) / max)}px` }),
+          h("figcaption", { html: inline(it.label) })))));
+        wrap.append(h("div", { class: "dg-note", html: '<span style="color:var(--warn)">■</span> what a caller must know &nbsp; <span style="color:var(--ink)">■</span> what it does for them' }));
+        break;
+      }
+      case "text": {
+        wrap.append(h("div", { class: "text", text: spec.text || "" }));
+        const words = (spec.text || "").trim().split(/\s+/).filter(Boolean).length;
+        wrap.append(h("div", { class: "dg-note", text: words + " words" }));
+        break;
+      }
+      case "code": wrap.append(h("pre", { class: "code", text: spec.code || "" })); break;
+      case "edges": {
+        const el = h("div", { class: "edges" });
+        for (const it of items) el.append(box({ label: it.from, tone: it.tone }), h("div", { class: "arrow", text: it.note ? "— " + it.note + " →" : "→" }), box({ label: it.to, tone: it.tone }));
+        wrap.append(el); break;
+      }
+      default: wrap.append(h("pre", { class: "code", text: JSON.stringify(spec, null, 1) }));
+    }
+    if (spec.note) wrap.append(h("div", { class: "dg-note", html: inline(spec.note) }));
+    return wrap;
+  }
+
+  /* ---------- finding ---------- */
+  const DELTA = { lines: "lines", files: "files", concepts: "concepts", words: "words", tests: "tests", dependencies: "dependencies", seconds: "s of test time" };
+  function deltaPills(delta) {
+    if (!delta) return null;
+    const pills = Object.entries(delta).filter(([, v]) => typeof v === "number" && v !== 0).map(([k, v]) =>
+      h("span", { class: v < 0 ? "neg" : "pos", text: (v < 0 ? "−" : "+") + Math.abs(v).toLocaleString("en") + " " + (DELTA[k] || k) }));
+    return pills.length ? h("div", { class: "delta" }, pills) : null;
+  }
+  function mainDelta(f) {
+    const entry = Object.entries((f.balance && f.balance.delta) || {}).filter(([, v]) => typeof v === "number" && v !== 0).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))[0];
+    if (!entry) return null;
+    const [k, v] = entry;
+    return h("span", { class: "badge " + (v < 0 ? "strong" : "worth-exploring"), text: (v < 0 ? "−" : "+") + Math.abs(v).toLocaleString("en") + " " + (DELTA[k] || k) });
+  }
+  function votes(f) {
+    const analysts = R.analysts || [];
+    if (!f.votes || !analysts.length) return null;
+    return h("span", { class: "votes" }, analysts.map((a) => {
+      const v = f.votes[a.id] || "unreviewed";
+      return h("span", { class: "vote " + v, title: (a.name || a.model || a.id) + " " + VOTE[v][1], text: VOTE[v][0] });
+    }));
+  }
+  function brief(f) {
+    const open = f.strength !== "strong";
+    const L = [`${open ? "Investigate" : "Implement"} finding ${f.id} of the health report${R.path ? " `" + R.path + "/report.json`" : ""}: ${f.title}`, ""];
+    if (open) L.push("The review found the problem real and left the cure open. Take the first step only, report what it shows, and change nothing more before the user decides.", "");
+    const add = (title, v) => { if (v && v.length) L.push(`## ${title}`, Array.isArray(v) ? v.map((x) => "- " + x).join("\n") : v, ""); };
+    add("Problem", f.claim);
+    add("Evidence", (f.evidence || []).map((e) => (e.file ? "`" + e.file + (e.line ? ":" + e.line : "") + "` " : "") + (e.text || "") + (e.command ? " (`" + e.command + "`)" : "")));
+    add("Change", f.change);
+    if (f.balance) { add("Removes", f.balance.removes); add("Adds", f.balance.adds); }
+    add("First step", f.firstStep); add("Then", f.steps); add("Verify", f.verify); add("Risks", f.risks); add("Not part of this", f.outOfScope);
+    add("Disagreement in the review", f.dissent);
+    if (f.dependsOn && f.dependsOn.length) add("Depends on", f.dependsOn.map((d) => d + (byId[d] ? ": " + byId[d].title : "")));
+    L.push("Check the evidence against the current code first: the report was written at commit " + (R.commit || "?") + ". Keep structural and behavioral changes in separate commits.");
+    return L.join("\n");
+  }
+  function copy(text, button) {
+    const done = () => { const t = button.textContent; button.textContent = "Copied"; setTimeout(() => (button.textContent = t), 1400); };
+    const fallback = () => { const ta = h("textarea", { style: "position:fixed;opacity:0" }); ta.value = text; document.body.append(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ } ta.remove(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+  }
+  function findingBody(f) {
+    const body = h("div", { class: "fbody" });
+    const sec = (title, node) => { if (node) body.append(h("h4", { text: title }), node); };
+    const blk = (v) => (v && v.length ? h("div", { html: block(v) }) : null);
+    if (f.before || f.after) sec("Before and after", h("div", { class: "ba" },
+      h("div", { class: "before" }, h("div", { class: "tag", text: "Before" }), diagram(f.before)),
+      h("div", { class: "after" }, h("div", { class: "tag", text: "After" }), diagram(f.after))));
+    if (f.evidence && f.evidence.length) sec("Evidence", h("ul", { class: "evidence" }, f.evidence.map((e) => h("li", {
+      html: inline(e.text || "") + (e.file ? `<span class="where">${fileLink(e.file, e.line)}</span>` : "") + (e.command ? `<span class="where">$ ${esc(e.command)}</span>` : "") }))));
+    sec("Change", blk(f.change));
+    if (f.balance) sec("What it removes, what it adds", h("div", {},
+      h("div", { class: "balance" },
+        h("div", { class: "minus" }, h("b", { text: "Removes" }), h("div", { html: block(f.balance.removes) || "nothing" })),
+        h("div", { class: "plus" }, h("b", { text: "Adds" }), h("div", { html: block(f.balance.adds) || "nothing" }))),
+      deltaPills(f.balance.delta)));
+    const cols = h("div", { class: "cols" });
+    const col = (title, v) => { if (v && v.length) cols.append(h("div", {}, h("h4", { text: title }), h("div", { html: block(v) }))); };
+    col("First step", f.firstStep); col("Then", f.steps); col("How we know it worked", f.verify); col("Risks", f.risks); col("If we leave it", f.ifNot); col("Not part of this", f.outOfScope);
+    if (f.files && f.files.length) cols.append(h("div", {}, h("h4", { text: "Files" }), h("div", { html: "<ul>" + f.files.map((p) => "<li>" + fileLink(p) + "</li>").join("") + "</ul>" })));
+    if (cols.children.length) body.append(cols);
+    if (f.dissent) body.append(h("div", { class: "callout dissent" }, h("b", { text: "Disagreement" }), h("div", { html: block(f.dissent) })));
+    if (f.dependsOn && f.dependsOn.length) body.append(h("div", { class: "callout" }, h("b", { text: "Do first" }),
+      h("div", { html: f.dependsOn.map((d) => `<a href="#${esc(d)}">${esc(d)}</a>` + (byId[d] ? " " + esc(byId[d].title) : "")).join(" · ") })));
+    const actions = h("div", { class: "actions" });
+    if (f.strength !== "speculative" && !["rejected", "deferred", "done"].includes(f.status)) {
+      const b = h("button", { class: "ghost", type: "button", text: "Copy as a prompt" });
+      b.addEventListener("click", () => copy(brief(f), b));
+      actions.append(b);
+    }
+    if (f.task) actions.append(h("span", { html: "Tracked as " + inline(f.task) }));
+    if (f.candidates && f.candidates.length) actions.append(h("span", { text: "From " + f.candidates.join(", ") + " of analysis/candidates.md" }));
+    if (f.status && f.status !== "proposed") actions.append(h("span", { class: "badge", text: f.status }));
+    const who = (R.analysts || []).filter((a) => f.votes && f.votes[a.id]).map((a) => (a.name || a.id) + " " + VOTE[f.votes[a.id]][1]);
+    if (who.length) actions.append(h("span", { text: who.join(" · ") }));
+    body.append(actions);
+    return body;
+  }
+  function finding(f) {
+    const d = h("details", { class: "finding", id: f.id, "data-lens": f.lens || "", "data-area": f.area || "", "data-strength": f.strength || "", "data-action": f.action || "" });
+    d.append(h("summary", {},
+      h("span", { class: "fid", text: f.id }),
+      h("span", { class: "ftitle", html: inline(f.title) }),
+      h("span", { class: "fmeta" },
+        f.action ? h("span", { class: "badge act " + f.action, text: f.action }) : null,
+        f.strength ? h("span", { class: "badge " + f.strength, text: f.strength.replace("-", " ") }) : null,
+        f.effort ? h("span", { class: "badge", text: (EFFORT[f.effort] || f.effort) + " effort", title: "effort" }) : null,
+        mainDelta(f),
+        f.risk === "high" ? h("span", { class: "badge risk-high", text: "high risk" }) : null,
+        votes(f)),
+      h("span", { class: "fclaim", html: inline(f.claim) + (f.area ? ` <span class="mono">${esc(f.area)}</span>` : "") })));
+    /* The body is built when the finding is first opened; printing builds them all. */
+    let filled = false;
+    d.fill = () => { if (!filled) { filled = true; d.append(findingBody(f)); } };
+    d.addEventListener("toggle", () => { if (d.open) d.fill(); });
+    return d;
+  }
+
+  /* ---------- sections ---------- */
+  const nav = document.getElementById("nav");
+  function section(id, title, lead) {
+    const wrap = h("div", { class: "wrap" }, h("h2", { text: title }), lead ? h("p", { class: "lead", html: inline(lead) }) : null);
+    app.append(h("section", { id }, wrap));
+    nav.append(h("a", { href: "#" + id, text: title }));
+    return wrap;
+  }
+  document.title = R.title || "Codebase health report";
+  const meta = [R.repo, R.commit && "at " + R.commit, R.date, R.scope].filter(Boolean).join(" · ");
+  const head = h("div", { class: "wrap" }, h("div", { class: "eyebrow", text: meta }), h("h1", { text: R.title || "Codebase health report" }), h("div", { class: "verdict", html: block(R.verdict) }));
+  if (R.metrics && R.metrics.length) head.append(h("div", { class: "tiles" }, R.metrics.map((m) =>
+    h("div", { class: "tile " + (m.tone || "") }, h("b", { text: m.value }), h("span", { html: inline(m.label) }), m.note ? h("small", { html: inline(m.note) }) : null))));
+  app.append(h("header", { class: "top" }, head));
+
+  const first = (R.roadmap || [])[0];
+  if (first && first.items && first.items.length) {
+    const s = section("start", "Start here", first.note || "The first changes to make, in order.");
+    s.append(h("div", { class: "moves" }, first.items.filter((it) => !["rejected", "deferred", "done"].includes((byId[it.finding] || {}).status)).slice(0, 6).map((it) => {
+      const f = byId[it.finding] || {};
+      return h("a", { class: "move", href: "#" + it.finding }, h("b", { html: inline(f.title || it.finding) }), h("span", { html: inline(it.note || f.claim || "") }));
+    })));
+  }
+
+  /* map: impact x effort, and lens x area */
+  const state = { lens: null, area: null, strength: null, action: null, q: "" };
+  if (findings.length > 2) {
+    const s = section("map", "Where it pays", "Each finding by what it gains and what it costs, and where the findings concentrate.");
+    const maps = h("div", { class: "maps" });
+    const impacts = ["high", "medium", "low"], efforts = ["S", "M", "L"];
+    const t = h("table", { class: "grid" }, h("thead", {}, h("tr", {}, h("th", {}), efforts.map((e) => h("th", { text: EFFORT[e] + " effort" })))));
+    const tb = h("tbody");
+    for (const im of impacts) tb.append(h("tr", {}, h("th", { text: im + " impact" }), efforts.map((e) => h("td", { class: im === "high" && e === "S" ? "best" : "" },
+      findings.filter((f) => f.impact === im && f.effort === e).map((f) => h("a", { class: "chip " + (f.strength || ""), href: "#" + f.id, title: f.title, text: f.id }))))));
+    t.append(tb);
+    maps.append(h("div", { class: "panel" }, h("h3", { text: "Impact and effort" }), h("p", { text: "Dashed cell: high impact for a small effort. Green: strong, amber: worth exploring, gray: speculative." }), t));
+
+    const lenses = [...new Set(findings.map((f) => f.lens).filter(Boolean))];
+    const areaCount = {};
+    for (const f of findings) if (f.area) areaCount[f.area] = (areaCount[f.area] || 0) + 1;
+    const areas = Object.keys(areaCount).sort((a, b) => areaCount[b] - areaCount[a]).slice(0, 10);
+    if (lenses.length > 1 && areas.length > 1) {
+      const ht = h("table", { class: "grid heat" }, h("thead", {}, h("tr", {}, h("th", {}), lenses.map((l) => h("th", { text: l })))));
+      const hb = h("tbody");
+      const peak = Math.max(...areas.flatMap((a) => lenses.map((l) => findings.filter((f) => f.area === a && f.lens === l).length))) || 1;
+      for (const a of areas) hb.append(h("tr", {}, h("th", { class: "mono", text: a }), lenses.map((l) => {
+        const n = findings.filter((f) => f.area === a && f.lens === l).length;
+        const td = h("td", { class: n ? "" : "zero", style: n ? `background: color-mix(in srgb, var(--accent) ${Math.round(18 + (62 * n) / peak)}%, var(--sunken)); color: ${n / peak > 0.5 ? "var(--bg)" : "var(--ink)"}` : "" });
+        if (n) {
+          const show = h("button", { type: "button", class: "cell", text: n, title: `Show the ${n} finding(s): ${l} in ${a}` });
+          show.addEventListener("click", () => { state.lens = l; state.area = a; applyFilters(); document.getElementById("findings").scrollIntoView(); });
+          td.append(show);
+        }
+        return td;
+      })));
+      ht.append(hb);
+      maps.append(h("div", { class: "panel" }, h("h3", { text: "Where the findings are" }), h("p", { text: "Findings per area and lens. Click a cell to list them." }), ht));
+    }
+    s.append(maps);
+  }
+
+  /* findings by theme */
+  const fs = section("findings", "Findings", findings.length ? "Grouped by theme. Open a finding for its evidence, the change, and how to start." : null);
+  const filterBar = h("div", { class: "filters" });
+  const countEl = h("span", { class: "count" });
+  function group(label, key, values) {
+    if (values.length < 2) return;
+    filterBar.append(h("div", { class: "group" }, h("span", { text: label }), values.map((v) => {
+      const b = h("button", { class: "f", type: "button", "data-key": key, "data-value": v, "aria-pressed": "false", text: v.replace("-", " ") });
+      b.addEventListener("click", () => { state[key] = state[key] === v ? null : v; if (key === "lens") state.area = null; applyFilters(); });
+      return b;
+    })));
+  }
+  const uniq = (k) => [...new Set(findings.map((f) => f[k]).filter(Boolean))];
+  group("Lens", "lens", uniq("lens"));
+  group("Strength", "strength", ["strong", "worth-exploring", "speculative"].filter((v) => findings.some((f) => f.strength === v)));
+  group("Action", "action", uniq("action"));
+  const search = h("input", { type: "search", placeholder: "Filter by text or path", "aria-label": "Filter findings" });
+  search.addEventListener("input", () => { state.q = search.value.toLowerCase(); applyFilters(); });
+  const areaChip = h("button", { class: "f hidden", type: "button", "aria-pressed": "true", title: "Show every area" });
+  areaChip.addEventListener("click", () => { state.area = null; state.lens = null; applyFilters(); }); // a cell of the map set both
+  filterBar.append(search, areaChip, countEl);
+  if (findings.length > 2) fs.append(filterBar);
+  if (!findings.length) fs.append(h("p", { class: "muted", text: "The review kept no finding." }));
+  const placed = new Set();
+  const themes = (R.themes || []).slice();
+  for (const th of themes) (th.findings || []).forEach((id) => placed.add(id));
+  const rest = findings.filter((f) => !placed.has(f.id)).map((f) => f.id);
+  if (rest.length) themes.push({ id: "other", title: themes.length ? "Other findings" : "", findings: rest });
+  for (const th of themes) {
+    const el = h("div", { class: "theme", id: "theme-" + slug(th.id || th.title) }, th.title ? h("h3", { html: inline(th.title) }) : null, th.thesis ? h("p", { html: inline(th.thesis) }) : null);
+    for (const id of th.findings || []) if (byId[id]) el.append(finding(byId[id]));
+    fs.append(el);
+  }
+  const haystack = {};
+  function searchText(f) {
+    return haystack[f.id] || (haystack[f.id] = [f.id, f.title, f.claim, f.change, f.area, f.lens, f.firstStep, ...(f.files || []),
+      ...(f.evidence || []).flatMap((e) => [e.text, e.file, e.command])].filter(Boolean).join(" ").toLowerCase());
+  }
+  function applyFilters() {
+    let shown = 0;
+    for (const d of document.querySelectorAll("details.finding")) {
+      const f = byId[d.id];
+      const text = state.q ? searchText(f) : "";
+      const ok = (!state.lens || f.lens === state.lens) && (!state.area || f.area === state.area) && (!state.strength || f.strength === state.strength)
+        && (!state.action || f.action === state.action) && (!state.q || text.includes(state.q));
+      d.classList.toggle("hidden", !ok);
+      if (ok) shown++;
+    }
+    for (const t of document.querySelectorAll(".theme")) t.classList.toggle("hidden", !t.querySelector("details.finding:not(.hidden)"));
+    for (const b of filterBar.querySelectorAll("button.f[data-key]")) b.setAttribute("aria-pressed", String(state[b.dataset.key] === b.dataset.value));
+    areaChip.classList.toggle("hidden", !state.area);
+    areaChip.textContent = state.area ? state.area + " ✕" : "";
+    countEl.textContent = shown === findings.length ? `${shown} findings` : `${shown} of ${findings.length}`;
+  }
+  applyFilters();
+
+  /* roadmap */
+  if (R.roadmap && R.roadmap.length) {
+    const s = section("roadmap", "Order of work", "What to do first and what waits for it.");
+    s.append(h("div", { class: "waves" }, R.roadmap.map((w) => h("div", { class: "wave" }, h("h3", { html: inline(w.title) }), w.note ? h("p", { html: inline(w.note) }) : null,
+      h("ol", {}, (w.items || []).map((it) => {
+        const f = byId[it.finding];
+        return h("li", {}, h("a", { href: "#" + it.finding, html: `<span class="mono">${esc(it.finding)}</span> ` + inline(f ? f.title : "") }), it.note ? h("small", { html: inline(it.note) }) : null);
+      }))))));
+  }
+
+  /* Hotspots as commits against size: the top right is where a change costs most. A file of a finding links to it. */
+  function scatter(hot) {
+    const W = 680, H = 300, L = 48, B = 30, T = 14, RIGHT = 16;
+    const maxC = Math.max(...hot.map((x) => x.commits)) || 1, maxL = Math.max(...hot.map((x) => x.loc)) || 1, maxF = Math.max(...hot.map((x) => x.fixes || 0)) || 1;
+    const X = (c) => L + ((W - L - RIGHT) * c) / maxC, Y = (l) => H - B - (H - B - T) * Math.sqrt(l / maxL);
+    const owner = (p) => findings.find((f) => (f.files || []).includes(p) || (f.evidence || []).some((e) => e.file === p));
+    const named = new Set(hot.slice().sort((a, b) => b.commits * b.loc - a.commits * a.loc).slice(0, 6).map((x) => x.path));
+    let s = `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hotspots: commits against lines">`
+      + `<line class="axis" x1="${L}" y1="${H - B}" x2="${W - RIGHT}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/>`
+      + `<text x="${W - RIGHT}" y="${H - 8}" text-anchor="end">commits →  (${maxC} at most)</text><text x="${L - 6}" y="${T + 4}" text-anchor="end">lines</text>`
+      + `<text x="${L - 6}" y="${Y(maxL) + 16}" text-anchor="end">${Number(maxL).toLocaleString("en")}</text>`;
+    for (const x of hot) {
+      const f = owner(x.path), r = 4 + (7 * (x.fixes || 0)) / maxF, cx = X(x.commits), cy = Y(x.loc), base = x.path.split("/").pop();
+      const dot = `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(x.path)}: ${x.commits} commits, ${x.loc} lines${x.fixes ? ", " + x.fixes + " fixes" : ""}${f ? " · " + esc(f.id) : ""}</title></circle>`;
+      s += f ? `<a href="#${esc(f.id)}">${dot}</a>` : dot;
+      if (named.has(x.path)) s += `<text class="name" x="${(cx > W - 150 ? cx - r - 4 : cx + r + 4).toFixed(1)}" y="${(cy + 3).toFixed(1)}" text-anchor="${cx > W - 150 ? "end" : "start"}">${esc(base)}${f ? " · " + esc(f.id) : ""}</text>`;
+    }
+    return s + "</svg><p class='muted' style='font-size:.8rem;margin:-.4rem 0 1rem'>Larger dot: fixed more often. Colored: a finding of this report changes it.</p>";
+  }
+
+  /* evidence and method */
+  const ev = section("evidence", "Evidence and method", "What the review rests on, what it kept out, and the full analyses.");
+  function more(title, node, open) { if (!node) return; ev.append(h("details", Object.assign({ class: "more" }, open ? { open: "" } : {}), h("summary", { text: title }), h("div", {}, node))); }
+  function plain(headers, rows) {
+    return h("table", { class: "plain" }, h("thead", {}, h("tr", {}, headers.map((x) => h("th", { text: x })))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, r.map((c) => (c && c.nodeType ? c : h("td", typeof c === "number" ? { class: "n", text: c.toLocaleString("en") } : { html: c })))))));
+  }
+  if (R.healthy && R.healthy.length) more("In good shape: keep as it is", plain(["What", "Why it works"], R.healthy.map((x) => [inline(x.title), inline(x.note || "")])));
+  if (R.dropped && R.dropped.length) more("Considered and dropped", plain(["Idea", "Why not", "Raised by"], R.dropped.map((x) => [inline(x.title), inline(x.reason || ""), esc(x.raisedBy || "")])));
+  const sig = R.signals || {};
+  if (sig.hotspots && sig.hotspots.length) {
+    const max = Math.max(...sig.hotspots.map((x) => x.commits)) || 1;
+    const bars = h("div", { class: "bars" });
+    for (const x of sig.hotspots.slice(0, 15)) bars.append(h("div", { html: fileLink(x.path) }),
+      h("div", { class: "track" }, h("div", { class: "fill " + (x.tone || ""), style: `width:${(100 * x.commits) / max}%` })),
+      h("div", { class: "num", text: `${x.commits} commits · ${Number(x.loc).toLocaleString("en")} lines` + (x.fixes ? ` · ${x.fixes} fixes` : "") }));
+    more("Hotspots: files changed often and large", h("div", {}, sig.note ? h("p", { class: "muted", html: inline(sig.note) }) : null,
+      sig.hotspots.length > 3 ? h("div", { html: scatter(sig.hotspots) }) : null, bars));
+  }
+  if (sig.coupling && sig.coupling.length) more("Files that change together across areas", plain(["File", "File", "Shared commits", "Share"],
+    sig.coupling.slice(0, 15).map((c) => [fileLink(c.a), fileLink(c.b), c.shared, Math.round(c.degree * 100) + "%"])));
+  const panel = R.analysts || [];
+  if (panel.length > 1 && findings.some((f) => f.votes)) {
+    const vt = h("table", { class: "grid who" }, h("thead", {}, h("tr", {}, h("th", {}), panel.map((a) => h("th", { text: a.name || a.id })))));
+    vt.append(h("tbody", {}, findings.map((f) => h("tr", {},
+      h("th", {}, h("a", { href: "#" + f.id, title: f.title, html: `<span class="mono">${esc(f.id)}</span> ` + inline(f.title) })),
+      panel.map((a) => { const v = (f.votes || {})[a.id] || "unreviewed"; return h("td", { class: "vote-cell " + v, text: VOTE[v][2] }); })))));
+    more("Who found what", h("div", {}, h("p", { class: "muted", text: "Each analyst worked alone, then tried to refute the findings of the others without knowing who made them." }), vt));
+  }
+  if (R.analysts && R.analysts.length) more("Analysts and their full analyses", h("div", {},
+    plain(["Analyst", "Model", "Role", "Analysis", "Review of the others"], R.analysts.map((a) => [esc(a.name || a.id), `<span class="mono">${esc(a.model || "")}</span>`, esc(a.role || ""),
+      a.analysis ? `<a href="${esc(a.analysis)}">${esc(a.analysis)}</a>` : "", a.review ? `<a href="${esc(a.review)}">${esc(a.review)}</a>` : ""])),
+    h("p", { class: "muted", style: "margin-top:.7rem", text: "On each finding: ● found it · ✓ confirmed it · ~ refined it · ✕ disputed it · · did not review it." })));
+  if (R.method) more("Method and limits", h("div", { html: block(R.method.text) + (R.method.notExamined && R.method.notExamined.length ? "<h4 class='eyebrow' style='margin:.9rem 0 .3rem'>Not examined</h4>" + block(R.method.notExamined) : "") }));
+  for (const x of R.sections || []) more(x.title, h("div", { html: block(x.text) }));
+  if (!ev.querySelector("details.more")) ev.parentElement.remove();
+  app.append(h("footer", {}, h("div", { class: "wrap", text: [R.title, R.date, R.path].filter(Boolean).join(" · ") })));
+
+  /* ---------- theme, open all, deep links ---------- */
+  function setTheme(t) {
+    root.dataset.theme = t;
+    for (const b of document.querySelectorAll("[data-theme-set]")) b.setAttribute("aria-pressed", String(b.dataset.themeSet === t));
+    try { localStorage.setItem("health-report-theme", t); } catch (e) { /* storage is not available for a file opened from disk in some browsers */ }
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) b.addEventListener("click", () => setTheme(b.dataset.themeSet));
+  let saved = "auto";
+  try { saved = localStorage.getItem("health-report-theme") || "auto"; } catch (e) { /* same */ }
+  setTheme(saved);
+
+  const toggleAll = document.getElementById("toggle-all");
+  toggleAll.addEventListener("click", () => {
+    const open = toggleAll.textContent === "Open all";
+    for (const d of document.querySelectorAll("details.finding:not(.hidden), details.more")) d.open = open;
+    toggleAll.textContent = open ? "Close all" : "Open all";
+  });
+  function openHash() {
+    const el = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!el || el.tagName !== "DETAILS") return;
+    if (el.classList.contains("hidden")) { Object.assign(state, { lens: null, area: null, strength: null, action: null, q: "" }); search.value = ""; applyFilters(); }
+    el.open = true; el.scrollIntoView();
+  }
+  addEventListener("hashchange", openHash);
+  openHash();
+  addEventListener("beforeprint", () => { for (const d of document.querySelectorAll("details")) { if (d.fill) d.fill(); d.open = true; } });
+
+})();
+</script>
+</body>
+</html>
