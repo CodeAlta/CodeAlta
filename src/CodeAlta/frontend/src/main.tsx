@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -179,7 +179,6 @@ import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDra
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
 import { confirmDeletedSession, createSessionDeletion, deleteSelectionCurrent, hostSessionPresence, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
-import { ConfirmPopover } from "./ConfirmPopover";
 import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
@@ -356,6 +355,7 @@ import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
 import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
 import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
+import { useSessionArchiveQuestion } from "./sessionArchive/SessionArchiveQuestion";
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
@@ -1138,11 +1138,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
-  // The session asked about beside its row before it is archived: one with child sessions, which go with it by default.
-  // The archive of a session with child sessions that asks, and where it was asked: the Explorer or the composer.
-  const [sessionArchiving, setSessionArchiving] = useState<Readonly<{ id: string; count: number; withChildren: boolean; from: "explorer" | "composer" }> | null>(null);
   const [sessionArchiveBusy, setSessionArchiveBusy] = useState(false);
-  const [sessionArchiveNotice, setSessionArchiveText] = useState("");
+  const sessionArchiveQuestion = useSessionArchiveQuestion({
+    busy: sessionArchiveBusy, t, onArchive: (row, withChildren) => void archiveSessionNow(row, withChildren, true),
+  });
   const sessionArchivePending = useRef(false);
   // The archived session whose info the saved sessions show, by its id: the catalog is read again meanwhile.
   const [archivedInfo, setArchivedInfo] = useState<string | null>(null);
@@ -5048,25 +5047,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (sessionArchivePending.current) return;
     setRenamingId(null);
     sessionDeleteQuestion.close();
-    setSessionArchiveText("");
+    sessionArchiveQuestion.setError("");
     const below = archivableDescendants(catalog.current?.sessions ?? [], row.id).length;
-    if (below > 0) setSessionArchiving({ id: row.id, count: below, withChildren: true, from });
+    if (below > 0) sessionArchiveQuestion.ask(row.id, below, from);
     else void archiveSessionNow(row, false, false);
-  }
-  // The question of the archive of a session with child sessions: with them, by default, or alone.
-  function sessionArchiveQuestion(session: WorkspaceSession, placement: "right-start" | "top-end") {
-    if (sessionArchiving?.id !== session.id) return null;
-    return <ConfirmPopover always title={t("Archive this session?")} subject={plainTitle(session.title)} placement={placement}
-      detail={t("It leaves the Explorer and keeps its history. Saved sessions and the search find it, to restore it.")}
-      confirmLabel={t("Archive")} busy={sessionArchiveBusy} error={sessionArchiveNotice || null}
-      onConfirm={() => void archiveSessionNow(session, sessionArchiving.withChildren, true)}
-      onCancel={() => { setSessionArchiving(null); setSessionArchiveText(""); }}>
-      <RadioGroup className="confirm-choices" selectedValue={sessionArchiving.withChildren ? "tree" : "alone"} disabled={sessionArchiveBusy}
-        onChange={event => { const withChildren = event.currentTarget.value === "tree"; setSessionArchiving(value => value && { ...value, withChildren }); }}>
-        <Radio value="tree" label={sessionArchiving.count === 1 ? t("Archive with its child session") : t("Archive with its {count} child sessions", { count: sessionArchiving.count })} />
-        <Radio value="alone" label={t("Archive this session only")} />
-      </RadioGroup>
-    </ConfirmPopover>;
   }
   // Archives a session, with its child sessions when asked. What went wrong is said in the question that was asked,
   // or in a message when nothing was asked.
@@ -5074,7 +5058,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (sessionArchivePending.current || !owned || !mutation?.capability.canMutate()) return;
     sessionArchivePending.current = true;
     setSessionArchiveBusy(true);
-    setSessionArchiveText("");
+    sessionArchiveQuestion.setError("");
     try {
       const result = await setSessionArchived(workspace.archiveSession, status?.hostEpoch, row.id, withChildren);
       if (!creationAlive.current) return;
@@ -5085,13 +5069,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
       }
       if (result.kind === "done") {
-        setSessionArchiving(null);
+        sessionArchiveQuestion.close();
         showToast({ message: result.changed.length > 1 ? t("Archived {count} sessions.", { count: result.changed.length }) : t("Archived."),
           intent: "success", icon: "tick", timeout: 8000, action: { text: t("Restore"), onClick: () => void restoreSessionNow(row, false) } });
         return;
       }
       const message = t(sessionArchiveMessage(result.code));
-      if (asked) setSessionArchiveText(message);
+      if (asked) sessionArchiveQuestion.setError(message);
       else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
     } finally {
       sessionArchivePending.current = false;
@@ -6659,7 +6643,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
                 onSubmit={title => void renameSelectedSession(title)} onCancel={() => setRenamingId(null)} />}
               {sessionDeleteQuestion.render(session)}
-              {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
+              {sessionArchiveQuestion.render(session, "explorer")}
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && !filterView && omittedSessions(snapshot, projectId) === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
@@ -6707,7 +6691,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 heldElsewhere={elsewhereSessions.get(row.id) ?? null}
                 archive={owned && !row.archived && !row.machineId ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
                   run: () => { protectNavigation([row.id], () => beginSessionArchive(row, "composer")); },
-                  question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned && !row.machineId ? branchHost : null} bookmarks={owned && !row.machineId ? bookmarkHost : null}
+                  question: sessionArchiveQuestion.render(row, "composer") } : null} branch={owned && !row.machineId ? branchHost : null} bookmarks={owned && !row.machineId ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={listing} selectedProjectId={tab.projectId}
