@@ -32,12 +32,13 @@ In a CodeAlta Desktop session, `alta ui activate` gives the session the tools fo
 
 ## API and traps
 
-`alta plugin api <type>` gives the signatures and XML docs of the running version, including the plugin abstractions, terminal controls and the `CodeAlta.Agent` types they use. A partial type name or a member name also works. It does **not** describe JavaScript or third-party APIs. For workflow and C# examples, read [Plugin development](https://codealta.io/docs/plugins/developers/); for UI behavior, read [Plugin UI](https://codealta.io/docs/plugins/ui/).
+`alta plugin api <type>` gives the signatures and XML docs of the running version, including the plugin abstractions, terminal controls and the `CodeAlta.Agent` types they use. A partial type name or a member name also works. It does **not** describe JavaScript or third-party APIs. For workflow and C# examples, read [Plugin development](https://codealta.io/docs/plugins/developers/); for UI behavior, read [Plugin UI](https://codealta.io/docs/plugins/ui/). Both ship in the user guide as `plugins/developers.md` and `plugins/ui.md`; find them offline with `alta search "Plugin development" --kind doc`.
 
 - **Tool hooks.** If a pre-call check must not be skipped, override `ToolHooksFailClosed` to return `true`. Otherwise a throw or a timeout is logged and the call goes on. Honor the cancellation token and the call's capabilities (`CanBlock`, `CanModifyArguments`); use `ShellCommand` and `ModifiedFiles` rather than parsing the tool arguments yourself. Hooks do not bypass CodeAlta's permissions or sandbox. Declare `StartsPrograms` for an agent tool that can run arbitrary commands.
 - **HTML.** A fragment is sanitized, inert HTML: `<script>`, event attributes and inline styles are removed. Encode user text with `PluginHtml.Encode`. Use `data-alta-command` or, in a dialog, `data-alta-action` to reach C#. Supply Markdown or a terminal control for TUI; it does not render HTML.
 - **Canvases and scripts.** A canvas is a Desktop tab that views state owned by the plugin. It can show a fragment or a JavaScript module supplied separately with `PluginScript`; only a canvas script can call C# through `alta.rpc`. For any plugin JavaScript, read the [script API](references/script-api.md) and [library index](references/script-libraries.md) first. Import the libraries supplied by the window; do not install or bundle another copy. Use `alta.html` to sanitize HTML in a module.
 - **Settings.** Declare ordinary user preferences with `GetSettings()` and read them through `Services.Settings`, not by opening the config file. Do not grant agents write access to settings that protect data or access. For a custom Settings page, use a canvas with `PluginCanvasPlacement.Settings`.
+- **Logging.** Add `using XenoAtom.Logging;` for extension methods such as `Logger.Info(...)`.
 
 ## Contribution index
 
@@ -73,6 +74,9 @@ Pass the API type to `alta plugin api`, then read `plugin.cs` in the linked samp
 | Startup contribution | `GetStartupContributions()` | `PluginStartupContribution` | — |
 | TUI command-line command | `GetCommandLineContributions()` | `PluginBase` | — |
 | Persistent data | `Services.State` | `IPluginStateStore` | [saved-data](samples/saved-data/) |
+| SQLite tables | `Services.Database` | `IPluginDatabase` | [Lifecycle and data](https://codealta.io/docs/plugins/developers/#lifecycle-and-data) |
+| Run `alta` commands in-process | `Services.Alta` | `IPluginAltaService` | [Agent tools and alta](https://codealta.io/docs/plugins/developers/#agent-tools-and-alta) |
+| Assigned spaces and other host services | `Services.Spaces`, `Services` | `IPluginServices` | [Lifecycle and data](https://codealta.io/docs/plugins/developers/#lifecycle-and-data) |
 | Plugin-lifetime work | `Tasks.Run` | `IPluginTaskService` | [background-task](samples/background-task/) |
 
 For source layout, see [package-reference](samples/package-reference/) and [multi-plugin-assembly](samples/multi-plugin-assembly/).
