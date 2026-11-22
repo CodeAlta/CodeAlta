@@ -79,6 +79,68 @@ public sealed class CodeModeScriptLibraryTests
         Assert.IsNull(library.Find("other", project), "nothing is written under a scope that is not saved");
     }
 
+    // The script commands run here, outside the container, with the rights of the user: for a sandboxed session they open
+    // no file and write none. It reads its file and writes its copy itself, with its own tools.
+    [TestMethod]
+    public async Task AltaScript_OpensAndWritesNoFileForASandboxedSession()
+    {
+        using var root = TestTempDirectory.Create();
+        var (library, project) = Create(root.Path);
+        var secret = Path.Combine(root.Path, "outside", "notes.js");
+        Directory.CreateDirectory(Path.GetDirectoryName(secret)!);
+        File.WriteAllText(secret, "return (;");
+        var registry = new AltaCommandRegistry();
+        var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection()
+            .Add(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") }).Add(registry).Add(library)
+            .Add(new AltaSandboxedSessions((_, _) => Task.FromResult<AltaSessionSandbox?>(new AltaSessionSandbox("workspace", [])))));
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "sandboxed" };
+
+        var own = Path.Combine(project, "mine.js");
+        File.WriteAllText(own, "return (;");
+        // Not even a file of its own folder: a path that is checked could name another file by the time it is opened.
+        foreach (var file in new[] { secret, Path.Combine(root.Path, "outside", "none.js"), own })
+        {
+            var refused = await dispatcher.InvokeAsync(["script", "check", file], cwd: project, caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, refused.Stdout + refused.Stderr);
+            StringAssert.Contains(refused.Stdout + refused.Stderr, "sandbox.fileDenied");
+            Assert.IsFalse((refused.Stdout + refused.Stderr).Contains("SyntaxError", StringComparison.Ordinal), "nothing of the file is told");
+            Assert.IsFalse((refused.Stdout + refused.Stderr).Contains("script.notFound", StringComparison.Ordinal), "nor whether it exists");
+        }
+
+        // `alta script edit` writes nothing for it: a file written here, in a folder the session writes, could land
+        // elsewhere through a link. The session gets the source, and writes its copy itself.
+        library.Save("review", CodeModeScriptScope.Global, Review, null, null);
+        var edited = await dispatcher.InvokeAsync(["script", "edit", "review"], cwd: project, caller: caller);
+        Assert.AreEqual(AltaExitCodes.Success, edited.ExitCode, edited.Stdout + edited.Stderr);
+        using (var edit = JsonDocument.Parse(edited.Stdout.Split('\n').Single(static line => line.Contains("\"alta.script.edit\"", StringComparison.Ordinal))))
+        {
+            Assert.IsFalse(edit.RootElement.GetProperty("written").GetBoolean());
+            Assert.AreEqual(Review, edit.RootElement.GetProperty("source").GetString());
+            StringAssert.Contains(edit.RootElement.GetProperty("nextStep").GetString(), "write `source`");
+        }
+
+        Assert.IsFalse(Directory.Exists(Path.Combine(root.Path, "home", "scratchpad")), "nothing was written for the sandboxed session");
+
+        // The name of a script is a name, sandboxed or not: never a path that would put the copy elsewhere.
+        foreach (var name in new[] { "../../outside/forged", "..\\..\\outside\\forged", Path.Combine(root.Path, "outside", "forged"), "Has Space", "a/b/c" })
+        {
+            foreach (var who in new AltaCallerIdentity?[] { caller, null })
+            {
+                var refused = await dispatcher.InvokeAsync(["script", "edit", name], cwd: project, caller: who);
+                Assert.AreEqual(AltaExitCodes.Usage, refused.ExitCode, name + ": " + refused.Stdout + refused.Stderr);
+                StringAssert.Contains(refused.Stdout + refused.Stderr, "script.invalidName");
+            }
+        }
+
+        Assert.IsFalse(File.Exists(Path.Combine(root.Path, "outside", "forged.js")));
+
+        // What the session read itself is checked as before, and a session that is not sandboxed has the file read.
+        var given = await dispatcher.InvokeAsync(["script", "check", "--stdin"], "return (;", cwd: project, caller: caller);
+        Assert.AreEqual(AltaExitCodes.Failure, given.ExitCode);
+        StringAssert.Contains(given.Stdout, "SyntaxError");
+        Assert.AreEqual(AltaExitCodes.Failure, (await dispatcher.InvokeAsync(["script", "check", secret], cwd: project)).ExitCode);
+    }
+
     [TestMethod]
     public async Task AltaScript_EditsAScriptThroughACopy_ChecksIt_SavesIt_AndDeletesIt()
     {

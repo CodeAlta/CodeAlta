@@ -27,6 +27,17 @@ internal static class SandboxedProviders
         => string.Equals(providerType, "claude-code", StringComparison.OrdinalIgnoreCase) || string.Equals(providerType, "acp", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(providerType, "codex-cli", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Gets whether the sessions of a provider type run their commands with the <c>shell_command</c> of CodeAlta, which
+    /// takes the parameter to run one outside the sandbox: the providers CodeAlta drives, and Claude Code in the sandbox of
+    /// Windows, where its own shell tools do not run (<c>ClaudeCodeLauncher.CommandsThroughCodeAlta</c>). The other agents
+    /// run their own shell, which has no such parameter.
+    /// </summary>
+    /// <param name="providerType">The type of the provider, or null when it is not known.</param>
+    /// <returns>True when a command of the session can ask to run outside its sandbox.</returns>
+    public static bool RunsCodeAltaShell(string? providerType)
+        => RunsCodeAltaTools(providerType) || (OperatingSystem.IsWindows() && string.Equals(providerType, "claude-code", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Gets whether a sandboxed session can run on a provider type: its tools run in the sandbox either way.</summary>
     /// <param name="providerType">The type of the provider, or null when it is not known.</param>
     /// <returns>True when the sandbox holds what the provider runs.</returns>

@@ -178,7 +178,7 @@ test("provider presentation preserves literal decisions and input owners across 
     assert.equal(await evaluate("document.querySelector('[data-permission-decision=allow_once]').disabled"), true, "A card shown again arms again");
     assert.equal(await armed(), true);
     await evaluate("document.querySelector('[data-permission-decision=allow_once]').focus()"); await key("Escape", "Escape", 27);
-    assert.deepEqual(await evaluate("providerFixture.decisions[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", handle: await evaluate("providerFixture.handle"), decision: "deny" }, "Escape denies");
+    assert.deepEqual(await evaluate("providerFixture.decisions[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", handle: await evaluate("providerFixture.handle"), decision: "deny", feedback: null }, "Escape denies");
     await evaluate("providerFixture.decisions[0].reject(Error('transport failure'))");
     assert.equal(await wait("providerFixture.permission.readOriginal()?.state==='error'"), true);
     assert.equal(await wait("!!document.querySelector('.command-permission-panel [role=alert]')"), true, "An uncertain answer stays shown");
@@ -266,6 +266,92 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("providerFixture.decisions[0].resolve({status:'resolved',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
     assert.equal(await wait("providerFixture.instructions.length===1"), true);
     assert.deepEqual(await evaluate("providerFixture.instructions[0]"), ["Steer", "Use a dry run"]);
+    assert.equal(await evaluate("providerFixture.decisions[0].request.feedback"), null, "A request whose denial carries no text is denied without it: the text follows");
+    // A request whose denial takes the text: the text goes with the denial, in one call, and nothing is sent after it.
+    // The agent reads what to do instead where it reads that it was denied, not one answer later.
+    const taking = "({...providerFixture.permissionPage,entries:providerFixture.permissionPage.entries.map(entry=>({...entry,denialTakesFeedback:true}))})";
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+    await evaluate(`providerFixture.permissions[0].resolve(${taking})`);
+    assert.equal(await armed(), true); await paint();
+    await evaluate("document.querySelector('[data-permission-instead]').focus()");
+    await command("Input.insertText", { text: "  Use a dry run " });
+    await key("Enter", "Enter", 13, "\r");
+    assert.equal(await wait("providerFixture.decisions.length===1"), true);
+    assert.deepEqual(await evaluate("[providerFixture.decisions[0].request.decision,providerFixture.decisions[0].request.feedback]"), ["deny", "Use a dry run"]);
+    assert.equal(await evaluate("document.querySelector('[data-permission-instead]')?.value ?? ''"), "", "The text leaves the field with the denial");
+    await evaluate("providerFixture.decisions[0].resolve({status:'resolved',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
+    assert.equal(await wait("providerFixture.permission.readOriginal()?.state==='resolved'"), true);
+    await paint();
+    assert.equal(await evaluate("providerFixture.instructions.length"), 0, "A text that went with the denial is not sent a second time");
+    // The Deny button says the text written in the field too; Escape denies without it.
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+    await evaluate(`providerFixture.permissions[0].resolve(${taking})`);
+    assert.equal(await armed(), true); await paint();
+    await evaluate("document.querySelector('[data-permission-instead]').focus()");
+    await command("Input.insertText", { text: "Ask me first" });
+    await evaluate("document.querySelector('[data-permission-decision=deny]').click()");
+    assert.equal(await wait("providerFixture.decisions.length===1"), true);
+    assert.deepEqual(await evaluate("[providerFixture.decisions[0].request.decision,providerFixture.decisions[0].request.feedback]"), ["deny", "Ask me first"]);
+    // A denial with a text that was not taken, or whose answer was lost: the text is never lost, and never sent twice.
+    await evaluate("providerFixture.decisions[0].resolve({status:'rejected',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
+    assert.equal(await wait("providerFixture.instructions.length===1"), true);
+    assert.deepEqual(await evaluate("providerFixture.instructions[0]"), ["Queue", "Ask me first"], "The request no longer waited: the text waits for the next turn");
+    // A text written for one request is not said to another: it leaves the field with any answer, and with the request.
+    for (const leave of ["allow", "escape", "other"] as const) {
+      await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+      await evaluate(`providerFixture.permissions[0].resolve(${taking})`);
+      assert.equal(await armed(), true); await paint();
+      await evaluate("document.querySelector('[data-permission-instead]').focus()");
+      await command("Input.insertText", { text: "For the first request only" });
+      if (leave === "other") {
+        // Another session is shown, then this one again: the card is the same component, with another request to answer.
+        const reads = await evaluate("providerFixture.permissions.length") as number;
+        await evaluate("providerFixture.select('Other')"); await evaluate("providerFixture.select('Settings')");
+        assert.equal(await wait(`providerFixture.permissions.length>${reads} && providerFixture.permissions.at(-1).request.sessionId==='Settings'`), true);
+        await evaluate(`providerFixture.permissions.at(-1).resolve(${taking})`);
+        assert.equal(await armed(), true); await paint();
+        assert.equal(await evaluate("document.querySelector('[data-permission-instead]').value"), "", "A text written for another request is not shown for this one");
+        await evaluate("document.querySelector('[data-permission-decision=deny]').click()");
+        assert.equal(await wait("providerFixture.decisions.length===1"), true);
+        assert.equal(await evaluate("providerFixture.decisions[0].request.feedback"), null, "Nor sent with its denial");
+        continue;
+      }
+      if (leave === "allow") await evaluate("document.querySelector('[data-permission-decision=allow_once]').click()");
+      else { await evaluate("document.querySelector('[data-permission-decision=allow_once]').focus()"); await key("Escape", "Escape", 27); }
+      assert.equal(await wait("providerFixture.decisions.length===1"), true);
+      assert.deepEqual(await evaluate("[providerFixture.decisions[0].request.decision,providerFixture.decisions[0].request.feedback]"), [leave === "allow" ? "allow_once" : "deny", null],
+        leave === "allow" ? "Allowing says no text" : "Escape denies without the text");
+      await evaluate("providerFixture.decisions[0].resolve({status:'resolved',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
+      assert.equal(await wait("providerFixture.permission.readOriginal()?.state==='resolved'"), true);
+      await paint();
+      assert.equal(await evaluate("providerFixture.instructions.length"), 0);
+    }
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+    await evaluate(`providerFixture.permissions[0].resolve(${taking})`);
+    assert.equal(await armed(), true); await paint();
+    await evaluate("document.querySelector('[data-permission-instead]').focus()");
+    await command("Input.insertText", { text: "Ask me first" });
+    await key("Enter", "Enter", 13, "\r");
+    assert.equal(await wait("providerFixture.decisions.length===1"), true);
+    await evaluate("providerFixture.decisions[0].reject(Error('transport failure'))");
+    assert.equal(await wait("providerFixture.instructions.length===1"), true);
+    assert.deepEqual(await evaluate("providerFixture.instructions[0]"), ["Draft", "Ask me first"], "Nothing says whether the denial took the text: it comes back as a draft");
+    assert.deepEqual(await evaluate("providerFixture.instructionsShown"), [true]);
+    // The card shows another session by the time the denial is answered (or its tab was closed): the text is still told,
+    // for the session it was written for, and says that the card no longer shows it.
+    for (const [taken, status, expected] of [[false, "resolved", "Steer"], [true, "rejected", "Queue"]] as const) {
+      await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+      await evaluate(`providerFixture.permissions[0].resolve(${taken ? taking : "providerFixture.permissionPage"})`);
+      assert.equal(await armed(), true); await paint();
+      await evaluate("document.querySelector('[data-permission-instead]').focus()");
+      await command("Input.insertText", { text: "Keep this text" });
+      await key("Enter", "Enter", 13, "\r");
+      assert.equal(await wait("providerFixture.decisions.length===1"), true);
+      await evaluate("providerFixture.select('Other')"); await paint();
+      await evaluate(`providerFixture.decisions[0].resolve({status:'${status}',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})`);
+      assert.equal(await wait("providerFixture.instructions.length===1"), true, `${status}: the text is not dropped with the card`);
+      assert.deepEqual(await evaluate("[providerFixture.instructions[0],providerFixture.instructionsShown]"), [[expected, "Keep this text"], [false]]);
+    }
     // A request to load a skill of an MCP server: its name, server, files and address, three answers, and its SKILL.md
     // read on demand for the entry shown, hidden again, and a read that fails said in place.
     await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);

@@ -445,6 +445,8 @@ public sealed class ClaudeCodeSessionTests
 
     [TestMethod]
     [DataRow("user", "The user denied this action in CodeAlta.")]
+    // The CLI gives the model the message of a denial: what the user says with it is there (#489).
+    [DataRow("user-said", "The user denied this action in CodeAlta. The user said: push to the fork instead")]
     [DataRow("policy", "CodeAlta's permission rules denied this action: the permission mode of this session does not approve it.")]
     [DataRow("unattended", "CodeAlta denied this action without asking the user: this run has no user.")]
     [DataRow("unspecified", "This action was denied in CodeAlta.")]
@@ -465,14 +467,18 @@ public sealed class ClaudeCodeSessionTests
         var denial = source switch
         {
             "user" => AgentPermissionDecision.DeniedByUser(),
+            "user-said" => AgentPermissionDecision.DeniedByUser("push to the fork instead"),
             "policy" => AgentPermissionDecision.DeniedByPolicy("the permission mode of this session does not approve it"),
             "unattended" => AgentPermissionDecision.DeniedUnattended("this run has no user."),
             _ => new AgentPermissionDecision(AgentPermissionDecisionKind.Deny),
         };
+        AgentPermissionRequest? asked = null;
         await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
-        await using var session = await CreateSessionAsync(runtime, directory, onPermission: (_, _) => Task.FromResult(denial));
+        await using var session = await CreateSessionAsync(runtime, directory, onPermission: (request, _) => { asked = request; return Task.FromResult(denial); });
 
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("push it") }).WithinAsync(Timeout);
+
+        Assert.IsTrue(asked?.DenialTakesFeedback, "The request says that its denial takes what the user says with it.");
 
         Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
         Assert.AreEqual(expected, decision.Value.GetProperty("message").GetString());

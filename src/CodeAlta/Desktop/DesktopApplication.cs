@@ -575,11 +575,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ModelServerTransports = modelServerTransports.Resolve,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
-                // No sandbox reaches the MCP server of the window, on whatever port it listens.
+                // No sandbox reaches the MCP servers of the instances of this user, as they record them.
+                McpPorts = mcpPorts,
+                // Nor the MCP server of the window, on whatever port it listens, before it is recorded.
                 // Nor the page of the phones: a session that reached it could sign in as a phone and answer its own requests.
                 ReservedLocalPorts = () =>
                 {
-                    IReadOnlyCollection<int> ports = mcp?.ListeningPort is { } listening ? [listening, .. mcpPorts.Current()] : mcpPorts.Current();
+                    IReadOnlyCollection<int> ports = mcp?.ListeningPort is { } listening ? [listening] : [];
                     return _hostCreation is { IsCompletedSuccessfully: true } created
                         && created.Result.PluginRuntime.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mobile.IMobileHostControl>().FirstOrDefault()?.ListeningPort is { } phones
                         ? [phones, .. ports] : ports;

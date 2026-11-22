@@ -1626,9 +1626,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   return <>
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy}
-      instruct={(kind, value) => {
+      instruct={(kind, value, shown) => {
+        // The card no longer shows this session (another one is shown here, or its tab was closed): the text stays the
+        // session's, in its queue, which the application keeps and its composer sends as a prompt when it is shown again.
+        // Never as steering: the run it would reach then may not be the one that asked. A text nothing says was taken
+        // is not queued: it could be sent a second time, and the window asks for a reload then.
+        if (!shown) { if (kind !== "Draft") queue.add("Queue", epoch, sessionId, value); return; }
         // Text that cannot be staged (a request is pending, the queue is full) goes back to the composer, never lost.
-        if (!stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
+        if (kind === "Draft" || !stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
 ${value}` : value);
       }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active}
       showSkill={showPermissionSkill} />}

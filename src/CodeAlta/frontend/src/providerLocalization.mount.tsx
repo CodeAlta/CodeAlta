@@ -19,7 +19,9 @@ const decisions = transport<Parameters<Parameters<typeof createPermissionReviewe
 const inputs = transport<Parameters<Parameters<typeof createUserInputReviewer>[0]>[0], unknown>();
 const answers = transport<Parameters<Parameters<typeof createUserInputReviewer>[1]>[0], unknown>();
 const cancels = transport<Parameters<Parameters<typeof createUserInputReviewer>[2]>[0], unknown>();
-const instructions: ["Steer" | "Queue", string][] = [];
+const instructions: ["Steer" | "Queue" | "Draft", string][] = [];
+// For each instruction, whether the card still showed the session it was written for.
+const instructionsShown: boolean[] = [];
 // The checks that a shown request still waits are recorded apart from the reads of the requests.
 const checks = transport<Parameters<Parameters<typeof createPermissionReviewer>[0]>[0], Awaited<ReturnType<Parameters<typeof createPermissionReviewer>[0]>>>();
 // The reads of the SKILL.md a request to load a skill of an MCP server asks for.
@@ -35,9 +37,9 @@ const inputPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMo
 ] }] };
 const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMore: false, entries: [{ handle, providerId: "Settings",
   kind: "commandExecution", grantRoot: null,
-  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny", shortened: false, outsideSandbox: false, skill: null, browser: null, credential: null }] };
+  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny", shortened: false, outsideSandbox: false, denialTakesFeedback: false, skill: null, browser: null, credential: null }] };
 // A request to load a skill of an MCP server whose files can be checked: it can be allowed from now on.
-const skillPage = { ...permissionPage, entries: [{ handle, providerId: "Settings", kind: "skill", command: null, workingDirectory: null, grantRoot: null, reason: null, shortened: false, outsideSandbox: false,
+const skillPage = { ...permissionPage, entries: [{ handle, providerId: "Settings", kind: "skill", command: null, workingDirectory: null, grantRoot: null, reason: null, shortened: false, outsideSandbox: false, denialTakesFeedback: false,
   skill: { server: "billing", name: "refunds", uri: "skill://acme/billing/refunds/SKILL.md", fileCount: 2, totalBytes: 2048, dynamic: false }, browser: null, credential: null }] };
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
@@ -47,11 +49,11 @@ function Fixture() {
   const [observing, observe] = useState(true);
   useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, focus, observe, epoch, handle, inputPage, permissionPage, skillPage, skillReads: skillReads.calls,
     permissions: permissions.calls, decisions: decisions.calls, inputs: inputs.calls, answers: answers.calls, cancels: cancels.calls,
-    checks: checks.calls, instructions, permission, input, capability } }); }, []);
+    checks: checks.calls, instructions, instructionsShown, permission, input, capability } }); }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => {} }}>
     <main className="configuration-page">
       <PaneObservingContext value={observing}><CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running}
-        instruct={(kind, text) => instructions.push([kind, text])} takeFocus={() => focusable}
+        instruct={(kind, text, shown) => { instructions.push([kind, text]); instructionsShown.push(shown); }} takeFocus={() => focusable}
         showSkill={entry => skillReads.invoke(entry)} /></PaneObservingContext>
       <UserInputPanel reviewer={input} capability={capability} epoch={epoch} sessionId={sessionId} />
     </main>

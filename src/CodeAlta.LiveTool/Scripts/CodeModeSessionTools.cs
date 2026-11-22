@@ -110,7 +110,7 @@ public sealed class CodeModeSessionTools
             Runs = runs,
             Cache = new CodeModeScriptCache(),
             OfSessions = true,
-            SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,
+            SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? (sessionId, _) => ValueTask.FromResult<string?>(Path.Combine(scratchpad, "codemode", sessionId)) : null,
         };
         return new CodeModeSessionTools(options, (providerKey, modelId) => ResolveMode(store, providerKey, modelId));
     }
@@ -168,6 +168,19 @@ public sealed class CodeModeSessionTools
     {
         ArgumentNullException.ThrowIfNull(spaceOf);
         return new CodeModeSessionTools(_options with { SpaceOf = spaceOf }, _mode);
+    }
+
+    /// <summary>
+    /// Returns a copy whose runs keep their source where a runtime keeps it for its sessions
+    /// (<see cref="SessionRuntimeService.GetScriptSourcesAsync"/>): in its scratchpad, and nowhere for a sandboxed session.
+    /// </summary>
+    /// <param name="runtime">The runtime of the sessions.</param>
+    /// <returns>The tools of Code Mode that keep the source of their runs there.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="runtime"/> is null.</exception>
+    public CodeModeSessionTools WithSourcesOf(SessionRuntimeService runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        return new CodeModeSessionTools(_options with { SourceFolder = runtime.GetScriptSourcesAsync }, _mode);
     }
 
     /// <summary>Gives the scripts of these tools where their notifications (<c>notify()</c>) reach the user.</summary>

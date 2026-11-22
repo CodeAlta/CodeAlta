@@ -103,6 +103,12 @@ public sealed record SandboxPolicy
     /// <summary>Gets the folders read and written.</summary>
     public required IReadOnlyList<string> ReadWrite { get; init; }
 
+    /// <summary>
+    /// Gets the folders of <see cref="ReadWrite"/> that the profile adds for the session to write (its <c>write</c>),
+    /// as full paths: the file tools of the session write them as its commands do.
+    /// </summary>
+    public IReadOnlyList<string> ProfileWrite { get; init; } = [];
+
     /// <summary>Gets the folders and files read only.</summary>
     public required IReadOnlyList<string> ReadOnly { get; init; }
 

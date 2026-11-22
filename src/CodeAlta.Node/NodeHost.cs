@@ -262,6 +262,9 @@ public sealed class NodeHost : IAsyncDisposable
             ReviewOwnedPermissionsPolicy = () => FleetSessionDefaults.AsksByDefault(catalog.FleetRoot),
             SessionPermissionModes = true,
             InheritPermissionModePolicy = static () => true,
+            // The commands of a node have no `alta review` (CreateAltaOptions): a session that waited for a review before
+            // it commits would wait for one nobody can ask for nor give.
+            WithoutReviews = !AltaCommandRegistryOptions.Node.AllowsBuiltInRoot("review"),
             // Sandboxed by default where the sandbox can run: workspace and the hosts of git hosting.
             DefaultSandbox = options.SandboxByDefault ? FleetNodeSandbox.ProfileName : null,
             // A session works under the Git, GitHub and CLI identity of its space, as in CodeAlta Desktop.
@@ -308,7 +311,6 @@ public sealed class NodeHost : IAsyncDisposable
         return new HeadlessAltaToolsOptions
         {
             Registry = AltaCommandRegistryOptions.Node,
-            CodeModeScratchpadRoot = Path.Combine(profile.StateRoot, "scratchpad"),
             KeepsScriptValues = true,
             ReadsSessionSpaces = true,
             OwnsReminders = true,

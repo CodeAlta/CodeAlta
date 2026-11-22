@@ -91,7 +91,8 @@ public static class SandboxPolicyBuilder
         readWrite.AddRange(gitFolders.Take(1).Where(folder => !IsInside(workingDirectory, folder)));
         readWrite.AddRange(folders.Writable.Select(Full));
         if (folders.Scratchpad is { } scratchpad) readWrite.Add(Full(scratchpad));
-        readWrite.AddRange(profile.Write.Select(path => Expand(path, home)));
+        var profileWrite = profile.Write.Select(path => Expand(path, home)).ToList();
+        readWrite.AddRange(profileWrite);
         readWrite.AddRange([sandboxHome, caches, temp]);
 
         var readOnly = new List<string>();
@@ -161,6 +162,7 @@ public static class SandboxPolicyBuilder
             ProfileName = profile.Name,
             WorkingDirectory = workingDirectory,
             ReadWrite = Distinct(readWrite),
+            ProfileWrite = Distinct(profileWrite),
             ReadOnly = Distinct(readOnly.Where(path => !readWrite.Any(grant => comparer.Equals(grant, path)))),
             Denied = Distinct(denied),
             Protected = Distinct(protectedEntries),

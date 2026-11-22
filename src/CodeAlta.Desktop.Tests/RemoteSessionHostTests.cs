@@ -25,6 +25,18 @@ public sealed class RemoteSessionHostTests
 
     public TestContext TestContext { get; set; } = null!;
 
+    // The answer a node takes carries no words of the user: a denial given with some is not sent without them, where
+    // they would be lost. The window sends them as a prompt instead, as the requests of a node say.
+    [TestMethod]
+    public async Task RemoteHost_SendsNoDenialWhoseWordsItCannotCarry()
+    {
+        var machine = new PairedMachine("node", "device-node", default, [], DateTimeOffset.UnixEpoch, ["view"]);
+        await using var host = new RemoteSessionHost(machine, static _ => throw new AssertFailedException("Nothing is sent to the node."));
+        var handle = new SessionOwnedPermissionHandle(Guid.NewGuid(), Guid.NewGuid(), 1, new SessionPermissionHandle("session", null, "interaction", Guid.NewGuid()));
+
+        Assert.IsFalse(await host.ResolvePermissionAsync(handle, AgentPermissionDecisionKind.Deny, "Use the dry run instead.", TestContext.CancellationToken));
+    }
+
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]

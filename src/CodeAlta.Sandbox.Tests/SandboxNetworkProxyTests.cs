@@ -30,6 +30,24 @@ public sealed class SandboxNetworkProxyTests
         Assert.StartsWith("HTTP/1.1 403", await SendAsync(proxy, "CONNECT 169.254.169.254:80 HTTP/1.1\r\n\r\n", null), "the metadata of a cloud");
     }
 
+    // A port CodeAlta takes while a proxy runs (the MCP server of a window that opens on a free port) is refused from the
+    // next connection on: a proxy that kept the ports it was started with let a sandbox whose profile lists that port in.
+    [TestMethod]
+    public async Task APortReservedWhileTheProxyRuns_IsRefusedAtTheNextConnection()
+    {
+        using var upstream = new EchoServer();
+        var reserved = new HashSet<int>();
+        await using var proxy = SandboxNetworkProxy.Start([], [upstream.Port], () => reserved, upstream: null);
+        var connect = $"CONNECT localhost:{upstream.Port} HTTP/1.1\r\nHost: localhost\r\n\r\n";
+
+        Assert.StartsWith("HTTP/1.1 200", await SendAsync(proxy, connect, "ping"));
+        reserved.Add(upstream.Port);
+        Assert.StartsWith("HTTP/1.1 403", await SendAsync(proxy, connect, null), "the port is CodeAlta's own now");
+        Assert.IsNull(await proxy.ResolveAllowedAsync("127.0.0.1", upstream.Port, CancellationToken.None));
+        reserved.Clear();
+        Assert.StartsWith("HTTP/1.1 200", await SendAsync(proxy, connect, "ping"), "and reached again once it is no longer");
+    }
+
     [TestMethod]
     public async Task AProxyDisposedAsSoonAsItStarts_EndsWithoutThrowing()
     {

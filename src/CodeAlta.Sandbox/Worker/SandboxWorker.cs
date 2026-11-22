@@ -125,7 +125,9 @@ public static class SandboxWorker
                     Scratchpad = init.Scratchpad,
                 },
             };
-            return AgentBuiltInToolFactory.CreateDefaultTools(options)
+            // Every tool of the list, whatever the provider: CodeAlta chose the tools of the session, with the whole
+            // description of its provider, and sends here the calls of those.
+            return AgentBuiltInToolFactory.CreateAllTools(options)
                 .Where(static tool => Tools.Contains(tool.Spec.Name))
                 .ToDictionary(static tool => tool.Spec.Name, StringComparer.Ordinal);
         }

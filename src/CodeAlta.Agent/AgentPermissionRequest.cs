@@ -26,7 +26,16 @@ public abstract record AgentPermissionRequest(
     AgentRunId? RunId,
     string InteractionId,
     string Kind)
-    : AgentEvent(ProviderId, SessionId, Timestamp, RunId);
+    : AgentEvent(ProviderId, SessionId, Timestamp, RunId)
+{
+    /// <summary>
+    /// Gets whether what asks tells the agent, with a denial, the words the user gave with it
+    /// (<see cref="AgentPermissionDecision.UserFeedback"/>): the agent then reads what to do instead where it reads that
+    /// it was denied. False, the default, for what answers through a protocol whose refusal carries no text (an ACP
+    /// agent, Codex): the words of the user are then sent to the session as a prompt, after the denial.
+    /// </summary>
+    public bool DenialTakesFeedback { get; init; }
+}
 
 /// <summary>
 /// Generic permission request for providers that do not expose a richer typed prompt.
@@ -295,9 +304,22 @@ public sealed record AgentPermissionDecision(
     /// </summary>
     public string? Reason { get; init; }
 
+    /// <summary>
+    /// Gets what the user tells the agent with a denial, such as what to do instead, in the user's own words; null when
+    /// the user said nothing. Only a request that takes it gets one
+    /// (<see cref="AgentPermissionRequest.DenialTakesFeedback"/>).
+    /// </summary>
+    public string? UserFeedback { get; init; }
+
     /// <summary>Creates the denial of the user, who answered the request.</summary>
     /// <returns>The decision.</returns>
     public static AgentPermissionDecision DeniedByUser() => new(AgentPermissionDecisionKind.Deny) { Source = AgentPermissionDecisionSource.User };
+
+    /// <summary>Creates the denial of the user, who answered the request and told the agent something with it.</summary>
+    /// <param name="feedback">What the user tells the agent, such as what to do instead; null or blank for nothing.</param>
+    /// <returns>The decision.</returns>
+    public static AgentPermissionDecision DeniedByUser(string? feedback)
+        => new(AgentPermissionDecisionKind.Deny) { Source = AgentPermissionDecisionSource.User, UserFeedback = string.IsNullOrWhiteSpace(feedback) ? null : feedback.Trim() };
 
     /// <summary>Creates the denial of a rule or a permission mode of CodeAlta, which nobody was asked about.</summary>
     /// <param name="reason">Why the rule denies the request: a short clause.</param>
@@ -321,15 +343,16 @@ public sealed record AgentPermissionDecision(
 
     /// <summary>
     /// Gets the sentence that tells an agent who denied its action and why, such as
-    /// <c>The user denied this action in CodeAlta.</c>
+    /// <c>The user denied this action in CodeAlta.</c>, followed by what the user said with the denial
+    /// (<see cref="UserFeedback"/>).
     /// </summary>
-    /// <returns>The sentence, ending with a period.</returns>
+    /// <returns>The sentence, ending with a period, then the words of the user as they are.</returns>
     public string DescribeDenial()
     {
         var reason = Reason?.Trim().TrimEnd('.');
         return Source switch
         {
-            AgentPermissionDecisionSource.User => "The user denied this action in CodeAlta.",
+            AgentPermissionDecisionSource.User => "The user denied this action in CodeAlta." + DescribeUserFeedback(),
             AgentPermissionDecisionSource.Policy => string.IsNullOrEmpty(reason)
                 ? "CodeAlta's permission rules denied this action."
                 : $"CodeAlta's permission rules denied this action: {reason}.",
@@ -339,6 +362,16 @@ public sealed record AgentPermissionDecision(
             _ => "This action was denied in CodeAlta.",
         };
     }
+
+    /// <summary>
+    /// Gets what the user said with a denial, as the text that follows the sentence of the denial: a space, then
+    /// <c>The user said: …</c>. Empty when the user said nothing.
+    /// </summary>
+    /// <returns>The text, or an empty string.</returns>
+    public string DescribeUserFeedback()
+        => Kind == AgentPermissionDecisionKind.Deny && Source == AgentPermissionDecisionSource.User && !string.IsNullOrWhiteSpace(UserFeedback)
+            ? $" The user said: {UserFeedback.Trim()}"
+            : string.Empty;
 }
 
 /// <summary>

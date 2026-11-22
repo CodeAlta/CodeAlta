@@ -23,13 +23,15 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     private readonly TcpListener _listener;
     private readonly IReadOnlyList<string>? _hosts;
     private readonly IReadOnlySet<int> _localPorts;
-    private readonly IReadOnlySet<int> _reservedPorts;
+    // Read at each connection: a port CodeAlta takes after the proxy started (the MCP server of a window that opens) is
+    // refused from then on, without a new proxy.
+    private readonly Func<IReadOnlySet<int>> _reservedPorts;
     private readonly IWebProxy? _upstream;
     private readonly CancellationTokenSource _closing = new();
     private readonly ConcurrentQueue<string> _refusals = new();
     private readonly Task _accepting;
 
-    private SandboxNetworkProxy(TcpListener listener, IReadOnlyList<string>? hosts, IReadOnlySet<int> localPorts, IReadOnlySet<int> reservedPorts, IWebProxy? upstream)
+    private SandboxNetworkProxy(TcpListener listener, IReadOnlyList<string>? hosts, IReadOnlySet<int> localPorts, Func<IReadOnlySet<int>> reservedPorts, IWebProxy? upstream)
     {
         _listener = listener;
         _hosts = hosts;
@@ -68,12 +70,29 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     /// <exception cref="SocketException">No port could be listened on.</exception>
     public static SandboxNetworkProxy Start(IEnumerable<string>? hosts, IEnumerable<int> localPorts, IEnumerable<int> reservedPorts, IWebProxy? upstream)
     {
+        ArgumentNullException.ThrowIfNull(reservedPorts);
+        var reserved = reservedPorts.ToHashSet();
+        return Start(hosts, localPorts, () => reserved, upstream);
+    }
+
+    /// <summary>
+    /// Starts a proxy as <see cref="Start(IEnumerable{string}?, IEnumerable{int}, IEnumerable{int}, IWebProxy?)"/> does, whose
+    /// reserved ports are read at each connection: a port that becomes reserved while the proxy runs is refused from then on.
+    /// </summary>
+    /// <param name="hosts">The host patterns of the profile (<see cref="SandboxHostPattern"/>), or null for every host of the internet.</param>
+    /// <param name="localPorts">The ports of this computer the sandbox may reach.</param>
+    /// <param name="reservedPorts">Gives the ports of this computer that are never reached now, whatever the profile: CodeAlta's own.</param>
+    /// <param name="upstream">The proxy asked how to reach a host the sandbox may reach; null to reach every host directly.</param>
+    /// <returns>The proxy.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="localPorts"/> or <paramref name="reservedPorts"/> is null.</exception>
+    /// <exception cref="SocketException">No port could be listened on.</exception>
+    public static SandboxNetworkProxy Start(IEnumerable<string>? hosts, IEnumerable<int> localPorts, Func<IReadOnlySet<int>> reservedPorts, IWebProxy? upstream)
+    {
         ArgumentNullException.ThrowIfNull(localPorts);
         ArgumentNullException.ThrowIfNull(reservedPorts);
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        var reserved = reservedPorts.ToHashSet();
-        return new SandboxNetworkProxy(listener, hosts is null ? null : [.. hosts], localPorts.Where(port => !reserved.Contains(port)).ToHashSet(), reserved, upstream);
+        return new SandboxNetworkProxy(listener, hosts is null ? null : [.. hosts], localPorts.ToHashSet(), reservedPorts, upstream);
     }
 
     /// <summary>Says whether the sandbox may reach a host and port, as the proxy decides it (also for the <c>webget</c> of CodeAlta).</summary>
@@ -82,7 +101,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The address to connect to, or null when the host is refused.</returns>
     public Task<IPAddress?> ResolveAllowedAsync(string host, int port, CancellationToken cancellationToken)
-        => ResolveAllowedAsync(host, port, _hosts, _localPorts, _reservedPorts, cancellationToken);
+        => ResolveAllowedAsync(host, port, _hosts, _localPorts, _reservedPorts(), cancellationToken);
 
     /// <summary>
     /// Says whether a sandbox may reach a host and port: a host of its patterns (none for <paramref name="hosts"/> null,

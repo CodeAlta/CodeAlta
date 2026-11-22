@@ -25,12 +25,6 @@ public sealed record HeadlessAltaToolsOptions
     public string? CodeMode { get; init; }
 
     /// <summary>
-    /// Gets the scratchpad folder where the runs of Code Mode keep their source (<c>codemode/&lt;session-id&gt;</c> below it);
-    /// null keeps none.
-    /// </summary>
-    public string? CodeModeScratchpadRoot { get; init; }
-
-    /// <summary>
     /// Gets whether the scripts of Code Mode keep values across runs (<c>store</c> and <c>load</c>) in the state root of the
     /// host. False, the default: a host that leaves its state root as it is keeps none.
     /// </summary>
@@ -180,7 +174,6 @@ public sealed class HeadlessAltaTools : IAsyncDisposable
     private static CodeModeSessionTools? CreateCodeMode(CodeAltaHost host, HeadlessAltaToolsOptions options)
     {
         if (options.CodeMode == CodeModeScopes.Off) return null;
-        var scratchpad = options.CodeModeScratchpadRoot;
         var codeModeOptions = new CodeModeToolOptions
         {
             Runs = host.CodeModeRuns,
@@ -189,7 +182,9 @@ public sealed class HeadlessAltaTools : IAsyncDisposable
             Library = host.CodeModeScripts,
             Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
             Values = options.KeepsScriptValues ? new CodeModeValueStore(CodeModeValueStore.RootOf(host.CatalogOptions)) : null,
-            SourceFolder = scratchpad is { Length: > 0 } ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,
+            // In the scratchpad of the host, which is the one of its sessions: a run of altacli keeps the sources in its
+            // private scratchpad, deleted with it.
+            SourceFolder = host.RuntimeService.GetScriptSourcesAsync,
         };
         var store = new CodeAltaConfigStore(host.CatalogOptions);
         var tools = options.CodeMode is { } fixedMode

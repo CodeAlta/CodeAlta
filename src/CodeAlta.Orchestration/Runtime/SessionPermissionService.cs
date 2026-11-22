@@ -49,6 +49,12 @@ public sealed record SessionPermissionSnapshot(
     /// (<see cref="AgentCommandPermissionRequest.OutsideSandbox"/>): no permission mode answers it for the user.
     /// </summary>
     public bool OutsideSandbox { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether a denial of the request takes the words of the user with it
+    /// (<see cref="AgentPermissionRequest.DenialTakesFeedback"/>).
+    /// </summary>
+    public bool DenialTakesFeedback { get; init; }
 }
 
 /// <summary>A change of where the secrets are kept that an agent asks, as the review shows it: never a value.</summary>
@@ -718,6 +724,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // The presented form of an eligible request: a command carries its command line and folder, a file change
     // carries the root it asks to write under. Only a kind <see cref="Eligible"/> accepted reaches this.
     private static SessionPermissionSnapshot OwnedSnapshot(SessionPermissionHandle handle, AgentPermissionRequest request)
+        => OwnedShape(handle, request) with { DenialTakesFeedback = request.DenialTakesFeedback };
+
+    private static SessionPermissionSnapshot OwnedShape(SessionPermissionHandle handle, AgentPermissionRequest request)
         => request switch
         {
             AgentCommandPermissionRequest command => new(handle, request.ProviderId, request.Timestamp, request.Kind,
@@ -792,6 +801,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             Browser = request is AgentBrowserPermissionRequest browser ? new(browser.Browser, browser.Profile, browser.Site) : null,
             Credential = request is AgentCredentialPermissionRequest credential ? new(credential.Action, credential.Subject, credential.Detail) : null,
             OutsideSandbox = command?.OutsideSandbox == true,
+            DenialTakesFeedback = request.DenialTakesFeedback,
         };
         var completion = new TaskCompletionSource<AgentPermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         var registered = await ExecuteAsync(() =>
@@ -879,11 +889,32 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// <exception cref="OperationCanceledException">Caller cancellation is observed before resolution.</exception>
     public ValueTask<bool> ResolveOwnedCommandAsync(SessionOwnedPermissionHandle handle,
         AgentPermissionDecisionKind decision, CancellationToken cancellationToken)
+        => ResolveOwnedCommandAsync(handle, decision, userFeedback: null, cancellationToken);
+
+    /// <summary>
+    /// Resolves an owned attempt as <see cref="ResolveOwnedCommandAsync(SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken)"/>
+    /// does, with what the user tells the agent with a denial: the request receives the denial and those words together
+    /// (<see cref="AgentPermissionDecision.UserFeedback"/>), in one answer. They are refused, and nothing is resolved, with
+    /// another decision than Deny, for a request that takes none (<see cref="SessionPermissionSnapshot.DenialTakesFeedback"/>),
+    /// or when they are longer than <see cref="UserFeedbackLimit"/> characters: the caller then sends them another way.
+    /// </summary>
+    /// <param name="handle">The exact attempt.</param>
+    /// <param name="decision">The decision.</param>
+    /// <param name="userFeedback">What the user tells the agent with a denial; null or blank for nothing.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the attempt was resolved with the decision.</returns>
+    /// <exception cref="ArgumentNullException">The handle or its attempt is null.</exception>
+    /// <exception cref="OperationCanceledException">Caller cancellation is observed before resolution.</exception>
+    public ValueTask<bool> ResolveOwnedCommandAsync(SessionOwnedPermissionHandle handle,
+        AgentPermissionDecisionKind decision, string? userFeedback, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(handle);
         ArgumentNullException.ThrowIfNull(handle.Attempt);
         cancellationToken.ThrowIfCancellationRequested();
         if (decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel or AgentPermissionDecisionKind.AllowAlways))
+            return ValueTask.FromResult(false);
+        var feedback = string.IsNullOrWhiteSpace(userFeedback) ? null : userFeedback.Trim();
+        if (feedback is not null && (decision != AgentPermissionDecisionKind.Deny || !ValidOwnedText(feedback, UserFeedbackLimit, required: true)))
             return ValueTask.FromResult(false);
         return ExecuteAsync(() =>
         {
@@ -891,9 +922,14 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             if (!_pending.TryGetValue(handle.Attempt, out var pending) || pending.OwnedExecution is not { } execution
                 || execution.OperationId != handle.OperationId || execution.RuntimeId != handle.RuntimeInstanceId
                 || execution.AttachmentOrdinal != handle.AttachmentGeneration || !CanUse(execution) || IsCanceled(pending)) return false;
-            return Complete(handle.Attempt, decision);
+            // Words the request would not tell the agent are not taken: they would be lost with the answer.
+            if (feedback is not null && !pending.Snapshot.DenialTakesFeedback) return false;
+            return Complete(handle.Attempt, decision, feedback);
         }, false);
     }
+
+    /// <summary>The most characters of what the user tells the agent with a denial.</summary>
+    public const int UserFeedbackLimit = 4096;
 
     /// <summary>
     /// Checks the entire scoped handle and caller cancellation in the mailbox; canceled, stale or wrong identities
@@ -1014,7 +1050,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         }
     }
 
-    private bool Complete(SessionPermissionHandle handle, AgentPermissionDecisionKind decision)
+    private bool Complete(SessionPermissionHandle handle, AgentPermissionDecisionKind decision, string? userFeedback = null)
     {
         if (!_pending.TryGetValue(handle, out var entry))
         {
@@ -1028,7 +1064,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             && decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel or AgentPermissionDecisionKind.AllowAlways)) return false;
         _pending.Remove(handle);
         // Every answer that resolves a waiting request is the user's: on the card of its session, in a dialog, on a phone.
-        entry.Completion.SetResult(canceled ? new(AgentPermissionDecisionKind.Cancel) : new(decision) { Source = AgentPermissionDecisionSource.User });
+        entry.Completion.SetResult(canceled ? new(AgentPermissionDecisionKind.Cancel)
+            : new(decision) { Source = AgentPermissionDecisionSource.User, UserFeedback = decision == AgentPermissionDecisionKind.Deny ? userFeedback : null });
         return !canceled || decision == AgentPermissionDecisionKind.Cancel;
     }
 

@@ -1682,6 +1682,54 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.HasCount(0, (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
     }, reviewPermissions: true);
 
+    // What the user says with a denial reaches the request with the denial, in one answer: sent after it, as a prompt, it
+    // reached the model one request late, after the model had answered the bare denial (#489).
+    [TestMethod]
+    public Task OwnedPermission_DeniedWithWords_GivesTheRequestTheDenialAndTheWordsTogether() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.RequestPerSendPermission = true;
+        f.Provider.RequestedDenialTakesFeedback = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Track(f.Provider.SendPermission!);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var entry = (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries.Single();
+        Assert.IsTrue(entry.Request.DenialTakesFeedback, "the review knows the request takes the words");
+
+        // Words go with a denial only, and within the limit: the request keeps waiting, for an answer that is sent another way.
+        Assert.IsFalse(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, "run it in tmp", CancellationToken.None).AsTask()));
+        Assert.IsFalse(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, new string('x', SessionPermissionService.UserFeedbackLimit + 1), CancellationToken.None).AsTask()));
+        Assert.IsFalse(pending.IsCompleted);
+
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, "  run it in tmp instead \n", CancellationToken.None).AsTask()));
+        var decision = await f.Observe(pending);
+        Assert.AreEqual((AgentPermissionDecisionKind.Deny, AgentPermissionDecisionSource.User, "run it in tmp instead"), (decision.Kind, decision.Source, decision.UserFeedback));
+        Assert.AreEqual("The user denied this action in CodeAlta. The user said: run it in tmp instead", decision.DescribeDenial());
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, reviewPermissions: true);
+
+    // A request whose answer carries no text (an ACP agent, Codex) refuses the words rather than lose them: the window
+    // sends them as a prompt.
+    [TestMethod]
+    public Task OwnedPermission_ThatTakesNoWords_RefusesADenialWithWords_AndStillWaits() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Track(f.Provider.SendPermission!);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var entry = (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries.Single();
+        Assert.IsFalse(entry.Request.DenialTakesFeedback);
+
+        Assert.IsFalse(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, "run it in tmp instead", CancellationToken.None).AsTask()));
+        Assert.IsFalse(pending.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, "  ", CancellationToken.None).AsTask()), "blank words are no words");
+        Assert.IsNull((await f.Observe(pending)).UserFeedback);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, reviewPermissions: true);
+
     [TestMethod]
     public Task OwnedPermission_TooLongToShowInFull_WaitsForTheUserShortened() => Fixture.RunAsync(async f =>
     {
@@ -2894,8 +2942,9 @@ public sealed class OwnedSessionCommandServiceTests
         internal Task? AbortDependency { get; set; }
         internal string RequestedCommand { get; set; } = "inert fixture command";
         internal string RequestedReason { get; set; } = "fixture";
+        internal bool RequestedDenialTakesFeedback { get; set; }
         internal AgentCommandPermissionRequest CommandRequest() => new(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
-            null, "owned-permission", null, RequestedCommand, Options!.WorkingDirectory, null, RequestedReason, null, null, null);
+            null, "owned-permission", null, RequestedCommand, Options!.WorkingDirectory, null, RequestedReason, null, null, null) { DenialTakesFeedback = RequestedDenialTakesFeedback };
         internal TaskCompletionSource PreparationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleasePreparation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

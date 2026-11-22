@@ -117,7 +117,8 @@ internal sealed partial class ClaudeCodeSession
                 return Deny("No run of CodeAlta is active for this session.", interrupt: false);
             }
 
-            var decision = await run.OnPermissionRequest(permission, prompt.Token).ConfigureAwait(false);
+            // The CLI gives the model the message of a denial: what the user says with it goes there.
+            var decision = await run.OnPermissionRequest(permission with { DenialTakesFeedback = true }, prompt.Token).ConfigureAwait(false);
             if (prompt.IsCancellationRequested)
             {
                 // The prompt was withdrawn (answered on claude.ai, over Remote Control) or the turn was interrupted:

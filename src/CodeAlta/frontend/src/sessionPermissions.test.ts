@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionPermissionCommand, SessionPermissionResolution, SessionPermissionsPage } from "#neoastra";
-import { createPermissionReviewer, offersAllowAlways, signInOf, type PermissionReviewState } from "./sessionPermissions";
+import { createPermissionReviewer, denialFeedbackLimit, feedbackGoesWithDenial, offersAllowAlways, signInOf, type PermissionReviewState } from "./sessionPermissions";
 import { testLimit } from "./testTime";
 
 const epoch = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -12,7 +12,7 @@ function command(): SessionPermissionCommand {
   return { handle: { operationId: epoch, runtimeInstanceId: runtime, attachmentGeneration: "9223372036854775807",
     sessionId: "selected", runId: null, interactionId: "interaction", attemptId: epoch },
     providerId: "fake", kind: "commandExecution", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture",
-    grantRoot: null, reason: null, shortened: false, outsideSandbox: false, skill: null, browser: null, credential: null };
+    grantRoot: null, reason: null, shortened: false, outsideSandbox: false, denialTakesFeedback: false, skill: null, browser: null, credential: null };
 }
 function fileChange(): SessionPermissionCommand {
   return { ...command(), kind: "fileChange", command: null, workingDirectory: null, grantRoot: "Q:\\fixture" };
@@ -119,7 +119,7 @@ function resolution(status = "resolved"): SessionPermissionResolution {
   return { status, hostEpoch: epoch, handle: command().handle };
 }
 function origin(decision = "allow_once", entry = command()) {
-  return { expectedHostEpoch: epoch, handle: entry.handle, decision };
+  return { expectedHostEpoch: epoch, handle: entry.handle, decision, feedback: null };
 }
 
 test("permission review is manual, immutable and uses the latest request only", () => Fixture.run(async f => {
@@ -279,7 +279,7 @@ test("Allow once Deny Cancel forward exact handles and require fresh review afte
   for (const decision of ["allow_once", "deny", "cancel"] as const) {
     const states: PermissionReviewState[] = []; let calls = 0;
     const scope = f.reviewer(async () => page(), async (actual, options) => {
-      calls++; assert.deepEqual(actual, { expectedHostEpoch: epoch, handle: command().handle, decision });
+      calls++; assert.deepEqual(actual, { expectedHostEpoch: epoch, handle: command().handle, decision, feedback: null });
       assert.equal(options.timeoutMilliseconds, 8_000);
       return { status: decision === "deny" ? "rejected" : "resolved", hostEpoch: epoch, handle: actual.handle };
     }).forSelection(request, f.controller().signal, value => states.push(value));
@@ -341,6 +341,36 @@ test("permission response identity mismatch or transport failure is uncertain an
     assert.equal(lists, 1);
     assert.deepEqual(states.at(-1), { kind: "error", code: "uncertain", reloadRequired: true });
     assert.equal(JSON.stringify(states).includes("private"), false);
+  }
+}));
+
+// What the user tells the agent with a denial goes with the denial itself, in the one call that resolves it: sent after
+// it, as a prompt, it reached the model one request late (#489).
+test("a denial carries what the user says for a request that takes it, and for no other", () => Fixture.run(async f => {
+  const sent: unknown[] = [];
+  const taking = { ...command(), denialTakesFeedback: true };
+  assert.equal(feedbackGoesWithDenial(taking, " Use a dry run "), true);
+  assert.equal(feedbackGoesWithDenial(taking, "   "), false);
+  assert.equal(feedbackGoesWithDenial(taking, "x".repeat(denialFeedbackLimit + 1)), false, "a longer text is sent as a prompt");
+  assert.equal(feedbackGoesWithDenial(command(), "Use a dry run"), false, "a request whose denial carries no text");
+  // The rule of the host: a text it would refuse with the denial is sent as a prompt instead.
+  assert.equal(feedbackGoesWithDenial(taking, "half an emoji \ud83d"), false, "a lone surrogate");
+  assert.equal(feedbackGoesWithDenial(taking, "a\0b"), false);
+  assert.equal(feedbackGoesWithDenial(taking, "a whole emoji \ud83d\ude00"), true);
+  for (const [entry, decision, feedback, expected] of [
+    [taking, "deny", " Use a dry run ", "Use a dry run"], [taking, "deny", null, null],
+    // Never sent: an answer that is no denial, or a request that would lose the text.
+    [taking, "allow_once", "Use a dry run", undefined], [command(), "deny", "Use a dry run", undefined],
+  ] as const) {
+    const states: PermissionReviewState[] = [];
+    const before = sent.length;
+    const reviewer = f.reviewer(async () => page([entry]), async origin => { sent.push(origin); return resolution(); });
+    const scope = reviewer.forSelection(request, f.controller().signal, value => states.push(value));
+    await f.wait(scope.refresh());
+    await f.wait(scope.decide(ready(states).entries[0], decision, feedback));
+    if (expected === undefined) { assert.equal(sent.length, before, `${decision} with a text it cannot carry sends nothing`); continue; }
+    assert.deepEqual(sent.at(-1), { expectedHostEpoch: epoch, handle: entry.handle, decision, feedback: expected });
+    assert.equal(reviewer.readOriginal()?.state, "resolved");
   }
 }));
 

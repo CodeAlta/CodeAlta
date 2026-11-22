@@ -161,7 +161,7 @@ internal sealed class CliHost : IAsyncDisposable
             var browser = new BrowserPluginHost(storage.StateRoot) { HasUser = false, SecretRoots = [storage.GlobalRoot, storage.StateRoot] };
             host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
-                ReservedLocalPorts = mcpPorts.Current,
+                McpPorts = mcpPorts,
                 GlobalRoot = storage.GlobalRoot,
                 StateRoot = storage.StateRoot,
                 Config = request.Config,
@@ -173,7 +173,7 @@ internal sealed class CliHost : IAsyncDisposable
                 FullTrust = true,
                 HeadlessInstructions = request.Headless,
                 // altacli offers no review (alta review), with a user or without.
-                WithoutReviews = true,
+                WithoutReviews = !AltaCommandRegistryOptions.Cli.AllowsBuiltInRoot("review"),
                 // A session another process runs (another altacli, CodeAlta Desktop or TUI) is refused as in use, exit code 5.
                 SessionLeaseOwner = SessionLeaseOwner.CliKind,
                 ListsSkills = request.ListsSkills,
@@ -238,7 +238,6 @@ internal sealed class CliHost : IAsyncDisposable
             {
                 Registry = request.ListsSkills ? AltaCommandRegistryOptions.Cli : WithoutSkills(AltaCommandRegistryOptions.Cli),
                 CodeMode = request.CodeMode,
-                CodeModeScratchpadRoot = Path.Combine(storage.GlobalRoot, "scratchpad"),
             }).Dispatcher;
             // The MCP plugin that runs: one that was created but did not start is not used.
             var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;

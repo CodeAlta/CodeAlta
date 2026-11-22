@@ -1330,6 +1330,8 @@ public sealed class AgentToolsTests
 
     [TestMethod]
     [DataRow("user", "shell_command was not run. The user denied this action in CodeAlta.")]
+    // What the user says with the denial is read with it, in the same result (#489).
+    [DataRow("user-said", "shell_command was not run. The user denied this action in CodeAlta. The user said: use the copy in tmp instead")]
     [DataRow("policy", "shell_command was not run. CodeAlta's permission rules denied this action: no rule approves it.")]
     [DataRow("unattended", "shell_command was not run. CodeAlta denied this action without asking the user: this run has no user.")]
     public async Task ShellCommandTool_SaysWhoDeniedIt(string source, string expected)
@@ -1338,10 +1340,12 @@ public sealed class AgentToolsTests
         var denial = source switch
         {
             "user" => AgentPermissionDecision.DeniedByUser(),
+            "user-said" => AgentPermissionDecision.DeniedByUser("  use the copy in tmp instead "),
             "policy" => AgentPermissionDecision.DeniedByPolicy("no rule approves it"),
             _ => AgentPermissionDecision.DeniedUnattended("this run has no user"),
         };
-        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path, onPermissionRequest: (_, _) => Task.FromResult(denial)))
+        AgentPermissionRequest? asked = null;
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path, onPermissionRequest: (request, _) => { asked = request; return Task.FromResult(denial); }))
             .Single(static tool => tool.Spec.Name == "shell_command");
         using var args = JsonDocument.Parse("""{"command":"Write-Output 'should not run'"}""");
 
@@ -1352,6 +1356,7 @@ public sealed class AgentToolsTests
 
         Assert.IsFalse(result.Success);
         Assert.AreEqual(expected, result.Error);
+        Assert.IsTrue(asked?.DenialTakesFeedback, "The request says that its denial takes what the user says with it.");
     }
 
     [TestMethod]
@@ -1363,6 +1368,19 @@ public sealed class AgentToolsTests
         Assert.AreEqual(decision, JsonSerializer.Deserialize(json, AgentJsonSerializerContext.Default.AgentPermissionDecision));
         Assert.AreEqual(AgentPermissionDecisionSource.Unspecified,
             JsonSerializer.Deserialize("""{"kind":"deny"}""", AgentJsonSerializerContext.Default.AgentPermissionDecision)!.Source);
+
+        // What the user says with a denial, and that the request takes it, cross the worker too: a file tool that runs in
+        // a sandbox tells the agent the same as one that runs here.
+        var said = AgentPermissionDecision.DeniedByUser("write it under tmp instead");
+        var back = JsonSerializer.Deserialize(JsonSerializer.Serialize(said, AgentJsonSerializerContext.Default.AgentPermissionDecision), AgentJsonSerializerContext.Default.AgentPermissionDecision)!;
+        Assert.AreEqual("The user denied this action in CodeAlta. The user said: write it under tmp instead", back.DescribeDenial());
+        Assert.AreEqual(string.Empty, AgentPermissionDecision.DeniedByUser("  ").DescribeUserFeedback());
+        Assert.AreEqual(string.Empty, (AgentPermissionDecision.DeniedByPolicy("no rule approves it") with { UserFeedback = "ignored" }).DescribeUserFeedback(), "only the user says something with a denial");
+        AgentPermissionRequest request = new AgentFileChangePermissionRequest(ModelProviderIds.OpenAIResponses, "session-1", DateTimeOffset.UnixEpoch, null, "tool-1", "C:/work", "edits")
+        {
+            DenialTakesFeedback = true,
+        };
+        Assert.IsTrue(JsonSerializer.Deserialize(JsonSerializer.Serialize(request, AgentJsonSerializerContext.Default.AgentPermissionRequest), AgentJsonSerializerContext.Default.AgentPermissionRequest)!.DenialTakesFeedback);
     }
 
     [TestMethod]

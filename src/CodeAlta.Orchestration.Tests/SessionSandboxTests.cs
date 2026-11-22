@@ -403,6 +403,16 @@ public sealed class SessionSandboxTests
         var request = asked.Single(static request => request.OutsideSandbox);
         Assert.AreEqual(("echo out", "It needs the NuGet API key."), (request.Command, request.Reason));
         Assert.AreEqual(0, backend.Starts.Count, "nothing ran, in the sandbox or out of it");
+        Assert.IsTrue(request.DenialTakesFeedback, "what the user says with the refusal goes with it");
+        Assert.AreEqual("shell_command did not run: the user did not allow it to run outside the sandbox.", refused.Error);
+
+        // What the user says with the refusal is in the result the model reads, not in a message that comes after it (#489).
+        var told = f.RoutedTools("s", router, (permission, _) => Task.FromResult(permission is AgentCommandPermissionRequest { OutsideSandbox: true }
+            ? AgentPermissionDecision.DeniedByUser("Use the key of the test feed instead.") : new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
+        var refusedWithWords = await told.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "It needs the NuGet API key." });
+        Assert.IsFalse(refusedWithWords.Success);
+        Assert.AreEqual("shell_command did not run: the user did not allow it to run outside the sandbox. The user said: Use the key of the test feed instead.", refusedWithWords.Error);
+        Assert.AreEqual(0, backend.Starts.Count, "nothing ran");
 
         answer = AgentPermissionDecisionKind.AllowOnce;
         var allowed = await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "It needs the NuGet API key." });
@@ -626,6 +636,69 @@ public sealed class SessionSandboxTests
         return relative == "." || (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative));
     }
 
+    // A runtime that names no scratchpad has the one of its state root, and a sandboxed session its own folder in it: the
+    // sandbox that gave it none left the file tools refusing the scratchpad the instructions name, with no folder to use
+    // instead (#492, and #454 before it, which was tested with a named scratchpad only).
+    [TestMethod]
+    public async Task ASandboxedSession_HasItsScratchpad_AndNoKeptScriptSource_WhenTheHostNamesNoScratchpad()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend, namedScratchpad: false);
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var root = Path.Combine(f.Options.StateRoot, "scratchpad");
+        Assert.AreEqual(root, f.Runtime.ScratchpadRoot);
+        var own = Path.Combine(root, "sandbox", "s");
+        var tools = f.RoutedTools("s");
+
+        var written = await tools.CallAsync("write_file", new { path = Path.Combine(own, "notes.md"), content = "kept" });
+        Assert.IsTrue(written.Success, written.Error);
+        Assert.AreEqual("kept", File.ReadAllText(Path.Combine(own, "notes.md")));
+        var policy = backend.Starts.Single();
+        CollectionAssert.Contains(policy.ReadWrite.ToArray(), own, "the container grants the folder the file tools write");
+
+        // The scratchpad of every session, which the instructions name, stays out of reach, and the refusal names its own.
+        var shared = await tools.CallAsync("write_file", new { path = Path.Combine(root, "2026-11-22-notes-abc123.md"), content = "no" });
+        Assert.IsFalse(shared.Success);
+        Assert.Contains(own, shared.Error!);
+        Assert.IsFalse(File.Exists(Path.Combine(root, "2026-11-22-notes-abc123.md")));
+
+        // The source of the runs of its scripts is not kept: CodeAlta writes nothing in a folder the session writes (a
+        // link made there would send the file elsewhere), and the sandbox is granted no other folder of the scratchpad, so
+        // the session is told of no file it cannot reach.
+        Assert.IsNull(await f.Runtime.GetScriptSourcesAsync("s"));
+        Assert.IsFalse(policy.ReadWrite.Concat(policy.ReadOnly).Any(path => path.StartsWith(Path.Combine(root, "codemode"), StringComparison.OrdinalIgnoreCase)));
+        f.WriteConfig("[sandbox]\nall_sessions = \"off\"\n");
+        Assert.AreEqual(Path.Combine(root, "codemode", "s"), await f.Runtime.GetScriptSourcesAsync("s"), "a session that is not sandboxed keeps it in the scratchpad");
+    }
+
+    // The folders a profile adds for writing are written by the file tools as by the commands: the worker of the sandbox
+    // was told the folders of the session alone, and refused them to write_file while a command wrote them.
+    [TestMethod]
+    public async Task TheFileTools_WriteTheFoldersTheProfileAdds_AsTheCommandsDo()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        var output = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(f.Project.ProjectPath)!, "build-output")).FullName;
+        var elsewhere = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(f.Project.ProjectPath)!, "elsewhere")).FullName;
+        f.WriteConfig($"[sandbox]\nall_sessions = \"build\"\n\n[sandbox.profiles.build]\nextends = \"workspace\"\nwrite = ['{output}']\n");
+        var tools = f.RoutedTools("s");
+
+        var written = await tools.CallAsync("write_file", new { path = Path.Combine(output, "report.txt"), content = "built" });
+        Assert.IsTrue(written.Success, written.Error);
+        Assert.AreEqual("built", File.ReadAllText(Path.Combine(output, "report.txt")));
+        CollectionAssert.Contains(backend.Starts.Single().ReadWrite.ToArray(), output, "the folder the container grants is the one the file tools write");
+        CollectionAssert.AreEqual(new[] { output }, backend.Starts.Single().ProfileWrite.ToArray());
+
+        // What git and coding agents read as settings stays out of reach there too, and another folder stays refused.
+        Assert.IsFalse((await tools.CallAsync("write_file", new { path = Path.Combine(output, ".git", "hooks", "pre-commit"), content = "evil" })).Success);
+        var outside = await tools.CallAsync("write_file", new { path = Path.Combine(elsewhere, "report.txt"), content = "no" });
+        Assert.IsFalse(outside.Success);
+        Assert.Contains("outside the folders this session works in", outside.Error!);
+        Assert.IsFalse(File.Exists(Path.Combine(elsewhere, "report.txt")));
+    }
+
     [TestMethod]
     public async Task TheAgentIsToldWhatItsSandboxAllows_OnceAndAgainWhenItChanges()
     {
@@ -639,6 +712,18 @@ public sealed class SessionSandboxTests
         Assert.Contains("nuget.org", workspace.Text);
         Assert.Contains("`outside_sandbox", workspace.Text);
         Assert.Contains("C:/scratch/s", workspace.Text);
+        // An agent that runs its own shell (an ACP agent, Codex CLI) is told of no parameter its shell does not have.
+        var ownShell = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(await f.Runtime.GetSessionSandboxAsync("s"), "C:/scratch/s", hasShell: false);
+        Assert.DoesNotContain("outside_sandbox", ownShell.Text);
+        Assert.Contains("No command runs outside it", ownShell.Text);
+        Assert.Contains("C:/scratch/s", ownShell.Text, "it has the scratchpad of its sandbox all the same");
+        Assert.AreNotEqual(workspace.Noted, ownShell.Noted);
+        Assert.IsTrue(SandboxedProviders.RunsCodeAltaShell("openai-responses"));
+        Assert.IsTrue(SandboxedProviders.RunsCodeAltaShell("codex"));
+        Assert.IsFalse(SandboxedProviders.RunsCodeAltaShell("acp"));
+        Assert.IsFalse(SandboxedProviders.RunsCodeAltaShell("codex-cli"));
+        Assert.AreEqual(OperatingSystem.IsWindows(), SandboxedProviders.RunsCodeAltaShell("claude-code"), "Claude Code runs its commands with the shell of CodeAlta in the sandbox of Windows only");
+        Assert.IsFalse(SandboxedProviders.RunsCodeAltaShell(null));
 
         f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
         var strict = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(await f.Runtime.GetSessionSandboxAsync("s"), null);
@@ -999,7 +1084,8 @@ public sealed class SessionSandboxTests
         public CatalogOptions Options { get; }
 
         public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null, string? defaultSandbox = null,
-            Func<IReadOnlyCollection<int>>? reservedPorts = null, Func<CodeAlta.Catalog.Secrets.SecretScope, CodeAlta.Catalog.Secrets.SecretScope?, CodeAlta.Catalog.Secrets.SecretReferenceResolver>? variables = null)
+            Func<IReadOnlyCollection<int>>? reservedPorts = null, Func<CodeAlta.Catalog.Secrets.SecretScope, CodeAlta.Catalog.Secrets.SecretScope?, CodeAlta.Catalog.Secrets.SecretReferenceResolver>? variables = null,
+            bool namedScratchpad = true)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
             var registry = new ModelProviderRegistry();
@@ -1017,7 +1103,8 @@ public sealed class SessionSandboxTests
                 SandboxVariables = variables,
                 DefaultSandbox = defaultSandbox,
                 SandboxDataRoot = Path.Combine(temp, "sandbox"),
-                ScratchpadRoot = Path.Combine(temp, "scratchpad"),
+                // Unset, it is the one of the state root: what the hosts of Desktop, the terminal UI and a node have.
+                ScratchpadRoot = namedScratchpad ? Path.Combine(temp, "scratchpad") : null,
             };
             return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, projects, project, options);
         }

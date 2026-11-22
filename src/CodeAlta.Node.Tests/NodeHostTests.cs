@@ -46,6 +46,21 @@ public sealed class NodeHostTests
         Assert.IsFalse(File.Exists(profile.LockFilePath));
     }
 
+    // A node has no `alta review`: with the setting that asks for a review before commit, shared with the profile of
+    // CodeAlta Desktop, its sessions would wait before each commit for a review nobody can ask for (#492).
+    [TestMethod]
+    public async Task ASessionOfANode_ReviewsNothingBeforeCommit_WhateverTheSettingSays()
+    {
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), TestContext.CancellationToken);
+        File.WriteAllText(Path.Combine(node.Host.CatalogOptions.GlobalRoot, "config.toml"), "[review]\nbefore_commit = true\n");
+
+        Assert.IsTrue(new CodeAltaConfigStore(node.Host.CatalogOptions).LoadGlobalReviewBeforeCommit(), "the setting is on");
+        Assert.IsFalse(node.Host.RuntimeService.GetEffectiveReviewBeforeCommit("a-session"));
+        Assert.AreEqual(Path.Combine(node.Host.CatalogOptions.StateRoot, "scratchpad"), node.Host.RuntimeService.ScratchpadRoot,
+            "and its sandboxed sessions have a scratchpad, in the one of its state root");
+    }
+
     [TestMethod]
     public async Task SecondStart_OnTheSameProfile_IsRefused_AndLeavesTheFirstRunning()
     {
@@ -95,6 +110,10 @@ public sealed class NodeHostTests
         Assert.AreEqual(PluginFrontends.Node, options.PluginFrontend, "The node identifies its enduring host, not an ephemeral CLI run.");
         Assert.IsTrue(options.PluginBuiltIns.All(static plugin => plugin.Frontends.Supports(PluginFrontends.Node)));
         Assert.IsNotNull(options.StartupScratchpadCleanup);
+        // The commands of a node have no `alta review`: no session waits before it commits for a review nobody can ask for (#492).
+        Assert.IsFalse(NodeHost.CreateAltaOptions(root.Profile()).Registry.AllowsBuiltInRoot("review"));
+        Assert.IsTrue(options.WithoutReviews, "A host whose sessions cannot ask for a review reviews nothing before commit.");
+        Assert.IsNull(options.ScratchpadRoot, "The scratchpad is the one of its state root, which the host resolves for the instructions, the sandbox and the scripts.");
     }
 
     [TestMethod]
