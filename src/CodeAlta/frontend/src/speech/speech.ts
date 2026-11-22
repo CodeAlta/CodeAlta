@@ -255,7 +255,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     }
     if (!id) {
       end(running);
-      // The model, or its engine, is not there: the setup of the composer offers to download it.
+      // The model is not there: the setup of the composer offers to download it.
       if (reply.status === "model_missing") store.update(state => ({ ...state, asking: owner, missing: true }));
       else if (reply.status === "installing") store.update(state => ({ ...state, reveals: state.reveals + 1 }));
       // Turned off, or not of this window: the buttons follow what the host says now.

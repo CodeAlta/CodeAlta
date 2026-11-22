@@ -60,7 +60,7 @@ public sealed class SpeechInstallerTests
         var before = fixture.Http.Requests.Count;
         Assert.IsTrue(installer.TryStart(Address));
         Assert.AreEqual("done", (await fixture.EndAsync(installer)).State);
-        Assert.AreEqual(2, fixture.Http.Requests.Count - before, "only the listing of the repository is read again");
+        Assert.AreEqual(0, fixture.Http.Requests.Count - before, "a model that is there is not looked up again");
         await installer.CloseAsync();
         Assert.IsFalse(installer.TryStart(Address), "a closed installer starts nothing");
     }

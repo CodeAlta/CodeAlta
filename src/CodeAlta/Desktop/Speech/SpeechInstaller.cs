@@ -309,9 +309,10 @@ internal sealed class SpeechInstaller
         {
             if (_engine is null) throw new SpeechInstallException("unsupported_platform");
             if (id is null) throw new SpeechInstallException("unsupported_model");
-            var definition = SpeechModelCatalog.FindPreset(model) ?? await ResolveAsync(model, token).ConfigureAwait(false);
-            var installed = Find(definition.Id);
-            var progress = new Progress(this, definition, (IsEngineInstalled ? 0 : _engine.Size + _voiceDetector.Size) + (installed is null ? definition.Size : 0));
+            // A model that is there is not looked up again: only what it runs on may be missing.
+            var installed = Find(id);
+            var definition = installed is null ? SpeechModelCatalog.FindPreset(model) ?? await ResolveAsync(model, token).ConfigureAwait(false) : null;
+            var progress = new Progress(this, id, definition?.Name ?? installed!.Manifest.Name, (IsEngineInstalled ? 0 : _engine.Size + _voiceDetector.Size) + (definition?.Size ?? 0));
             progress.Publish("downloading", force: true);
             if (!IsEngineInstalled)
             {
@@ -321,7 +322,7 @@ internal sealed class SpeechInstaller
                     "{}"u8.ToArray(), progress, token).ConfigureAwait(false);
             }
 
-            if (installed is null)
+            if (definition is not null)
             {
                 // The largest file last: the check of its hash, the longest, is then the last step shown.
                 var files = definition.Files.OrderBy(static file => file.Size).Select(file => (file, definition.AddressOf(file))).ToArray();
@@ -330,7 +331,7 @@ internal sealed class SpeechInstaller
             }
 
             progress.Publish("installing", force: true);
-            if (Validate is { } validate && await validate(installed, token).ConfigureAwait(false) is { } failure) throw new SpeechInstallException(failure);
+            if (Validate is { } validate && await validate(installed!, token).ConfigureAwait(false) is { } failure) throw new SpeechInstallException(failure);
             progress.Publish("done", force: true);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -433,7 +434,7 @@ internal sealed class SpeechInstaller
     }
 
     /// <summary>What is on disk of the whole download, published at most ten times a second.</summary>
-    private sealed class Progress(SpeechInstaller owner, SpeechModelDefinition definition, long total) : IPinnedDownloadProgress
+    private sealed class Progress(SpeechInstaller owner, string modelId, string modelName, long total) : IPinnedDownloadProgress
     {
         private long _received;
         private long _published;
@@ -457,7 +458,7 @@ internal sealed class SpeechInstaller
             if (!force && Stopwatch.GetElapsedTime(_published, now) < TimeSpan.FromMilliseconds(100)) return;
             _published = now;
             _state = state is "done" ? _state : state;
-            lock (owner._gate) owner.SetLocked(new(state, definition.Id, definition.Name, Math.Min(_received, total), total, null));
+            lock (owner._gate) owner.SetLocked(new(state, modelId, modelName, Math.Min(_received, total), total, null));
         }
     }
 }

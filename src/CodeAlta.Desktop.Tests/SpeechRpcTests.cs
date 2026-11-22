@@ -152,6 +152,22 @@ public sealed class SpeechRpcTests
     }
 
     [TestMethod]
+    public async Task Dictation_DownloadsTheEngine_OfAModelThatIsThereWithoutIt()
+    {
+        using var fixture = new Fixture(new OfflineHandler());
+        InstallModel(fixture.SpeechRoot, Runtime, SpeechSettings.DefaultModel, SpeechSettings.DefaultModel);
+        // What a version of the application that runs on another engine finds: the model, and no engine of its own.
+        Directory.Delete(Path.Combine(fixture.SpeechRoot, "runtime"), recursive: true);
+
+        Assert.AreEqual(new SpeechStartResponse("installing", null), await fixture.Service.StartAsync(new("host"), default), "The user is not asked to download a model that is there.");
+        var installer = fixture.Service.Installer!;
+        await Until(() => !installer.Current.IsRunning, "the download to end");
+        Assert.AreEqual(("failed", SpeechSettings.DefaultModel, "network"), (installer.Current.State, installer.Current.ModelId, installer.Current.Error), "The engine was asked for: this network gives nothing.");
+        Assert.IsNotNull(installer.Find(SpeechSettings.DefaultModel), "The model stays.");
+        Assert.AreEqual(0, fixture.Started.Count, "no worker starts without an engine");
+    }
+
+    [TestMethod]
     public async Task Watch_ReplaysTheStateOfTheDownload()
     {
         using var fixture = new Fixture();
@@ -210,13 +226,20 @@ public sealed class SpeechRpcTests
         return count;
     }
 
+    // A network that gives nothing.
+    private sealed class OfflineHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+    }
+
     private sealed class Fixture : IDisposable
     {
-        public Fixture()
+        public Fixture(HttpMessageHandler? handler = null)
         {
             Root = NewRoot();
             Options = new() { GlobalRoot = Root };
-            Service = new(Options, "host", null, _ =>
+            Service = new(Options, "host", handler, _ =>
             {
                 var process = new FakeSpeechWorkerProcess(Engine);
                 lock (Started) Started.Add(process);

@@ -32,7 +32,9 @@ The first press shows a small setup beside the button and records nothing yet:
 
 **Start dictation** keeps that microphone and starts; it reads **Download** while the model is missing. After that, the button records at once.
 
-Nothing is downloaded before you ask. A notification shows the download, with **Cancel**; you can keep working, and an interrupted download resumes next time. The first download brings the model, from [Hugging Face](https://huggingface.co/), and the speech engine ([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), about 10 MiB), from nuget.org. Every file is checked against its checksum.
+No model is downloaded before you ask. A notification shows the download, with **Cancel**; you can keep working, and an interrupted download resumes next time. The first download brings the model, from [Hugging Face](https://huggingface.co/), and the speech engine ([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), about 10 MiB), from nuget.org. Every file is checked against its checksum.
+
+A new version of CodeAlta may run on a newer engine: the first press of the button then downloads it, and the next one records.
 
 ## Settings
 

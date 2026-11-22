@@ -427,7 +427,7 @@ test("the setup offers to download a model that is missing, and keeps the microp
 test("a model the host says is missing shows the same setup to a user who already chose a microphone", async () => {
   const { host, speech } = await window({ installed: ["parakeet-tdt-0.6b-v3"] });
   const { sink } = prompt();
-  // The model is listed as installed, and its engine is not: the host knows.
+  // The model is listed as installed, and the host no longer finds it.
   host.state.startStatus = "model_missing";
   speech.toggle("a", sink);
   await settle();

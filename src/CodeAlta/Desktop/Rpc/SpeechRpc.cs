@@ -11,7 +11,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// Speech to prompt: its settings, the speech models in the cache and their download, and dictation. The page
 /// records the microphone and sends the audio here; a local model, in a worker process, turns it into text.
-/// Nothing is downloaded before <c>install</c> is called.
+/// No model is downloaded before <c>install</c> is called.
 /// </summary>
 [NeoRpcService("speech", Version = 1)]
 internal sealed class SpeechService
@@ -171,7 +171,10 @@ internal sealed class SpeechService
     /// <summary>Raised when a dictation starts (true) and when it ends (false).</summary>
     internal event Action<bool>? DictatingChanged;
 
-    /// <summary>Starts a dictation with the chosen model, when it is in the cache.</summary>
+    /// <summary>
+    /// Starts a dictation with the chosen model, when it is in the cache. A model that is there without its engine (a
+    /// version of the application that runs on another engine) gets it now: the answer is <c>installing</c>.
+    /// </summary>
     [NeoRpcMethod("start")]
     public async Task<SpeechStartResponse> StartAsync(SpeechRequest request, CancellationToken cancellationToken)
     {
@@ -184,7 +187,15 @@ internal sealed class SpeechService
             if (!settings.Enabled) return new("disabled", null);
             var id = SpeechModelSource.ModelIdOf(settings.Model);
             if (_installer.Current is { IsRunning: true } running && running.ModelId == id) return new("installing", null);
-            if (!_installer.IsEngineInstalled || _installer.Find(id) is not { } installed) return new("model_missing", null);
+            if (_installer.Find(id) is not { } installed) return new("model_missing", null);
+            if (!_installer.IsEngineInstalled)
+            {
+                // The engine is downloaded without asking, as a part of the model the user chose to download. When another
+                // download runs, it brings the engine with it.
+                _installer.TryStart(settings.Model);
+                return new("installing", null);
+            }
+
             var dictation = _worker!.Start(_installer.LoadFor(installed));
             // Other work of the computer (the indexing of search by meaning) waits while someone dictates.
             DictatingChanged?.Invoke(true);
