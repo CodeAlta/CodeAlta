@@ -1,4 +1,4 @@
-import { Button, Checkbox, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -359,7 +359,7 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveLevelOf, adaptiveTierOf, composerAdaptiveEntry, composerTierEntries, readAdaptiveTier, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
-import { cloudPlace, deletedSessionWorktree, existingPlace, folderName, makesWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, worktreeFirstSession, worktreesLeft, type DeletedWorktree, type WorkPlace, type Worktree } from "./worktrees/worktrees";
+import { cloudPlace, existingPlace, folderName, makesWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, worktreeFirstSession, worktreesLeft, type DeletedWorktree, type WorkPlace, type Worktree } from "./worktrees/worktrees";
 import { createSessionFolderSwitch, type FolderSwitchResult, type FolderTarget } from "./worktrees/sessionFolder";
 import { bringBackCommand, cloudOf, inCloud, pendingCloudStartKey, providerHasCloudSessions, readPendingCloudStart, runCloudStart, type CloudStartState,
   type PendingCloudStart } from "./cloudSessions/cloudSessions";
@@ -382,6 +382,7 @@ import { aboutFacts, AboutSettings } from "./AboutDialog";
 import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
+import { useSessionDeleteQuestion } from "./sessionChildren/SessionDeleteQuestion";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { GlobalSearch, type ContentSearch, type SearchChoice, type SearchStart } from "./search/GlobalSearch";
 import { PluginUiHost } from "./PluginUiHost";
@@ -1131,13 +1132,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   });
   const [movingBusy, setMovingBusy] = useState(false);
   const movingPending = useRef(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
-  const [deletingMessage, setDeletingMessage] = useState("");
-  // The question of a deletion also asks to remove the worktree of the session; off each time it is asked.
-  const [deletingWorktree, setDeletingWorktree] = useState(false);
-  // What the host says of the worktree of the session asked about: whether another session works in it, null while it checks.
-  const [deletingWorktreeCheck, setDeletingWorktreeCheck] = useState<{ id: string; shared: boolean | null } | null>(null);
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
@@ -3044,6 +3039,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const selectedSession = snapshot && tabs.active?.sessionId === sessionId && !resolveSessionTab(snapshot, tabs.active)
     ? undefined : snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
+  const sessionDeleteQuestion = useSessionDeleteQuestion({
+    railVisible, pending: deletingPending, alive: creationAlive, project: selectedProject, catalog, busy: deletingBusy, checkWorktrees: checkDeletedWorktrees, t,
+    onDelete: (session, remember, worktree) => {
+      if (remember) setConfirm("sessionDelete", false);
+      void deleteSessionRow(session, true, worktree);
+    },
+  });
   // What a canvas that is opened without a choice is about: the project in front, and the session in front with its project.
   const canvasSelection: CanvasSelection = {
     project: selectedProject && !selectedProject.archived ? { id: selectedProject.id, path: selectedProject.path } : null,
@@ -4449,8 +4451,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setSessionId(nextSessionId);
     setRenamingId(null);
     setRenamingMessage("");
-    setDeletingId(null);
-    setDeletingMessage("");
+    sessionDeleteQuestion.close();
+    sessionDeleteQuestion.setError("");
     if (!archiveBusy) { setArchiveAsk(null); setArchiveMessage(""); }
     if (!projectDeleteBusy) { setProjectDeleteTarget(null); setProjectDeleteMessage(""); }
     navigate("workspace");
@@ -4567,7 +4569,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (pending.action === "move") { beginSessionMove(rows[0]); return; }
     if (pending.action === "space") { beginSpaceMove(rows[0]); return; }
     if (pending.action === "archive") { beginSessionArchive(rows[0]); return; }
-    if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
+    if (pending.action === "rename") { beginSessionRename(rows[0]); sessionDeleteQuestion.close(); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
@@ -4836,20 +4838,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   // The session is the selected one. It is asked about beside its row, unless the user answered not to be asked again.
   function beginSessionDelete(row: WorkspaceSession) {
-    setDeletingMessage("");
-    setDeletingWorktree(false);
+    sessionDeleteQuestion.setError("");
     // A session that others come from is not deleted alone: what is below it is shown, with the choice to delete it all.
     if (knownChildren(row.id)) { showSessionChildren(row, true); return; }
-    setDeletingWorktreeCheck(null);
-    if (!confirms.sessionDelete) { setDeletingId(null); void deleteSessionRow(row, false); return; }
-    setDeletingId(row.id);
-    // The window may not list every session that works in the worktree: the host is asked while the question is open.
-    const worktree = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], row) : null;
-    if (!worktree || worktree.shared || !selectedProject) return;
-    setDeletingWorktreeCheck({ id: row.id, shared: null });
-    void checkDeletedWorktrees([{ projectId: selectedProject.id, name: worktree.name, path: worktree.path, shared: false, sessionIds: [row.id] }], [row.id])
-      .catch(() => null)
-      .then(checked => { if (creationAlive.current) setDeletingWorktreeCheck(value => value?.id === row.id ? { id: row.id, shared: checked?.[0]?.shared ?? false } : value); });
+    if (!confirms.sessionDelete) { sessionDeleteQuestion.close(); void deleteSessionRow(row, false); return; }
+    sessionDeleteQuestion.ask(row);
   }
 
   // Delete on the row of a session does what **Delete** of its menu does.
@@ -4881,10 +4874,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
       if (!access[action] || action === "archive" && sessionArchiveBusy) return;
       setMenuTarget(null);
-      if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); setDeletingMessage(""); }
+      if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); sessionDeleteQuestion.setError(""); }
       if (action === "fork") { branchHost.requests.open(row.id, "fork"); return; }
       if (action === "archive") { beginSessionArchive(row); return; }
-      setDeletingId(null);
+      sessionDeleteQuestion.close();
       beginSessionRename(row);
     });
   }
@@ -4916,10 +4909,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (action === "space") { dismissSessionMenu(false); beginSpaceMove(row); return; }
     if (action === "archive") { dismissSessionMenu(false); beginSessionArchive(row); return; }
     dismissSessionMenu(false);
-    if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
+    if (switching) { setRenamingMessage(""); sessionDeleteQuestion.setError(""); }
     if (action === "rename") {
       beginSessionRename(row);
-      setDeletingId(null);
+      sessionDeleteQuestion.close();
     } else {
       beginSessionDelete(row);
       setRenamingId(null);
@@ -4942,7 +4935,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   function showSessionChildren(row: WorkspaceSession, deleting: boolean) {
     setRenamingId(null);
-    setDeletingId(null);
+    sessionDeleteQuestion.close();
     setChildrenView({ id: row.id, title: plainTitle(row.title), deleting });
   }
   // The entries of a session's menu about its family: its child sessions, and its parent, which can be in another scope.
@@ -5009,7 +5002,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function beginSpaceMove(row: WorkspaceSession) {
     if (movingPending.current) return;
     setRenamingId(null);
-    setDeletingId(null);
+    sessionDeleteQuestion.close();
     const home = sessionHome(spacesHub.getSnapshot().spaces, { spaceId: row.spaceId, projectId: row.scopeKind === "project" ? row.projectId : null });
     setMovingToSpace({ id: row.id, title: plainTitle(row.title), projectId: row.scopeKind === "project" ? row.projectId : null, spaceId: home.id });
   }
@@ -5052,7 +5045,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function beginSessionArchive(row: WorkspaceSession, from: "explorer" | "composer" = "explorer") {
     if (sessionArchivePending.current) return;
     setRenamingId(null);
-    setDeletingId(null);
+    sessionDeleteQuestion.close();
     setSessionArchiveText("");
     const below = archivableDescendants(catalog.current?.sessions ?? [], row.id).length;
     if (below > 0) setSessionArchiving({ id: row.id, count: below, withChildren: true, from });
@@ -5277,7 +5270,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const project = selectedProject;
     if (!project || project.archived || row.projectId !== project.id || row.workspacePath !== project.path || movingPending.current) return;
     setRenamingId(null);
-    setDeletingId(null);
+    sessionDeleteQuestion.close();
     setMovingSession({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
   }
 
@@ -6126,11 +6119,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const index = sessionRows().findIndex(row => row.parentElement?.dataset.sessionId === session.id);
     const failed = (message: string) => {
       if (!asked) showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
-      else if (selectedSessionId.current === session.id) setDeletingMessage(message);
+      else if (selectedSessionId.current === session.id) sessionDeleteQuestion.setError(message);
     };
     deletingPending.current = true;
     setDeletingBusy(true);
-    setDeletingMessage("");
+    sessionDeleteQuestion.setError("");
     try {
       const result = await deleteSession(status?.hostEpoch, target, session.id, session.title, capability);
       if (!creationAlive.current) return;
@@ -6143,7 +6136,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           if (deleteSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
             setSessionId(recovered.sessionId);
           }
-          setDeletingId(null);
+          sessionDeleteQuestion.close();
           if (index >= 0) setDeletedRow({ index });
           if (worktree && selectedProject && status?.hostEpoch) void removeDeletedWorktrees(status.hostEpoch, [{ projectId: selectedProject.id, ...worktree }]);
         } else {
@@ -6153,7 +6146,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         }
       } else if (result.code === "has_children") {
         // Children the window did not know of: they are shown, with the choice to delete them with it.
-        setDeletingId(null);
+        sessionDeleteQuestion.close();
         showSessionChildren(session, true);
       } else {
         if (result.code === "delete_unconfirmed") {
@@ -6177,10 +6170,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (deleteSelectionCurrent(captured, selectedScope.current, selectedSessionId.current)) {
         setSessionId(recovered.sessionId);
       }
-      setDeletingId(null);
-      setDeletingMessage("");
+      sessionDeleteQuestion.close();
+      sessionDeleteQuestion.setError("");
     } else if (selectedSessionId.current === captured.id)
-      setDeletingMessage("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
+      sessionDeleteQuestion.setError("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
   }
 
   // Archiving the selected project, or taking it out of the archive, is asked about beside its row, unless the
@@ -6194,7 +6187,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A question is asked beside a row: when the Explorer goes, as in a window made narrow, it goes with its row.
   useEffect(() => {
     if (railVisible) return;
-    if (!deletingPending.current) setDeletingId(null);
     if (!archiveBusy) setArchiveAsk(null);
     if (!projectDeleteBusy) setProjectDeleteTarget(null);
   }, [railVisible]);
@@ -6639,7 +6631,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
                 onClick={event => {
                   const focusPrompt = event.detail > 0;
-                  protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage("");
+                  protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); sessionDeleteQuestion.close(); sessionDeleteQuestion.setError("");
                     if (focusPrompt) focusPromptSoon(); });
                 }}
                 onDoubleClick={() => keepSession(projectId, session)}>
@@ -6679,30 +6671,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               {renamingId === session.id && <RenamePopover key={session.id} label={t("Session title")} initialValue={session.title}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
                 onSubmit={title => void renameSelectedSession(title)} onCancel={() => setRenamingId(null)} />}
-              {deletingId === session.id && (() => {
-                // A session that works in a worktree leaves it, with its branch: the question says where, and can remove it.
-                const found = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
-                const check = deletingWorktreeCheck?.id === session.id ? deletingWorktreeCheck : null;
-                const worktree = found && check?.shared ? { ...found, shared: true } : found;
-                const checking = !!found && !found.shared && check?.shared === null;
-                return <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
-                  detail={inCloud(session) ? `${t("Its history is deleted and cannot be restored. The files of the project are kept.")} ${t("The cloud session stays on claude.ai: archive or delete it there.")}`
-                    : t("Its history is deleted and cannot be restored. The files of the project are kept.")}
-                  confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
-                  onConfirm={remember => { if (remember) setConfirm("sessionDelete", false);
-                    void deleteSessionRow(session, true, worktree && !worktree.shared && deletingWorktree ? worktree : null); }}
-                  onCancel={() => { setDeletingId(null); setDeletingMessage(""); }}>
-                  {worktree && <div className="confirm-worktree">
-                    <p>{t("Its worktree {name} is kept in {path}, with its branch.", { name: worktree.name, path: worktree.path })}</p>
-                    {worktree.shared ? <p>{t("Other sessions work in this worktree: it stays.")}</p>
-                      : <>{checking && <p className="muted-text" role="status">{t("Checking which sessions still work in it…")}</p>}
-                        <Checkbox checked={deletingWorktree} disabled={deletingBusy || checking} label={t("Also remove the worktree")}
-                          onChange={event => setDeletingWorktree(event.currentTarget.checked)} /></>}
-                    {deletingWorktree && !worktree.shared && !checking && <p className="muted-text">
-                      {t("A worktree that holds changes that are not committed is kept, and its branch is deleted only when its commits are all in another branch.")}</p>}
-                  </div>}
-                </ConfirmPopover>;
-              })()}
+              {sessionDeleteQuestion.render(session)}
               {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
             </div>;
             })}
