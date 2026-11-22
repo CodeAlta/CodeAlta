@@ -140,20 +140,26 @@ public sealed class ApplicationDatabaseTests
         await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
         {
             DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
-            BusyTimeout = TimeSpan.FromMilliseconds(200),
+            // The recovery that is not canceled runs out of this time, which the test checks. The canceled one waits up to
+            // a test limit instead: a loaded runner can bring the cancel to it after 200 ms.
+            BusyTimeout = cancel ? TestTime.Seconds(30) : TimeSpan.FromMilliseconds(200), // not a limit when it does not cancel
             TimeProvider = new StoppedClock(),
         });
         await database.WriteAsync("setup", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_kept (id INTEGER);", token));
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reader = database.ReadAsync("held", async (connection, token) =>
         {
             await ScalarAsync<long>(connection, "SELECT COUNT(*) FROM app_meta;", token);
+            holding.SetResult();
             await release.Task;
             return 1;
         }).AsTask();
         using var cancellation = new CancellationTokenSource();
         try
         {
+            // The recovery starts while the reader holds its connection.
+            await holding.Task.WithinAsync(TestTime.Seconds(10));
             var recovery = database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation, cancellation.Token).AsTask();
             if (cancel)
             {
