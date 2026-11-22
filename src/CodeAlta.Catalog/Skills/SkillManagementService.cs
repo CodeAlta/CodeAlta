@@ -84,8 +84,8 @@ public sealed class SkillManagementService
         => LoadListingAsync(scope, projectRoot, [], folders, cancellationToken);
 
     /// <summary>
-    /// Lists management descriptors with the configuration the project inherits. An unreadable file does not hide
-    /// skills: it is named in the problems and treated as disabling none.
+    /// Lists management descriptors with the resources and configuration the project inherits. An unreadable file
+    /// does not hide skills: it is named in the problems and treated as disabling none.
     /// </summary>
     /// <param name="scope">Which skills to list.</param>
     /// <param name="project">The project whose skills and configuration are read too, or null.</param>
@@ -120,7 +120,7 @@ public sealed class SkillManagementService
         try { globalFolders = _config.LoadGlobalSkillFolders(); }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException) { globalFolders = []; }
         var skills = await _catalog.ListAsync(CreateQuery(scope, projectRoot, global, inheritedDisabled.Count == 0 ? project : [.. project, .. inheritedDisabled],
-            globalFolders, folders), cancellationToken).ConfigureAwait(false);
+            globalFolders, folders, inheritedRoots), cancellationToken).ConfigureAwait(false);
         return new SkillListing(skills, problems) { InheritedDisabledSkillNames = inheritedDisabled };
     }
 
@@ -165,7 +165,7 @@ public sealed class SkillManagementService
     }
 
     private SkillCatalogQuery CreateQuery(SkillListingScope scope, string? projectRoot, IReadOnlyCollection<string> globalDisabled, IReadOnlyCollection<string> projectDisabled,
-        IReadOnlyList<string> globalFolders, SkillFolderContext folders)
+        IReadOnlyList<string> globalFolders, SkillFolderContext folders, IReadOnlyList<string>? inheritedRoots = null)
     {
         var includeUser = scope is SkillListingScope.User or SkillListingScope.Combined;
         var includeProject = scope != SkillListingScope.User && projectRoot is not null;
@@ -173,7 +173,7 @@ public sealed class SkillManagementService
         {
             Discovery = new SkillDiscoveryContext
             {
-                ProjectRoots = includeProject ? [projectRoot!] : [],
+                ProjectRoots = includeProject ? [projectRoot!, .. inheritedRoots ?? []] : [],
                 UserCodeAltaRoot = includeUser ? _globalRoot : null,
                 UserProfileRoot = includeUser ? _userProfileRoot : null,
                 AdditionalRoots = AddedSkillFolders.Roots(includeUser ? globalFolders : null, folders.SpaceId, includeUser ? folders.SpaceFolders : null,

@@ -118,6 +118,17 @@ test("the repository's disablement is explained and the skill cannot be switched
   assert.match(row, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable release-notes")/);
 });
 
+test("a skill from an inherited root is previewable but has no edit or remove action", () => {
+  const skill = { ...entry("repo-skill", "ProjectAlta"), scope: "Inherited", folder: null };
+  const row = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills: [skill], empty: "No skills were found.", selected: skill, disabled: false,
+      onSelect: never, onToggle: never, onEdit: never, onDelete: never })));
+  assert.match(row, /Inherited/);
+  assert.match(row, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable repo-skill")/);
+  assert.doesNotMatch(row, /Edit repo-skill|Remove repo-skill/);
+  assert.match(render(skill, detail(skill, { folder: null })), /Inherited/);
+});
+
 test("invalid or missing names cannot write name-based enablement, but keep their selection and removal", () => {
   for (const name of ["", " ", "Not A Slug", "../skill", "-skill", "skill-", "two--dashes", "a".repeat(65), "name:tool", "bad_name"])
     assert.equal(skillToggleable(name), false, name);

@@ -43,6 +43,13 @@ test("a folder is added for every space, for the space when the window has sever
   assert.deepEqual(skillFolderScopes(false, false), ["Global"]);
 });
 
+test("an inherited skill folder is identified and cannot be removed from the child's list", () => {
+  const row = render([folder("Inherited", "/libs/repository")]).split('role="listitem"')[1];
+  assert.match(row, /Inherited/);
+  assert.match(row, /\/libs\/repository/);
+  assert.doesNotMatch(row, /Remove from the list/);
+});
+
 test("a folder from which no skill is read says why", () => {
   assert.equal(skillFolderStateLabel("ready"), null);
   assert.equal(skillFolderStateLabel("missing")?.label, "Not found");

@@ -42,7 +42,8 @@ export const skillToggleable = (name: string) => {
   const normalized = name.trim().toLowerCase();
   return normalized.length <= 64 && /^[\p{L}\p{Nd}]+(?:-[\p{L}\p{Nd}]+)*$/u.test(normalized);
 };
-const canToggle = (skill: SkillsEntry) => !skill.disabledByRepository && skillToggleable(skill.name);
+const inheritedSkill = (skill: SkillsEntry) => skill.scope === "Inherited";
+const canToggle = (skill: SkillsEntry) => !inheritedSkill(skill) && !skill.disabledByRepository && skillToggleable(skill.name);
 
 /** The folder of a skill, as the code editor opens on it: the id the host gave it, its path and the name of the skill. */
 export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
@@ -64,7 +65,7 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
   onReveal?: (folder: SkillFolder, path: string) => void;
 }) {
   const { t } = useShellLanguage();
-  const readOnly = skillReadOnly(skill.source);
+  const inherited = inheritedSkill(skill), readOnly = inherited || skillReadOnly(skill.source);
   const facts: [MessageKey, string | null | undefined][] = !detail ? [] : [
     ["Overridden by", detail.shadowedBy], ["License", detail.license],
     ["Compatibility", detail.compatibility], ["Allowed tools", detail.allowedTools]];
@@ -74,7 +75,7 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
   const instructions = detail?.content ? skillInstructions(detail.content) : "";
   return <section className="skill-detail" aria-label={t("Details for {name}", { name: skill.title || skill.name })}>
     <header><h2>{skill.title || skill.name}</h2>
-      <span className="settings-editor-tags"><Tag minimal round>{t(skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
+      <span className="settings-editor-tags"><Tag minimal round>{t(inherited ? "Inherited" : skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
         <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.disabledByRepository ? "Disabled by repository" : skill.enabled ? "Enabled" : "Disabled")}</Tag>
         {detail && !detail.modelVisible && skill.enabled && <Tag minimal round intent="warning">{t("Not offered to the model")}</Tag>}
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
@@ -86,7 +87,7 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
           aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name: skill.title || skill.name })}
           title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
           onClick={() => onEdit({ id: detail.folder!, path: detail.skillRootPath!, name: skill.name })}>{t(readOnly ? "View files" : "Edit")}</Button>}
-        {onDelete && skillRemovable(skill.source) && !detail?.linked && <RemoveButton text name={skill.title || skill.name} disabled={disabled} onRemove={() => onDelete(skill)} />}</span></header>
+        {!inherited && onDelete && skillRemovable(skill.source) && !detail?.linked && <RemoveButton text name={skill.title || skill.name} disabled={disabled} onRemove={() => onDelete(skill)} />}</span></header>
     <p className="skill-detail-description">{skill.description}</p>
     {failed && <p role="alert" className="error-text">{t("The skill details could not be read.")}</p>}
     {detail && <>
@@ -129,17 +130,17 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
   const { start, end, before, after } = rows.slice;
   return <CardList compact className="settings-editor-rows settings-editor-list" aria-label={t("Skills")}>
     {rows.windowed && <div ref={rows.anchor} className="row-window-spacer" style={{ height: before }} aria-hidden="true" />}
-    {skills.slice(start, end + 1).map(skill => { const readOnly = skillReadOnly(skill.source), name = skill.title || skill.name;
+    {skills.slice(start, end + 1).map(skill => { const inherited = inheritedSkill(skill), readOnly = inherited || skillReadOnly(skill.source), name = skill.title || skill.name;
       return <Card key={skill.id} ref={rows.measure} data-row-key={skill.id} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
         onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch, .bp6-button")) onSelect(skill); }}>
         <span className="settings-editor-name"><strong>{name}</strong><small>{skill.description}</small></span>
-        <span className="settings-editor-tags"><Tag minimal round>{t(skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
+        <span className="settings-editor-tags"><Tag minimal round>{t(inherited ? "Inherited" : skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
           {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
           {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
           {skill.folder && skill.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
             aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name })} title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
             onClick={() => onEdit({ id: skill.folder!, path: skill.path!, name: skill.name })} />}
-          {onDelete && skillRemovable(skill.source) && <RemoveButton name={name} disabled={disabled} onRemove={() => onDelete(skill)} />}
+          {!inherited && onDelete && skillRemovable(skill.source) && <RemoveButton name={name} disabled={disabled} onRemove={() => onDelete(skill)} />}
           {!spacelessSkillSource(skill.source) && skillToggleable(skill.name)
             && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={name} disabled={disabled} />}
           {skill.disabledByRepository && <Tag minimal round>{t("Disabled by repository")}</Tag>}
@@ -174,8 +175,8 @@ export function SkillFolderList({ folders, space, project, showSpace, disabled, 
   const scopes = skillFolderScopes(showSpace && !!space, !!project);
   const [draft, setDraft] = useState<{ scope: SkillFolderScope; path: string } | null>(null);
   const scopeLabel = (scope: string) => scope === "Project" ? t("Project: {name}", { name: project?.name ?? "" })
-    : scope === "Space" ? t("Space: {name}", { name: space?.name ?? "" }) : t("Every space");
-  const shown = [...foldersOf(folders, "Project"), ...foldersOf(folders, "Space"), ...foldersOf(folders, "Global")];
+    : scope === "Inherited" ? t("Inherited") : scope === "Space" ? t("Space: {name}", { name: space?.name ?? "" }) : t("Every space");
+  const shown = [...foldersOf(folders, "Project"), ...foldersOf(folders, "Inherited"), ...foldersOf(folders, "Space"), ...foldersOf(folders, "Global")];
   async function browse() {
     if (!pickFolder || !draft) return;
     const picked = await pickFolder(draft.path.trim() || null);
@@ -217,11 +218,11 @@ export function SkillFolderList({ folders, space, project, showSpace, disabled, 
             <SettingsFileLocation path={folder.fullPath ?? folder.path} label={<Tag minimal round>{scopeLabel(folder.scope)}</Tag>} />
             <span className="skill-folder-state">{state ? <Tag minimal round intent="warning" title={t(state.title)}>{t(state.label)}</Tag>
               : <span className="bp6-text-muted">{folder.skills === 1 ? t("1 skill") : t("{count} skills", { count: folder.skills })}</span>}</span>
-            <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {path} from the list? Its files stay where they are.", { path: folder.path })}</p>
+            {folder.scope !== "Inherited" && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {path} from the list? Its files stay where they are.", { path: folder.path })}</p>
               <Button className="bp6-popover-dismiss" intent="danger" disabled={disabled} onClick={() => onRemove(folder)}>{t("Remove from the list")}</Button></div>}>
               <Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} disabled={disabled}
                 aria-label={`${t("Remove from the list")}: ${folder.path}`} title={t("Remove from the list")} />
-            </PopoverNext>
+            </PopoverNext>}
           </div>; })}
       </div>}
   </section>;
@@ -428,7 +429,7 @@ export function SkillSettings({ epoch, project, space = null, onEdit, onOpenFile
   const removeFolder = (folder: SkillsFolder) => void mutate(() => api.removeFolder({ expectedEpoch: epoch, projectId, spaceId, scope: folder.scope, path: folder.path },
     { timeoutMilliseconds: 30000 }), "Folder removed from the list.", skillFolderNotice);
   const draftProblem: MessageKey | null = !draft ? null : !/^[a-z0-9][a-z0-9-]{0,63}$/.test(draft.name.trim()) ? "Use lowercase letters, digits and dashes for the skill name."
-    : all.some(skill => skill.name === draft.name.trim()) ? "A skill with this name already exists." : !draft.description.trim() ? "Describe when the skill should be used." : null;
+    : all.some(skill => !inheritedSkill(skill) && skill.name === draft.name.trim()) ? "A skill with this name already exists." : !draft.description.trim() ? "Describe when the skill should be used." : null;
   async function create() {
     if (!draft || draftProblem || busy) return;
     setNotice(null);

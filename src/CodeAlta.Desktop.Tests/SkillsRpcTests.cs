@@ -176,6 +176,61 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task ASubProjectListsAndOffersRepositorySkillsAndFolders_WithoutEditingTheirFilesOrSettings()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var library = Path.Combine(Path.GetDirectoryName(fixture.ProjectPath)!, "library");
+        Fixture.WriteSkill(library, "borrowed", "A skill from a folder added for the repository");
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await fixture.Projects.UpdateSkillFoldersAsync(fixture.Project.Id, _ => [library]));
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        var service = new SkillsService(fixture.Projects, fixture.Catalog, null, Epoch, fixture.Trash)
+        {
+            PromptSkills = (project, _, token) => fixture.Catalog.ListAsync(
+                SkillCatalogQuery.ForProject(config, fixture.GlobalRoot, null, project, null, null) with { ModelVisibleOnly = true }, token),
+        };
+        fixture.Trash.Available = true;
+
+        var listed = await service.ListAsync(new(Epoch, child.Id), default);
+        var offered = await service.OfferedAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual(("ok", "ok"), (listed.Status, offered.Status));
+        CollectionAssert.AreEquivalent(new[] { "alpha", "beta", "borrowed" }, offered.Skills.Select(skill => skill.Name).ToArray());
+        CollectionAssert.AreEquivalent(offered.Skills.Select(skill => skill.Name).ToArray(), listed.Skills.Select(skill => skill.Name).ToArray());
+        var folder = listed.Folders.Single();
+        Assert.AreEqual(("Inherited", library, 1), (folder.Scope, folder.Path, folder.Skills));
+        foreach (var inherited in listed.Skills.Where(skill => skill.Name != "alpha"))
+        {
+            Assert.AreEqual("Inherited", inherited.Scope);
+            Assert.IsNull(inherited.Folder, "The child's editor never gets a writable handle to an inherited skill.");
+            var request = new SkillsDetailRequest(Epoch, child.Id, null, inherited.Source, inherited.Id);
+            var detail = await service.DetailAsync(request, default);
+            Assert.AreEqual(("ok", true, false), (detail.Status, detail.ModelVisible, detail.Linked));
+            Assert.IsNull(detail.Folder);
+            StringAssert.Contains(detail.Content, $"# {inherited.Name}");
+            Assert.AreEqual("read_only", (await service.DeleteAsync(request, default)).Status);
+            Assert.IsTrue(File.Exists(detail.SkillFilePath));
+        }
+
+        Assert.AreEqual(0, (await service.SetMatchingEnabledAsync(new(Epoch, child.Id, "Project", "beta", false), default)).Changed);
+        Assert.IsFalse(File.Exists(Path.Combine(child.ProjectPath, ".alta", "config.toml")));
+        Assert.AreEqual("not_found", (await service.RemoveFolderAsync(new(Epoch, child.Id, null, "Project", library), default)).Status);
+        Assert.AreEqual(library, (await fixture.Projects.GetByIdAsync(fixture.Project.Id))!.SkillFolders.Single());
+        Assert.IsEmpty(fixture.Trash.Moved);
+
+        var localLibrary = Path.Combine(Path.GetDirectoryName(fixture.ProjectPath)!, "own-library");
+        Fixture.WriteSkill(localLibrary, "own", "A skill from a folder added for the child");
+        Assert.AreEqual("ok", (await service.AddFolderAsync(new(Epoch, child.Id, null, "Project", localLibrary), default)).Status);
+        Assert.AreEqual("ok", (await service.CreateAsync(new(Epoch, child.Id, "Project", "beta", "A local override"), default)).Status);
+        var local = await service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual(("Project", localLibrary), (local.Folders.Single().Scope, local.Folders.Single().Path));
+        Assert.IsFalse(local.Skills.Any(skill => skill.Name == "borrowed"));
+        Assert.IsTrue(local.Skills.Single(skill => skill is { Name: "beta", Scope: "Inherited" }).Shadowed);
+        var own = local.Skills.Single(skill => skill is { Name: "beta", Scope: "Project" });
+        Assert.IsFalse(own.Shadowed);
+        Assert.IsNotNull(own.Folder, "The local skill is editable even when it has an inherited namesake.");
+    }
+
+    [TestMethod]
     public async Task List_ReturnsUserSkillsAndTheProjectSkillsOfTheNamedProject()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -875,7 +930,8 @@ public sealed class SkillsRpcTests
             }
 
             Trash = new RecordingFileTrash(Path.Combine(root, "trash"));
-            Service = new SkillsService(projects, new SkillCatalog(providers), Path.Combine(root, "home"), Epoch, Trash);
+            Catalog = new SkillCatalog(providers);
+            Service = new SkillsService(projects, Catalog, Path.Combine(root, "home"), Epoch, Trash);
         }
 
         public RecordingFileTrash Trash { get; }
@@ -891,6 +947,7 @@ public sealed class SkillsRpcTests
         public string BuiltinRoot => Path.Combine(_root, "builtin");
         public ProjectCatalog Projects { get; }
         public ProjectDescriptor Project { get; }
+        public SkillCatalog Catalog { get; }
         public SkillsService Service { get; }
         public string GlobalRoot => Projects.Options.GlobalRoot;
         public string ProjectPath => Project.ProjectPath;
@@ -904,7 +961,7 @@ public sealed class SkillsRpcTests
             return (await Projects.LoadAsync()).Single(project => project.DeclaredKey == "app");
         }
 
-        private static void WriteSkill(string root, string name, string description)
+        public static void WriteSkill(string root, string name, string description)
         {
             var directory = Directory.CreateDirectory(Path.Combine(root, name)).FullName;
             File.WriteAllText(Path.Combine(directory, "SKILL.md"), $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n\nUse this skill.\n");

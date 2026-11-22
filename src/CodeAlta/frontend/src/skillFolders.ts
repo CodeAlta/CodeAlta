@@ -43,4 +43,4 @@ export function skillFolderNotice(status: string, message?: string | null): Sett
 }
 
 /** The folders of a scope, in the order they are read. */
-export const foldersOf = (folders: readonly SkillsFolder[], scope: SkillFolderScope) => folders.filter(folder => folder.scope === scope);
+export const foldersOf = (folders: readonly SkillsFolder[], scope: SkillFolderScope | "Inherited") => folders.filter(folder => folder.scope === scope);
