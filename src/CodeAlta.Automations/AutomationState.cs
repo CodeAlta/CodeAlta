@@ -327,7 +327,7 @@ internal sealed class AutomationStateStore
     }
 
     /// <summary>Replaces a run by its identifier.</summary>
-    /// <returns>The run as it is now, or null when it is no longer kept.</returns>
+    /// <returns>The updated run, or null when the run was no longer kept before the update.</returns>
     internal AutomationRun? Update(string runId, Func<AutomationRun, AutomationRun> change)
     {
         ArgumentNullException.ThrowIfNull(change);
@@ -335,9 +335,9 @@ internal sealed class AutomationStateStore
         {
             var index = _state.Runs.FindLastIndex(run => run.Id == runId);
             if (index < 0) return null;
-            _state.Runs[index] = change(_state.Runs[index]);
+            var updated = _state.Runs[index] = change(_state.Runs[index]);
             Save();
-            return _state.Runs[index];
+            return updated;
         }
     }
 
@@ -458,20 +458,70 @@ internal sealed class AutomationStateStore
         }
     }
 
-    // Under the gate. A state that cannot be written is still the state of this run of the application. Whether it was written.
+    // Under the gate. A state that cannot be written is still the state of this run of the application.
     private bool Save()
     {
+        var originalRuns = _state.Runs;
+        var written = false;
         try
         {
+            var json = AutomationStateJsonContext.Default.StateFile;
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(_state, json);
+            if (bytes.Length > MaximumFileBytes)
+            {
+                if (TrimRuns(originalRuns, bytes.Length) is not { } trimmed) return false;
+                _state.Runs = trimmed;
+                bytes = JsonSerializer.SerializeToUtf8Bytes(_state, json);
+                if (bytes.Length > MaximumFileBytes) return false;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            SafeFile.WriteAllBytes(_path, JsonSerializer.SerializeToUtf8Bytes(_state, AutomationStateJsonContext.Default.StateFile));
+            SafeFile.WriteAllBytes(_path, bytes);
             _aliveSavedAt = _state.AliveAt;
-            return true;
+            return written = true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return false;
         }
+        finally
+        {
+            if (!written) _state.Runs = originalRuns;
+        }
+    }
+
+    private static List<AutomationRun>? TrimRuns(List<AutomationRun> originalRuns, int bytes)
+    {
+        var trimmed = new List<AutomationRun>(originalRuns.Count);
+        var remaining = originalRuns.Count;
+        var json = AutomationStateJsonContext.Default.AutomationRun;
+        foreach (var run in originalRuns)
+        {
+            if (bytes <= MaximumFileBytes || run.InProgress)
+            {
+                trimmed.Add(run);
+                continue;
+            }
+
+            // An entry has the same byte length inside the runs array as on its own. Measure only the entries we may lose.
+            var runBytes = JsonSerializer.SerializeToUtf8Bytes(run, json).Length;
+            if (run.Calls is not null)
+            {
+                var summary = run with { Calls = null };
+                var withoutCalls = bytes - runBytes + JsonSerializer.SerializeToUtf8Bytes(summary, json).Length;
+                if (withoutCalls <= MaximumFileBytes)
+                {
+                    bytes = withoutCalls;
+                    trimmed.Add(summary);
+                    continue;
+                }
+            }
+
+            // Removing an entry also removes a comma, unless the array is now empty.
+            bytes -= runBytes + (--remaining > 0 ? 1 : 0);
+        }
+
+        return bytes <= MaximumFileBytes ? trimmed : null;
     }
 
     internal sealed class StateFile
