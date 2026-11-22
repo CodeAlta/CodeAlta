@@ -196,6 +196,7 @@ public sealed class DesktopLoggingTests
     public void CommandLine_StartupFailureStillReturnsOneWithPersistedInnerException()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-logging-" + Guid.NewGuid().ToString("N"));
+        var catalog = Directory.CreateTempSubdirectory("codealta-test-catalog-");
         var previousError = Console.Error;
         using var output = new StringWriter();
         using var error = new StringWriter();
@@ -204,7 +205,9 @@ public sealed class DesktopLoggingTests
         {
             Console.SetError(error);
             var failure = new NeoAstraNativeLibraryException("native startup unavailable", new DllNotFoundException("missing WebKitGTK dependency"));
-            var result = DesktopCommandLine.Run(["--data-root", root], output, error,
+            var copy = catalog.FullName;
+            var result = DesktopCommandLine.Run(["--data-root", root, "--catalog-root", copy, "--allow-catalog-cache", "--allow-owned-host",
+                "--project-root", copy, "--discovery-home", copy, "--instruction-root", copy, "--builtin-skill-root", copy], output, error,
                 options => DesktopApplication.Run(options, _ => throw failure));
             Assert.AreEqual(1, result);
             Assert.AreEqual(string.Empty, output.ToString());
@@ -217,6 +220,7 @@ public sealed class DesktopLoggingTests
             LogManager.Shutdown();
             Console.SetError(previousError);
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            catalog.Delete(recursive: true);
         }
     }
 

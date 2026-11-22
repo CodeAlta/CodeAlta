@@ -19,6 +19,15 @@ public sealed class DesktopMcpTests
     private static DesktopLaunchOptions? Parse(params string[] args)
         => DesktopCommandLine.TryParse(args, _ => false, _ => false, out var options, out _) ? options : null;
 
+    private static DesktopLaunchOptions? ParseIsolated(params string[] args)
+    {
+        var root = OperatingSystem.IsWindows() ? @"Q:\owned" : "/owned";
+        var copy = Path.Combine(root, "copy");
+        return DesktopCommandLine.TryParse(["--data-root", Path.Combine(root, "browser"), "--catalog-root", copy, "--allow-catalog-cache",
+            "--allow-owned-host", "--project-root", copy, "--discovery-home", copy, "--instruction-root", copy, "--builtin-skill-root", copy, .. args],
+            path => path == copy, _ => false, out var options, out _) ? options : null;
+    }
+
     [TestMethod]
     public void CommandLine_SaysWhereTheServerListens_WithAnyStartThatOpensTheWindow()
     {
@@ -37,8 +46,7 @@ public sealed class DesktopMcpTests
         // The start is otherwise the one without the options.
         Assert.AreEqual(Parse()!.DataRoot, Parse("--mcp-port", "4100")!.DataRoot);
         Assert.AreEqual(Parse("--dev")!.StateRoot, Parse("--mcp-port", "4100", "--dev")!.StateRoot);
-        var root = Path.Combine(Path.GetTempPath(), "codealta-mcp-" + Guid.NewGuid().ToString("N"));
-        Assert.AreEqual(4102, Parse("--data-root", root, "--mcp-port", "4102")!.McpPort);
+        Assert.AreEqual(4102, ParseIsolated("--mcp-port", "4102")!.McpPort);
 
         // An option given twice, without a value or with one that names no port or no address is refused.
         foreach (var args in new string[][]
@@ -78,9 +86,7 @@ public sealed class DesktopMcpTests
         // A port of the user's own choice stays one when it is the one the instance would take.
         Assert.IsTrue(DesktopMcpEndpoint.For(Parse("--mcp-port", "2582")!).Chosen);
         // Tests and automation run several instances at once: each takes a free port.
-        var root = Path.Combine(Path.GetTempPath(), "codealta-mcp-" + Guid.NewGuid().ToString("N"));
-        Assert.AreEqual(new DesktopMcpEndpoint("127.0.0.1", 0, false), DesktopMcpEndpoint.For(Parse("--data-root", root)!));
-        Assert.AreEqual(0, DesktopMcpEndpoint.For(Parse()! with { Owned = new(root, root, root, root) }).Port);
+        Assert.AreEqual(new DesktopMcpEndpoint("127.0.0.1", 0, false), DesktopMcpEndpoint.For(ParseIsolated()!));
 
         Assert.AreEqual("http://127.0.0.1:2582/mcp", new DesktopMcpEndpoint("127.0.0.1", 2582, false).Url);
         Assert.AreEqual("http://localhost:4100/mcp", new DesktopMcpEndpoint("localhost", 2582, false).On(4100).Url);

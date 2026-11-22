@@ -110,8 +110,8 @@ The pictures are `site/img/alta-desktop-*.webp`; how to take them is written in
     removed, a page that needs one gets it.
 - Captures are taken on the **developer instance** (`alta --dev`, MCP server `codealta-dev`) built from the
   release commit, in the **Dark** theme, at 1600x1000 CSS pixels (2400x1500 pictures), with public projects
-  only (a space of public projects), exported as WebP. An isolated profile (`--data-root` ...) starts no
-  plugins and has no speech: use it only for what doc/site-screenshots.md says.
+  only (a space of public projects), exported as WebP. Isolated roots (`--allow-owned-host` with the roots
+  listed in `alta --help`) start no plugins and have no speech: use them only for what doc/site-screenshots.md says.
 - Leave the owner's profile as it was: what a scene creates (spaces, sessions, worktrees, temporary plugins,
   configuration tables) is removed after the capture, and the files it changed are checked against a copy.
 - Keep the scene scripts of the release in a folder that survives a restart, such as the ignored `tmp/` of the

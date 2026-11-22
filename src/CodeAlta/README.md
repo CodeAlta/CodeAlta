@@ -192,9 +192,8 @@ keeps the app in the process you started; so does a start under a debugger. See
 
 Set `CODEALTA_DISABLE_PLUGINS=1` to start without plugins.
 
-`alta --help` also lists the options that start the app on explicit directories instead of
-`~/.alta` (`--data-root`, `--catalog-root`, `--allow-owned-host` and others). They are for tests and
-for running on a copy of a profile. See
+For tests on a catalog copy, see **Isolated roots** in `alta --help`. Explicit directories require
+`--allow-owned-host`; this start does not use `~/.alta` or start plugins. See
 [One instance per profile](../../doc/desktop.md#one-instance-per-profile).
 
 ## Browser demo

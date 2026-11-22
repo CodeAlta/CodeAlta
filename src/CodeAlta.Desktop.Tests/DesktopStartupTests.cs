@@ -66,15 +66,20 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
-    public void ExplicitCatalogOptions_RemainReadOnly()
+    [DataRow(false)]
+    [DataRow(true)]
+    public void ExplicitRoots_RequireOwnedHostConsent(bool withCatalog)
     {
-        var root = OperatingSystem.IsWindows() ? @"Q:\catalog" : "/catalog";
-        var args = new[] { "--data-root", root + "/browser", "--catalog-root", root + "/copy", "--allow-catalog-cache" };
-        bool DirectoryExists(string path) => path.EndsWith("copy", StringComparison.Ordinal);
+        var root = OperatingSystem.IsWindows() ? @"Q:\desktop-fixture" : "/desktop-fixture";
+        var data = Path.Combine(root, "browser");
+        var catalog = Path.Combine(root, "copy");
+        string[] args = withCatalog
+            ? ["--data-root", data, "--catalog-root", catalog, "--allow-catalog-cache"]
+            : ["--data-root", data];
 
-        Assert.IsTrue(DesktopCommandLine.TryParse(args, DirectoryExists, _ => false, out var options, out _));
-        Assert.IsNotNull(options);
-        Assert.IsNull(options.Owned);
+        Assert.IsFalse(DesktopCommandLine.TryParse(args, path => path == catalog, _ => false, out var options, out var error));
+        Assert.IsNull(options);
+        StringAssert.Contains(error, "--allow-owned-host");
     }
 
     [TestMethod]
@@ -97,27 +102,33 @@ public sealed class DesktopStartupTests
     [TestMethod]
     public void ExplicitRoot_IsForwardedWithoutCreatingStorage_AndNativeExitIsPreserved()
     {
-        var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-test-" + Guid.NewGuid().ToString("N"));
-        var calls = 0;
-        var exit = DesktopCommandLine.Run(["--data-root", root], TextWriter.Null, TextWriter.Null, actual =>
+        var fixture = Directory.CreateTempSubdirectory("codealta-desktop-test-");
+        try
         {
-            calls++;
-            Assert.AreEqual(root, actual.DataRoot);
-            Assert.IsNull(actual.CatalogRoot);
-            Assert.IsFalse(Directory.Exists(root));
-            return 7;
-        });
-        Assert.AreEqual(1, calls);
-        Assert.AreEqual(7, exit);
-        Assert.IsFalse(Directory.Exists(root));
+            var data = Path.Combine(fixture.FullName, "browser");
+            var calls = 0;
+            var exit = DesktopCommandLine.Run(OwnedArguments(fixture.FullName, data), TextWriter.Null, TextWriter.Null, actual =>
+            {
+                calls++;
+                Assert.AreEqual(data, actual.DataRoot);
+                Assert.AreEqual(Path.Combine(fixture.FullName, "copy"), actual.CatalogRoot);
+                Assert.IsNotNull(actual.Owned);
+                Assert.AreEqual(Path.Combine(fixture.FullName, "project"), actual.Owned.Project);
+                Assert.IsFalse(Directory.Exists(data));
+                return 7;
+            });
+            Assert.AreEqual(1, calls);
+            Assert.AreEqual(7, exit);
+            Assert.IsFalse(Directory.Exists(data));
+        }
+        finally { fixture.Delete(recursive: true); }
     }
 
     [TestMethod]
     public void NativeStartupFailure_IsReportedAsFailure()
     {
         using var error = new StringWriter();
-        var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-test-" + Guid.NewGuid().ToString("N"));
-        Assert.AreEqual(1, DesktopCommandLine.Run(["--data-root", root], TextWriter.Null, error,
+        Assert.AreEqual(1, DesktopCommandLine.Run([], TextWriter.Null, error,
             _ => throw new InvalidOperationException("native unavailable")));
         StringAssert.Contains(error.ToString(), "native unavailable");
     }
@@ -125,15 +136,24 @@ public sealed class DesktopStartupTests
     [TestMethod]
     public void ExistingFileRoot_IsRejectedWithoutChangingTheFile()
     {
-        var file = Path.Combine(Path.GetTempPath(), "codealta-desktop-test-" + Guid.NewGuid().ToString("N"));
-        File.WriteAllText(file, "owned test sentinel");
+        var fixture = Directory.CreateTempSubdirectory("codealta-desktop-test-");
         try
         {
-            Assert.AreEqual(2, DesktopCommandLine.Run(["--data-root", file], TextWriter.Null, TextWriter.Null,
+            var file = Path.Combine(fixture.FullName, "browser");
+            File.WriteAllText(file, "owned test sentinel");
+            Assert.AreEqual(2, DesktopCommandLine.Run(OwnedArguments(fixture.FullName, file), TextWriter.Null, TextWriter.Null,
                 _ => throw new AssertFailedException("Native startup was entered.")));
             Assert.AreEqual("owned test sentinel", File.ReadAllText(file));
         }
-        finally { File.Delete(file); }
+        finally { fixture.Delete(recursive: true); }
+    }
+
+    private static string[] OwnedArguments(string root, string data)
+    {
+        var catalog = Directory.CreateDirectory(Path.Combine(root, "copy")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        return ["--data-root", data, "--catalog-root", catalog, "--allow-catalog-cache", "--allow-owned-host",
+            "--project-root", project, "--discovery-home", project, "--instruction-root", root, "--builtin-skill-root", project];
     }
 
     [TestMethod]

@@ -184,10 +184,9 @@ internal static class DesktopCommandLine
         Isolated roots, for tests and development. The ~/.alta profile is not used, and every
         directory is an absolute path outside .alta:
           alta --data-root <new directory> --catalog-root <catalog copy> --allow-catalog-cache
-              Browse a copy of a catalog. The cache of that copy can be written.
-          ... --allow-owned-host --project-root <directory> --discovery-home <directory>
-              --instruction-root <project ancestor> --builtin-skill-root <directory>
-              Also run sessions on that copy. Plugins are not started.
+               --allow-owned-host --project-root <directory> --discovery-home <directory>
+               --instruction-root <project ancestor> --builtin-skill-root <directory>
+              Start a host on the catalog copy. The copy can be written; plugins are not started.
           ... --review-owned-command-permissions
               Review each command request (Allow once / Deny / Cancel).
           ... --enable-owned-user-input
@@ -224,7 +223,6 @@ internal static class DesktopCommandLine
             if (IsAutomated(Environment.GetEnvironmentVariable(AutomatedVariable))) options = options! with { Automated = true };
             // What the sessions start (altacli, a terminal, the plugins) uses the same profile.
             if (options!.Profile is { } profile) Environment.SetEnvironmentVariable(HomeVariable, profile);
-            // Admission grants only desktop-owned browser storage and opt-in cache writes in a trusted copy.
             return startNative(options!);
         }
         catch (Exception exception)
@@ -322,29 +320,33 @@ internal static class DesktopCommandLine
                 default: return false;
             }
         }
-        if (string.IsNullOrWhiteSpace(data) || !Path.IsPathFullyQualified(data) || (catalog is not null) != allowCache) return false;
-        if (catalog is not null && (string.IsNullOrWhiteSpace(catalog) || !Path.IsPathFullyQualified(catalog))) return false;
-        if (ContainsAlta(data) || (catalog is not null && ContainsAlta(catalog))) return false;
-        data = Path.TrimEndingDirectorySeparator(Path.GetFullPath(data));
-        catalog = catalog is null ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(catalog));
-        if (ContainsAlta(data) || (catalog is not null && (ContainsAlta(catalog) || Overlap(data, catalog)))) return false;
-        if (directoryExists(data) || fileExists(data)) return false;
-        if (catalog is not null && (fileExists(catalog) || !directoryExists(catalog))) return false;
-        options = new DesktopLaunchOptions(data, catalog);
-        if (allowOwned || reviewCommands || enableUserInput || project is not null || home is not null || instructions is not null || builtin is not null)
+        if (string.IsNullOrWhiteSpace(data) || !Path.IsPathFullyQualified(data)) return false;
+        if (!allowOwned)
         {
-            options = null;
-            if (!allowOwned || catalog is null || !allowCache) return false;
-            var roots = new[] { project, home, instructions, builtin };
-            if (roots.Any(path => string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || ContainsAlta(path))) return false;
-            var normalized = roots.Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path!))).ToArray();
-            if (normalized.Any(path => ContainsAlta(path) || !directoryExists(path) || fileExists(path))) return false;
-            if (new[] { normalized[0], normalized[1], normalized[3] }.Any(path => Overlap(data, path))) return false;
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var ancestor = Path.EndsInDirectorySeparator(normalized[2]) ? normalized[2] : normalized[2] + Path.DirectorySeparatorChar;
-            if (!string.Equals(normalized[0], normalized[2], comparison) && !normalized[0].StartsWith(ancestor, comparison)) return false;
-            options = new DesktopLaunchOptions(data, catalog) { Owned = new(normalized[0], normalized[1], normalized[2], normalized[3]), ReviewOwnedCommandPermissions = reviewCommands, EnableOwnedUserInput = enableUserInput };
+            error = "Isolated roots require --allow-owned-host. Run alta --help for the required options.";
+            return false;
         }
+        if (!allowCache || string.IsNullOrWhiteSpace(catalog) || !Path.IsPathFullyQualified(catalog)) return false;
+        if (ContainsAlta(data) || ContainsAlta(catalog)) return false;
+        data = Path.TrimEndingDirectorySeparator(Path.GetFullPath(data));
+        catalog = Path.TrimEndingDirectorySeparator(Path.GetFullPath(catalog));
+        if (ContainsAlta(data) || ContainsAlta(catalog) || Overlap(data, catalog)) return false;
+        if (directoryExists(data) || fileExists(data)) return false;
+        if (fileExists(catalog) || !directoryExists(catalog)) return false;
+        var roots = new[] { project, home, instructions, builtin };
+        if (roots.Any(path => string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || ContainsAlta(path))) return false;
+        var normalized = roots.Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path!))).ToArray();
+        if (normalized.Any(path => ContainsAlta(path) || !directoryExists(path) || fileExists(path))) return false;
+        if (new[] { normalized[0], normalized[1], normalized[3] }.Any(path => Overlap(data, path))) return false;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var ancestor = Path.EndsInDirectorySeparator(normalized[2]) ? normalized[2] : normalized[2] + Path.DirectorySeparatorChar;
+        if (!string.Equals(normalized[0], normalized[2], comparison) && !normalized[0].StartsWith(ancestor, comparison)) return false;
+        options = new DesktopLaunchOptions(data, catalog)
+        {
+            Owned = new(normalized[0], normalized[1], normalized[2], normalized[3]),
+            ReviewOwnedCommandPermissions = reviewCommands,
+            EnableOwnedUserInput = enableUserInput,
+        };
         error = null;
         return true;
     }
