@@ -140,59 +140,61 @@ internal sealed class NodeScopeProviders
         var link = applied.GetValueOrDefault(linkId) ?? new ScopeProvidersOfLink();
         var before = new Dictionary<string, long>(link.Applied, StringComparer.Ordinal);
         var store = new CodeAltaConfigStore(_catalog);
-        var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
         // An id is the one of the link that installed it first: another server, another organization, never replaces its
         // definition or its key; it is free again once that link no longer gives it.
         var others = applied.Where(pair => pair.Key != linkId).SelectMany(static pair => pair.Value.Applied.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var kept = new Dictionary<string, long>(StringComparer.Ordinal);
         var changed = new List<string>();
-        foreach (var (provider, key) in opened)
+        store.UpdateGlobalProviderDefinitions(definitions =>
         {
-            if (kept.ContainsKey(provider.Id)) continue;
-            if (before.TryGetValue(provider.Id, out var held) && provider.Version < held)
+            foreach (var (provider, key) in opened)
             {
-                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} was given at version {provider.Version}, older than {held}: the installed one stays.");
-                kept[provider.Id] = held;
-                continue;
+                if (kept.ContainsKey(provider.Id)) continue;
+                if (before.TryGetValue(provider.Id, out var held) && provider.Version < held)
+                {
+                    if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} was given at version {provider.Version}, older than {held}: the installed one stays.");
+                    kept[provider.Id] = held;
+                    continue;
+                }
+
+                if (link.Removed.TryGetValue(provider.Id, out var removed) && provider.Version <= removed)
+                {
+                    if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} was removed at version {removed}: version {provider.Version} does not bring it back.");
+                    continue;
+                }
+
+                if (others.Contains(provider.Id))
+                {
+                    if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} has the id of a provider another server gave this machine: it is not installed.");
+                    continue;
+                }
+
+                var existing = definitions.FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase));
+                if (existing is not null && !before.ContainsKey(provider.Id)) continue;
+                if (Differs(existing, provider, key)) changed.Add(provider.Id);
+                if (existing is not null) definitions.Remove(existing);
+                _secrets.SetSecret(SecretName(provider.Id), key, "fleet");
+                definitions.Add(new CodeAltaProviderDocument
+                {
+                    ProviderKey = provider.Id, DisplayName = provider.Name, ProviderType = provider.Type, ApiUrl = provider.Endpoint, Model = provider.Models.FirstOrDefault(),
+                    ApiKeySecret = SecretName(provider.Id), Enabled = true,
+                });
+                kept[provider.Id] = provider.Version;
+                link.Accepted[provider.Id] = Pin(provider, key);
+                link.Removed.Remove(provider.Id);
             }
 
-            if (link.Removed.TryGetValue(provider.Id, out var removed) && provider.Version <= removed)
+            foreach (var (gone, version) in before.Where(pair => !kept.ContainsKey(pair.Key)))
             {
-                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} was removed at version {removed}: version {provider.Version} does not bring it back.");
-                continue;
+                definitions.RemoveAll(definition => string.Equals(definition.ProviderKey, gone, StringComparison.OrdinalIgnoreCase));
+                _secrets.DeleteSecret(SecretName(gone));
+                link.Removed[gone] = Math.Max(version, link.Removed.GetValueOrDefault(gone));
+                link.Accepted.Remove(gone);
+                changed.Add(gone);
             }
 
-            if (others.Contains(provider.Id))
-            {
-                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} has the id of a provider another server gave this machine: it is not installed.");
-                continue;
-            }
-
-            var existing = definitions.FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null && !before.ContainsKey(provider.Id)) continue;
-            if (Differs(existing, provider, key)) changed.Add(provider.Id);
-            if (existing is not null) definitions.Remove(existing);
-            _secrets.SetSecret(SecretName(provider.Id), key, "fleet");
-            definitions.Add(new CodeAltaProviderDocument
-            {
-                ProviderKey = provider.Id, DisplayName = provider.Name, ProviderType = provider.Type, ApiUrl = provider.Endpoint, Model = provider.Models.FirstOrDefault(),
-                ApiKeySecret = SecretName(provider.Id), Enabled = true,
-            });
-            kept[provider.Id] = provider.Version;
-            link.Accepted[provider.Id] = Pin(provider, key);
-            link.Removed.Remove(provider.Id);
-        }
-
-        foreach (var (gone, version) in before.Where(pair => !kept.ContainsKey(pair.Key)))
-        {
-            definitions.RemoveAll(definition => string.Equals(definition.ProviderKey, gone, StringComparison.OrdinalIgnoreCase));
-            _secrets.DeleteSecret(SecretName(gone));
-            link.Removed[gone] = Math.Max(version, link.Removed.GetValueOrDefault(gone));
-            link.Accepted.Remove(gone);
-            changed.Add(gone);
-        }
-
-        if (kept.Count > 0 || before.Count > 0) store.SaveGlobalProviderDefinitions(definitions);
+            return kept.Count > 0 || before.Count > 0;
+        });
         link.Applied = kept;
         applied[linkId] = link;
         WriteApplied(applied);
