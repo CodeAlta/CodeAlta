@@ -157,15 +157,16 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
-    public void BootRpc_ProjectsOnlyDevelopmentMetadata_WithGeneratedJson()
+    public void BootRpc_ProjectsOwnedHostMetadata_WithGeneratedJson()
     {
-        var status = new BootService().Status(new BootRequest());
-        Assert.AreEqual("in-development", status.State);
+        var status = new BootService("epoch").Status(new BootRequest());
+        Assert.AreEqual("owned-text-only", status.State);
         Assert.AreEqual("CodeAlta", status.ProductName);
-        Assert.IsFalse(status.HostAvailable);
+        Assert.AreEqual("epoch", status.HostEpoch);
+        Assert.IsTrue(status.HostAvailable);
         var json = JsonSerializer.Serialize(status, DesktopJsonContext.Default.BootStatus);
         Assert.AreEqual(status, JsonSerializer.Deserialize(json, DesktopJsonContext.Default.BootStatus));
-        StringAssert.Contains(json, "\"hostAvailable\":false");
+        StringAssert.Contains(json, "\"hostAvailable\":true");
     }
 
     [TestMethod]
@@ -173,7 +174,7 @@ public sealed class DesktopStartupTests
     {
         var runningVersion = typeof(DesktopCommandLine).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "development";
-        Assert.AreEqual(runningVersion, new BootService().Status(new()).Version);
+        Assert.AreEqual(runningVersion, new BootService(developer: false).Status(new()).Version);
         Assert.AreEqual(runningVersion, new BootService("test-owned-epoch").Status(new()).Version);
     }
 

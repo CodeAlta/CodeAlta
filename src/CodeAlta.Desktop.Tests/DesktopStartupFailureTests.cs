@@ -73,7 +73,7 @@ public sealed class DesktopStartupFailureTests
 
             File.WriteAllText(waiting, string.Empty);
             var data = Path.Combine(Path.GetTempPath(), "codealta-startup-" + token);
-            var options = new DesktopLaunchOptions(data, null) { StartToken = token };
+            var options = new DesktopLaunchOptions(data, data + "-catalog", new(data + "-project", null, null, null)) { StartToken = token };
             var shown = new List<string>();
             var notified = new List<string>();
             var failure = new NeoAstraException(NeoErrorCode.BackendUnavailable, "Could not open display");

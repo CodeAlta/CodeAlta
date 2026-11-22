@@ -37,7 +37,7 @@ public sealed class SessionPermissionsRpcTests
         Assert.IsFalse(DesktopCommandLine.TryParse([.. args, "--review-owned-command-permissions", "--review-owned-command-permissions"], Exists, _ => false, out _, out _));
         Assert.IsFalse(DesktopCommandLine.TryParse(["--data-root", root + "/browser", "--review-owned-command-permissions"], Exists, _ => false, out _, out _));
         Assert.IsFalse(DesktopCommandLine.TryParse([.. args.Where(arg => arg != "--allow-owned-host"), "--review-owned-command-permissions"], Exists, _ => false, out _, out _));
-        Assert.IsFalse(new BootService().Status(new()).CommandReviewEnabled);
+        Assert.IsFalse(new BootService(developer: false).Status(new()).CommandReviewEnabled);
         Assert.IsFalse(new BootService(Epoch).Status(new()).CommandReviewEnabled);
         Assert.IsTrue(new BootService(Epoch, true).Status(new()).CommandReviewEnabled);
     }

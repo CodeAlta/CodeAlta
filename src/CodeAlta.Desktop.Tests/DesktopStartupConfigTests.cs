@@ -108,7 +108,8 @@ public sealed class DesktopStartupConfigTests
     [TestMethod]
     public void BootStatus_TellsThePageWhatTheWindowIsFor()
     {
-        var recovery = new BootService { ConfigRecovery = true, Developer = true }.Status(new());
+        var recovery = new BootService(developer: true).Status(new());
+        Assert.AreEqual("config-recovery", recovery.State);
         Assert.IsTrue(recovery.ConfigRecovery);
         Assert.IsFalse(recovery.HostAvailable);
         Assert.IsNull(recovery.HostEpoch);
@@ -120,7 +121,6 @@ public sealed class DesktopStartupConfigTests
         Assert.IsFalse(first.ConfigRecovery);
         Assert.IsTrue(first.HostAvailable);
         Assert.IsFalse(new BootService("epoch").Status(new()).ProviderSetup);
-        Assert.IsFalse(new BootService().Status(new()).ConfigRecovery);
     }
 
     private sealed class Profile : IDisposable

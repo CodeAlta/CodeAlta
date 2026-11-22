@@ -11,14 +11,9 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("subProjects", Version = 1)]
 internal sealed class SubProjectsService
 {
-    private readonly ProjectCatalog? _catalog;
-    private readonly DesktopSpaceView? _view;
-    private readonly string? _epoch;
-
-    /// <summary>Creates the service of a window whose host keeps no projects: it answers <c>unavailable</c>.</summary>
-    public SubProjectsService()
-    {
-    }
+    private readonly ProjectCatalog _catalog;
+    private readonly DesktopSpaceView _view;
+    private readonly string _epoch;
 
     /// <summary>Creates the service of an owned host.</summary>
     /// <param name="catalog">The projects.</param>
@@ -41,7 +36,7 @@ internal sealed class SubProjectsService
         if (string.IsNullOrWhiteSpace(request.ProjectId)) return new("not_found", null);
         try
         {
-            var map = await _catalog!.ReadRepositoryMapAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+            var map = await _catalog.ReadRepositoryMapAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
             return map is null ? new("not_found", null) : new("ok", View(map));
         }
         catch (Exception exception) when (Unreadable(exception))
@@ -62,7 +57,7 @@ internal sealed class SubProjectsService
         if (string.IsNullOrWhiteSpace(request.ProjectId)) return new("not_found", 0, 0, false, null, []);
         try
         {
-            var map = await _catalog!.ReadRepositoryMapAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+            var map = await _catalog.ReadRepositoryMapAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
             if (map is null) return new("not_found", 0, 0, false, null, []);
             var declared = map.Entries.Count(static entry => entry.Folder == ProjectManifestFolderState.Ok);
             var optional = map.Entries.Count(static entry => entry.Entry.Optional && entry.Project is null);
@@ -87,7 +82,7 @@ internal sealed class SubProjectsService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false, null);
         try
         {
-            var projects = await _catalog!.LoadAsync(cancellationToken).ConfigureAwait(false);
+            var projects = await _catalog.LoadAsync(cancellationToken).ConfigureAwait(false);
             // A sub-project too: its own map is a nested map.
             if (projects.FirstOrDefault(project => project.Id == request.ProjectId) is not { } repository) return new("not_found", [], false, null);
             var map = await _catalog.ReadManifestAsync(repository.ProjectPath, cancellationToken).ConfigureAwait(false);
@@ -113,11 +108,11 @@ internal sealed class SubProjectsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (string.IsNullOrWhiteSpace(request.ProjectId) || string.IsNullOrWhiteSpace(request.Key)) return new("not_found", null, null);
-        if (_catalog!.IsReadOnly) return new("invalid", "The projects are read-only in this process.", null);
+        if (_catalog.IsReadOnly) return new("invalid", "The projects are read-only in this process.", null);
         try
         {
             var (status, project) = await _catalog.SetSubProjectShownAsync(request.ProjectId, request.Key, request.Shown, cancellationToken).ConfigureAwait(false);
-            if (status == SubProjectShowStatus.Updated) _view!.NotifyChanged();
+            if (status == SubProjectShowStatus.Updated) _view.NotifyChanged();
             return status switch
             {
                 SubProjectShowStatus.Updated => new("ok", null, project?.Id),
@@ -178,11 +173,11 @@ internal sealed class SubProjectsService
         if (string.IsNullOrWhiteSpace(projectId)) return new("not_found", null, null);
         try
         {
-            var projects = await _catalog!.LoadAsync(cancellationToken).ConfigureAwait(false);
+            var projects = await _catalog.LoadAsync(cancellationToken).ConfigureAwait(false);
             // A sub-project too: its own map is a nested map.
             if (projects.FirstOrDefault(project => project.Id == projectId) is not { } repository) return new("not_found", null, null);
             var result = await Task.Run(() => change(repository.ProjectPath), CancellationToken.None).ConfigureAwait(false);
-            if (result.Status == ProjectManifestChangeStatus.Updated) _view!.NotifyChanged();
+            if (result.Status == ProjectManifestChangeStatus.Updated) _view.NotifyChanged();
             return result.Status switch
             {
                 ProjectManifestChangeStatus.Updated or ProjectManifestChangeStatus.Unchanged => new("ok", null, result.Key),
@@ -217,7 +212,7 @@ internal sealed class SubProjectsService
     }
 
     private string? Refuse(string? expectedEpoch)
-        => _catalog is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
+        => string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
     private static bool Unreadable(Exception exception)
         => exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or SharpYaml.YamlException;

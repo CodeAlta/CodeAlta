@@ -71,7 +71,7 @@ internal static class DesktopStartupFailure
     {
         ArgumentNullException.ThrowIfNull(options);
         // Only a start of the user's profile shows a dialog: a start on explicit roots is a test or an automation.
-        var user = options.Owned is { Home: null };
+        var user = options.Owned.Home is null;
         Report(options, failure, text => { if (user && OperatingSystem.IsWindows()) ShowMessage(text); }, (text, logs) => { if (user) Notify(text, logs); },
             Console.IsErrorRedirected, Console.Error);
     }

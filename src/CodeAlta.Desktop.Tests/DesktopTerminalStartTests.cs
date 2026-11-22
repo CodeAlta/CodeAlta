@@ -70,11 +70,8 @@ public sealed class DesktopTerminalStartTests
         Assert.IsFalse(DesktopTerminalStart.Applies(Parse()! with { StartToken = new string('a', 32) }));
         // Explicit roots are tests and automation, which own the process they start.
         var root = OperatingSystem.IsWindows() ? @"Q:\owned" : "/owned";
-        Assert.IsFalse(DesktopTerminalStart.Applies(new DesktopLaunchOptions(Path.Combine(root, "browser"), null)));
-        Assert.IsFalse(DesktopTerminalStart.Applies(new DesktopLaunchOptions(Path.Combine(root, "browser"), Path.Combine(root, "copy"))
-        {
-            Owned = new(Path.Combine(root, "project"), Path.Combine(root, "home"), root, Path.Combine(root, "builtin")),
-        }));
+        Assert.IsFalse(DesktopTerminalStart.Applies(new DesktopLaunchOptions(Path.Combine(root, "browser"), Path.Combine(root, "copy"),
+            new(Path.Combine(root, "project"), Path.Combine(root, "home"), root, Path.Combine(root, "builtin")))));
     }
 
     [TestMethod]

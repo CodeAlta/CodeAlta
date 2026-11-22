@@ -14,14 +14,9 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed class ManagedPolicyService
 {
     private const int MaximumKeys = 32;
-    private readonly ManagedPolicyState? _state;
+    private readonly ManagedPolicyState _state;
     private readonly CopilotManagedPolicySource? _copilot;
-    private readonly string? _epoch;
-
-    /// <summary>Creates an unavailable service for launches without an owned host.</summary>
-    internal ManagedPolicyService()
-    {
-    }
+    private readonly string _epoch;
 
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="state">The policies of the host.</param>
@@ -41,7 +36,7 @@ internal sealed class ManagedPolicyService
     /// <summary>Reads the policy that applies now, and where the reading of the Copilot accounts stands.</summary>
     [NeoRpcMethod("read")]
     public ManagedPolicyResponse Read(ManagedPolicyRequest request)
-        => Refused(request?.ExpectedEpoch) is { } code ? Empty(code) : Project(_state!.Current, _copilot?.Status);
+        => Refused(request?.ExpectedEpoch) is { } code ? Empty(code) : Project(_state.Current, _copilot?.Status);
 
     /// <summary>Reads the managed settings of the Copilot accounts again, then the policy that applies.</summary>
     [NeoRpcMethod("refresh")]
@@ -49,7 +44,7 @@ internal sealed class ManagedPolicyService
     {
         if (Refused(request?.ExpectedEpoch) is { } code) return Empty(code);
         var status = _copilot is null ? null : await _copilot.RefreshAsync(cancellationToken).ConfigureAwait(false);
-        return Project(_state!.Current, status);
+        return Project(_state.Current, status);
     }
 
     internal static ManagedPolicyResponse Project(ManagedPolicy policy, CopilotManagedPolicyStatus? copilot)
@@ -66,7 +61,7 @@ internal sealed class ManagedPolicyService
     private static int? Kilobytes(long? bytes) => bytes is { } value && value >= 0 ? (int)Math.Min(value / 1024, int.MaxValue) : null;
 
     private string? Refused(string? expectedEpoch)
-        => _state is null ? "unavailable" : !string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? "stale_epoch" : null;
+        => string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
     private static ManagedPolicyResponse Empty(string status)
         => new(status, false, null, null, false, false, null, false, false, false, null, [], null, null);

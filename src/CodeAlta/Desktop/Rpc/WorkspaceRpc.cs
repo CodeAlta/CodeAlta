@@ -6,7 +6,7 @@ using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
 
-/// <summary>Persisted catalog browsing for one explicitly admitted task-owned copy.</summary>
+/// <summary>Projects the host's workspace into bounded lists of projects, sessions, and their history.</summary>
 /// <remarks>
 /// Listing can create/rebuild data/alta.sqlite3 and SQLite sidecars. It never falls back to header scans.
 /// AgentSessionCatalog starts its shared load using Task.Run and CancellationToken.None: canceling a waiter

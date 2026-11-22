@@ -6,10 +6,8 @@ using CodeAlta.Plugin.Mcp;
 
 namespace CodeAlta.Desktop;
 
-internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot)
+internal sealed record DesktopLaunchOptions(string DataRoot, string CatalogRoot, OwnedDesktopRoots Owned)
 {
-    internal OwnedDesktopRoots? Owned { get; init; }
-
     /// <summary>The root of the state this instance alone writes; null keeps it in the catalog root.</summary>
     internal string? StateRoot { get; init; }
 
@@ -39,8 +37,8 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     internal string? StartToken { get; init; }
 
     /// <summary>
-    /// The proxy of the process, applied from the configuration at the start of an owned instance, before the first HTTP
-    /// request; null for a start that owns no profile. The settings change it while the application runs.
+    /// The proxy of the process, applied from the configuration before the first HTTP request.
+    /// The settings change it while the application runs.
     /// </summary>
     internal CodeAltaNetwork? Network { get; init; }
     internal bool ReviewOwnedCommandPermissions { get; init; }
@@ -81,14 +79,14 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     /// profile, which reads none of the MCP configurations other tools keep in the home of the user, as
     /// <c>altacli --profile</c>; else the home the roots own, or the one of the user.
     /// </summary>
-    internal McpHome McpHome => Profile is { } profile ? new McpHome(null, profile) : Owned?.Home;
+    internal McpHome McpHome => Profile is { } profile ? new McpHome(null, profile) : Owned.Home;
 
     /// <summary>
     /// The home whose skills, agents and instructions of other tools (<c>~/.agents</c>, <c>~/.copilot</c>, <c>~/.claude</c>)
     /// the sessions and the window read: none for a separate profile, as <c>altacli --profile</c>; else the home the roots
     /// own, or the one of the user.
     /// </summary>
-    internal string? OtherToolsHome => Profile is not null ? null : Owned?.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    internal string? OtherToolsHome => Profile is not null ? null : Owned.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 }
 internal sealed record OwnedDesktopRoots(string Project, string? Home, string? Instructions, string? Builtin);
 
@@ -341,9 +339,8 @@ internal static class DesktopCommandLine
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var ancestor = Path.EndsInDirectorySeparator(normalized[2]) ? normalized[2] : normalized[2] + Path.DirectorySeparatorChar;
         if (!string.Equals(normalized[0], normalized[2], comparison) && !normalized[0].StartsWith(ancestor, comparison)) return false;
-        options = new DesktopLaunchOptions(data, catalog)
+        options = new DesktopLaunchOptions(data, catalog, new(normalized[0], normalized[1], normalized[2], normalized[3]))
         {
-            Owned = new(normalized[0], normalized[1], normalized[2], normalized[3]),
             ReviewOwnedCommandPermissions = reviewCommands,
             EnableOwnedUserInput = enableUserInput,
         };
@@ -471,11 +468,11 @@ internal static class DesktopCommandLine
             // The developer instance has its own WebView profile: its own tabs and drafts, and its own
             // remote debugging port when one is requested.
             DefaultDataRoot(userProfile, developer),
-            profile.GlobalRoot)
-        {
+            profile.GlobalRoot,
             // Match the TUI's normal startup: current project, standard profile, and the
             // built-in discovery defaults rather than the restricted explicit-root scope.
-            Owned = new(project ?? Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
+            new(project ?? Path.GetFullPath(Environment.CurrentDirectory), null, null, null))
+        {
             StateRoot = developer ? profile.StateRoot : null,
             Developer = developer,
         };
@@ -496,9 +493,8 @@ internal static class DesktopCommandLine
     // A separate profile keeps all of its data in its folder, the data of the window too: a profile is moved off the home
     // folder of the user (where it may not be trusted) as a whole.
     private static DesktopLaunchOptions CreateProfileOptions(string profile, string? project) =>
-        new(Path.Combine(profile, ProfileDataFolder), profile)
+        new(Path.Combine(profile, ProfileDataFolder), profile, new(project ?? Path.GetFullPath(Environment.CurrentDirectory), null, null, null))
         {
-            Owned = new(project ?? Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
             Profile = profile,
             IntegrationRoot = DefaultDataRoot(UserProfile(), developer: false),
         };

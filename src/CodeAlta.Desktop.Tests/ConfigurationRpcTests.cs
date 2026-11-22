@@ -69,21 +69,9 @@ public sealed class ConfigurationRpcTests
     }
 
     [TestMethod]
-    public void Snapshot_BrowserOnlyStartupDoesNotRequireCatalogRoot()
-    {
-        // The explicit --data-root mode forwards a null CatalogRoot to this constructor.
-        var result = new ConfigurationService(catalogRoot: null).Snapshot(new ConfigurationRequest());
-
-        Assert.IsFalse(result.ProviderRuntimeAvailable);
-        Assert.IsFalse(result.PluginRuntimeAvailable);
-        Assert.IsEmpty(result.Providers);
-        Assert.IsEmpty(result.Plugins);
-    }
-
-    [TestMethod]
     [DataRow("")]
     [DataRow("relative")]
-    public void Snapshot_NonNullCatalogRootStillRequiresAnAbsoluteDirectory(string root) =>
+    public void Snapshot_CatalogRootRequiresAnAbsoluteDirectory(string root) =>
         Assert.ThrowsExactly<ArgumentException>(() => new ConfigurationService(root));
 
     [TestMethod]

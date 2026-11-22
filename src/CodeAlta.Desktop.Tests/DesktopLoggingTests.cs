@@ -8,6 +8,9 @@ namespace CodeAlta.Desktop.Tests;
 [DoNotParallelize]
 public sealed class DesktopLoggingTests
 {
+    private static DesktopLaunchOptions Launch(string root)
+        => new(root, Path.Combine(root, "catalog"), new(root, null, null, null));
+
     [TestMethod]
     public void Startup_InitializesLoggingBeforeHostWorkAndFlushesToDesktopRoot()
     {
@@ -18,7 +21,7 @@ public sealed class DesktopLoggingTests
         try
         {
             Console.SetError(error);
-            Assert.AreEqual(0, DesktopApplication.Run(new(root, null), _ =>
+            Assert.AreEqual(0, DesktopApplication.Run(Launch(root), _ =>
             {
                 Assert.IsTrue(LogManager.IsInitialized);
                 LogManager.GetLogger("CodeAlta.Desktop.Test").Info("desktop logging regression");
@@ -46,7 +49,7 @@ public sealed class DesktopLoggingTests
         try
         {
             Environment.SetEnvironmentVariable("CODEALTA_DEBUG_LOGGERS", "CodeAlta.ClaudeCode.Protocol");
-            Assert.AreEqual(0, DesktopApplication.Run(new(root, null), _ =>
+            Assert.AreEqual(0, DesktopApplication.Run(Launch(root), _ =>
             {
                 LogManager.GetLogger("CodeAlta.ClaudeCode.Protocol").Debug("protocol line of the regression");
                 LogManager.GetLogger("CodeAlta.Desktop.Test").Debug("other debug line of the regression");
@@ -82,11 +85,11 @@ public sealed class DesktopLoggingTests
         LogManager.InitializeForAsync(new LogManagerConfig());
         try
         {
-            Assert.AreEqual(result, DesktopApplication.Run(new("unused-existing-logger-root", null), _ => result));
+            Assert.AreEqual(result, DesktopApplication.Run(Launch("unused-existing-logger-root"), _ => result));
             Assert.IsTrue(LogManager.IsInitialized);
             var failure = new InvalidOperationException("borrowed logging failure");
             Assert.AreSame(failure, Assert.ThrowsExactly<InvalidOperationException>(() =>
-                DesktopApplication.Run(new("unused-existing-logger-root", null), _ => throw failure)));
+                DesktopApplication.Run(Launch("unused-existing-logger-root"), _ => throw failure)));
             Assert.IsTrue(LogManager.IsInitialized);
         }
         finally { LogManager.Shutdown(); }
@@ -104,7 +107,7 @@ public sealed class DesktopLoggingTests
         try
         {
             Console.SetError(error);
-            var caught = Assert.ThrowsExactly<NeoAstraNativeLibraryException>(() => DesktopApplication.Run(new(root, null), _ => throw failure));
+            var caught = Assert.ThrowsExactly<NeoAstraNativeLibraryException>(() => DesktopApplication.Run(Launch(root), _ => throw failure));
             Assert.AreSame(failure, caught, "Reporting must not swallow or replace the startup exception.");
             Assert.IsTrue(LogManager.IsInitialized, "A thrown run does not prove retained callbacks have stopped.");
             // Read before any fixture shutdown: an async log merely queued at return is not sufficient.
@@ -134,7 +137,7 @@ public sealed class DesktopLoggingTests
         try
         {
             Console.SetError(error);
-            Assert.AreEqual(17, DesktopApplication.Run(new(root, null), _ =>
+            Assert.AreEqual(17, DesktopApplication.Run(Launch(root), _ =>
             {
                 // Models an inner startup boundary which already reported its exception and returned failure.
                 LogManager.GetLogger("CodeAlta.Desktop.Test").Info("preceding startup diagnostic");
@@ -177,8 +180,8 @@ public sealed class DesktopLoggingTests
                 return 1;
             }
             if (throws)
-                Assert.AreSame(failure, Assert.ThrowsExactly<InvalidOperationException>(() => DesktopApplication.Run(new(root, null), Run)));
-            else Assert.AreEqual(1, DesktopApplication.Run(new(root, null), Run));
+                Assert.AreSame(failure, Assert.ThrowsExactly<InvalidOperationException>(() => DesktopApplication.Run(Launch(root), Run)));
+            else Assert.AreEqual(1, DesktopApplication.Run(Launch(root), Run));
             Assert.IsTrue(LogManager.IsInitialized);
             StringAssert.Contains(ReadLogs(root), throws ? "unconfirmed startup failure" : "exit code 1");
             retainedCallback!();

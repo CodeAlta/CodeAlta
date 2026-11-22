@@ -38,15 +38,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ArgumentNullException.ThrowIfNull(options);
         // A profile in use is a running CodeAlta, possibly with its window closed. This start asks it to show
         // its window and ends there, before touching anything the running one holds (its log file, say).
-        if (options.Owned is not null && ProfileInUse(options)) return ActivateRunningInstance(options);
+        if (ProfileInUse(options)) return ActivateRunningInstance(options);
         if (options.ExitRunning) return 0; // None is running: there is nothing to exit.
         // A start from a terminal gives the prompt back: the application runs in a process of its own.
         if (DesktopTerminalStart.TryHandOver(options, Console.Error) is { } handedOver) return handedOver;
         // The proxy of [network.proxy] before any HTTP client sends, and in the environment of every program started.
-        if (options.Owned is not null && options.CatalogRoot is { } networkRoot) options = options with { Network = CodeAltaNetwork.Start(networkRoot) };
+        options = options with { Network = CodeAltaNetwork.Start(options.CatalogRoot) };
         // The traces of the runs go to the OpenTelemetry collector the environment names, if any: the end sends the last ones.
         using var telemetry = CodeAltaTelemetry.StartFromEnvironment("alta");
-        return RunWithCapture(options, RunCore);
+        return RunWithCapture(options, RunOwned);
     }
 
     /// <summary>What the start-up screen says when the start failed: the reason, and where the log is.</summary>
@@ -57,7 +57,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         return $"CodeAlta could not start: {reason} The log is in {logs}.";
     }
 
-    private static string LockPath(DesktopLaunchOptions options) => Path.Combine(options.StateRoot ?? options.CatalogRoot!, "alta.lock");
+    private static string LockPath(DesktopLaunchOptions options) => Path.Combine(options.StateRoot ?? options.CatalogRoot, "alta.lock");
 
     // What an alta command that failed said: the message of its first error record, else its first line.
     private static string FirstLine(string output)
@@ -95,7 +95,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
         // The secrets of the machine never land in the log: their values are masked in its file and its rows.
-        var masker = options.CatalogRoot is { } secretsRoot ? new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(secretsRoot).GetSecretValues) : null;
+        var masker = new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(options.CatalogRoot).GetSecretValues);
         var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), masker, out var flushPending);
         var result = 1;
         try
@@ -118,25 +118,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     }
 
     // The levels of the features of the log, from the configuration of the user, before the host reads it.
-    private static Func<CodeAlta.Catalog.Logging.LoggingSettings>? LoggingSettingsOf(DesktopLaunchOptions options)
-        => options.CatalogRoot is { } root
-            ? () => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root, StateRoot = options.StateRoot ?? root }).LoadGlobalLoggingSettings()
-            : null;
-
-    private static int RunCore(DesktopLaunchOptions options, DesktopLogCapture? capture)
-    {
-        DesktopThreadPool.Configure();
-        if (options.Owned is not null) return RunOwned(options, capture);
-        Directory.CreateDirectory(options.DataRoot);
-        var desktop = new DesktopApplication(options, capture);
-        var result = NeoApplication.Run(new NeoApplicationOptions
+    private static Func<CodeAlta.Catalog.Logging.LoggingSettings> LoggingSettingsOf(DesktopLaunchOptions options)
+        => () => new CodeAltaConfigStore(new CatalogOptions
         {
-            ApplicationName = "CodeAlta",
-            // Keep the dispatcher alive through asynchronous browser/environment disposal.
-            ShutdownMode = NeoApplicationShutdownMode.Explicit,
-        }, desktop.RunAsync);
-        return result == 0 ? desktop.ExitCode : result;
-    }
+            GlobalRoot = options.CatalogRoot,
+            StateRoot = options.StateRoot ?? options.CatalogRoot,
+        }).LoadGlobalLoggingSettings();
 
     /// <summary>The start-up screen: the document the view shows while the host starts.</summary>
     internal static Uri StartupDocument { get; } = new("app://codealta/splash.html");
@@ -191,7 +178,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     internal static string InstanceId(DesktopLaunchOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var root = Path.GetFullPath(options.StateRoot ?? options.CatalogRoot ?? options.DataRoot);
+        var root = Path.GetFullPath(options.StateRoot ?? options.CatalogRoot);
         if (OperatingSystem.IsWindows()) root = root.ToUpperInvariant();
         return "org.codealta.desktop." + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(root)))[..24];
     }
@@ -243,12 +230,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunOwned(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
+        DesktopThreadPool.Configure();
         var desktop = new DesktopApplication(options, capture);
         try
         {
             // Only the normal instance is the installed application; the developer instance and one on explicit
             // roots stay apart from it in the taskbar and leave the desktop's entry alone.
-            var installed = !options.Developer && options.Owned!.Home is null;
+            var installed = !options.Developer && options.Owned.Home is null;
             DesktopIntegration.IdentifyProcess(developer: !installed);
             try { desktop._lease = CodeAltaSingleInstanceGuard.Acquire(LockPath(options)); }
             catch (CodeAltaAlreadyRunningException) { return ActivateRunningInstance(options); } // Another start won the profile meanwhile.
@@ -323,7 +311,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private async ValueTask RunOwnedAsync(NeoApplication application)
     {
-        var roots = options.Owned!;
+        var roots = options.Owned;
         var closeRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         // Whether the host closes and what its close waits for: the page shows it, and offers to end the process.
         var closing = new DesktopClosing();
@@ -402,9 +390,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // browser and sandboxes keep away from all of them. An instance on explicit roots keeps a record of its own.
             var mcpPorts = new CodeAlta.Core.IO.McpPortRecord(roots.Home is null ? CodeAlta.Core.IO.McpPortRecord.DefaultFolder() : Path.Combine(options.DataRoot, "mcp-ports"));
             // A page never reads the files of the profile, wherever it is (--profile).
-            var browserHost = new CodeAlta.Plugin.Browser.BrowserPluginHost(options.StateRoot ?? options.CatalogRoot!)
+            var browserHost = new CodeAlta.Plugin.Browser.BrowserPluginHost(options.StateRoot ?? options.CatalogRoot)
             {
-                SecretRoots = [options.CatalogRoot!, options.StateRoot ?? options.CatalogRoot!],
+                SecretRoots = [options.CatalogRoot, options.StateRoot ?? options.CatalogRoot],
             };
             // The Search plugin exists before the host; the index it signals is created once the host runs.
             var searchRelay = new Search.DesktopSearchRelay();
@@ -473,7 +461,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             IReadOnlyList<Mcp.DesktopMcpTool> McpTools() => Volatile.Read(ref altaTool) is { } alta ? [.. windowTools, alta] : windowTools;
             // The Tailscale network is a choice of Settings, unless the start named the address.
             var tailnet = options.McpHost is null ? new Mcp.DesktopTailnetChoice(shell.McpTailnet, shell.SetMcpTailnet, Mcp.DesktopTailnet.FindAsync) : null;
-            mcp = new Mcp.DesktopMcpServer(Mcp.DesktopMcpEndpoint.For(options), McpTools, options.StateRoot ?? options.CatalogRoot!,
+            mcp = new Mcp.DesktopMcpServer(Mcp.DesktopMcpEndpoint.For(options), McpTools, options.StateRoot ?? options.CatalogRoot,
                 DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer, tailnet) { Ports = mcpPorts };
             // A server that cannot listen says so in Settings: the application does not wait for it. Nothing in its start waits on a
             // loopback address, so it would build and start its web host on this thread, before the window is shown.
@@ -508,9 +496,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var startupClock = System.Diagnostics.Stopwatch.StartNew();
             void Mark(string step) => LogManager.GetLogger("CodeAlta.Desktop").Info($"Startup: {step} at {startupClock.ElapsedMilliseconds} ms");
             var startedWindow = window;
-            var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot!, StateRoot = options.StateRoot ?? options.CatalogRoot! };
+            var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot ?? options.CatalogRoot };
             var startupScratchpadCleanup = new ScratchpadStartupCleanup(
-                CodeAltaInstanceProfile.Create(options.CatalogRoot!, options.Developer), _lease);
+                CodeAltaInstanceProfile.Create(options.CatalogRoot, options.Developer), _lease);
             // Plugins read the user's profile (the MCP servers and their sign-ins, the provider CLIs): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
@@ -540,7 +528,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             windows.Changed += pluginUi.WindowsChanged;
             // A configuration file that cannot be loaded is repaired in the window before anything reads it: the
             // host would fail on it. A missing file is created with the defaults.
-            var configRecovery = new ConfigRecoveryService(options.CatalogRoot!, new TextFileCodec());
+            var configRecovery = new ConfigRecoveryService(options.CatalogRoot, new TextFileCodec());
             configRecovery.Reload();
             // Off the window's thread: the host reads the catalog and the configuration and starts the plugins
             // while the window creates its view and shows the start-up screen.
@@ -553,7 +541,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // off the network: it does not refresh it.
             modelsDev = new CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService(new CodeAlta.Agent.ModelCatalog.ModelsDevCatalogServiceOptions
             {
-                CacheFilePath = Path.Combine(options.CatalogRoot!, "cache", "model-catalog", "models_dev_db.json"),
+                CacheFilePath = Path.Combine(options.CatalogRoot, "cache", "model-catalog", "models_dev_db.json"),
             });
             if (roots.Home is null) modelsDev.StartBackgroundRefresh();
             // The models of the agents of plugins are described by it too.
@@ -631,16 +619,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     privateNetworks, pluginMachines),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
-                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
+                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot, modelsDev, pluginProviderTypes),
                 ConfigurePluginModelProviders = (registry, runtime) =>
                 {
                     pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
-                    pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, includeDisabled: false);
+                    pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), options.CatalogRoot, includeDisabled: false);
                 },
                 // The policy the organization of a Copilot account of this computer sets narrows every session.
                 // The developer instance can take a managed-settings.json as the policy of every Copilot account
                 // (CODEALTA_DEV_COPILOT_MANAGED_SETTINGS), to check the window without an enterprise.
-                StartManagedPolicies = state => _copilotPolicies = CopilotManagedPolicySource.Start(state, options.CatalogRoot!, new CodeAltaConfigStore(catalog),
+                StartManagedPolicies = state => _copilotPolicies = CopilotManagedPolicySource.Start(state, options.CatalogRoot, new CodeAltaConfigStore(catalog),
                     options.Developer ? Environment.GetEnvironmentVariable("CODEALTA_DEV_COPILOT_MANAGED_SETTINGS") : null),
             }, CancellationToken.None);
             });
@@ -813,7 +801,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()], InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
                 }));
                 chrome.AddHandlers(recoveryBuilder);
-                recoveryBuilder.AddBootService(new BootService { ConfigRecovery = true, Developer = options.Developer, RememberAppearance = RememberAppearance });
+                recoveryBuilder.AddBootService(new BootService(developer: options.Developer) { RememberAppearance = RememberAppearance });
                 recoveryBuilder.AddStartupConfigService(new StartupConfigService(configRecovery)
                 {
                     Continue = () => repaired.TrySetResult(), Exit = () => shell.RequestExit(confirmed: true),
@@ -821,7 +809,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 recoveryBuilder.AddDesktopShellService(new DesktopShellService(shell));
                 // The configuration editor is in the main window alone.
                 recoveryBuilder.AddWindowsService(new WindowsService());
-                recoveryBuilder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
+                recoveryBuilder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot));
                 // A file written by a newer version is the usual reason an installed one cannot read it: the
                 // editor says when a newer version is published, and can install it.
                 appUpdate = StartAppUpdate();
@@ -907,7 +895,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     var store = new CodeAltaConfigStore(host.CatalogOptions);
                     ModelServers.DesktopModelServers.SaveLocalProviderDefinition(store, key, name, server);
-                    GlobalConfigService.ApplyProviders(store, host.ModelProviderRegistry, options.CatalogRoot!, pluginProviderTypes, modelsDev);
+                    GlobalConfigService.ApplyProviders(store, host.ModelProviderRegistry, options.CatalogRoot, pluginProviderTypes, modelsDev);
                     await host.ModelProviderInitializationService.RefreshProviderAfterChangeAsync(new CodeAlta.Agent.ModelProviderId(key), token).ConfigureAwait(false);
                 };
                 var startingModelServers = modelServers;
@@ -1127,7 +1115,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // `alta llama`: the llama.cpp servers of this computer and of the machines it manages.
                     modelServers is null ? null : ModelServers.DesktopAltaModelServers.Of(modelServers, host.RuntimeService),
                     // `alta provider refresh`: the providers of config.toml, applied again as Save and apply does.
-                    new DesktopAltaProviderConfiguration(new CodeAltaConfigStore(host.CatalogOptions), host.ModelProviderRegistry, options.CatalogRoot!,
+                    new DesktopAltaProviderConfiguration(new CodeAltaConfigStore(host.CatalogOptions), host.ModelProviderRegistry, options.CatalogRoot,
                         pluginProviderTypes, modelsDev, () => _copilotPolicies?.RefreshSoon()), notices);
                 // A script of an automation without a model runs with these commands, as the automation allows them.
                 // The person's other computers read the sessions of this one with its alta commands (sessions.read of the node API).
@@ -1212,7 +1200,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing), Drops = fileDrops });
                     // The windows: which one a page is, the tabs it holds, the tabs it moves or drags to another one.
                     builder.AddWindowsService(new WindowsService(windows, () => application.GetWindowCapability(NeoWindowCapability.Placement).IsSupported));
-                    builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
+                    builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot));
                     // The one of the configuration editor when the application started with it.
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
@@ -1273,7 +1261,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     loggingSaved = applicationLogs.Reload;
                     builder.AddSettingsService(new SettingsService(desktopSettings, epoch));
                     builder.AddReleaseNotesService(new ReleaseNotesService(releaseNotes));
-                    var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
+                    var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot, epoch)
                     {
                         // The file may change the levels of the log: they are taken at once.
                         // A provider added, removed or changed in the file can change the policy that applies.
@@ -1315,9 +1303,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }
                     builder.AddGlobalConfigService(globalConfig);
                     // The policy of the organization of a Copilot account is read again once it signs in or out.
-                    providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch, _ => _copilotPolicies?.RefreshSoon());
+                    providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot, epoch, _ => _copilotPolicies?.RefreshSoon());
                     builder.AddProviderLoginService(providerLogin);
-                    providerUsage = new ProviderUsageService(configStore, options.CatalogRoot!, epoch);
+                    providerUsage = new ProviderUsageService(configStore, options.CatalogRoot, epoch);
                     builder.AddProviderUsageService(providerUsage);
                     builder.AddManagedPolicyService(new ManagedPolicyService(host.RuntimeService.ManagedPolicies, _copilotPolicies, epoch));
                     builder.AddSandboxSettingsService(new SandboxSettingsService(configStore, host.RuntimeService, host.Commands, host.ProjectCatalog, host.SpaceCatalog, epoch));
@@ -1818,109 +1806,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         catch (Exception exception)
         {
             logger.Error(exception, $"Closing the host: {name} failed after {clock.ElapsedMilliseconds} ms; the close goes on.");
-        }
-    }
-
-    private async ValueTask RunAsync(NeoApplication application)
-    {
-        try
-        {
-            var appearance = DesktopAppearance.Load(options.DataRoot);
-            await using var window = application.CreateWindow(DesktopWindowChrome.WindowOptions(developer: false, appearance));
-            application.MainWindow = window;
-            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            window.Closed += (_, _) => closed.TrySetResult();
-
-            var assets = Path.Combine(AppContext.BaseDirectory, "assets");
-            var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
-            DesktopAssetPaths.EnsureUsable(assets, manifest);
-            await using var environment = await application.CreateEnvironmentAsync(new NeoEnvironmentOptions
-            {
-                UserDataRoot = Path.Combine(options.DataRoot, "webview"),
-                CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
-            });
-            await using var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
-            await chrome.ApplyWindowIconAsync(window);
-            var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
-            {
-                ContractHash = NeoRpcGeneratedContract.Hash, Release = true,
-                DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()], InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
-            }));
-            chrome.AddHandlers(builder);
-            builder.AddBootService(new BootService());
-            // A copy of a catalog is browsed, not written: the schemes it holds are not offered.
-            builder.AddColorSchemesService(new ColorSchemesService());
-            builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
-            builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
-            builder.AddGlobalConfigService(new GlobalConfigService());
-            builder.AddStorageService(new StorageService());
-            builder.AddNetworkService(new NetworkService());
-            builder.AddProviderLoginService(new ProviderLoginService());
-            builder.AddProviderUsageService(new ProviderUsageService());
-            builder.AddManagedPolicyService(new ManagedPolicyService());
-            builder.AddSandboxSettingsService(new SandboxSettingsService());
-            builder.AddSpeechService(new SpeechService());
-            builder.AddPseudonymizerService(new PseudonymizerService());
-            builder.AddModelServersService(new ModelServersService());
-            builder.AddClaudeCliService(new ClaudeCliService());
-            builder.AddMcpServersService(new McpServersService());
-            builder.AddAgentPromptsService(new AgentPromptsService());
-            builder.AddSkillsService(new SkillsService());
-            builder.AddPluginsService(new PluginsService());
-            builder.AddSessionPluginEventsService(new SessionPluginEventsService());
-            builder.AddPluginUiService(new PluginUiService());
-            builder.AddCanvasesService(new CanvasesService());
-            builder.AddDocumentationService(new DocumentationService());
-            builder.AddSettingsService(new SettingsService());
-            builder.AddProjectFilesService(new ProjectFilesService());
-            builder.AddExternalEditorsService(new ExternalEditorsService());
-            builder.AddSettingsFilesService(new SettingsFilesService());
-            builder.AddProjectGitService(new ProjectGitService());
-            builder.AddWorktreesService(new WorktreesService());
-            builder.AddDiskUsageService(new DiskUsageService());
-            builder.AddMcpHostService(new McpHostService());
-            builder.AddTerminalsService(new TerminalsService());
-            builder.AddCloudSessionsService(new CloudSessionsService());
-            builder.AddAutomationsService(new AutomationsService());
-            builder.AddWorkflowsService(new WorkflowsService());
-            builder.AddWorkItemsService(new WorkItemsService());
-            builder.AddReviewsService(new ReviewsService());
-            builder.AddBookmarksService(new BookmarksService());
-            builder.AddLocalSearchService(new LocalSearchService());
-            builder.AddSessionRetentionProtectionService(new SessionRetentionProtectionService());
-            builder.AddIssuesService(new IssuesService());
-            builder.AddPullRequestPromptsService(new PullRequestPromptsService());
-            builder.AddStartPromptsService(new StartPromptsService());
-            builder.AddSpacesService(new SpacesService());
-            builder.AddLabelsService(new LabelsService());
-            builder.AddSubProjectsService(new SubProjectsService());
-            builder.AddSpaceIdentityService(new SpaceIdentityService());
-            builder.AddSpaceLinksService(new SpaceLinksService());
-            builder.AddSecretsService(new SecretsService());
-            builder.AddPromptImagesService(new PromptImagesService());
-            builder.AddToolCallsService(new ToolCallsService());
-            builder.AddMcpAppsService(new McpAppsService());
-            builder.AddComposerStatusService(new ComposerStatusService());
-            builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
-            builder.AddModelCatalogService(new ModelCatalogService());
-            await using var rpc = builder.Build();
-            window.Show();
-            await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
-            view.NavigationRequested = static request => ValueTask.FromResult(DecideNavigation(request));
-            view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
-            await using var binding = NeoRpcViewBinding.Bind(rpc, view);
-            await view.NavigateAsync(ApplicationDocument);
-            await closed.Task;
-            ExitCode = 0;
-        }
-        catch (Exception exception)
-        {
-            ExitCode = 1; // Also covers failures from asynchronous disposal after normal close.
-            DesktopLogging.ReportFailure(exception, "Desktop initialization or application flow failed");
-        }
-        finally
-        {
-            application.ForceShutdown();
         }
     }
 }
