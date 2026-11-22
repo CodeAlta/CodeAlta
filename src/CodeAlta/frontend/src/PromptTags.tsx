@@ -6,9 +6,12 @@ import { CopilotTag, copilotPromptScope } from "./CopilotTag";
 import type { MessageKey } from "./localization";
 import { useShellLanguage } from "./shellLanguage";
 
+/** The scope of a read-only prompt from a declared ancestor of the selected project. */
+export const inheritedPromptScope = (scope: string) => scope.startsWith("Inherited:");
+
 // Where a prompt is kept, as its tag says it. An agent of GitHub Copilot or Claude Code is of the user or of the project too.
 export const scopeLabel = (scope: string): MessageKey =>
-  scope === "BuiltIn" ? "Built-in" : scope === "Project" || scope === "CopilotProject" || scope === "ClaudeProject" ? "Project" : "Global";
+  inheritedPromptScope(scope) ? "Inherited" : scope === "BuiltIn" ? "Built-in" : scope === "Project" || scope === "CopilotProject" || scope === "ClaudeProject" ? "Project" : "Global";
 
 /**
  * The tags of a prompt in the list of Settings: where it is kept, the mark of GitHub Copilot or Claude Code for one of

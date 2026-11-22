@@ -273,7 +273,7 @@ public sealed class AgentPromptsRpcTests
         Assert.AreEqual("Write the documentation.", (await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "ClaudeGlobal", "writer"), default)).Prompt!.Body);
         Assert.AreEqual("not_found", (await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "ClaudeProject", "reviewer"), default)).Status);
         Assert.AreEqual("invalid", (await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "Agent", "ClaudeProject", "../reviewer"), default)).Status);
-        Assert.AreEqual(Path.GetFullPath(reviewer), fixture.Service.Locate("Agent", "ClaudeProject", "reviewer", fixture.ProjectPath)?.File);
+        Assert.AreEqual(Path.GetFullPath(reviewer), fixture.Service.Locate("Agent", "ClaudeProject", "reviewer", new("ok", fixture.ProjectPath, fixture.Project))?.File);
 
         var before = File.ReadAllText(reviewer);
         Assert.AreEqual("read_only", (await fixture.Service.SaveAsync(Save("Agent", "ClaudeProject", "reviewer", read.Prompt.Revision) with { ProjectId = fixture.Project.Id }, default)).Status);

@@ -172,7 +172,7 @@ internal sealed class SettingsFilesService
         {
             Entry? entry = kind switch
             {
-                "prompt" => Prompt(request.Part, scope, request.Id, project.Root),
+                "prompt" => Prompt(request.Part, scope, request.Id, project),
                 "pullRequest" => PullRequest(scope, request.Id, project.Root),
                 "startPrompt" => StartPromptFile(scope, request.Id, project.Root),
                 // "config" is a page and the kind of its files; the kind of the others is the name of their page.
@@ -245,8 +245,8 @@ internal sealed class SettingsFilesService
     }
 
     // The file of a listed prompt, in the folder of prompts it is read from.
-    private Entry? Prompt(string? part, string scope, string? id, string? projectRoot)
-        => _prompts?.Locate(part, scope, id, projectRoot) is { } prompt
+    private Entry? Prompt(string? part, string scope, string? id, SettingsProjectScope.Resolution project)
+        => _prompts?.Locate(part, scope, id, project) is { } prompt
             ? new("prompt", scope, id, prompt.File, Folder: false, ReadOnly: prompt.ReadOnly, Root: prompt.Root) : null;
 
     // The file of a kind of pull request of the user or of a project, in the folder of those files.
