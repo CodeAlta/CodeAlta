@@ -52,7 +52,10 @@ export const workspace = {
   moveSession: (request: WorkspaceMoveSessionRequest) => new Promise<WorkspaceMoveSessionResponse>(resolve => moves.push({ request, resolve })),
   snapshot: async (): Promise<WorkspaceSnapshot> => {
     const snapshot = await fixtureWorkspace.snapshot() as WorkspaceSnapshot;
-    return { ...snapshot, projects: [...snapshot.projects, ...imported] };
+    const sessions = localStorage.getItem("archivedInfoFixture") === "true" ? [...snapshot.sessions,
+      { ...snapshot.sessions[0], id: "recorded-info", title: "Closed transcript", fullTitle: "Closed transcript", archived: true, archivedAt: "2026-10-16T00:00:00Z" }]
+      : snapshot.sessions;
+    return { ...snapshot, projects: [...snapshot.projects, ...imported], sessions };
   },
   completeDirectory: async (request: WorkspaceDirectoryCompletionRequest): Promise<WorkspaceDirectoryCompletionResponse> => ({
     status: "complete", hostEpoch: request.expectedHostEpoch, directoryPath: request.directoryPath, prefix: request.prefix,

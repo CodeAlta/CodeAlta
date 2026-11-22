@@ -357,6 +357,7 @@ import { deleteSessionTree, readSessionChildren, type SessionChildren, type Sess
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
 import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
 import { useSessionArchiveQuestion } from "./sessionArchive/SessionArchiveQuestion";
+import { useArchivedSessionInfo } from "./sessionArchive/ArchivedSessionInfo";
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
@@ -1139,8 +1140,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     busy: sessionArchiveBusy, t, onArchive: (row, withChildren) => void archiveSessionNow(row, withChildren, true),
   });
   const sessionArchivePending = useRef(false);
-  // The archived session whose info the saved sessions show, by its id: the catalog is read again meanwhile.
-  const [archivedInfo, setArchivedInfo] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingBusy, setRenamingBusy] = useState(false);
   const [renamingMessage, setRenamingMessage] = useState<WorkflowNotice>("");
@@ -5246,7 +5245,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!owned || !mutation?.capability.canMutate()) return undefined;
     return { sessions: shownArchived, busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
       restore: session => { setDialog(null); void restoreSessionNow(session, true); },
-      info: session => setArchivedInfo(session.id),
+      info: archivedSessionInfo.show,
       remove: deleteArchivedSession };
   }
   // The archived sessions the shown space lists: the saved sessions and the search find them there. The catalog is
@@ -5255,6 +5254,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const full = catalog.current;
     return full ? archivedSessions({ ...full, sessions: archivedInView(full, spaceView(spacesState.spaces, spaceId, showOthers)) }) : [];
   }, [snapshot, spacesState.spaces, spaceId, showOthers]);
+  const archivedSessionInfo = useArchivedSessionInfo(catalog, demoMode, row => owned && !demoMode
+    ? createSessionStorageHost(workspaceApi.sessionStorage, workspaceApi.revealSessionStorage, status?.hostEpoch, row.id, row.createdAt) : null);
 
   function beginSessionMove(row: WorkspaceSession) {
     const project = selectedProject;
@@ -7172,9 +7173,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         openingSession.current = tab.sessionId;
         selectSessionTab(tab); setBrowserWant(null); setDialog(null); return true;
       }} />}
-    {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
-      demo={demoMode} onClose={() => setArchivedInfo(null)}
-      storage={owned && !demoMode ? createSessionStorageHost(workspaceApi.sessionStorage, workspaceApi.revealSessionStorage, status?.hostEpoch, row.id, row.createdAt) : null} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
+    {archivedSessionInfo.dialog}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} unavailableReason={commandUnavailableReason} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}

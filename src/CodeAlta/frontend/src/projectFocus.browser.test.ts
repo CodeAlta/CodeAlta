@@ -110,7 +110,7 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true, exceptions.join("\n"));
-    await evaluate("localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true')");
+    await evaluate("localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true');localStorage.setItem('archivedInfoFixture','true')");
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('#project-list')"), true);
 
@@ -145,6 +145,24 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
         { sessionId: "one", projectId: "project", projectPath: "/fixture/project", targetProjectId: "other", targetProjectPath: "/fixture/other" });
       await evaluate(`(()=>{const {request,resolve}=${moves}[0];resolve({...request,hostEpoch:request.expectedHostEpoch,status:'target_missing',moved:[],warnings:[]})})()`);
       assert.equal(await wait(`!${dialog} && document.body.textContent.includes('The project to move the session to is gone or archived.')`), true);
+    });
+    await t.test("Info of an archived session opens recorded details above Saved Sessions", async () => {
+      const browser = "document.querySelector('dialog.session-browser[open]')";
+      const archived = `${browser}?.querySelector('.session-browser-archived')`;
+      const info = "document.querySelector('dialog.session-info-dialog[open]')";
+      for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent",
+        { type, key: "b", code: "KeyB", windowsVirtualKeyCode: 66, modifiers: 1 | 2 });
+      assert.equal(await wait(`${archived}?.querySelector('.session-browser-count')?.textContent==='1'`), true);
+      await evaluate(`${archived}.click()`);
+      assert.equal(await wait(`${browser}?.querySelector('.session-browser-name')?.textContent==='Closed transcript'`), true);
+      await evaluate(`[...${browser}.querySelectorAll('.archived-footer button')].find(button=>button.textContent==='Info…').click()`);
+      assert.equal(await wait(`${info}?.querySelector('#session-info-saved + dl')?.textContent.includes('recorded-info')`), true);
+      assert.match(await evaluate(`${info}.querySelector('#session-info-saved + dl').textContent`), /Closed transcript.*Archived/s);
+      assert.equal(await evaluate(`${info}.querySelector('[aria-label="Refresh observed details"]').disabled`), true);
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${info} && ${archived}?.getAttribute('aria-pressed')==='true'`), true);
+      await evaluate(`${browser}.querySelector('.app-window-close').click()`);
+      assert.equal(await wait(`!${browser}`), true);
     });
     await t.test("typing a session title does not render App", async t => {
       const input = `document.querySelector('.rename-popover input')`;
