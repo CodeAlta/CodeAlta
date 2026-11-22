@@ -453,6 +453,18 @@ test("a settings page says where its files are, and opens, copies and shows them
       assert.ok(await evaluate(`${list}[4].textContent.includes('Built-in')`));
       assert.ok(await evaluate(`${note}.textContent.includes('cannot be removed') && !${note}.querySelector('code, button')`));
     });
+
+    await t.test("a repository-disabled user skill is eligible only for Global bulk changes", async () => {
+      await command("Page.navigate", { url: pathToFileURL(page).href + "?skills=inherited" });
+      await until(`${skillRows}.length === 1`);
+      assert.equal(await evaluate(`${skillRows}[0].querySelector('input').disabled`), true, "The individual switch shows the effective state.");
+      assert.deepEqual(await evaluate(`[${bulk("Enable all")}.disabled, ${bulk("Disable all")}.disabled]`), [false, false], "The global setting is independent.");
+      await act(`${bulk("Disable all")}.click()`);
+      await until(`${calls("skills.setMatchingEnabled")}.length === 1`);
+      assert.deepEqual(await evaluate(calls("skills.setMatchingEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "", enabled: false, spaceId: null }]);
+      await act("[...document.querySelectorAll('.settings-scope button')].find(value => value.textContent === 'Project: a-project').click()");
+      assert.deepEqual(await evaluate(`[${bulk("Enable all")}.disabled, ${bulk("Disable all")}.disabled]`), [true, true]);
+    });
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

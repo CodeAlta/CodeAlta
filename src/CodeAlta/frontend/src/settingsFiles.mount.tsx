@@ -34,6 +34,7 @@ const skill = (id: string, name: string, source: string, change: Partial<SkillsE
 const query = new URLSearchParams(location.search);
 const invalidSkills = query.get("skills") === "invalid";
 const manySkills = query.get("skills") === "many";
+const inheritedSkills = query.get("skills") === "inherited";
 const mcpSkills = query.get("skills") === "mcp", mcpFailed = query.get("skills") === "mcp-failed";
 const mcpSkill = (server: string, name: string, change: Partial<SkillsMcpEntry> = {}): SkillsMcpEntry => ({ server, name, description: `What ${name} of ${server} is for.`,
   uri: `skill://${server}/${name}/SKILL.md`, enabled: true, namedLikeLocal: false, approval: "not_approved", dynamic: false, fileCount: 2, totalBytes: 3072,
@@ -55,7 +56,9 @@ const state = {
     skill("broken-second", "", "ProjectAlta", { title: "Broken second", valid: false, folder: null }),
     skill("duplicate-first", "duplicate", "ProjectAlta", { title: "Duplicate first", folder: null }),
     skill("duplicate-second", "duplicate", "ProjectAlta", { title: "Duplicate second", folder: null }),
-  ] : manySkills ? many : [skill("release-notes", "release-notes", "UserAlta"), skill("triage", "triage", "ProjectAlta")],
+  ] : manySkills ? many : inheritedSkills
+    ? [skill("release-notes", "release-notes", "UserAlta", { enabled: false, enabledProject: false, disabledByRepository: true })]
+    : [skill("release-notes", "release-notes", "UserAlta"), skill("triage", "triage", "ProjectAlta")],
   holdDetails: false, pendingDetails: [] as { resolve: () => void }[],
   mcp: [
     { server: "billing", listedAt: "2026-10-23T10:00:00Z", problems: [], skills: [

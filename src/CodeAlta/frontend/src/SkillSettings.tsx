@@ -43,7 +43,8 @@ export const skillToggleable = (name: string) => {
   return normalized.length <= 64 && /^[\p{L}\p{Nd}]+(?:-[\p{L}\p{Nd}]+)*$/u.test(normalized);
 };
 const inheritedSkill = (skill: SkillsEntry) => skill.scope === "Inherited";
-const canToggle = (skill: SkillsEntry) => !inheritedSkill(skill) && !skill.disabledByRepository && skillToggleable(skill.name);
+const canToggle = (skill: SkillsEntry, globalBulk = false) =>
+  !inheritedSkill(skill) && (globalBulk || !skill.disabledByRepository) && skillToggleable(skill.name);
 
 /** The folder of a skill, as the code editor opens on it: the id the host gave it, its path and the name of the skill. */
 export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
@@ -415,7 +416,7 @@ export function SkillSettings({ epoch, project, space = null, onEdit, onOpenFile
   // action and are left out of bulk writes, without losing their detail or remove actions. The bulk switches name the
   // filter, not the skills: the host switches every skill it matches, those beyond the listing limit included.
   const omitted = listing?.omitted ?? 0;
-  const hasToggle = shown.some(canToggle);
+  const hasToggle = shown.some(skill => canToggle(skill, writeScope === "Global"));
   const toggle = (skill: SkillsEntry, enabled: boolean) => {
     if (canToggle(skill)) void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, name: skill.name, enabled }, { timeoutMilliseconds: 30000 }));
   };

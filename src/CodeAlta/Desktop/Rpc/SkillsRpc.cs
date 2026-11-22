@@ -286,7 +286,7 @@ internal sealed partial class SkillsService
             var listing = await _management.LoadProjectListingAsync(SkillListingScope.Combined, project.Project, context, cancellationToken).ConfigureAwait(false);
             var query = request.Query?.Trim() ?? string.Empty;
             names = [.. listing.Skills.Where(skill => MatchesFilter(skill, query) && Toggleable(skill.Name) && !IsInheritedSkill(skill, project.Project)
-                && !listing.InheritedDisabledSkillNames.Contains(skill.NormalizedName)).Select(static skill => skill.Name).Distinct(StringComparer.Ordinal)];
+                && (!projectScope || !listing.InheritedDisabledSkillNames.Contains(skill.NormalizedName))).Select(static skill => skill.Name).Distinct(StringComparer.Ordinal)];
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

@@ -337,6 +337,26 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task AGlobalBulkSwitchIncludesUserSkillsTheRepositoryDisabled()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        config.SaveProjectDisabledSkillNames(fixture.ProjectPath, ["alpha"]);
+        var repositoryConfig = File.ReadAllText(fixture.ProjectConfig);
+        foreach (var enabled in new[] { false, true })
+        {
+            var changed = await fixture.Service.SetMatchingEnabledAsync(new(Epoch, child.Id, "Global", "alpha", enabled), default);
+            Assert.AreEqual(("ok", 1), (changed.Status, changed.Changed));
+            Assert.AreEqual(!enabled, config.LoadGlobalDisabledSkillNames().Contains("alpha"));
+            var alpha = (await fixture.Service.ListAsync(new(Epoch, child.Id), default)).Skills.Single(skill => skill.Name == "alpha");
+            Assert.AreEqual((false, enabled), (alpha.Enabled, alpha.EnabledGlobal), "The project continues to inherit the repository's off.");
+        }
+        Assert.AreEqual(repositoryConfig, File.ReadAllText(fixture.ProjectConfig));
+        Assert.IsFalse(File.Exists(Path.Combine(child.ProjectPath, ".alta", "config.toml")));
+    }
+
+    [TestMethod]
     public async Task ManySkills_AreListedBeyondFiveHundred_AndTheSwitchesOfAFilterChangeEveryMatch()
     {
         using var fixture = await Fixture.CreateAsync();
