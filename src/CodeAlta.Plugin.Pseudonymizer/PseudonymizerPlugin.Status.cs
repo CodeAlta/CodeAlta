@@ -22,10 +22,13 @@ public sealed partial class PseudonymizerPlugin
     /// <inheritdoc />
     public override ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
-        // Nothing is downloaded here: the window downloads the model of a language when a project in it is made secure.
+        // No model is downloaded here: the window downloads the model of a language when a project in it is made secure.
         if (_models is null) return ValueTask.CompletedTask;
         _lastState = $"{_models.Download.State}:{_models.Download.Language}";
         _models.Changed += OnModelsChanged;
+        // The models an earlier version of the application downloaded are there, and not the ONNX Runtime this one runs
+        // them on: it is downloaded now, so that the first request does not wait for it. A request asks again if this fails.
+        if (_models.NeedsRuntime) _ = _models.InstallRuntimeAsync();
         return ValueTask.CompletedTask;
     }
 
@@ -42,14 +45,17 @@ public sealed partial class PseudonymizerPlugin
         yield return new PluginStatusContribution { Region = PluginUiRegion.SessionStatus, Name = "pseudonymizer", GetStatus = Status };
     }
 
-    // The status line of a session: a download while it runs; for a session that waits for its model, the download to
-    // start; then what the session hid. A session of a normal project shows nothing but a download.
+    // The status line of a session: a download while it runs; for a session whose request waits for the ONNX Runtime, its
+    // download; for a session that waits for its model, the download to start; then what the session hid. A session of
+    // a normal project shows nothing but the download of a model.
     private PluginStatusItem? Status(PluginStatusContext context)
     {
         var download = _models?.Download ?? PseudonymizerDownload.Idle;
         if (download.State == PseudonymizerDownloadState.Downloading)
             return new PluginStatusItem { Label = "Pseudonymizer", Text = string.Create(CultureInfo.InvariantCulture, $"downloading the model {download.Percent} %"), Tone = PluginStatusTone.Info };
         if (context.SessionId is not { Length: > 0 } session) return null;
+        if (_waitingForRuntime.ContainsKey(session))
+            return new PluginStatusItem { Label = "Pseudonymizer", Text = "downloading the engine of the model", Tone = PluginStatusTone.Info };
         if (_waitingForModels.ContainsKey(session) && _models is not null && !_models.IsReady(LanguageOf(context.ProjectId)))
             return new PluginStatusItem
             {

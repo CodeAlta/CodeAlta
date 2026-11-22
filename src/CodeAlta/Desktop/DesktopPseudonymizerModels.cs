@@ -36,13 +36,12 @@ internal sealed class DesktopPseudonymizerModels : IPseudonymizerModelHost
     }
 
     /// <inheritdoc />
-    public Task InstallOnnxRuntimeAsync(PinnedDownloader downloads, IPinnedDownloadProgress progress, CancellationToken cancellationToken)
+    public async Task InstallOnnxRuntimeAsync(CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(downloads);
-        ArgumentNullException.ThrowIfNull(progress);
         if (_engine is null) throw new PlatformNotSupportedException("This platform has no ONNX Runtime for the models of the Pseudonymizer.");
-        return OnnxRuntimeLibrary() is not null ? Task.CompletedTask
-            : SherpaRuntime.InstallAsync(downloads, _catalog.RuntimeRoot, _engine, progress, installing: null, cancellationToken);
+        if (OnnxRuntimeLibrary() is not null) return;
+        using var downloads = new PinnedDownloader(null, new("CodeAlta", DesktopCommandLine.Version));
+        await SherpaRuntime.InstallAsync(downloads, _catalog.RuntimeRoot, _engine, NoProgress.Instance, installing: null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -50,5 +49,19 @@ internal sealed class DesktopPseudonymizerModels : IPseudonymizerModelHost
     {
         var folder = Directory.CreateDirectory(Path.Combine(_catalog.CacheRoot, "pseudonymizer")).FullName;
         return WorkerProcess.Start(NerWorker.Option, folder, static line => Logger.Info($"pseudonymizer worker: {line}"));
+    }
+
+    // The download of the ONNX Runtime, a few megabytes, shows no progress.
+    private sealed class NoProgress : IPinnedDownloadProgress
+    {
+        public static NoProgress Instance { get; } = new();
+
+        public void Received(long bytes)
+        {
+        }
+
+        public void Checking(PinnedFile file)
+        {
+        }
     }
 }

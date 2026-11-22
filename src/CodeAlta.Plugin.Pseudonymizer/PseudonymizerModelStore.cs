@@ -71,7 +71,7 @@ public static class PseudonymizerLanguages
 /// <param name="Id">One of <see cref="PseudonymizerLanguages.Offered"/>.</param>
 /// <param name="Model">The name of the model that finds names; null for identifiers only.</param>
 /// <param name="Size">The bytes of its download; 0 without a model.</param>
-/// <param name="Installed">Whether it can run now: downloaded whole, or no model needed.</param>
+/// <param name="Installed">Whether its model is there: downloaded whole, or no model needed.</param>
 public sealed record PseudonymizerLanguage(string Id, string? Model, long Size, bool Installed)
 {
     /// <summary>Gets the size of its download in megabytes, as the window says it.</summary>
@@ -98,7 +98,7 @@ public enum PseudonymizerDownloadState
 /// <param name="State">Its state.</param>
 /// <param name="Language">The language whose model is or was downloaded; null when idle.</param>
 /// <param name="Received">The bytes received.</param>
-/// <param name="Total">The bytes of the whole download, at least those of the model.</param>
+/// <param name="Total">The bytes of the whole download: those of the model.</param>
 /// <param name="Error">Why it failed, for <c>failed</c>.</param>
 public sealed record PseudonymizerDownload(PseudonymizerDownloadState State, string? Language, long Received, long Total, string? Error)
 {
@@ -111,8 +111,8 @@ public sealed record PseudonymizerDownload(PseudonymizerDownloadState State, str
 
 /// <summary>
 /// The models that find names, as the application keeps them: which language is ready, the download of one at a time
-/// (the others wait their turn), the deletion of a model, and the recognizers that run them. The plugin and the window
-/// share one store, so both see the same downloads.
+/// (the others wait their turn), the download of the ONNX Runtime they run on, the deletion of a model, and the
+/// recognizers that run them. The plugin and the window share one store, so both see the same downloads.
 /// </summary>
 public sealed class PseudonymizerModelStore : IDisposable
 {
@@ -122,6 +122,8 @@ public sealed class PseudonymizerModelStore : IDisposable
     private readonly CancellationTokenSource _stopping = new();
     private PseudonymizerDownload _download = PseudonymizerDownload.Idle;
     private bool _running;
+    // The download of the ONNX Runtime that runs, shared by all who need the runtime; null when none runs. Under the gate.
+    private Task<string?>? _runtime;
 
     /// <summary>Creates the store over what keeps and runs the models.</summary>
     /// <param name="host">Where the models are kept and run.</param>
@@ -150,10 +152,27 @@ public sealed class PseudonymizerModelStore : IDisposable
             ? new PseudonymizerLanguage(language, preset.Name, preset.Size, _models.IsInstalled(preset))
             : new PseudonymizerLanguage(language, null, 0, true))];
 
-    /// <summary>Gets whether a language can find names now: its model is downloaded, or it needs none.</summary>
+    /// <summary>Gets whether the model of a language is there: it is downloaded, or the language needs none.</summary>
     /// <param name="language">The language.</param>
-    /// <returns>Whether it is ready; true for identifiers only and for the model of the user.</returns>
+    /// <returns>Whether it is ready; true for identifiers only and for the model of the user. The ONNX Runtime that runs it may still be missing.</returns>
     public bool IsReady(string? language) => PseudonymizerLanguages.PresetOf(language) is not { } preset || _models.IsInstalled(preset);
+
+    /// <summary>
+    /// Gets whether models are there without the ONNX Runtime that runs them: a version of the application that runs on
+    /// another ONNX Runtime finds the models an earlier one downloaded, and not their runtime.
+    /// </summary>
+    public bool NeedsRuntime => !_models.HasRuntime && NerModelCatalog.Presets.Any(_models.IsInstalled);
+
+    /// <summary>
+    /// Downloads the ONNX Runtime the models run on, a few megabytes; does nothing when it is there. One download runs at
+    /// a time: who asks while it runs gets the same one.
+    /// </summary>
+    /// <returns>Null once the runtime is there; otherwise why it could not be downloaded.</returns>
+    public Task<string?> InstallRuntimeAsync()
+    {
+        if (_models.HasRuntime) return Task.FromResult<string?>(null);
+        lock (_gate) return _runtime ??= Task.Run(DownloadRuntimeAsync);
+    }
 
     /// <summary>Downloads the model of a language, after the one that runs; does nothing when it is there or on its way.</summary>
     /// <param name="language">The language.</param>
@@ -229,16 +248,21 @@ public sealed class PseudonymizerModelStore : IDisposable
     {
         while (true)
         {
-            PseudonymizerDownload ended;
+            string? failure;
             try
             {
-                await _models.InstallAsync([PseudonymizerLanguages.PresetOf(language)!], new Progress(this), _stopping.Token).ConfigureAwait(false);
-                ended = new PseudonymizerDownload(PseudonymizerDownloadState.Done, language, 0, 0, null);
+                var preset = PseudonymizerLanguages.PresetOf(language)!;
+                _models.RemoveDamaged(preset);
+                // The runtime first: a model is not downloaded for a computer that cannot run it.
+                failure = await InstallRuntimeAsync().ConfigureAwait(false);
+                if (failure is null) await _models.InstallAsync(preset, new Progress(this), _stopping.Token).ConfigureAwait(false);
             }
-            catch (Exception exception) when (exception is PinnedDownloadException or IOException or UnauthorizedAccessException or PlatformNotSupportedException or OperationCanceledException or HttpRequestException)
+            catch (Exception exception) when (IsDownloadFailure(exception))
             {
-                ended = new PseudonymizerDownload(PseudonymizerDownloadState.Failed, language, 0, 0, exception is PinnedDownloadException download ? download.Code : exception.Message);
+                failure = FailureOf(exception);
             }
+
+            var ended = new PseudonymizerDownload(failure is null ? PseudonymizerDownloadState.Done : PseudonymizerDownloadState.Failed, language, 0, 0, failure);
 
             bool last;
             lock (_gate)
@@ -253,6 +277,29 @@ public sealed class PseudonymizerModelStore : IDisposable
             if (last) return;
         }
     }
+
+    private async Task<string?> DownloadRuntimeAsync()
+    {
+        try
+        {
+            await _models.InstallRuntimeAsync(_stopping.Token).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception exception) when (IsDownloadFailure(exception))
+        {
+            return FailureOf(exception);
+        }
+        finally
+        {
+            lock (_gate) _runtime = null;
+        }
+    }
+
+    private static bool IsDownloadFailure(Exception exception)
+        => exception is PinnedDownloadException or IOException or UnauthorizedAccessException or InvalidDataException or PlatformNotSupportedException or OperationCanceledException or HttpRequestException;
+
+    // Why a download failed, as the window and the messages say it: the code of a download, or the message of the system.
+    private static string FailureOf(Exception exception) => exception is PinnedDownloadException download ? download.Code : exception.Message;
 
     /// <inheritdoc />
     public void Dispose()
@@ -270,12 +317,7 @@ public sealed class PseudonymizerModelStore : IDisposable
         public void Received(long bytes)
         {
             PseudonymizerDownload state;
-            lock (owner._gate)
-            {
-                // The ONNX Runtime comes on top of the model the first time: the total grows rather than pass 100 %.
-                var received = owner._download.Received + bytes;
-                owner._download = state = owner._download with { Received = received, Total = Math.Max(owner._download.Total, received) };
-            }
+            lock (owner._gate) owner._download = state = owner._download with { Received = owner._download.Received + bytes };
 
             if (Interlocked.Exchange(ref _percent, state.Percent) != state.Percent) owner.Changed?.Invoke(owner, EventArgs.Empty);
         }
