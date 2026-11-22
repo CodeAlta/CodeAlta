@@ -7,7 +7,7 @@ summary: The findings of `.alta/report/2026-11-22-health` (issue #496), implemen
 
 # Land the 16 findings of the health review of 5.0
 
-The report is [`.alta/report/2026-11-22-health/report.md`](../report/2026-11-22-health/report.md); each finding there has its evidence, change, first step and verification. The owner kept all 16 and asked for the whole plan.
+The report was `.alta/report/2026-11-22-health/report.md`, with the ledger beside it; each finding there had its evidence, change, first step and verification. Both were removed once the findings landed, and stay in the history at `2426d6146`. The owner kept all 16 and asked for the whole plan.
 
 ## How the work runs
 
