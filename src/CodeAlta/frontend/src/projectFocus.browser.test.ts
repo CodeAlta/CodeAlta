@@ -182,6 +182,22 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
         await evaluate("localStorage.removeItem('draftTabFixture')");
       }
     });
+    await t.test("typing a Settings search does not render App", async t => {
+      const input = `document.querySelector('.settings-search-field input')`;
+      await evaluate("document.querySelector('button.activity-settings').click()");
+      assert.equal(await wait(`${input} && document.activeElement===${input}`), true);
+      const renders = await keystrokeRenders("darker");
+      assert.equal(await evaluate(`${input}.value`), "darker");
+      assert.equal(await wait(`!!document.querySelector('.settings-search-results [data-setting-result="appearance.darker"]')`), true);
+      // Enter opens the setting on the same page that Settings was on before the search.
+      await key("Enter", "Enter", 13);
+      assert.equal(await wait(`!document.querySelector('.settings-search-results') && document.querySelector('.settings-dialog-content [data-glow]')?.getAttribute('data-setting')==='appearance.darker'`), true);
+      assert.equal(await evaluate(`${input}.value`), "");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${input}`), true);
+      t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
+      assert.deepEqual(renders, [0, 0, 0, 0, 0, 0]);
+    });
     await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
     assert.equal(await wait(`!!${otherSession}`), true);
     assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");

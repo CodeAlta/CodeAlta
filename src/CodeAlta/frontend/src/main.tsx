@@ -1,7 +1,7 @@
 import { Button, Checkbox, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
@@ -11,11 +11,11 @@ import { FleetOverview } from "./fleet/console/FleetOverview";
 import { settingsGroups, settingsPageOf, type SettingsPageId } from "./settings/settingsPages";
 import { glowSetting } from "./settings/settingsGlow";
 import { createSettingsHub } from "./settings/settingsHub";
-import { mergeSettings, settingText } from "./settings/settingsCatalog";
+import { mergeSettings, settingText, type SettingEntry } from "./settings/settingsCatalog";
 import { groupResults, matchCounts, searchSettings } from "./settings/settingsSearch";
 import { SettingsSearchResults } from "./settings/SettingsSearchResults";
 import { PluginSettingsForm, pluginPageId, typedSettingsPages } from "./settings/PluginSettingsForm";
-import { parseSettingValue, settingValueSource, settingValueText } from "./settings/settingValues";
+import { parseSettingValue, settingValueSource, settingValueText, type SettingValueSource } from "./settings/settingValues";
 import { useWindowSettingBindings, useWindowSettingsBridge } from "./settings/windowSettings";
 import { dismissStartupScreen } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
@@ -836,8 +836,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsVisible = useRef(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
-  // What the search of Settings has typed; Settings opened by the user starts in that search, one opened on a setting does not.
-  const [settingsQuery, setSettingsQuery] = useState("");
+  const resetSettingsSearch = useRef<(() => void) | null>(null);
+  // Settings opened by the user starts in its search; one opened on a setting does not.
   const settingsFocusSearch = useRef(true);
   // The space whose page Settings > Spaces shows, at which section; null for the cards of every space.
   const [spacePage, setSpacePage] = useState<SpacePageTarget | null>(null);
@@ -859,7 +859,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
   function closeSettings() {
     invalidateCreation();
-    setSettingsQuery("");
     settingsVisible.current = false;
     setSettingsOpen(false);
     setProviderGuide(false);
@@ -908,7 +907,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const notesVersion = readReleaseNotesPage(page);
     if (notesVersion !== undefined) { setReleaseNotesShown({ version: notesVersion }); return; }
     // The page asked for is shown, not the results of a search typed before.
-    setSettingsQuery("");
+    resetSettingsSearch.current?.();
     // `secrets/<tab>`, or `secrets` with the setting of a tab, opens Secrets and environment on that tab.
     const secretsTab = readSecretsPageLink(page, setting);
     if (secretsTab !== undefined) {
@@ -3893,13 +3892,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The pages of the plugins in Settings: their settings canvases, and a page for the settings of a plugin that has none.
   const allPluginPages = useMemo(() => [...pluginPages, ...typedSettingsPages(settingEntries)], [pluginPages, settingEntries]);
   const pluginSettingEntries = (page: PluginSettingsPage) => settingEntries.filter(entry => entry.plugin && entry.page === pluginPageId(page));
-  const settingsSearch = useMemo(() => settingsOpen && settingsQuery.trim() ? searchSettings(settingEntries, settingsQuery, language.locale) : null,
-    [settingsOpen, settingsQuery, settingEntries, language.locale]);
-  // A result of the search of Settings shows its page, with the setting glowing.
-  function openSearchedSetting(page: string, setting: string | null) {
-    setSettingsQuery("");
-    settingsNavigation.open({ page, setting });
-  }
   useEffect(() => settingsHub.onEvent(event => {
     if (event.kind === "show" && event.page) openSettingsAt.current({ page: event.page, setting: event.id ?? null });
     else if (event.kind === "changed" && event.id) { setSettingsChanges(count => count + 1); announceSettingChange.current(event); }
@@ -6968,17 +6960,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
-    {settingsOpen && <SettingsHelpContext.Provider value={settingsHelp}><SettingsOverlay section={settingsSection} onSection={page => { setSettingsQuery(""); navigate(page); }} onClose={closeSettings}
+    {settingsOpen && <SettingsHelpContext.Provider value={settingsHelp}><SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}
       spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}
-      pluginPages={owned ? allPluginPages : []} pluginPage={pluginPage} onPluginPage={page => { setSettingsQuery(""); openPluginSettings(page); }}
-      search={{ query: settingsQuery, onQuery: setSettingsQuery, counts: settingsSearch ? matchCounts(settingsSearch) : null, focusOnOpen: settingsFocusSearch.current,
-        onSubmit: () => {
-          const first = settingsSearch && (groupResults(settingsSearch, settingEntries)[0]?.settings[0] ?? null);
-          const page = first ? null : settingsSearch?.pages[0]?.page.id ?? null;
-          if (first) openSearchedSetting(first.page, first.id); else if (page) openSearchedSetting(page, null);
-        },
-        results: settingsSearch ? <SettingsSearchResults query={settingsQuery} result={settingsSearch} entries={settingEntries} source={settingValues} revision={settingsRevision}
-          onOpen={openSearchedSetting} /> : null }}>
+      pluginPages={owned ? allPluginPages : []} pluginPage={pluginPage} onPluginPage={openPluginSettings}
+      search={{ entries: settingEntries, source: settingValues, revision: settingsRevision, focusOnOpen: settingsFocusSearch.current, resetRef: resetSettingsSearch }}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: setRecentSessionCount, subAgentCount, setSubAgentCount,
@@ -7314,9 +7299,6 @@ function fleetBar(projects: readonly WorkspaceProject[], onOpen: () => void) {
 /** The pages of the Fleet tab of Settings, the Overview first. */
 const fleetSettingsPages: ReadonlySet<string> = new Set(settingsGroups.find(({ group }) => group === "Fleet")?.pages.map(page => page.id) ?? []);
 
-/** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
-type SettingsSearchControls = Readonly<{ query: string; onQuery(query: string): void; counts: ReadonlyMap<string, number> | null; onSubmit(): void; focusOnOpen: boolean; results: ReactNode | null }>;
-
 // Native modal matches the other shell dialogs: showModal supplies inert background,
 // browser-managed focus trapping and nested native About dialog top-layer ordering.
 function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, pluginPages, pluginPage, onPluginPage, search, children }: {
@@ -7328,17 +7310,30 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   /** The settings pages of the plugins that run in the space the window shows, each a page of the Extensions group. */
   pluginPages: readonly PluginSettingsPage[];
   pluginPage: PluginSettingsPage | null; onPluginPage: (page: PluginSettingsPage) => void;
-  /** The search of Settings: what is typed, how many results each page has while it is typed, and what Enter opens. */
-  search: SettingsSearchControls;
+  /** The settings a search can show and edit, and how an explicit page request leaves the search. */
+  search: { entries: readonly SettingEntry[]; source: SettingValueSource; revision: unknown; focusOnOpen: boolean; resetRef: RefObject<(() => void) | null> };
   children: ReactNode;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
   const searchField = useRef<HTMLInputElement>(null);
-  const counts = search.counts;
+  const [query, setQuery] = useState("");
+  useImperativeHandle(search.resetRef, () => () => setQuery(""), []);
+  const result = useMemo(() => query.trim() ? searchSettings(search.entries, query, locale) : null, [search.entries, query, locale]);
+  const counts = result ? matchCounts(result) : null;
   const dimmed = (page: string) => counts !== null && !counts.has(page);
   const count = (page: string) => counts?.get(page) ? <small className="settings-nav-count">{counts.get(page)}</small> : null;
+  const selectSection = (next: SettingsSection) => { setQuery(""); onSection(next); };
+  const selectPluginPage = (page: PluginSettingsPage) => { setQuery(""); onPluginPage(page); };
+  const openResult = (page: string, setting: string | null) => settingsNavigation.open({ page, setting });
+  function submitSearch() {
+    if (!result) return;
+    const first = groupResults(result, search.entries)[0]?.settings[0];
+    const page = result.pages[0]?.page.id;
+    if (first) openResult(first.page, first.id);
+    else if (page) openResult(page, null);
+  }
   // Fleet is a whole of its own: its pages have their tab, and the other pages theirs; a search looks in both.
   const inFleet = fleetSettingsPages.has(section);
   const lastPage = useRef<{ general: SettingsSection; fleet: SettingsSection }>({ general: "appearance", fleet: "fleet" });
@@ -7360,19 +7355,19 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined} data-fleet={inFleet || undefined}>
         <div className="settings-mode" role="group" aria-label={t("Settings")}>
-          <button type="button" aria-pressed={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) onSection(lastPage.current.general); }}>
+          <button type="button" aria-pressed={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) selectSection(lastPage.current.general); }}>
             <AppIcon name="settings" size={15} /><span>{t("General")}</span></button>
-          <button type="button" aria-pressed={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) onSection(lastPage.current.fleet); }}>
+          <button type="button" aria-pressed={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) selectSection(lastPage.current.fleet); }}>
             <AppIcon name="fleet" size={15} /><span>{t("Fleet")}</span></button>
         </div>
         <div className="settings-search-bar"><InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
-          placeholder={t("Search settings")} aria-label={t("Search settings")} value={search.query} onValueChange={search.onQuery}
+          placeholder={t("Search settings")} aria-label={t("Search settings")} value={query} onValueChange={setQuery}
           onKeyDown={event => {
             // A key that commits a candidate of an input method (Japanese, Chinese) belongs to the input method.
             if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-            if (event.key === "Escape" && search.query) { event.preventDefault(); event.stopPropagation(); search.onQuery(""); }
-            else if (event.key === "Enter" && search.query.trim()) { event.preventDefault(); search.onSubmit(); }
-            else if (event.key === "ArrowDown" && search.query.trim()) {
+            if (event.key === "Escape" && query) { event.preventDefault(); event.stopPropagation(); setQuery(""); }
+            else if (event.key === "Enter" && result) { event.preventDefault(); submitSearch(); }
+            else if (event.key === "ArrowDown" && result) {
               const first = document.querySelector<HTMLElement>(".settings-search-results :is(button, input, select, [tabindex='0'])");
               if (first) { event.preventDefault(); first.focus(); }
             }
@@ -7382,26 +7377,28 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
           ? <div key={group} className="settings-dialog-group settings-dialog-spaces">
             <h3>{t(group)}</h3>
             {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id && (id !== "spaces" || !spacePage) ? "page" : undefined}
-              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => { onSection(id); if (id === "spaces") onSpacePage(null); }}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
+              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => { selectSection(id); if (id === "spaces") onSpacePage(null); }}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
             {spaces.map(space => <button key={space.id} type="button" aria-current={counts === null && section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
-              data-settings-space={space.id} data-dimmed={counts !== null || undefined} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
+              data-settings-space={space.id} data-dimmed={counts !== null || undefined} onClick={() => { selectSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
               <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}
           </div>
           : <div key={group} className="settings-dialog-group">
             <h3>{t(group)}</h3>
             {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id ? "page" : undefined}
-              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => onSection(id)}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
+              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => selectSection(id)}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
             {/* Each plugin that has a settings page has its own, after the pages of the extensions, named and iconed as its canvas. */}
             {group === "Extensions" && pluginPages.map(page => {
               const id = page.canvasId ? `plugin/${page.pluginKey}/${page.canvasId}` : `plugin/${page.pluginKey}`;
               return <button key={`${page.pluginKey}/${page.canvasId}`} type="button"
                 aria-current={counts === null && section === "plugin" && samePluginSettingsPage(pluginPage, page) ? "page" : undefined} data-settings-plugin={`${page.pluginKey}/${page.canvasId}`}
-                data-dimmed={dimmed(id) || undefined} onClick={() => onPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span>{count(id)}</button>;
+                data-dimmed={dimmed(id) || undefined} onClick={() => selectPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span>{count(id)}</button>;
             })}
           </div>)}
         <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span:last-child" />
       </nav>
-      <div className="settings-dialog-content" key={search.results ? "search" : section}>{search.results ?? children}</div>
+      <div className="settings-dialog-content" key={result ? "search" : section}>
+        {result ? <SettingsSearchResults query={query} result={result} entries={search.entries} source={search.source} revision={search.revision} onOpen={openResult} /> : children}
+      </div>
     </div>
   </AppWindow>;
 }
