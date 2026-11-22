@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { testLimit } from "./testTime";
+import { browserStartLimit, testLimit } from "./testTime";
 
 /** The variable that names the browser to drive, in the place of the Edge the system has. */
 export const browserVariable = "CODEALTA_TEST_BROWSER";
@@ -88,7 +88,7 @@ export const browserBaseArgs: readonly string[] = Object.freeze([
 ]);
 
 /** Waits through missing/partial port files, with a real deadline and bounded launch diagnostics. */
-export async function waitForBrowserPort(profile: string, browser: ChildProcess, timeoutMs = testLimit(5000)): Promise<string> {
+export async function waitForBrowserPort(profile: string, browser: ChildProcess, timeoutMs = browserStartLimit): Promise<string> {
   let stderr = "", probe = "not read", launchError: Error | undefined;
   let exitCode = browser.exitCode, signal = browser.signalCode;
   const capture = (chunk: Buffer | string) => { stderr = (stderr + chunk.toString()).slice(-4096); };
