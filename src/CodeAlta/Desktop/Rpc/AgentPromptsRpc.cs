@@ -283,9 +283,11 @@ internal sealed class AgentPromptsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var inheritance = _catalog.ResolveInheritance(ReadQuery(project), request.Id, inherits);
+            var query = ReadQuery(project);
+            var inheritance = _catalog.ResolveInheritance(query, request.Id, inherits);
+            var roots = _catalog.ResolveRoots(query);
             var parts = inheritance.Prompts.Select(prompt => new AgentPromptComposedPart(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
-                Scope(prompt.SourceKind), (int)TokenEstimator.Estimate(prompt.Body))).ToArray();
+                Scope(prompt.SourceKind, prompt.SourcePath, roots), (int)TokenEstimator.Estimate(prompt.Body))).ToArray();
             // The text as a session reads it: what is written for a tool the prompt turns off is left out.
             var disabledTools = new HashSet<string>(inheritance.DisabledTools.Concat((request.DisabledTools ?? []).Take(SpaceTools.MaximumTools)), StringComparer.Ordinal);
             var body = PromptToolConditions.Apply(string.Join(Environment.NewLine + Environment.NewLine,
@@ -451,9 +453,9 @@ internal sealed class AgentPromptsService
 
     private static bool IsInheritedScope(string? scope) => scope?.StartsWith(InheritedScopePrefix, StringComparison.OrdinalIgnoreCase) == true;
 
-    private static string Scope(AgentPromptSourceKind kind, string path, SystemPromptContentRoots roots)
+    private static string Scope(AgentPromptSourceKind kind, string? path, SystemPromptContentRoots roots)
     {
-        if (kind == AgentPromptSourceKind.Project)
+        if (kind == AgentPromptSourceKind.Project && path is not null)
         {
             var promptRoot = Path.GetDirectoryName(Path.GetDirectoryName(path));
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

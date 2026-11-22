@@ -184,6 +184,7 @@ public sealed class SettingsFilesRpcTests
 
         var composed = await fixture.Prompts.ComposeAsync(new(Epoch, child.Id, null, ["review"], "Local text"), default);
         Assert.AreEqual(("ok", 1), (composed.Status, composed.Parts.Count));
+        Assert.AreEqual(near.Scope, composed.Parts.Single().Scope, "The preview names the same inherited source as the listing.");
         Assert.AreEqual($"Tools text{Environment.NewLine}{Environment.NewLine}Local text", composed.Body);
 
         var open = new SettingsFileRequest(Epoch, child.Id, "prompt", far.Scope, far.Id, far.Kind);
