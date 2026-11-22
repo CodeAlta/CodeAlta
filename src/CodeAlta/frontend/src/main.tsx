@@ -77,6 +77,7 @@ import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
+import { useProjectArchiveQuestion } from "./explorer/ProjectArchiveQuestion";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
 import { useProjectDeleteQuestion } from "./explorer/ProjectDeleteQuestion";
 import { browserActivation } from "./sessionBrowser";
@@ -4454,7 +4455,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setRenamingMessage("");
     sessionDeleteQuestion.close();
     sessionDeleteQuestion.setError("");
-    if (!archiveBusy) { setArchiveAsk(null); setArchiveMessage(""); }
+    if (!archiveBusy) projectArchiveQuestion.reset();
     if (!projectDeleteBusy) { setProjectDeleteTarget(null); projectDeleteQuestion.clearError(); }
     navigate("workspace");
     setCreatingVisible(false);
@@ -6177,11 +6178,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       sessionDeleteQuestion.setError("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
   }
 
-  // Archiving the selected project, or taking it out of the archive, is asked about beside its row, unless the
-  // user answered not to be asked again. The project file is read and written in one go once the answer is yes.
-  const [archiveAsk, setArchiveAsk] = useState<{ id: string; archived: boolean } | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
-  const [archiveMessage, setArchiveMessage] = useState("");
+  const projectArchiveQuestion = useProjectArchiveQuestion({
+    project: selectedProject, railVisible, busy: archiveBusy, t,
+    onConfirm: remember => { if (remember) setConfirm("projectArchive", false); void archiveSelectedProject(true); },
+  });
   const [projectDeleteTarget, setProjectDeleteTarget] = useState<ProjectDeleteTarget | null>(null);
   const [projectDeleteBusy, setProjectDeleteBusy] = useState(false);
   const projectDeleteQuestion = useProjectDeleteQuestion({
@@ -6190,9 +6191,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   });
   // A question is asked beside a row: when the Explorer goes, as in a window made narrow, it goes with its row.
   useEffect(() => {
-    if (railVisible) return;
-    if (!archiveBusy) setArchiveAsk(null);
-    if (!projectDeleteBusy) setProjectDeleteTarget(null);
+    if (!railVisible && !projectDeleteBusy) setProjectDeleteTarget(null);
   }, [railVisible]);
   function archiveScope(): ArchiveScope | null {
     const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);
@@ -6204,20 +6203,20 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function beginProjectArchive() {
     const scope = archiveScope();
     if (!scope || archiveBusy || projectArchive.locked || projectDeleteBusy) return;
-    setArchiveMessage("");
+    projectArchiveQuestion.setError("");
     setProjectDeleteTarget(null);
-    if (confirms.projectArchive) setArchiveAsk({ id: scope.id, archived: scope.archived });
+    if (confirms.projectArchive) projectArchiveQuestion.ask(scope);
     else void archiveSelectedProject(false);
   }
   async function archiveSelectedProject(asked: boolean) {
     const failed = (message: string) => {
-      if (asked) setArchiveMessage(message); else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
+      if (asked) projectArchiveQuestion.setError(message); else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
     };
     const changed = "The project changed. Nothing was written.";
     const scope = archiveScope();
     if (!scope) { failed(changed); return; }
     setArchiveBusy(true);
-    setArchiveMessage("");
+    projectArchiveQuestion.setError("");
     try {
       const target = await projectArchive.prepare(scope);
       if (!creationAlive.current) return;
@@ -6226,7 +6225,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       const result = await projectArchive.confirm(target, archiveScope());
       if (!creationAlive.current) return;
       if (result?.state !== "confirmed") { failed(result?.status ?? changed); return; }
-      setArchiveAsk(null);
+      projectArchiveQuestion.close();
       // The write is confirmed even when the projects cannot be read again.
       if (currentHostEpoch.current !== target.epoch || !mutation?.capability.canMutate()) return;
       const version = browserRevision.current;
@@ -6267,8 +6266,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!target || projectDeletion.locked || projectArchive.locked || archiveBusy || projectRenamePending.current || !!projectRenameTarget
       || deletingPending.current || renamingPending.current) return;
     projectDeleteQuestion.clearError();
-    setArchiveAsk(null);
-    setArchiveMessage("");
+    projectArchiveQuestion.reset();
     setProjectDeleteTarget(Object.freeze(target));
   }
   async function deleteConfirmedProject() {
@@ -6516,13 +6514,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
               error={projectRenameNotice ? workflowNotice(language.locale, projectRenameNotice) : null}
               onSubmit={name => void saveProjectRename(name)} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
-            asking={projectDeleteQuestion.question ?? (archiveAsk && selectedProject && archiveAsk.id === selectedProject.id && archiveAsk.archived === selectedProject.archived ? { id: archiveAsk.id,
-              form: <ConfirmPopover title={t(archiveAsk.archived ? "Unarchive this project?" : "Archive this project?")} subject={selectedProject.name}
-                detail={t(archiveAsk.archived ? "It can be worked in again. Nothing is started."
-                  : "It becomes read-only in CodeAlta until it is unarchived. Its files and its sessions are kept.")}
-                confirmLabel={t(archiveAsk.archived ? "Unarchive" : "Archive")} busy={archiveBusy} error={archiveMessage || null}
-                onConfirm={remember => { if (remember) setConfirm("projectArchive", false); void archiveSelectedProject(true); }}
-                onCancel={() => { setArchiveAsk(null); setArchiveMessage(""); }} /> } : undefined)}
+            asking={projectDeleteQuestion.question ?? projectArchiveQuestion.question}
             creating={creatingShown ? { id: projectId, form: <NewSessionPopover heading={selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New chat")}
               title={creatingTitle} onTitle={setCreatingTitle} choices={creationProviderChoice(true)}
               place={selectedProject && <ProjectContext epoch={owned ? status?.hostEpoch ?? null : null} project={selectedProject} read={projectGit.status} branches
