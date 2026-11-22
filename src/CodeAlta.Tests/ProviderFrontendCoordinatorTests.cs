@@ -129,6 +129,38 @@ public sealed class ProviderFrontendCoordinatorTests
     }
 
     [TestMethod]
+    public async Task SaveDefinitions_RefusesToReplaceProvidersThatChangedSinceLoad()
+    {
+        using var temp = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = temp.Path };
+        var otherWriter = new CodeAltaConfigStore(options);
+        otherWriter.SaveGlobalConfigContent("""
+            [providers.codex]
+            type = "codex"
+            """);
+        var service = new ModelProviderDialogService(CreateCoordinator(options));
+        var draft = service.LoadDefinitions();
+        draft.Single().Model = "draft-model";
+
+        otherWriter.UpdateGlobalProviderDefinitions(providers =>
+        {
+            providers.Add(new CodeAltaProviderDocument { ProviderKey = "other", ProviderType = "copilot", Enabled = false });
+            return true;
+        });
+        var onDisk = otherWriter.LoadGlobalConfigContent();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => service.SaveDefinitionsAsync(draft));
+        Assert.AreEqual(onDisk, otherWriter.LoadGlobalConfigContent());
+
+        var reloaded = service.LoadDefinitions();
+        reloaded.Single(provider => provider.ProviderKey == "codex").Model = "draft-model";
+        await service.SaveDefinitionsAsync(reloaded);
+        var saved = otherWriter.LoadGlobal().Providers!;
+        Assert.AreEqual("draft-model", saved["codex"].Model);
+        Assert.IsFalse(saved["other"].Enabled);
+    }
+
+    [TestMethod]
     public void TryBuildActiveProviderTestResult_UsesReadyProviderState()
     {
         var definition = new CodeAltaProviderDocument

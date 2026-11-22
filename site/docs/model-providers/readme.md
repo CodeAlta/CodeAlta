@@ -92,6 +92,8 @@ A provider that runs a program ([Claude Code](setup.md#claude-code-settings), [C
 
 Saved settings reach the sessions already open: an idle session takes them at its next prompt, and a running turn finishes with the settings it started with.
 
+CodeAlta TUI refuses to save the form if the configuration changed on disk since it was loaded. Choose **Refresh** and reapply your changes.
+
 A deleted provider leaves the model tiers, the global ones and those of each space; a provider given another key keeps its place in them under the new key. Its sessions keep their history:
 
 - in CodeAlta Desktop, a session of a deleted provider switches to the default provider when you open it, and says so;

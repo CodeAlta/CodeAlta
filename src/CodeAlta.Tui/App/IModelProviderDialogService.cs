@@ -63,6 +63,7 @@ internal readonly record struct ProviderConfigurationSaveResult(bool RuntimeRefr
 internal sealed class ModelProviderDialogService : IModelProviderDialogService
 {
     private readonly ProviderFrontendCoordinator _providerUi;
+    private string? _loadedRevision;
 
     public ModelProviderDialogService(ProviderFrontendCoordinator providerUi)
     {
@@ -73,7 +74,13 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
     public string ConfigurationPath => _providerUi.ConfigurationPath;
 
     public IReadOnlyList<CodeAltaProviderDocument> LoadDefinitions()
-        => _providerUi.LoadProviderDefinitions();
+    {
+        // The revision must describe the same file the form populated its draft from.
+        using var reading = CodeAltaConfigStore.LockConfigFile(ConfigurationPath);
+        var definitions = _providerUi.LoadProviderDefinitions();
+        _loadedRevision = CodeAltaConfigStore.GetGlobalConfigRevision(LoadConfigurationContent());
+        return definitions;
+    }
 
     public string LoadConfigurationContent()
         => _providerUi.LoadProviderConfigurationContent();
@@ -85,7 +92,7 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
         => _providerUi.SaveProviderConfigurationContentAsync(content, cancellationToken);
 
     public Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions, CancellationToken cancellationToken = default)
-        => _providerUi.SaveProviderDefinitionsAsync(definitions, cancellationToken);
+        => _providerUi.SaveProviderDefinitionsAsync(definitions, _loadedRevision, cancellationToken);
 
     public Task<ProviderConfigurationSaveResult> RefreshConfigurationAsync(CancellationToken cancellationToken = default)
         => _providerUi.RefreshProviderConfigurationAsync(cancellationToken);
