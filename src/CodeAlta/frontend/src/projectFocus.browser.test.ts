@@ -146,6 +146,42 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
       t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
       assert.deepEqual(renders, [0, 0, 0]);
     });
+    await t.test("typing a project name does not render App", async t => {
+      const input = `document.querySelector('.rename-popover input')`;
+      const openRename = async () => {
+        await evaluate(`${scope("project")}.focus()`);
+        await key("F2", "F2", 113);
+        assert.equal(await wait("settingsShellFixture.projectNameReads.length===1"), true);
+        await evaluate("settingsShellFixture.releaseProjectName()");
+        assert.equal(await wait(`${input} && document.activeElement===${input} && ${input}.selectionEnd===13`), true);
+        assert.equal(await evaluate(`${input}.value`), "Original name", "the form starts from the host's project name");
+      };
+      await evaluate("localStorage.setItem('draftTabFixture','true')");
+      try {
+        await openRename();
+        const renders = await keystrokeRenders("new");
+        assert.equal(await evaluate(`${input}.value`), "new");
+        await key("Escape", "Escape", 27);
+        assert.equal(await wait(`!${input}`), true);
+        assert.equal(await evaluate("settingsShellFixture.projectRenames.length"), 0, "cancel sends no rename");
+        await openRename();
+        await command("Input.insertText", { text: "submitted project name" });
+        await evaluate("document.querySelector('.rename-popover button[type=submit]').click()");
+        assert.equal(await wait(`settingsShellFixture.projectRenames[0]?.request.displayName==='submitted project name' && ${input}?.disabled`), true);
+        await evaluate(`(() => {
+          const {request,resolve}=settingsShellFixture.projectRenames[0];
+          resolve({...request,hostEpoch:request.expectedHostEpoch,status:'conflict'});
+        })()`);
+        assert.equal(await wait(`${input}?.disabled && document.querySelector('.rename-popover [role=alert]')?.textContent.includes('project file changed')`), true);
+        assert.equal(await evaluate(`${input}.value`), "submitted project name", "a conflict preserves the draft");
+        await key("Escape", "Escape", 27);
+        assert.equal(await wait(`!${input}`), true);
+        t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
+        assert.deepEqual(renders, [0, 0, 0]);
+      } finally {
+        await evaluate("localStorage.removeItem('draftTabFixture')");
+      }
+    });
     await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
     assert.equal(await wait(`!!${otherSession}`), true);
     assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");

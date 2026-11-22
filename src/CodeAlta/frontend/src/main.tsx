@@ -1097,7 +1097,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [projectDeletion] = useState(() => createProjectDeletion((request, options) => projectDeleteRpc.current(request, options)));
   const [projectRename] = useState(() => createProjectRename(workspace.readProjectName, workspace.renameProject));
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectNameTarget | null>(null);
-  const [projectRenameName, setProjectRenameName] = useState("");
   const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [projectRenameConflict, setProjectRenameConflict] = useState(false);
   const [projectRenameNotice, setProjectRenameNotice] = useState<WorkflowNotice>("");
@@ -5384,18 +5383,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         || currentHostEpoch.current !== status?.hostEpoch || !capability.canMutate()) return;
       if (result.kind === "ready") {
         setProjectRenameTarget(result.target);
-        setProjectRenameName(result.target.name);
         setProjectRenameConflict(false);
       } else setProjectRenameNotice(projectRenameMessage(result.code));
     } finally { projectRenamePending.current = false; if (creationAlive.current) setProjectRenameBusy(false); }
   }
 
-  async function saveProjectRename() {
+  async function saveProjectRename(name: string) {
     const target = projectRenameTarget;
     const capability = mutation?.capability;
     if (!target || !capability?.canMutate() || projectRenamePending.current || projectRenameConflict || projectRenameLocked
       || selectedScope.current !== target.id || currentHostEpoch.current !== target.epoch) return;
-    const name = projectRenameName;
     const generation = projectRenameGeneration.current;
     projectRenamePending.current = true;
     setProjectRenameBusy(true);
@@ -6525,10 +6522,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} />
               {id !== null && <WorkItemsBadge counts={workByProject.get(id)} onOpen={owned ? () => openWorkItems({ projectId: id }) : undefined} />}</>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
-            renaming={projectRenaming && projectRenameTarget ? { id: projectRenameTarget.id, form: <RenamePopover label={t("Project name")}
-              value={projectRenameName} onChange={setProjectRenameName} busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
+            renaming={projectRenaming && projectRenameTarget ? { id: projectRenameTarget.id, form: <RenamePopover
+              key={`${projectRenameTarget.id}:${projectRenameTarget.revision}`} label={t("Project name")} initialValue={projectRenameTarget.name}
+              busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
               error={projectRenameNotice ? workflowNotice(language.locale, projectRenameNotice) : null}
-              onSubmit={() => void saveProjectRename()} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
+              onSubmit={name => void saveProjectRename(name)} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
             asking={projectDeleteTarget && selectedProject && projectDeleteTarget.id === selectedProject.id ? { id: projectDeleteTarget.id,
               form: <ConfirmPopover always title={t("Delete this project?")} subject={selectedProject.name}
                 detail={t("It is removed from CodeAlta and its sessions are deleted: they cannot be restored. Its folder and its files are kept.")}
