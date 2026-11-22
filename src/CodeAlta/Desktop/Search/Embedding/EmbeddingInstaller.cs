@@ -21,7 +21,7 @@ internal sealed record EmbeddingInstallSnapshot(string State, string? ModelId, l
 
 /// <summary>
 /// Downloads a model of search by meaning into the cache (<c>cache/search/models/&lt;id&gt;-&lt;revision&gt;</c>), and the
-/// ONNX Runtime it runs on into the runtime folder speech shares (<c>cache/runtime/sherpa-onnx/&lt;version&gt;/&lt;rid&gt;</c>).
+/// ONNX Runtime it runs on through the runtime the application shares (<see cref="SherpaRuntime"/>).
 /// One download at a time; a file is resumed where it stopped and checked against its hash, and a folder gets its name
 /// only once complete.
 /// </summary>
@@ -30,9 +30,7 @@ internal sealed class EmbeddingInstaller
     private const string Marker = "model.json";
 
     private readonly string _modelsRoot;
-    private readonly string _runtimeRoot;
-    private readonly string _speechRoot;
-    private readonly SpeechEngineDefinition? _engine;
+    private readonly SherpaRuntime _runtime;
     private readonly PinnedDownloader _downloads;
     private readonly Lock _gate = new();
     private EmbeddingInstallSnapshot _snapshot = EmbeddingInstallSnapshot.Idle;
@@ -42,19 +40,14 @@ internal sealed class EmbeddingInstaller
 
     /// <summary>Creates the installer.</summary>
     /// <param name="searchCacheRoot">The folder of search in the cache.</param>
-    /// <param name="runtimeRoot">The folder of the native runtimes in the cache.</param>
-    /// <param name="speechRoot">The folder of speech in the cache, where an older runtime may still be.</param>
-    /// <param name="engine">The ONNX Runtime of this platform, or null when it has none.</param>
-    /// <param name="handler">The handler of the requests, or null for the network.</param>
-    public EmbeddingInstaller(string searchCacheRoot, string runtimeRoot, string speechRoot, SpeechEngineDefinition? engine, HttpMessageHandler? handler)
+    /// <param name="runtime">The ONNX Runtime, which the application shares.</param>
+    /// <param name="handler">The handler of the requests of models, or null for the network.</param>
+    public EmbeddingInstaller(string searchCacheRoot, SherpaRuntime runtime, HttpMessageHandler? handler)
     {
         ArgumentException.ThrowIfNullOrEmpty(searchCacheRoot);
-        ArgumentException.ThrowIfNullOrEmpty(runtimeRoot);
-        ArgumentException.ThrowIfNullOrEmpty(speechRoot);
+        ArgumentNullException.ThrowIfNull(runtime);
         _modelsRoot = Path.Combine(Path.GetFullPath(searchCacheRoot), "models");
-        _runtimeRoot = Path.GetFullPath(runtimeRoot);
-        _speechRoot = Path.GetFullPath(speechRoot);
-        _engine = engine;
+        _runtime = runtime;
         _downloads = new(handler, new("CodeAlta", DesktopCommandLine.Version));
     }
 
@@ -65,7 +58,7 @@ internal sealed class EmbeddingInstaller
     public EmbeddingInstallSnapshot Current { get { lock (_gate) return _snapshot; } }
 
     /// <summary>Gets whether this platform has the ONNX Runtime the models run on.</summary>
-    public bool Supported => _engine is not null;
+    public bool Supported => _runtime.Engine is not null;
 
     /// <summary>Gets the folder of a model.</summary>
     public string DirectoryOf(EmbeddingModelDefinition model) => Path.Combine(_modelsRoot, model.FolderName);
@@ -82,12 +75,7 @@ internal sealed class EmbeddingInstaller
         => IsInstalled(model) ? model.Files.Sum(file => new FileInfo(Path.Combine(DirectoryOf(model), file.Name)).Length) : 0;
 
     /// <summary>Gets the full path of the ONNX Runtime library when it is installed, or null.</summary>
-    public string? RuntimeLibrary()
-    {
-        if (_engine is null) return null;
-        var directory = SherpaRuntime.Resolve(_runtimeRoot, _speechRoot, _engine);
-        return SherpaRuntime.IsInstalled(directory, _engine) ? SherpaRuntime.OnnxRuntimePathOf(directory, _engine) : null;
-    }
+    public string? RuntimeLibrary() => _runtime.OnnxRuntimeLibrary();
 
     /// <summary>Starts the download of a model and of the runtime, unless one runs; does nothing when both are there.</summary>
     /// <returns>The download, which ends in <c>done</c>, <c>failed</c> or <c>canceled</c>.</returns>
@@ -98,7 +86,7 @@ internal sealed class EmbeddingInstaller
         {
             if (_closed) return Task.CompletedTask;
             if (_snapshot.IsRunning) return _active;
-            if (_engine is null)
+            if (_runtime.Engine is not { } engine)
             {
                 Publish(new("failed", model.Id, 0, 0, "unsupported_platform"));
                 return Task.CompletedTask;
@@ -107,7 +95,7 @@ internal sealed class EmbeddingInstaller
             _cancellation?.Dispose();
             _cancellation = new();
             var token = _cancellation.Token;
-            var total = model.Size + (RuntimeLibrary() is null ? _engine.Size : 0);
+            var total = model.Size + (RuntimeLibrary() is null ? engine.Size : 0);
             Publish(new("downloading", model.Id, 0, total, null));
             _active = Task.Run(() => RunAsync(model, total, token));
             return _active;
@@ -119,7 +107,7 @@ internal sealed class EmbeddingInstaller
         var progress = new Progress(this, model.Id, total);
         try
         {
-            if (RuntimeLibrary() is null) await SherpaRuntime.InstallAsync(_downloads, _runtimeRoot, _engine!, progress, null, cancellationToken).ConfigureAwait(false);
+            if (RuntimeLibrary() is null) await _runtime.InstallAsync(progress, cancellationToken).ConfigureAwait(false);
             if (!IsInstalled(model))
             {
                 Directory.CreateDirectory(_modelsRoot);
@@ -144,7 +132,10 @@ internal sealed class EmbeddingInstaller
         }
     }
 
-    /// <summary>Stops the download that runs; what is on disk is resumed by the next one.</summary>
+    /// <summary>
+    /// Stops the download that runs; what is on disk is resumed by the next one. The download of the ONNX Runtime, which
+    /// other features may wait for, goes on by itself.
+    /// </summary>
     public void Cancel()
     {
         lock (_gate) _cancellation?.Cancel();

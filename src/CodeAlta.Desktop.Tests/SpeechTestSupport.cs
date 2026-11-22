@@ -1,4 +1,8 @@
+using System.IO.Compression;
 using System.IO.Pipes;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text.Json;
 using CodeAlta.Desktop.Speech;
 
@@ -194,8 +198,62 @@ internal sealed class SpeechTestClock : TimeProvider
     }
 }
 
+/// <summary>Hugging Face and nuget.org in memory: files by address, with ranges, and connections that break or wait.</summary>
+internal sealed class FakeDownloadServer : HttpMessageHandler
+{
+    public Dictionary<string, byte[]> Content { get; } = [];
+    public Dictionary<string, int> FailAfter { get; } = [];
+    public Dictionary<string, Task> Hold { get; } = [];
+    public List<(string Url, long? RangeFrom)> Requests { get; } = [];
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var url = request.RequestUri!.AbsoluteUri;
+        var from = request.Headers.Range?.Ranges.Single().From;
+        lock (Requests) Requests.Add((url, from));
+        if (Hold.TryGetValue(url, out var hold)) await hold.WaitAsync(cancellationToken);
+        if (!Content.TryGetValue(url, out var bytes)) return new(HttpStatusCode.NotFound);
+        var body = bytes.AsSpan((int)(from ?? 0)).ToArray();
+        Stream stream = new MemoryStream(body);
+        if (FailAfter.TryGetValue(url, out var limit)) stream = new BrokenStream(body, limit);
+        var response = new HttpResponseMessage(from is null ? HttpStatusCode.OK : HttpStatusCode.PartialContent) { Content = new StreamContent(stream) };
+        response.Content.Headers.ContentLength = body.Length;
+        if (from is not null) response.Content.Headers.ContentRange = new ContentRangeHeaderValue(from.Value, bytes.Length - 1, bytes.Length);
+        return response;
+    }
+
+    private sealed class BrokenStream(byte[] content, int limit) : MemoryStream(content)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Position >= limit) throw new IOException("The connection was closed.");
+            return base.ReadAsync(buffer[..(int)Math.Min(buffer.Length, limit - Position)], cancellationToken);
+        }
+    }
+}
+
 internal static class SpeechTestSupport
 {
+    /// <summary>Builds the package of an engine as nuget.org gives it: the libraries of the platform <c>test-rid</c>, and one of another platform.</summary>
+    public static (SpeechEngineDefinition Engine, byte[] Package) EnginePackage(params (string Library, string Content)[] libraries)
+    {
+        using var package = new MemoryStream();
+        using (var archive = new ZipArchive(package, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (library, content) in libraries) Write($"runtimes/test-rid/native/{library}", content);
+            Write($"runtimes/other-rid/native/{libraries[0].Library}", "another platform");
+
+            void Write(string name, string content)
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(name).Open());
+                writer.Write(content);
+            }
+        }
+
+        var bytes = package.ToArray();
+        return (new("test-rid", bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes)), [.. libraries.Select(static library => library.Library)]), bytes);
+    }
+
     /// <summary>Audio the fake detector hears as speech (loud) or not, in 16-bit samples.</summary>
     public static byte[] Audio(int windows, bool loud)
     {

@@ -40,7 +40,7 @@ export type SpeechState = Readonly<{
   dictation: DictationView;
   /** The composer whose button shows the setup: the microphone to use and, when it is missing, the model to download. */
   asking: string | null;
-  /** The host said that the chosen model, or its engine, is not there: the setup offers to download it. */
+  /** The host said that the chosen model is not there: the setup offers to download it. */
   missing: boolean;
   /** Counts the times the progress of the download was asked for again, after its notice was closed. */
   reveals: number;

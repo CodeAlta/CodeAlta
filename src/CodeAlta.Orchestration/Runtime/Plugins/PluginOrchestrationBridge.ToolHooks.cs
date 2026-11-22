@@ -66,8 +66,9 @@ public sealed partial class PluginOrchestrationBridge
             {
                 boundary = plugin.GetProviderBoundary(context);
             }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
+            catch (Exception exception) when (exception is not (OutOfMemoryException or AgentProviderBoundaryException))
             {
+                // A plugin that failed. What a plugin refuses itself is not caught: its message tells the user why and what to do.
                 throw new AgentProviderBoundaryException($"The plugin {active.Descriptor.DisplayName ?? active.Descriptor.TypeName} could not prepare the pseudonymization of this session: nothing was sent.", exception);
             }
 

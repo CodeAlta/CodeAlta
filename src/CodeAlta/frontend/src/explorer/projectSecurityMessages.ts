@@ -122,6 +122,7 @@ export const projectSecurityMessages = {
   "{0} values hidden": ["{0} valores ocultos", "{0} valeurs masquées", "{0} Werte verborgen", "{0} 件の値を非表示", "已隐藏 {0} 个值"],
   "{0} value hidden": ["{0} valor oculto", "{0} valeur masquée", "{0} Wert verborgen", "{0} 件の値を非表示", "已隐藏 {0} 个值"],
   "downloading the model {0} %": ["descargando el modelo {0} %", "téléchargement du modèle {0} %", "Modell wird heruntergeladen {0} %", "モデルをダウンロード中 {0} %", "正在下载模型 {0} %"],
+  "downloading the engine of the model": ["descargando el motor del modelo", "téléchargement du moteur du modèle", "Modell-Engine wird heruntergeladen", "モデルのエンジンをダウンロード中", "正在下载模型引擎"],
   "download the model ({0} MB)": ["descargar el modelo ({0} MB)", "télécharger le modèle ({0} Mo)", "Modell herunterladen ({0} MB)", "モデルをダウンロード ({0} MB)", "下载模型 ({0} MB)"],
   "download failed: retry": ["descarga fallida: reintentar", "échec du téléchargement : réessayer", "Download fehlgeschlagen: erneut versuchen", "ダウンロード失敗: 再試行", "下载失败：重试"],
   "This project hides identifiers only: names are not looked for.": ["Este proyecto solo oculta identificadores: no se buscan los nombres.", "Ce projet ne masque que les identifiants : les noms ne sont pas cherchés.", "Dieses Projekt verbirgt nur Kennungen: Namen werden nicht gesucht.", "このプロジェクトは識別子だけを隠します: 名前は検索しません。", "此项目仅隐藏标识号：不查找姓名。"],

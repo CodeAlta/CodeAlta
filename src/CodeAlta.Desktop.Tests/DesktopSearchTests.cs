@@ -163,7 +163,8 @@ public sealed class DesktopSearchTests
         Assert.IsFalse(search.RequestMeaningDialog(), "no window listens");
 
         var engine = CodeAlta.Desktop.Speech.SpeechModelCatalog.FindEngine(CodeAlta.Desktop.Speech.SpeechModelCatalog.CurrentRuntimeIdentifier())!;
-        var installer = new CodeAlta.Desktop.Search.Embedding.EmbeddingInstaller(Path.Combine(temp.Path, "models"), Path.Combine(temp.Path, "runtime"), Path.Combine(temp.Path, "speech"), engine, handler: null);
+        var installer = new CodeAlta.Desktop.Search.Embedding.EmbeddingInstaller(Path.Combine(temp.Path, "models"),
+            new CodeAlta.Desktop.Speech.SherpaRuntime(Path.Combine(temp.Path, "runtime"), Path.Combine(temp.Path, "speech"), engine, handler: null), handler: null);
         search.AttachMeaning(new DesktopSearchMeaning(search.Host, search.Indexer, installer, new StoreMeaningVectors(search.Store, null),
             load => throw new InvalidOperationException("search by meaning is off"), null));
 

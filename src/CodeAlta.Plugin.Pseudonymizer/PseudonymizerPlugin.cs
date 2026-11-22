@@ -148,6 +148,13 @@ public sealed partial class PseudonymizerPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(context);
         var language = LanguageOf(context.ProjectId);
         var recognizers = RecognizersOf(language, out var failure);
+        return IsRuntimeMissing(failure) ? new RuntimeWaitingBoundary(this, context, language) : Boundary(context, language, recognizers, failure);
+    }
+
+    // The boundary of a request of a session: the recognizers of the language of its project over the pseudonyms of the
+    // session. A model that cannot run sends nothing.
+    private IAgentProviderBoundary Boundary(PluginProviderBoundaryContext context, string language, List<PiiRecognizer> recognizers, InvalidOperationException? failure)
+    {
         if (failure is not null)
         {
             // The status line of the session offers the download from then on: it tells why nothing was sent.
@@ -226,8 +233,10 @@ public sealed partial class PseudonymizerPlugin : PluginBase
         return _models?.Recognizer(language, custom) ?? throw new InvalidOperationException("This application runs no model.");
     }
 
+    // Why nothing was sent: the model of the language is not downloaded, which the status line of the session offers to
+    // do; or it is there and does not run.
     private static string NotReadyMessage(string language, InvalidOperationException exception)
-        => PseudonymizerLanguages.PresetOf(language) is { } preset
+        => exception is NerModelMissingException { Missing: NerModelPart.Model } && PseudonymizerLanguages.PresetOf(language) is { } preset
             ? $"This project is pseudonymized and finds names with {preset.Name}, which is not downloaded yet ({PseudonymizerLanguages.MegabytesOf(language)} MB): download it from the status line of this session. Nothing was sent."
             : $"This project is pseudonymized and its model that finds names cannot run ({exception.Message}). Nothing was sent.";
 
